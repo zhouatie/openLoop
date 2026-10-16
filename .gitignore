@@ -8,10 +8,6 @@ dist-electron/
 build/
 out/
 
-# OpenSpec (per user request: openSpec不需要提交)
-openspec/
-.openspec/
-
 # Pi & logs
 *.log
 .run.log
