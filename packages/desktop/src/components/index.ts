@@ -6,4 +6,5 @@ export * from './ConfirmModal';
 export * from './LogTerminalDrawer';
 export * from './KanbanColumnSortDropdown';
 export * from './NodeExecutionTimeline';
+export * from './WorkspacePicker';
 

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
+import os from 'os';
 import { OpenLoopServer } from '@openloop/core';
 
 let mainWindow: BrowserWindow | null = null;
@@ -59,7 +60,13 @@ ipcMain.handle('dialog:openDirectory', async (_event, options?: { defaultPath?: 
 // 注册系统级 IPC：在访达/资源管理器中查看定位目录
 ipcMain.handle('shell:openPath', async (_event, dirPath: string) => {
   if (!dirPath) return false;
-  await shell.openPath(dirPath);
+  let targetPath = dirPath.trim();
+  if (targetPath === '~') {
+    targetPath = os.homedir();
+  } else if (targetPath.startsWith('~/') || targetPath.startsWith('~\\')) {
+    targetPath = path.join(os.homedir(), targetPath.slice(2));
+  }
+  await shell.openPath(targetPath);
   return true;
 });
 

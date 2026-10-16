@@ -670,15 +670,21 @@ export class OpenLoopServer {
         if (!targetPath) {
           return this.sendJson(res, 400, { error: 'path is required' }, reqMeta);
         }
-        serverLogger.info(`[System:OpenPath] 在系统文件管理器中打开路径: ${targetPath}`);
+        let resolvedPath = String(targetPath).trim();
+        if (resolvedPath === '~') {
+          resolvedPath = os.homedir();
+        } else if (resolvedPath.startsWith('~/') || resolvedPath.startsWith('~\\')) {
+          resolvedPath = path.join(os.homedir(), resolvedPath.slice(2));
+        }
+        serverLogger.info(`[System:OpenPath] 在系统文件管理器中打开路径: ${resolvedPath}`);
         const execAsync = util.promisify(exec);
         try {
           if (process.platform === 'darwin') {
-            await execAsync(`open "${targetPath.replace(/"/g, '\\"')}"`);
+            await execAsync(`open "${resolvedPath.replace(/"/g, '\\"')}"`);
           } else if (process.platform === 'win32') {
-            await execAsync(`start "" "${targetPath.replace(/"/g, '\\"')}"`);
+            await execAsync(`start "" "${resolvedPath.replace(/"/g, '\\"')}"`);
           } else {
-            await execAsync(`xdg-open "${targetPath.replace(/"/g, '\\"')}"`);
+            await execAsync(`xdg-open "${resolvedPath.replace(/"/g, '\\"')}"`);
           }
           return this.sendJson(res, 200, { success: true }, reqMeta);
         } catch (err: any) {

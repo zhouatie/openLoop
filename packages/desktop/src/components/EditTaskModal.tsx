@@ -5,21 +5,13 @@ import {
   Workflow,
   ChevronDown,
   Check,
-  Bot,
-  Target,
-  Sparkles,
-  Layers,
-  ArrowRight,
   Lock,
   AlertCircle,
   Inbox,
   ListTodo,
-  FolderGit2,
-  FolderOpen,
-  ExternalLink,
 } from 'lucide-react';
 import { Task, WorkflowDefinition, KanbanColumn } from '@openloop/core';
-import { api } from '../services/api';
+import { WorkspacePicker } from './WorkspacePicker';
 
 interface EditTaskModalProps {
   isOpen: boolean;
@@ -47,7 +39,6 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const [workflowId, setWorkflowId] = useState('');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>('backlog');
   const [workspace, setWorkspace] = useState('');
-  const [isSelectingWorkspace, setIsSelectingWorkspace] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -102,34 +93,6 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const isPending = task.status === 'pending';
   const currentWf = workflows.find((w) => w.id === workflowId) || workflows[0];
 
-  const getDirectoryName = (dirPath: string) => {
-    if (!dirPath) return '';
-    const trimmed = dirPath.replace(/[/\\]+$/, '');
-    const parts = trimmed.split(/[/\\]/);
-    return parts[parts.length - 1] || dirPath;
-  };
-
-  const handleSelectWorkspace = async () => {
-    if (isSelectingWorkspace) return;
-    setIsSelectingWorkspace(true);
-    if (import.meta.env?.DEV) {
-      console.log('[EditTaskModal] 用户触发选择工作区，准备调起访达...');
-    }
-    try {
-      const chosen = await api.selectDirectory({ defaultPath: workspace || undefined });
-      if (chosen) {
-        setWorkspace(chosen);
-        if (import.meta.env?.DEV) {
-          console.log('[EditTaskModal] 成功更新工作区:', chosen);
-        }
-      }
-    } catch (err) {
-      console.error('[EditTaskModal] 调起目录选择器异常:', err);
-    } finally {
-      setIsSelectingWorkspace(false);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -171,68 +134,30 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
     }
   };
 
-  const getNodeSummaryBadges = (wf: WorkflowDefinition) => {
-    const types = Array.from(new Set(wf.nodes.map((n) => n.type)));
-    return (
-      <div className="flex items-center gap-1 mt-1">
-        {types.slice(0, 4).map((t) => {
-          let label = t;
-          let color = 'bg-[#f1f1f4] text-[#4b4b53]';
-          if (t === 'agent') {
-            label = 'Agent';
-            color = 'bg-[#eeedfd] text-[#4f46e5]';
-          } else if (t === 'midscene') {
-            label = 'Midscene';
-            color = 'bg-[#e4f6ec] text-[#189a58]';
-          } else if (t === 'qa-approval') {
-            label = 'QA验收';
-            color = 'bg-[#fbf0df] text-[#b45309]';
-          }
-          return (
-            <span
-              key={t}
-              className={`px-1.5 py-[1px] rounded-[3px] text-[9.5px] font-medium ${color}`}
-            >
-              {label}
-            </span>
-          );
-        })}
-        {types.length > 4 && (
-          <span className="text-[9.5px] text-[#85858d]">+{types.length - 4}</span>
-        )}
-      </div>
-    );
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100">
-      <div className="w-[500px] bg-white border border-[#e3e3e8] rounded-[12px] p-5 shadow-[0_16px_44px_rgba(20,22,30,0.16)] text-[#1c1c21]">
+      <div className="w-[440px] bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.14)] text-[#1c1c21]">
         {/* 顶部标题栏 */}
-        <div className="flex items-center justify-between pb-3.5 border-b border-[#ececf0]">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-[14px] text-[#1c1c21]">编辑任务信息</h3>
-              <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded">
-                {task.id}
-              </span>
-            </div>
-            <p className="text-[11.5px] text-[#85858d] mt-0.5">
-              修改任务标题、补充业务上下文与调整执行配置
-            </p>
+        <div className="flex items-center justify-between pb-2.5 border-b border-[#ececf0]">
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-[13px] text-[#1c1c21]">编辑任务信息</h3>
+            <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[0.5px] rounded">
+              {task.id}
+            </span>
           </div>
           <button
             onClick={onClose}
-            className="w-6 h-6 rounded-[6px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-colors"
+            className="w-5 h-5 rounded-[4px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-colors"
           >
-            <X size={15} />
+            <X size={14} />
           </button>
         </div>
 
         {/* 内联错误通知横幅 */}
         {errorMsg && (
-          <div className="mt-3.5 p-2.5 rounded-[8px] bg-[#fef2f2] border border-[#fecaca] flex items-center justify-between gap-2 text-[#b91c1c] text-[11.5px] animate-in fade-in slide-in-from-top-1">
-            <div className="flex items-center gap-2 min-w-0">
-              <AlertCircle size={14} className="text-[#dc2626] shrink-0" />
+          <div className="mt-2.5 p-2 rounded-[6px] bg-[#fef2f2] border border-[#fecaca] flex items-center justify-between gap-2 text-[#b91c1c] text-[11px] animate-in fade-in slide-in-from-top-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <AlertCircle size={13} className="text-[#dc2626] shrink-0" />
               <span className="truncate font-medium">{errorMsg}</span>
             </div>
             <button
@@ -240,189 +165,91 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
               onClick={() => setErrorMsg(null)}
               className="text-[#dc2626] hover:opacity-75 p-0.5 rounded transition-opacity"
             >
-              <X size={13} />
+              <X size={12} />
             </button>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-[12px]">
+        <form onSubmit={handleSubmit} className="mt-3 space-y-2.5 text-[11.5px]">
           {/* 任务名称 */}
           <div>
-            <label className="block font-medium text-[#4b4b53] mb-1.5">任务名称</label>
+            <label className="block text-[11px] font-medium text-[#63636b] mb-1">任务名称</label>
             <input
               type="text"
               required
               placeholder="请输入任务名称"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full h-[32px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[7px] px-3 text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all"
+              className="w-full h-[30px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2.5 text-[12px] text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all"
             />
           </div>
 
           {/* 关联工程工作区 */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block font-medium text-[#4b4b53]">关联工程工作区</label>
-              {workspace ? (
-                <span className="text-[10.5px] text-[#189a58] font-medium flex items-center gap-1 bg-[#e4f6ec] px-1.5 py-[0.5px] rounded">
-                  <Check size={10.5} strokeWidth={2.4} /> 已绑定
-                </span>
-              ) : (
-                <span className="text-[10.5px] text-[#85858d]">
-                  独立工程目录，非默认工具目录
-                </span>
-              )}
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-medium text-[#63636b]">工程工作区</label>
+              <span className="text-[10px] text-[#85858d]">
+                {workspace ? '已关联独立工程' : '可留空使用默认目录'}
+              </span>
             </div>
-
-            {workspace ? (
-              <div className="w-full min-h-[46px] px-3 py-2 rounded-[8px] border border-[#d8d6fb] bg-[#f5f5ff]/60 flex items-center justify-between gap-2 shadow-[0_1px_2px_rgba(79,70,229,0.04)]">
-                <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <div className="w-7 h-7 rounded-[6px] bg-[#4f46e5] text-white flex items-center justify-center shrink-0 shadow-sm">
-                    <FolderGit2 size={14} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-[12.5px] text-[#1c1c21] truncate">
-                        {getDirectoryName(workspace)}
-                      </span>
-                      <span className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1 py-[0.5px] rounded">
-                        Workspace
-                      </span>
-                    </div>
-                    <div
-                      className="text-[11px] font-mono text-[#63636b] truncate mt-0.5 select-all"
-                      title={workspace}
-                    >
-                      {workspace}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => api.openPath(workspace)}
-                    className="h-[24px] px-2 rounded-[5px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium transition-colors shadow-sm flex items-center gap-1"
-                    title="在系统访达中定位该目录"
-                  >
-                    <ExternalLink size={11} />
-                    <span>访达</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isSelectingWorkspace}
-                    onClick={handleSelectWorkspace}
-                    className="h-[24px] px-2 rounded-[5px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium transition-colors shadow-sm"
-                    title="更换其他工程目录"
-                  >
-                    {isSelectingWorkspace ? '选择中...' : '更换'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWorkspace('');
-                      if (import.meta.env?.DEV) console.log('[EditTaskModal] 清除工作区关联');
-                    }}
-                    className="w-6 h-[24px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:text-[#d64545] hover:bg-[#fee2e2]/60 transition-colors"
-                    title="取消关联工作区"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div
-                onClick={handleSelectWorkspace}
-                className="group w-full min-h-[46px] px-3 py-2.5 rounded-[8px] border border-dashed border-[#d1d1d8] hover:border-[#4f46e5] bg-[#f9f9fb] hover:bg-[#f5f5ff]/60 cursor-pointer transition-all flex items-center justify-between shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-              >
-                <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                  <div className="w-7 h-7 rounded-[6px] bg-[#f1f1f4] group-hover:bg-[#eeedfd] group-hover:text-[#4f46e5] text-[#85858d] flex items-center justify-center shrink-0 transition-colors">
-                    <FolderGit2 size={14} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-[12px] font-medium text-[#4b4b53] group-hover:text-[#4f46e5] transition-colors flex items-center gap-1.5">
-                      <span>点击关联本地工程工作区</span>
-                    </div>
-                    <div className="text-[10.5px] text-[#85858d] truncate mt-0.5">
-                      选择待迭代代码工程，执行时在此目录下自测与编码
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={isSelectingWorkspace}
-                  className="px-2.5 h-[26px] rounded-[6px] bg-white border border-[#e3e3e8] group-hover:border-[#d8d6fb] text-[11px] font-medium text-[#4b4b53] group-hover:text-[#4f46e5] shadow-sm flex items-center gap-1 transition-all shrink-0"
-                >
-                  <FolderOpen size={12} />
-                  <span>{isSelectingWorkspace ? '选择中...' : '打开访达'}</span>
-                </button>
-              </div>
-            )}
+            <WorkspacePicker
+              value={workspace}
+              onChange={setWorkspace}
+              placeholder="选择工程工作区 (点击下拉或右侧打开访达)..."
+            />
           </div>
 
           {/* 关联工作流 */}
           <div className="relative" ref={dropdownRef}>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-1.5">
-                <label className="block font-medium text-[#4b4b53]">关联自动化流程</label>
+                <label className="text-[11px] font-medium text-[#63636b]">关联自动化流程</label>
                 {!isPending && (
-                  <span className="flex items-center gap-0.5 text-[10.5px] text-[#85858d] bg-[#f4f4f6] px-1 py-0.5 rounded">
-                    <Lock size={10} /> 任务已启动，流程已锁定
+                  <span className="flex items-center gap-0.5 text-[9.5px] text-[#85858d] bg-[#f4f4f6] px-1 py-[0.5px] rounded">
+                    <Lock size={9.5} /> 流程已锁定
                   </span>
                 )}
               </div>
               {currentWf && (
-                <span className="text-[11px] font-mono text-[#85858d]">
+                <span className="text-[10px] font-mono text-[#85858d]">
                   {currentWf.nodes.length} 节点 · {currentWf.edges.length} 连线
                 </span>
               )}
             </div>
 
-            {/* 触发主卡片 */}
+            {/* 触发单行控件 */}
             <div
               onClick={() => {
                 if (isPending) {
                   setIsDropdownOpen(!isDropdownOpen);
                 }
               }}
-              className={`w-full min-h-[46px] px-3 py-2 rounded-[8px] border transition-all ${
+              className={`w-full h-[30px] px-2.5 rounded-[6px] border transition-all flex items-center justify-between select-none ${
                 !isPending
-                  ? 'bg-[#f4f4f6]/60 border-[#ececf0] cursor-not-allowed opacity-80'
+                  ? 'bg-[#f4f4f6] border-[#ececf0] text-[#85858d] cursor-not-allowed'
                   : isDropdownOpen
-                  ? 'border-[#4f46e5] bg-white ring-2 ring-[#eeedfd] shadow-sm cursor-pointer'
-                  : 'border-[#e3e3e8] bg-[#f9f9fb] hover:bg-white hover:border-[#b9b9c2] shadow-[0_1px_2px_rgba(0,0,0,0.03)] cursor-pointer'
-              } flex items-center justify-between`}
+                  ? 'border-[#4f46e5] bg-white ring-1 ring-[#eeedfd] shadow-sm cursor-pointer'
+                  : 'border-[#e3e3e8] bg-[#f9f9fb] hover:bg-white hover:border-[#b9b9c2] shadow-[0_1px_2px_rgba(0,0,0,0.02)] cursor-pointer'
+              }`}
             >
               {currentWf ? (
-                <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
-                  <div className="w-7 h-7 rounded-[6px] bg-[#eeedfd] border border-[#d8d6fb] flex items-center justify-center text-[#4f46e5] shrink-0">
-                    <Workflow size={14} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-[12.5px] text-[#1c1c21] truncate">
-                        {currentWf.name}
-                      </span>
-                      <span className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1 py-[0.5px] rounded">
-                        {currentWf.id}
-                      </span>
-                    </div>
-                    {currentWf.description && (
-                      <p className="text-[11px] text-[#85858d] truncate mt-0.5">
-                        {currentWf.description}
-                      </p>
-                    )}
-                  </div>
+                <div className="flex items-center gap-2 min-w-0 flex-1 pr-1">
+                  <Workflow size={13} className={isPending ? 'text-[#4f46e5]' : 'text-[#85858d]'} />
+                  <span className="font-medium text-[12px] text-[#1c1c21] truncate max-w-[200px]">
+                    {currentWf.name}
+                  </span>
+                  <span className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1 py-[0.5px] rounded shrink-0">
+                    {currentWf.id}
+                  </span>
                 </div>
               ) : (
-                <span className="text-[#85858d]">请选择工作流</span>
+                <span className="text-[#85858d] text-[11.5px]">请选择工作流</span>
               )}
 
               {isPending && (
                 <ChevronDown
-                  size={14}
-                  className={`text-[#85858d] shrink-0 transition-transform duration-200 ${
+                  size={12}
+                  className={`text-[#85858d] shrink-0 transition-transform duration-150 ${
                     isDropdownOpen ? 'rotate-180 text-[#4f46e5]' : ''
                   }`}
                 />
@@ -431,7 +258,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
 
             {/* 下拉弹出浮层 Popover */}
             {isPending && isDropdownOpen && (
-              <div className="absolute top-[calc(100%+6px)] left-0 right-0 bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.12)] z-50 max-h-[240px] overflow-y-auto p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-white border border-[#e3e3e8] rounded-[8px] shadow-[0_10px_26px_rgba(20,22,30,0.12)] z-50 max-h-[220px] overflow-y-auto p-1 space-y-0.5 animate-in fade-in zoom-in-95 duration-100">
                 {workflows.map((wf) => {
                   const isSelected = wf.id === currentWf?.id;
 
@@ -442,49 +269,47 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
                         setWorkflowId(wf.id);
                         setIsDropdownOpen(false);
                       }}
-                      className={`p-2.5 rounded-[7px] cursor-pointer transition-all flex items-start justify-between ${
+                      className={`p-2 rounded-[5px] cursor-pointer transition-all flex items-start justify-between ${
                         isSelected
                           ? 'bg-[#eeedfd]/50 border border-[#d8d6fb]'
                           : 'hover:bg-[#f9f9fb] border border-transparent'
                       }`}
                     >
-                      <div className="flex items-start gap-2.5 min-w-0 flex-1 pr-3">
+                      <div className="flex items-start gap-2 min-w-0 flex-1 pr-2">
                         <div
-                          className={`w-6 h-6 rounded-[5px] flex items-center justify-center shrink-0 mt-0.5 ${
+                          className={`w-5 h-5 rounded-[4px] flex items-center justify-center shrink-0 mt-0.5 ${
                             isSelected
                               ? 'bg-[#4f46e5] text-white shadow-sm'
                               : 'bg-[#f1f1f4] text-[#63636b]'
                           }`}
                         >
-                          <Workflow size={12} />
+                          <Workflow size={11} />
                         </div>
 
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-medium text-[12.5px] text-[#1c1c21] truncate">
+                            <span className="font-medium text-[12px] text-[#1c1c21] truncate">
                               {wf.name}
                             </span>
-                            <span className="text-[9.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1 py-[0.5px] rounded">
+                            <span className="text-[9px] font-mono text-[#85858d] bg-[#f4f4f6] px-1 py-[0.5px] rounded">
                               {wf.id}
                             </span>
                           </div>
 
-                          <div className="text-[11px] text-[#85858d] truncate mt-0.5">
+                          <div className="text-[10.5px] text-[#85858d] truncate mt-0.5">
                             {wf.description || '无附加描述'}
                           </div>
-
-                          {getNodeSummaryBadges(wf)}
                         </div>
                       </div>
 
-                      <div className="flex flex-col items-end shrink-0 pt-0.5">
-                        <span className="text-[10.5px] font-mono text-[#85858d]">
+                      <div className="flex flex-col items-end shrink-0">
+                        <span className="text-[10px] font-mono text-[#85858d]">
                           {wf.nodes.length} 节点
                         </span>
                         {isSelected && (
-                          <span className="mt-1 flex items-center gap-1 text-[10.5px] text-[#4f46e5] font-medium">
-                            <Check size={12} strokeWidth={2.4} />
-                            已选中
+                          <span className="mt-0.5 flex items-center gap-1 text-[10px] text-[#4f46e5] font-medium">
+                            <Check size={11} strokeWidth={2.4} />
+                            已选
                           </span>
                         )}
                       </div>
@@ -497,69 +322,66 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
 
           {/* 任务描述与上下文 */}
           <div>
-            <label className="block font-medium text-[#4b4b53] mb-1.5">任务说明与提示词 (可选)</label>
+            <label className="block text-[11px] font-medium text-[#63636b] mb-1">
+              任务说明与提示词 (可选)
+            </label>
             <textarea
-              rows={3}
+              rows={2}
               placeholder="输入任务背景、特定需求描述或传给 Agent 的 Prompt 覆盖项..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[7px] p-2.5 text-[#1c1c21] placeholder-[#85858d] outline-none resize-none focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all"
+              className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none resize-none focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all leading-normal"
             />
           </div>
 
-          {/* 未运行任务允许调整看板泳道 */}
+          {/* 未运行任务允许调整看板泳道 (Segmented Control) */}
           {isPending && (
-            <div>
-              <label className="block font-medium text-[#4b4b53] mb-1.5">所在看板泳道</label>
-              <div className="grid grid-cols-2 gap-2">
-                <div
+            <div className="flex items-center justify-between gap-2 pt-1 pb-0.5">
+              <span className="text-[11px] font-medium text-[#63636b] shrink-0">归属泳道:</span>
+              <div className="flex items-center p-0.5 rounded-[5px] bg-[#f1f1f4] border border-[#e3e3e8]">
+                <button
+                  type="button"
                   onClick={() => setKanbanColumn('inbox')}
-                  className={`p-2 rounded-[8px] border cursor-pointer transition-all flex items-center gap-2 ${
+                  className={`px-2.5 h-[22px] rounded-[4px] text-[10.5px] transition-all flex items-center gap-1 ${
                     kanbanColumn === 'inbox'
-                      ? 'bg-[#f5f5ff] border-[#6366f1] ring-1 ring-[#6366f1]/20'
-                      : 'bg-[#f9f9fb] border-[#e3e3e8] hover:bg-white'
+                      ? 'bg-white text-[#4f46e5] font-medium shadow-sm'
+                      : 'text-[#63636b] hover:text-[#1c1c21]'
                   }`}
                 >
-                  <Inbox size={13} className={kanbanColumn === 'inbox' ? 'text-[#6366f1]' : 'text-[#85858d]'} />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-[11.5px] font-medium text-[#1c1c21]">Inbox 收集箱</span>
-                  </div>
-                  {kanbanColumn === 'inbox' && <Check size={12} className="text-[#6366f1]" />}
-                </div>
-
-                <div
+                  <Inbox size={11} />
+                  <span>Inbox 收集箱</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setKanbanColumn('backlog')}
-                  className={`p-2 rounded-[8px] border cursor-pointer transition-all flex items-center gap-2 ${
+                  className={`px-2.5 h-[22px] rounded-[4px] text-[10.5px] transition-all flex items-center gap-1 ${
                     kanbanColumn === 'backlog'
-                      ? 'bg-[#f5f5ff] border-[#4f46e5] ring-1 ring-[#4f46e5]/20'
-                      : 'bg-[#f9f9fb] border-[#e3e3e8] hover:bg-white'
+                      ? 'bg-white text-[#1c1c21] font-medium shadow-sm'
+                      : 'text-[#63636b] hover:text-[#1c1c21]'
                   }`}
                 >
-                  <ListTodo size={13} className={kanbanColumn === 'backlog' ? 'text-[#4f46e5]' : 'text-[#85858d]'} />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-[11.5px] font-medium text-[#1c1c21]">待处理队列</span>
-                  </div>
-                  {kanbanColumn === 'backlog' && <Check size={12} className="text-[#4f46e5]" />}
-                </div>
+                  <ListTodo size={11} />
+                  <span>待处理队列</span>
+                </button>
               </div>
             </div>
           )}
 
           {/* 底部按钮栏 */}
-          <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#ececf0]">
+          <div className="pt-2 flex items-center justify-end gap-1.5 border-t border-[#ececf0]">
             <button
               type="button"
               onClick={onClose}
-              className="h-[28px] px-3.5 rounded-[6px] text-[#4b4b53] hover:bg-[#f1f1f4] hover:text-[#1c1c21] text-[12px] transition-colors"
+              className="h-[26px] px-3 rounded-[5px] text-[#63636b] hover:bg-[#f1f1f4] hover:text-[#1c1c21] text-[11.5px] transition-colors"
             >
               取消
             </button>
             <button
               type="submit"
               disabled={loading || !title.trim()}
-              className="h-[28px] px-4 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white font-medium flex items-center gap-1.5 active:scale-95 disabled:opacity-40 transition-all shadow-sm"
+              className="h-[26px] px-3.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 active:scale-95 disabled:opacity-40 transition-all shadow-sm"
             >
-              <Save size={12} strokeWidth={2.4} />
+              <Save size={11} strokeWidth={2.4} />
               <span>{loading ? '保存中...' : '保存修改'}</span>
             </button>
           </div>

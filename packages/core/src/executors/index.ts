@@ -1,11 +1,23 @@
 import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { WorkflowNode, Task, LogEntry, NodeRun, TaskSessionState } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 
 const executorLogger = createLogger('Executor');
+
+function resolveWorkingDir(rawPath?: string): string | undefined {
+  if (!rawPath || typeof rawPath !== 'string') return undefined;
+  const trimmed = rawPath.trim();
+  if (!trimmed) return undefined;
+  if (trimmed === '~') return os.homedir();
+  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
+    return path.join(os.homedir(), trimmed.slice(2));
+  }
+  return trimmed;
+}
 
 export interface ExecutionContext {
   task: Task;
@@ -65,7 +77,8 @@ export class CliCommandExecutor implements NodeExecutor {
     }
 
     const command = interpolateString(rawCommand, variables);
-    const cwd = node.config.cwd || ctx.task.workspace || settings.defaultCwd || process.cwd();
+    const rawCwd = node.config.cwd || ctx.task.workspace || settings.defaultCwd || process.cwd();
+    const cwd = resolveWorkingDir(rawCwd) || process.cwd();
     emitLog('system', `[执行进程] 启动命令: ${command}`);
 
     const timeoutMs = node.config.timeoutSec
@@ -313,7 +326,8 @@ export class AgentExecutor implements NodeExecutor {
         args.push(`--tools "${String(settings.piTools).trim()}"`);
       }
 
-      const cwd = node.config.cwd || task.workspace || settings.defaultCwd || process.cwd();
+      const rawCwd = node.config.cwd || task.workspace || settings.defaultCwd || process.cwd();
+      const cwd = resolveWorkingDir(rawCwd) || process.cwd();
 
       executorLogger.info(
         `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId} (工作区 CWD: ${cwd})`,

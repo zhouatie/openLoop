@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Check,
   X,
@@ -64,6 +64,8 @@ interface KanbanViewProps {
   onOpenTaskLogs: (taskId: string, nodeId?: string) => void;
   onRefresh: () => void | Promise<void>;
   onTaskUpdate?: (task: Task) => void;
+  selectedWorkspaceFilter?: string;
+  onWorkspaceFilterChange?: (workspace: string) => void;
 }
 
 interface ColumnDef {
@@ -96,6 +98,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   onOpenTaskLogs,
   onRefresh,
   onTaskUpdate,
+  selectedWorkspaceFilter,
+  onWorkspaceFilterChange,
 }) => {
   // 默认使用看板泳道，同时支持无缝切会话列表
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('kanban');
@@ -105,6 +109,38 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [copiedSession, setCopiedSession] = useState(false);
+
+  // 项目工程级别筛选
+  const [internalWorkspaceFilter, setInternalWorkspaceFilter] = useState<string>('all');
+  const activeWorkspaceFilter = selectedWorkspaceFilter !== undefined ? selectedWorkspaceFilter : internalWorkspaceFilter;
+  const [isWsDropdownOpen, setIsWsDropdownOpen] = useState(false);
+  const wsDropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleSelectWorkspaceFilter = (ws: string) => {
+    if (onWorkspaceFilterChange) {
+      onWorkspaceFilterChange(ws);
+    } else {
+      setInternalWorkspaceFilter(ws);
+    }
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanView] 切换工程项目过滤:', { from: activeWorkspaceFilter, to: ws });
+    }
+  };
+
+  const handleSelectCustomDirectoryForFilter = async () => {
+    try {
+      setIsWsDropdownOpen(false);
+      if (import.meta.env?.DEV) {
+        console.log('[KanbanView] 调起原生文件管理器选择待过滤工程...');
+      }
+      const chosen = await api.selectDirectory();
+      if (chosen) {
+        handleSelectWorkspaceFilter(chosen);
+      }
+    } catch (err) {
+      console.error('[KanbanView] 选择工程筛选失败:', err);
+    }
+  };
 
   const handleResumeTerminal = async (taskId: string) => {
     try {
@@ -287,14 +323,83 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   const wfMap = new Map(workflows.map((w) => [w.id, w]));
 
+  const getDirectoryName = (dirPath: string) => {
+    if (!dirPath) return '';
+    const trimmed = dirPath.replace(/[/\\]+$/, '');
+    const parts = trimmed.split(/[/\\]/);
+    return parts[parts.length - 1] || dirPath;
+  };
+
+  const compactPath = (fullPath: string) => {
+    if (!fullPath) return '';
+    return fullPath.replace(/^\/Users\/[^/]+/, '~');
+  };
+
+  // 聚合所有已知工程目录（任务已有 + 本地最近使用）并按活跃度排序
+  const availableWorkspaces = useMemo(() => {
+    const set = new Set<string>();
+    tasks.forEach((t) => {
+      if (t.workspace && t.workspace.trim()) {
+        set.add(t.workspace.trim());
+      }
+    });
+    try {
+      const raw = localStorage.getItem('openloop_recent_workspaces');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((ws) => {
+            if (typeof ws === 'string' && ws.trim()) {
+              set.add(ws.trim());
+            }
+          });
+        }
+      }
+    } catch {}
+
+    const list = Array.from(set);
+    list.sort((a, b) => {
+      const countA = tasks.filter((t) => t.workspace === a).length;
+      const countB = tasks.filter((t) => t.workspace === b).length;
+      if (countB !== countA) return countB - countA;
+      return a.localeCompare(b);
+    });
+    return list;
+  }, [tasks]);
+
+  // 先对项目工作区进行过滤，供工作流计数联动使用
+  const workspaceFilteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      if (activeWorkspaceFilter === 'none') {
+        return !t.workspace || !t.workspace.trim();
+      }
+      if (activeWorkspaceFilter !== 'all') {
+        return t.workspace === activeWorkspaceFilter;
+      }
+      return true;
+    });
+  }, [tasks, activeWorkspaceFilter]);
+
   const filteredTasks = tasks.filter((t) => {
+    // 1. 工程项目过滤
+    if (activeWorkspaceFilter === 'none') {
+      if (t.workspace && t.workspace.trim()) return false;
+    } else if (activeWorkspaceFilter !== 'all') {
+      if (t.workspace !== activeWorkspaceFilter) return false;
+    }
+
+    // 2. 自动化工作流过滤
     if (selectedWorkflowFilter !== 'all' && t.workflowId !== selectedWorkflowFilter) {
       return false;
     }
+
+    // 3. 搜索词检索 (标题、ID、以及项目路径)
     if (!searchTerm) return true;
+    const term = searchTerm.toLowerCase();
     return (
-      t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.id.toLowerCase().includes(searchTerm.toLowerCase())
+      t.title.toLowerCase().includes(term) ||
+      t.id.toLowerCase().includes(term) ||
+      (t.workspace && t.workspace.toLowerCase().includes(term))
     );
   });
 
@@ -414,12 +519,18 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     if (e) e.preventDefault();
     if (!quickIdeaTitle.trim() || isSubmittingQuickIdea) return;
     const defaultWfId = workflows[0]?.id || 'wf_auto_dev_qa';
+    const targetWorkspace =
+      activeWorkspaceFilter !== 'all' && activeWorkspaceFilter !== 'none'
+        ? activeWorkspaceFilter
+        : undefined;
+
     setIsSubmittingQuickIdea(true);
     if (import.meta.env?.DEV) {
       console.log('[KanbanView] 快捷录入 Inbox 想法任务:', {
         title: quickIdeaTitle.trim(),
         workflowId: defaultWfId,
         kanbanColumn: 'inbox',
+        workspace: targetWorkspace || '未指定',
       });
     }
     try {
@@ -429,6 +540,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         description: '来自 Inbox 快捷想法收集',
         kanbanColumn: 'inbox',
         autoRun: false,
+        workspace: targetWorkspace,
       });
       setQuickIdeaTitle('');
       setIsQuickAddingIdea(false);
@@ -504,7 +616,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isWfDropdownOpen) {
+        if (isWsDropdownOpen) {
+          setIsWsDropdownOpen(false);
+        } else if (isWfDropdownOpen) {
           setIsWfDropdownOpen(false);
         } else if (isBoardSortOpen) {
           setIsBoardSortOpen(false);
@@ -521,10 +635,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isWfDropdownOpen, isBoardSortOpen, openSortDropdownCol, editingTask, previewArtifact, selectedTask]);
+  }, [isWsDropdownOpen, isWfDropdownOpen, isBoardSortOpen, openSortDropdownCol, editingTask, previewArtifact, selectedTask]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
+      if (wsDropdownRef.current && !wsDropdownRef.current.contains(e.target as Node)) {
+        setIsWsDropdownOpen(false);
+      }
       if (wfDropdownRef.current && !wfDropdownRef.current.contains(e.target as Node)) {
         setIsWfDropdownOpen(false);
       }
@@ -532,23 +649,253 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         setIsBoardSortOpen(false);
       }
     };
-    if (isWfDropdownOpen || isBoardSortOpen) {
+    if (isWsDropdownOpen || isWfDropdownOpen || isBoardSortOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isWfDropdownOpen, isBoardSortOpen]);
+  }, [isWsDropdownOpen, isWfDropdownOpen, isBoardSortOpen]);
+
+  let currentWsLabel = '全部项目';
+  let currentWsTaskCount = tasks.length;
+
+  if (activeWorkspaceFilter === 'none') {
+    currentWsLabel = '未关联工程';
+    currentWsTaskCount = tasks.filter((t) => !t.workspace || !t.workspace.trim()).length;
+  } else if (activeWorkspaceFilter !== 'all') {
+    currentWsLabel = getDirectoryName(activeWorkspaceFilter);
+    currentWsTaskCount = tasks.filter((t) => t.workspace === activeWorkspaceFilter).length;
+  }
 
   const currentWf = workflows.find((w) => w.id === selectedWorkflowFilter);
   const currentWfLabel = selectedWorkflowFilter === 'all' ? '全部工作流' : (currentWf?.name || selectedWorkflowFilter);
   const currentWfTaskCount = selectedWorkflowFilter === 'all'
-    ? tasks.length
-    : tasks.filter((t) => t.workflowId === selectedWorkflowFilter).length;
+    ? workspaceFilteredTasks.length
+    : workspaceFilteredTasks.filter((t) => t.workflowId === selectedWorkflowFilter).length;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">
       {/* 1:1 magpie 风格次级工具栏 (Sub-header) */}
       <div className="px-6 py-2 bg-transparent flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
+          {/* 项目工程筛选器下拉选择器 */}
+          <div className="relative" ref={wsDropdownRef}>
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => setIsWsDropdownOpen(!isWsDropdownOpen)}
+                className={`flex items-center gap-1.5 px-2.5 h-[28px] rounded-[6px] border transition-all shadow-[0_1px_2px_rgba(0,0,0,0.06)] text-[12px] font-medium cursor-pointer ${
+                  isWsDropdownOpen
+                    ? 'border-[#4f46e5] bg-white ring-2 ring-[#4f46e5]/10 text-[#1c1c21]'
+                    : activeWorkspaceFilter !== 'all'
+                    ? 'border-[#d8d6fb] bg-[#f5f5ff]/70 text-[#4f46e5] hover:bg-[#eeedfd]'
+                    : 'border-[#e3e3e8] bg-white text-[#1c1c21] hover:bg-[#f9f9fb]'
+                }`}
+                title={
+                  activeWorkspaceFilter !== 'all' && activeWorkspaceFilter !== 'none'
+                    ? `当前聚焦工程: ${activeWorkspaceFilter}`
+                    : '按工程项目筛选任务'
+                }
+              >
+                <FolderGit2
+                  size={12}
+                  className={activeWorkspaceFilter !== 'all' ? 'text-[#4f46e5]' : 'text-[#85858d]'}
+                />
+                <span className="font-semibold max-w-[140px] truncate">{currentWsLabel}</span>
+                <span
+                  className={`font-mono text-[11px] px-1.5 py-[1px] rounded border ${
+                    activeWorkspaceFilter !== 'all'
+                      ? 'bg-[#eeedfd] text-[#4f46e5] border-[#d8d6fb]'
+                      : 'text-[#85858d] bg-[#f4f4f6] border-[#ececf0]'
+                  }`}
+                >
+                  {currentWsTaskCount}
+                </span>
+                <ChevronDown
+                  size={12}
+                  className={`text-[#85858d] transition-transform duration-150 ${
+                    isWsDropdownOpen ? 'rotate-180 text-[#4f46e5]' : ''
+                  }`}
+                />
+              </button>
+
+              {/* 激活非全部状态时提供快速清除按钮 */}
+              {activeWorkspaceFilter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSelectWorkspaceFilter('all');
+                  }}
+                  className="ml-1 w-5 h-5 rounded-[4px] flex items-center justify-center text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0] transition-colors"
+                  title="清除项目筛选，查看全部任务"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* 下拉浮层 */}
+            {isWsDropdownOpen && (
+              <div className="absolute top-[34px] left-0 w-[300px] bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_10px_26px_rgba(20,22,30,0.12)] py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
+                <div className="px-3 py-1 text-[10.5px] font-semibold text-[#85858d] uppercase tracking-wider flex items-center justify-between border-b border-[#ececf0] pb-1.5 mb-1">
+                  <span>工程项目筛选</span>
+                  {activeWorkspaceFilter !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleSelectWorkspaceFilter('all');
+                        setIsWsDropdownOpen(false);
+                      }}
+                      className="text-[10px] text-[#4f46e5] hover:underline font-normal cursor-pointer"
+                    >
+                      重置为全部
+                    </button>
+                  )}
+                </div>
+
+                {/* 全部项目 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSelectWorkspaceFilter('all');
+                    setIsWsDropdownOpen(false);
+                  }}
+                  className={`w-full px-3 py-2 text-left flex items-center justify-between text-[12px] hover:bg-[#f4f4f6] transition-colors ${
+                    activeWorkspaceFilter === 'all'
+                      ? 'text-[#1c1c21] font-medium bg-[#f9f9fb]'
+                      : 'text-[#4b4b53]'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-[4px] bg-[#f1f1f4] flex items-center justify-center text-[#85858d]">
+                      <Folder size={12} />
+                    </div>
+                    <span>全部项目 (所有工程)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
+                      {tasks.length}
+                    </span>
+                    {activeWorkspaceFilter === 'all' && (
+                      <Check size={13} className="text-[#1c1c21]" />
+                    )}
+                  </div>
+                </button>
+
+                {/* 未关联独立工程 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSelectWorkspaceFilter('none');
+                    setIsWsDropdownOpen(false);
+                  }}
+                  className={`w-full px-3 py-2 text-left flex items-center justify-between text-[12px] hover:bg-[#f4f4f6] transition-colors ${
+                    activeWorkspaceFilter === 'none'
+                      ? 'text-[#1c1c21] font-medium bg-[#f9f9fb]'
+                      : 'text-[#4b4b53]'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-[4px] bg-[#f1f1f4] flex items-center justify-center text-[#85858d]">
+                      <FolderOpen size={12} />
+                    </div>
+                    <span className="text-[11.5px]">未关联工程 (默认目录)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
+                      {tasks.filter((t) => !t.workspace || !t.workspace.trim()).length}
+                    </span>
+                    {activeWorkspaceFilter === 'none' && (
+                      <Check size={13} className="text-[#1c1c21]" />
+                    )}
+                  </div>
+                </button>
+
+                <div className="my-1 border-t border-[#ececf0]" />
+
+                {/* 具体项目列表 */}
+                <div className="max-h-[220px] overflow-y-auto space-y-0.5 px-1">
+                  {availableWorkspaces.length === 0 ? (
+                    <div className="px-3 py-3 text-[11px] text-[#85858d] text-center">
+                      暂无已绑定的工程项目
+                    </div>
+                  ) : (
+                    availableWorkspaces.map((ws) => {
+                      const count = tasks.filter((t) => t.workspace === ws).length;
+                      const isSelected = activeWorkspaceFilter === ws;
+                      const dirName = getDirectoryName(ws);
+                      const pathDisplay = compactPath(ws);
+
+                      return (
+                        <button
+                          key={ws}
+                          type="button"
+                          onClick={() => {
+                            handleSelectWorkspaceFilter(ws);
+                            setIsWsDropdownOpen(false);
+                          }}
+                          className={`w-full px-2.5 py-1.5 text-left rounded-[6px] flex items-center justify-between text-[12px] transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'text-[#4f46e5] font-medium bg-[#eeedfd]/60'
+                              : 'text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f9f9fb]'
+                          }`}
+                          title={ws}
+                        >
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <div
+                              className={`w-5 h-5 rounded-[4px] flex items-center justify-center shrink-0 ${
+                                isSelected
+                                  ? 'bg-[#4f46e5] text-white shadow-sm'
+                                  : 'bg-[#f1f1f4] text-[#63636b]'
+                              }`}
+                            >
+                              <FolderGit2 size={11} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate text-[12px] font-medium leading-tight">
+                                {dirName}
+                              </div>
+                              <div className="text-[10px] font-mono text-[#85858d] truncate mt-0.5">
+                                {pathDisplay}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span
+                              className={`font-mono text-[11px] px-1.5 py-[0.5px] rounded border ${
+                                isSelected
+                                  ? 'bg-white text-[#4f46e5] border-[#d8d6fb]'
+                                  : 'text-[#85858d] bg-[#f4f4f6] border-[#ececf0]'
+                              }`}
+                            >
+                              {count}
+                            </span>
+                            {isSelected && <Check size={13} className="text-[#4f46e5]" />}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* 底部原生访达选择新目录快速聚焦 */}
+                <div className="mt-1 pt-1 border-t border-[#ececf0] px-1">
+                  <button
+                    type="button"
+                    onClick={handleSelectCustomDirectoryForFilter}
+                    className="w-full px-2.5 py-1.5 text-left rounded-[6px] text-[11px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f9f9fb] flex items-center justify-between transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <ExternalLink size={11} />
+                      <span>选择本地其他工程筛选...</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* 工作流筛选器下拉选择器 */}
           <div className="relative" ref={wfDropdownRef}>
             <button
@@ -859,13 +1206,22 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           <span className="flex items-center gap-1.5">
                             <Lightbulb size={12} />
                             <span>随手记想法</span>
+                            {activeWorkspaceFilter !== 'all' && activeWorkspaceFilter !== 'none' && (
+                              <span className="text-[9.5px] font-normal text-[#85858d] bg-[#f4f4f6] px-1 py-[0.5px] rounded border border-[#ececf0] truncate max-w-[120px]">
+                                {getDirectoryName(activeWorkspaceFilter)}
+                              </span>
+                            )}
                           </span>
                           <span className="text-[10px] text-[#85858d]">暂缓执行</span>
                         </div>
                         <input
                           type="text"
                           autoFocus
-                          placeholder="输入突发奇想，按 Enter 存入..."
+                          placeholder={
+                            activeWorkspaceFilter !== 'all' && activeWorkspaceFilter !== 'none'
+                              ? `输入突发奇想，按 Enter 存入 ${getDirectoryName(activeWorkspaceFilter)}...`
+                              : '输入突发奇想，按 Enter 存入...'
+                          }
                           value={quickIdeaTitle}
                           onChange={(e) => setQuickIdeaTitle(e.target.value)}
                           onKeyDown={(e) => {

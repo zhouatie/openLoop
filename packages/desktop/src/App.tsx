@@ -22,8 +22,25 @@ export const App: React.FC = () => {
   const [isLogsOpen, setIsLogsOpen] = useState<boolean>(false);
   const [unreadLogsCount, setUnreadLogsCount] = useState<number>(0);
   const [activeNodeFilter, setActiveNodeFilter] = useState<string>('all');
+  const [selectedWorkspaceFilter, setSelectedWorkspaceFilter] = useState<string>(() => {
+    try {
+      return localStorage.getItem('openloop_kanban_selected_workspace_filter') || 'all';
+    } catch {
+      return 'all';
+    }
+  });
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isDaemonConnected, setIsDaemonConnected] = useState<boolean>(api.getConnectionStatus());
+
+  const handleWorkspaceFilterChange = (workspace: string) => {
+    setSelectedWorkspaceFilter(workspace);
+    try {
+      localStorage.setItem('openloop_kanban_selected_workspace_filter', workspace);
+    } catch {}
+    if (import.meta.env?.DEV) {
+      console.log('[App] 看板聚焦工程项目变更:', workspace);
+    }
+  };
 
   const refreshData = async () => {
     try {
@@ -188,6 +205,8 @@ export const App: React.FC = () => {
               onOpenTaskLogs={handleOpenTaskLogs}
               onRefresh={refreshData}
               onTaskUpdate={handleTaskUpdate}
+              selectedWorkspaceFilter={selectedWorkspaceFilter}
+              onWorkspaceFilterChange={handleWorkspaceFilterChange}
             />
           )}
 
@@ -261,6 +280,11 @@ export const App: React.FC = () => {
         onClose={() => setIsCreateTaskModalOpen(false)}
         workflows={workflows}
         onCreate={handleCreateTask}
+        defaultWorkspace={
+          selectedWorkspaceFilter !== 'all' && selectedWorkspaceFilter !== 'none'
+            ? selectedWorkspaceFilter
+            : undefined
+        }
       />
     </div>
   );
