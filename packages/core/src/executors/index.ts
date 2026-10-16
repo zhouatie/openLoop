@@ -1,4 +1,6 @@
 import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { WorkflowNode, Task, LogEntry, NodeRun } from '../types';
 
 export interface ExecutionContext {
@@ -38,14 +40,24 @@ export function interpolateString(template: string, context: Record<string, any>
   });
 }
 
-// 通用子进程命令行执行器
+// 通用子进程命令行执行器（真实执行子进程，不含任何 Mock）
 export class CliCommandExecutor implements NodeExecutor {
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, variables, emitLog } = ctx;
-    const rawCommand = node.config.command || 'echo "No command configured"';
-    const command = interpolateString(rawCommand, variables);
+    const rawCommand = node.config.command;
 
-    emitLog('system', `[CLI 执行器] 开始执行命令: ${command}`);
+    if (!rawCommand || !rawCommand.trim()) {
+      const err = `[CLI 节点 ${node.id}] 未配置可执行的 command 脚本`;
+      emitLog('stderr', err);
+      return {
+        status: 'failed',
+        exitCode: 1,
+        error: err,
+      };
+    }
+
+    const command = interpolateString(rawCommand, variables);
+    emitLog('system', `[执行进程] 启动命令: ${command}`);
 
     return new Promise((resolve) => {
       const child = spawn(command, {
@@ -60,17 +72,15 @@ export class CliCommandExecutor implements NodeExecutor {
       });
 
       child.stdout.on('data', (chunk) => {
-        const text = chunk.toString();
-        emitLog('stdout', text.trimEnd());
+        emitLog('stdout', chunk.toString().trimEnd());
       });
 
       child.stderr.on('data', (chunk) => {
-        const text = chunk.toString();
-        emitLog('stderr', text.trimEnd());
+        emitLog('stderr', chunk.toString().trimEnd());
       });
 
       child.on('error', (err) => {
-        emitLog('stderr', `[进程启动失败]: ${err.message}`);
+        emitLog('stderr', `[进程执行错误]: ${err.message}`);
         resolve({
           status: 'failed',
           error: err.message,
@@ -80,14 +90,14 @@ export class CliCommandExecutor implements NodeExecutor {
 
       child.on('close', (code) => {
         if (code === 0) {
-          emitLog('system', `[CLI 执行器] 执行成功 (退出码: 0)`);
+          emitLog('system', `[执行完成] 退出码: 0`);
           resolve({
             status: 'success',
             exitCode: 0,
             output: { command, executedAt: Date.now() },
           });
         } else {
-          emitLog('stderr', `[CLI 执行器] 执行失败 (退出码: ${code})`);
+          emitLog('stderr', `[执行失败] 异常退出码: ${code}`);
           resolve({
             status: 'failed',
             exitCode: code ?? 1,
@@ -99,166 +109,162 @@ export class CliCommandExecutor implements NodeExecutor {
   }
 }
 
-// AI Agent 节点执行器
+// 真实 AI Agent 节点执行器（移除所有模拟 delay 与 fake 输出）
 export class AgentExecutor implements NodeExecutor {
   private cliExecutor = new CliCommandExecutor();
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, emitLog } = ctx;
-    const agentName = node.config.agentName || '通用 Agent';
-    const prompt = node.config.prompt || '自动化编码与构建流程';
+    const agentName = node.config.agentName || 'OpenLoop Agent';
 
-    emitLog('system', `[Agent 接入] 唤醒 Agent: ${agentName}`);
-    emitLog('system', `[Agent 目标] ${prompt}`);
+    emitLog('system', `[Agent 节点] 激活: ${agentName}`);
 
-    // 如果配置了 CLI 命令则真实执行，否则执行自带的模拟/默认 Agent 逻辑
-    if (node.config.command) {
-      return this.cliExecutor.execute(ctx);
+    if (!node.config.command) {
+      const err = `[Agent 节点 ${node.id}] 未配置 Agent 执行 CLI 命令 (例如 openloop-agent, pi 或自定义脚本)`;
+      emitLog('stderr', err);
+      return {
+        status: 'failed',
+        exitCode: 1,
+        error: err,
+      };
     }
 
-    emitLog('stdout', `[${agentName}] 正在分析需求并进行代码修改...`);
-    await new Promise((r) => setTimeout(r, 1500));
-    emitLog('stdout', `[${agentName}] 修改完毕，已生成补丁与改动文件。`);
-    emitLog('system', `[${agentName}] 任务开发阶段完成，触发下一阶段 Hook！`);
-
-    return {
-      status: 'success',
-      exitCode: 0,
-      output: {
-        agent: agentName,
-        status: 'code_generated',
-        changedFiles: ['src/App.tsx', 'src/services/api.ts'],
-      },
-    };
+    return this.cliExecutor.execute(ctx);
   }
 }
 
-// Hook 节点执行器
+// 真实 Hook 节点执行器
 export class HookExecutor implements NodeExecutor {
   private cliExecutor = new CliCommandExecutor();
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, emitLog } = ctx;
-    emitLog('system', `[Hook 调度] 接收到上游状态完成事件，正在触发下游流转...`);
+    emitLog('system', `[Hook 节点] 触发流转事件: ${node.name}`);
 
-    if (node.config.command) {
-      return this.cliExecutor.execute(ctx);
+    if (!node.config.command) {
+      const err = `[Hook 节点 ${node.id}] 未配置 Hook 触发脚本`;
+      emitLog('stderr', err);
+      return {
+        status: 'failed',
+        exitCode: 1,
+        error: err,
+      };
     }
 
-    await new Promise((r) => setTimeout(r, 800));
-    emitLog('system', `[Hook 调度] 事件广播成功，已自动推进流程至 QA 自动化验证阶段`);
-
-    return {
-      status: 'success',
-      output: { hookFired: true, timestamp: Date.now() },
-    };
+    return this.cliExecutor.execute(ctx);
   }
 }
 
-// Midscene 智能测试执行器
+// 真实 Midscene 智能测试执行器（真实执行测试并从磁盘提取产物）
 export class MidsceneExecutor implements NodeExecutor {
   private cliExecutor = new CliCommandExecutor();
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, emitLog } = ctx;
-    const testUrl = node.config.testUrl || 'http://localhost:3000';
-    const instructions = node.config.instructions || ['校验主页显示', '操作核心按钮'];
+    const testUrl = node.config.testUrl;
 
-    emitLog('system', `[Midscene UI 测试] 目标地址: ${testUrl}`);
-    for (const inst of instructions) {
-      emitLog('system', `[Midscene 指令] -> ${inst}`);
-    }
+    emitLog('system', `[Midscene UI 测试] 目标地址: ${testUrl || '未指定'}`);
 
-    if (node.config.command) {
-      const res = await this.cliExecutor.execute(ctx);
+    if (!node.config.command) {
+      const err = `[Midscene 节点 ${node.id}] 未配置真实测试命令 (如 npx midscene run ...)`;
+      emitLog('stderr', err);
       return {
-        ...res,
-        artifacts: [
-          { name: 'step1_landing.png', type: 'image', path: './artifacts/midscene/step1.png' },
-          { name: 'step2_action.png', type: 'image', path: './artifacts/midscene/step2.png' },
-          { name: 'step3_result.png', type: 'image', path: './artifacts/midscene/step3.png' },
-        ],
+        status: 'failed',
+        exitCode: 1,
+        error: err,
       };
     }
 
-    emitLog('stdout', `[Midscene] 正在连接无头 Chrome 实例...`);
-    await new Promise((r) => setTimeout(r, 1000));
-    emitLog('stdout', `[Midscene] 步骤 1/3: 导航至页面，捕获截图: step1_landing.png`);
-    await new Promise((r) => setTimeout(r, 800));
-    emitLog('stdout', `[Midscene] 步骤 2/3: 智能定位操作元素，执行交互，捕获截图: step2_action.png`);
-    await new Promise((r) => setTimeout(r, 800));
-    emitLog('stdout', `[Midscene] 步骤 3/3: 断言验收指标成功，捕获截图: step3_result.png`);
+    const res = await this.cliExecutor.execute(ctx);
+    if (res.status !== 'success') {
+      return res;
+    }
+
+    // 检查是否有真实产物输出在指定目录
+    const artifacts: Array<{ name: string; type: 'image' | 'video' | 'log' | 'json'; path: string }> = [];
+    const reportDir = node.config.screenshotPath;
+    if (reportDir && fs.existsSync(reportDir)) {
+      try {
+        const files = fs.readdirSync(reportDir);
+        for (const file of files) {
+          if (/\.(png|jpe?g|webp)$/i.test(file)) {
+            artifacts.push({
+              name: file,
+              type: 'image',
+              path: path.join(reportDir, file),
+            });
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     return {
-      status: 'success',
-      output: {
-        testedUrl: testUrl,
-        stepsExecuted: instructions.length,
-        screenshots: ['step1_landing.png', 'step2_action.png', 'step3_result.png'],
-      },
-      artifacts: [
-        { name: 'step1_landing.png', type: 'image', path: './artifacts/midscene/step1.png' },
-        { name: 'step2_action.png', type: 'image', path: './artifacts/midscene/step2.png' },
-        { name: 'step3_result.png', type: 'image', path: './artifacts/midscene/step3.png' },
-      ],
+      ...res,
+      artifacts: artifacts.length > 0 ? artifacts : undefined,
     };
   }
 }
 
-// 拼接截图与生成动图执行器
+// 真实拼接截图与动图生成执行器
 export class StitchImageExecutor implements NodeExecutor {
   private cliExecutor = new CliCommandExecutor();
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, emitLog } = ctx;
-    const format = node.config.outputFormat || 'gif';
-    const outputFile = node.config.outputFile || `./artifacts/flow_result.${format}`;
+    const outputFile = node.config.outputFile;
 
-    emitLog('system', `[截图拼接] 目标格式: ${format}, 输出文件: ${outputFile}`);
+    emitLog('system', `[动图拼接节点] 目标输出: ${outputFile || '未指定'}`);
 
-    if (node.config.command) {
-      const res = await this.cliExecutor.execute(ctx);
+    if (!node.config.command) {
+      const err = `[动图拼接节点 ${node.id}] 未配置合成脚本 (如 ffmpeg 或 gifski)`;
+      emitLog('stderr', err);
       return {
-        ...res,
-        artifacts: [
-          { name: `animation.${format}`, type: format === 'gif' ? 'image' : 'video', path: outputFile },
-        ],
+        status: 'failed',
+        exitCode: 1,
+        error: err,
       };
     }
 
-    emitLog('stdout', `[Stitcher CLI] 扫描源目录截图文件 [step1.png, step2.png, step3.png]...`);
-    await new Promise((r) => setTimeout(r, 1000));
-    emitLog('stdout', `[Stitcher CLI] 帧率设置: 1.5s/帧，添加高亮操作红框...`);
-    await new Promise((r) => setTimeout(r, 800));
-    emitLog('stdout', `[Stitcher CLI] 生成动画动图成功: ${outputFile}`);
+    const res = await this.cliExecutor.execute(ctx);
+    if (res.status !== 'success') {
+      return res;
+    }
+
+    // 仅当真实产物生成在磁盘时收集
+    const artifacts: Array<{ name: string; type: 'image' | 'video' | 'log' | 'json'; path: string }> = [];
+    if (outputFile && fs.existsSync(outputFile)) {
+      artifacts.push({
+        name: path.basename(outputFile),
+        type: outputFile.endsWith('.gif') ? 'image' : 'video',
+        path: outputFile,
+      });
+    }
 
     return {
-      status: 'success',
-      output: { outputFile, frames: 3 },
-      artifacts: [
-        { name: `preview.${format}`, type: 'image', path: outputFile },
-      ],
+      ...res,
+      artifacts: artifacts.length > 0 ? artifacts : undefined,
     };
   }
 }
 
-// QA 人工审核与验证挂起执行器
+// QA 人工审核与验证挂起执行器（状态机断点机制，等待人工批准或驳回）
 export class QaApprovalExecutor implements NodeExecutor {
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, emitLog } = ctx;
     emitLog('system', `=====================================================`);
-    emitLog('system', `[QA 验证拦截] 流程已进入人工/测试用例验收阶段！`);
-    emitLog('system', `[提示]: ${node.config.approvalPrompt || '等待 QA 检查测试截图与动画'}`);
+    emitLog('system', `[QA 验收拦截] 工作流进入人工/测试用例验收阶段`);
+    emitLog('system', `[提示]: ${node.config.approvalPrompt || '等待 QA 人工确认测试产物'}`);
     if (node.config.checklist && node.config.checklist.length > 0) {
       emitLog('system', `[核查清单]:`);
       node.config.checklist.forEach((item, idx) => {
         emitLog('system', `  ${idx + 1}. [ ] ${item}`);
       });
     }
-    emitLog('system', `任务已挂起，可在桌面端看板点击【确认通过】或在 CLI 执行 'openloop task approve'。`);
+    emitLog('system', `任务已挂起，可通过桌面端看板点击【验收通过】或命令行 openloop task approve 恢复。`);
     emitLog('system', `=====================================================`);
 
-    // 挂起状态
     return {
       status: 'waiting_approval',
     };
@@ -284,7 +290,6 @@ export class ExecutorRegistry {
   get(type: string): NodeExecutor {
     const exec = this.executors.get(type);
     if (!exec) {
-      // 找不到则回退使用通用 CLI 执行器
       return this.executors.get('cli')!;
     }
     return exec;
