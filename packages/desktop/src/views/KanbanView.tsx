@@ -240,14 +240,23 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     workflowId: string;
   }) => {
     if (!editingTask) return;
+    if (import.meta.env?.DEV) {
+      console.log('[Kanban:TaskEdit] 发起任务更新:', editingTask.id, params);
+    }
     try {
       const updated = await api.updateTask(editingTask.id, params);
       if (selectedTask?.id === editingTask.id) {
         setSelectedTask(updated);
       }
+      if (import.meta.env?.DEV) {
+        console.log('[Kanban:TaskEdit] 任务更新成功:', updated.id);
+      }
       onRefresh();
     } catch (e: any) {
-      alert(`保存修改失败: ${e.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[Kanban:TaskEdit] 任务更新异常:', e);
+      }
+      throw e;
     }
   };
 

@@ -504,6 +504,7 @@ export class SqliteStore {
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         description = excluded.description,
+        workflow_id = excluded.workflow_id,
         status = excluded.status,
         kanban_column = excluded.kanban_column,
         current_node_id = excluded.current_node_id,

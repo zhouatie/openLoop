@@ -11,6 +11,7 @@ import {
   Layers,
   ArrowRight,
   Lock,
+  AlertCircle,
 } from 'lucide-react';
 import { Task, WorkflowDefinition } from '@openloop/core';
 
@@ -37,6 +38,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const [description, setDescription] = useState('');
   const [workflowId, setWorkflowId] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -47,6 +49,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
       setTitle(task.title || '');
       setDescription(task.description || '');
       setWorkflowId(task.workflowId || workflows[0]?.id || '');
+      setErrorMsg(null);
     }
   }, [task, workflows]);
 
@@ -91,14 +94,32 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
     if (!title.trim()) return;
 
     setLoading(true);
+    setErrorMsg(null);
+    if (import.meta.env?.DEV) {
+      console.log('[TaskEdit] 开始提交任务更新:', {
+        taskId: task.id,
+        title: title.trim(),
+        workflowId,
+        description: description.trim(),
+      });
+    }
     try {
       await onSave({
         title: title.trim(),
         description: description.trim(),
         workflowId,
       });
+      if (import.meta.env?.DEV) {
+        console.log('[TaskEdit] 任务更新保存成功:', task.id);
+      }
       setIsDropdownOpen(false);
       onClose();
+    } catch (err: any) {
+      const msg = err?.message || '未知错误，请检查调度服务连接状态';
+      if (import.meta.env?.DEV) {
+        console.error('[TaskEdit] 任务更新保存失败:', err);
+      }
+      setErrorMsg(`保存修改失败: ${msg}`);
     } finally {
       setLoading(false);
     }
@@ -160,6 +181,23 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
             <X size={15} />
           </button>
         </div>
+
+        {/* 内联错误通知横幅 */}
+        {errorMsg && (
+          <div className="mt-3.5 p-2.5 rounded-[8px] bg-[#fef2f2] border border-[#fecaca] flex items-center justify-between gap-2 text-[#b91c1c] text-[11.5px] animate-in fade-in slide-in-from-top-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertCircle size={14} className="text-[#dc2626] shrink-0" />
+              <span className="truncate font-medium">{errorMsg}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setErrorMsg(null)}
+              className="text-[#dc2626] hover:opacity-75 p-0.5 rounded transition-opacity"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-[12px]">
           {/* 任务名称 */}
