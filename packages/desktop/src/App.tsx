@@ -21,6 +21,7 @@ export const App: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isLogsOpen, setIsLogsOpen] = useState<boolean>(false);
   const [unreadLogsCount, setUnreadLogsCount] = useState<number>(0);
+  const [activeNodeFilter, setActiveNodeFilter] = useState<string>('all');
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isDaemonConnected, setIsDaemonConnected] = useState<boolean>(api.getConnectionStatus());
 
@@ -78,7 +79,10 @@ export const App: React.FC = () => {
     };
   }, [isLogsOpen]);
 
-  const handleOpenTaskLogs = async (taskId: string) => {
+  const handleOpenTaskLogs = async (taskId: string, nodeId?: string) => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[App] handleOpenTaskLogs:', { taskId, nodeId });
+    }
     try {
       const taskLogs = await api.getTaskLogs(taskId);
       setLogs((prev) => {
@@ -86,9 +90,11 @@ export const App: React.FC = () => {
         const newOnes = taskLogs.filter((l) => !existingIds.has(l.id));
         return [...prev, ...newOnes];
       });
+      setActiveNodeFilter(nodeId || 'all');
       setIsLogsOpen(true);
       setUnreadLogsCount(0);
     } catch {
+      setActiveNodeFilter(nodeId || 'all');
       setIsLogsOpen(true);
     }
   };
@@ -106,6 +112,7 @@ export const App: React.FC = () => {
     description: string;
     autoRun: boolean;
     kanbanColumn?: KanbanColumn;
+    workspace?: string;
   }) => {
     if (import.meta.env?.DEV) {
       console.log('[App] 创建任务请求:', params);
@@ -243,6 +250,9 @@ export const App: React.FC = () => {
         onClose={() => setIsLogsOpen(false)}
         logs={logs}
         onClearLogs={() => setLogs([])}
+        workflows={workflows}
+        activeNodeFilter={activeNodeFilter}
+        onFilterChange={setActiveNodeFilter}
       />
 
       {/* 新建任务弹窗 */}

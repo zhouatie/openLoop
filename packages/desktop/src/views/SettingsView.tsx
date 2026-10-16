@@ -9,6 +9,7 @@ import {
   RotateCcw,
   Sliders,
   Folder,
+  FolderOpen,
   Download,
 } from 'lucide-react';
 import { api } from '../services/api';
@@ -90,6 +91,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setTimeout(() => setSaveStatus(null), 1800);
     } catch (err: any) {
       alert(`保存失败: ${err.message}`);
+    }
+  };
+
+  const handleBrowseCwd = async () => {
+    try {
+      const chosen = await api.selectDirectory({ defaultPath: defaultCwd || undefined });
+      if (chosen) {
+        setDefaultCwd(chosen);
+        await handleSave({ defaultCwd: chosen });
+      }
+    } catch (err) {
+      console.error('选择目录失败:', err);
     }
   };
 
@@ -481,7 +494,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
               </div>
 
-              <div className="shrink-0 self-center">
+              <div className="shrink-0 self-center flex items-center gap-1.5">
                 <input
                   type="text"
                   value={defaultCwd}
@@ -490,6 +503,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   placeholder="留空使用 openLoop 启动目录"
                   className="w-64 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#85858d] outline-none shadow-sm focus:border-[#4f46e5]"
                 />
+                <button
+                  type="button"
+                  onClick={handleBrowseCwd}
+                  className="h-[26px] px-2 rounded-[6px] bg-[#f9f9fb] hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium flex items-center gap-1 transition-colors shadow-sm"
+                  title="打开系统访达选择目录"
+                >
+                  <FolderOpen size={12} />
+                  <span>访达</span>
+                </button>
               </div>
             </div>
 

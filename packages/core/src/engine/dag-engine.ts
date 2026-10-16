@@ -179,6 +179,7 @@ export class DagEngine extends EventEmitter {
           title: task.title,
           description: task.description || '',
           workflowId: task.workflowId,
+          workspace: task.workspace || '',
         },
         ...workflow.variables,
         ...task.context,

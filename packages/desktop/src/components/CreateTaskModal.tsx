@@ -14,11 +14,17 @@ import {
   ListTodo,
   Clock,
   Search,
+  FolderGit2,
+  FolderOpen,
+  ExternalLink,
 } from 'lucide-react';
 import { WorkflowDefinition, NodeType, KanbanColumn } from '@openloop/core';
+import { api } from '../services/api';
 
 const STORAGE_KEY_LAST_WORKFLOW = 'openloop_last_used_workflow_id';
 const STORAGE_KEY_RECENT_WORKFLOWS = 'openloop_recent_workflow_ids';
+const STORAGE_KEY_LAST_WORKSPACE = 'openloop_last_used_workspace';
+const STORAGE_KEY_RECENT_WORKSPACES = 'openloop_recent_workspaces';
 const MAX_RECENT_COUNT = 3;
 
 interface CreateTaskModalProps {
@@ -32,6 +38,7 @@ interface CreateTaskModalProps {
     description: string;
     autoRun: boolean;
     kanbanColumn?: KanbanColumn;
+    workspace?: string;
   }) => Promise<void>;
 }
 
@@ -46,6 +53,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [description, setDescription] = useState('');
   const [workflowId, setWorkflowId] = useState(workflows[0]?.id || '');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>(defaultColumn);
+  const [workspace, setWorkspace] = useState('');
+  const [isSelectingWorkspace, setIsSelectingWorkspace] = useState(false);
   const [autoRun, setAutoRun] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -58,12 +67,33 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       return [];
     }
   });
+  const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_RECENT_WORKSPACES);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // 弹窗打开或 workflows 变更时，优先恢复本地上次使用的流程记忆
+  // 弹窗打开或 workflows 变更时，优先恢复本地上次使用的流程与工作区记忆
   useEffect(() => {
     if (!isOpen) return;
+
+    // 工作区本地历史记忆恢复
+    try {
+      const lastWs = localStorage.getItem(STORAGE_KEY_LAST_WORKSPACE);
+      if (lastWs && !workspace) {
+        setWorkspace(lastWs);
+        if (import.meta.env?.DEV) {
+          console.log('[CreateTaskModal] 从本地记忆回填上次使用的工作区:', lastWs);
+        }
+      }
+    } catch (err) {
+      console.warn('[CreateTaskModal] 读取工作区历史记忆失败:', err);
+    }
 
     try {
       const lastId = localStorage.getItem(STORAGE_KEY_LAST_WORKFLOW);
@@ -223,16 +253,50 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     );
   };
 
+  const getDirectoryName = (dirPath: string) => {
+    if (!dirPath) return '';
+    const trimmed = dirPath.replace(/[/\\]+$/, '');
+    const parts = trimmed.split(/[/\\]/);
+    return parts[parts.length - 1] || dirPath;
+  };
+
+  const handleSelectWorkspace = async () => {
+    if (isSelectingWorkspace) return;
+    setIsSelectingWorkspace(true);
+    if (import.meta.env?.DEV) {
+      console.log('[CreateTaskModal] 用户触发选择工作区，准备调起访达...');
+    }
+    try {
+      const chosen = await api.selectDirectory({ defaultPath: workspace || undefined });
+      if (chosen) {
+        setWorkspace(chosen);
+        if (import.meta.env?.DEV) {
+          console.log('[CreateTaskModal] 成功关联工作区:', chosen);
+        }
+      } else {
+        if (import.meta.env?.DEV) {
+          console.log('[CreateTaskModal] 用户取消了访达目录选择');
+        }
+      }
+    } catch (err) {
+      console.error('[CreateTaskModal] 调起目录选择器异常:', err);
+    } finally {
+      setIsSelectingWorkspace(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !workflowId) return;
 
     setLoading(true);
+    const trimmedWorkspace = workspace.trim();
     if (import.meta.env?.DEV) {
       console.log('[CreateTaskModal] 提交创建任务:', {
         title: title.trim(),
         workflowId,
         kanbanColumn,
+        workspace: trimmedWorkspace || '未指定(留空)',
         autoRun,
       });
     }
@@ -243,6 +307,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         description: description.trim(),
         autoRun,
         kanbanColumn,
+        workspace: trimmedWorkspace || undefined,
       });
 
       // 保存本地记忆与 LRU 最近使用列表
@@ -255,10 +320,22 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         localStorage.setItem(STORAGE_KEY_RECENT_WORKFLOWS, JSON.stringify(nextRecents));
         setRecentWorkflowIds(nextRecents);
 
+        // 保存工作区记忆
+        if (trimmedWorkspace) {
+          localStorage.setItem(STORAGE_KEY_LAST_WORKSPACE, trimmedWorkspace);
+          const nextWsRecents = [
+            trimmedWorkspace,
+            ...recentWorkspaces.filter((w) => w !== trimmedWorkspace),
+          ].slice(0, MAX_RECENT_COUNT);
+          localStorage.setItem(STORAGE_KEY_RECENT_WORKSPACES, JSON.stringify(nextWsRecents));
+          setRecentWorkspaces(nextWsRecents);
+        }
+
         if (import.meta.env?.DEV) {
-          console.log('[CreateTaskModal] 更新工作流 LRU 历史记录:', {
+          console.log('[CreateTaskModal] 更新工作流与工作区 LRU 历史记录:', {
             lastUsed: workflowId,
             recentWorkflows: nextRecents,
+            lastWorkspace: trimmedWorkspace,
           });
         }
       } catch (storageErr) {
@@ -341,6 +418,137 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               onChange={(e) => setTitle(e.target.value)}
               className="w-full h-[32px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[7px] px-3 text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all"
             />
+          </div>
+
+          {/* 关联工程工作区 */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block font-medium text-[#4b4b53]">关联工程工作区</label>
+              {workspace ? (
+                <span className="text-[10.5px] text-[#189a58] font-medium flex items-center gap-1 bg-[#e4f6ec] px-1.5 py-[0.5px] rounded">
+                  <Check size={10.5} strokeWidth={2.4} /> 已绑定
+                </span>
+              ) : (
+                <span className="text-[10.5px] text-[#85858d]">
+                  独立工程目录，非默认工具目录
+                </span>
+              )}
+            </div>
+
+            {workspace ? (
+              <div className="w-full min-h-[46px] px-3 py-2 rounded-[8px] border border-[#d8d6fb] bg-[#f5f5ff]/60 flex items-center justify-between gap-2 shadow-[0_1px_2px_rgba(79,70,229,0.04)]">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="w-7 h-7 rounded-[6px] bg-[#4f46e5] text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <FolderGit2 size={14} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-[12.5px] text-[#1c1c21] truncate">
+                        {getDirectoryName(workspace)}
+                      </span>
+                      <span className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1 py-[0.5px] rounded">
+                        Workspace
+                      </span>
+                    </div>
+                    <div
+                      className="text-[11px] font-mono text-[#63636b] truncate mt-0.5 select-all"
+                      title={workspace}
+                    >
+                      {workspace}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => api.openPath(workspace)}
+                    className="h-[24px] px-2 rounded-[5px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium transition-colors shadow-sm flex items-center gap-1"
+                    title="在系统访达中定位该目录"
+                  >
+                    <ExternalLink size={11} />
+                    <span>访达</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSelectingWorkspace}
+                    onClick={handleSelectWorkspace}
+                    className="h-[24px] px-2 rounded-[5px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium transition-colors shadow-sm"
+                    title="更换其他工程目录"
+                  >
+                    {isSelectingWorkspace ? '选择中...' : '更换'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspace('');
+                      if (import.meta.env?.DEV) console.log('[CreateTaskModal] 清除工作区关联');
+                    }}
+                    className="w-6 h-[24px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:text-[#d64545] hover:bg-[#fee2e2]/60 transition-colors"
+                    title="取消关联工作区"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div
+                onClick={handleSelectWorkspace}
+                className="group w-full min-h-[46px] px-3 py-2.5 rounded-[8px] border border-dashed border-[#d1d1d8] hover:border-[#4f46e5] bg-[#f9f9fb] hover:bg-[#f5f5ff]/60 cursor-pointer transition-all flex items-center justify-between shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+              >
+                <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                  <div className="w-7 h-7 rounded-[6px] bg-[#f1f1f4] group-hover:bg-[#eeedfd] group-hover:text-[#4f46e5] text-[#85858d] flex items-center justify-center shrink-0 transition-colors">
+                    <FolderGit2 size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-medium text-[#4b4b53] group-hover:text-[#4f46e5] transition-colors flex items-center gap-1.5">
+                      <span>点击关联本地工程工作区</span>
+                    </div>
+                    <div className="text-[10.5px] text-[#85858d] truncate mt-0.5">
+                      选择待迭代代码工程，执行时在此目录下自测与编码
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isSelectingWorkspace}
+                  className="px-2.5 h-[26px] rounded-[6px] bg-white border border-[#e3e3e8] group-hover:border-[#d8d6fb] text-[11px] font-medium text-[#4b4b53] group-hover:text-[#4f46e5] shadow-sm flex items-center gap-1 transition-all shrink-0"
+                >
+                  <FolderOpen size={12} />
+                  <span>{isSelectingWorkspace ? '选择中...' : '打开访达'}</span>
+                </button>
+              </div>
+            )}
+
+            {recentWorkspaces.length > 0 && (
+              <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-[#85858d] flex items-center gap-1">
+                  <Clock size={10} /> 最近工作区:
+                </span>
+                {recentWorkspaces.map((wsPath) => {
+                  const isCurrent = wsPath === workspace;
+                  return (
+                    <button
+                      key={wsPath}
+                      type="button"
+                      onClick={() => {
+                        setWorkspace(wsPath);
+                        if (import.meta.env?.DEV) console.log('[CreateTaskModal] 切换工作区:', wsPath);
+                      }}
+                      className={`px-2 py-[2px] rounded-[4px] text-[10.5px] font-mono border transition-all max-w-[180px] truncate shadow-[0_1px_2px_rgba(0,0,0,0.02)] ${
+                        isCurrent
+                          ? 'bg-[#eeedfd] border-[#4f46e5] text-[#4f46e5] font-semibold'
+                          : 'bg-white hover:bg-[#f9f9fb] border-[#e3e3e8] text-[#4b4b53] hover:text-[#1c1c21]'
+                      }`}
+                      title={wsPath}
+                    >
+                      {getDirectoryName(wsPath)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* 极致优雅的自定义工作流下拉选择器 */}

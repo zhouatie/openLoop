@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Trash2, ArrowDown, Filter, Copy, Check, Terminal } from 'lucide-react';
-import { LogEntry } from '@openloop/core';
+import { LogEntry, WorkflowDefinition } from '@openloop/core';
+import { resolveNodeMeta } from '../utils/nodeMeta';
 
 interface LogTerminalDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   logs: LogEntry[];
   onClearLogs: () => void;
+  workflows?: WorkflowDefinition[];
+  activeNodeFilter?: string;
+  onFilterChange?: (nodeId: string) => void;
 }
 
 export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
@@ -14,11 +18,20 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
   onClose,
   logs,
   onClearLogs,
+  workflows,
+  activeNodeFilter,
+  onFilterChange,
 }) => {
   const [selectedNodeFilter, setSelectedNodeFilter] = useState<string>('all');
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [copied, setCopied] = useState<boolean>(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (activeNodeFilter) {
+      setSelectedNodeFilter(activeNodeFilter);
+    }
+  }, [activeNodeFilter, isOpen]);
 
   const nodeIds = Array.from(new Set(logs.map((l) => l.nodeId)));
 
@@ -48,7 +61,10 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
 
   const copyAll = () => {
     const text = filteredLogs
-      .map((l) => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.nodeId}] ${l.message}`)
+      .map((l) => {
+        const meta = resolveNodeMeta(l.nodeId, undefined, workflows);
+        return `[${new Date(l.timestamp).toLocaleTimeString()}] [${meta.name} (${l.nodeId})] ${l.message}`;
+      })
       .join('\n');
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -71,15 +87,21 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
             <span className="text-[#85858d]">过滤:</span>
             <select
               value={selectedNodeFilter}
-              onChange={(e) => setSelectedNodeFilter(e.target.value)}
-              className="bg-[#24242c] border border-[#383842] text-[#e3e3e8] text-[11px] rounded-[4px] px-1.5 py-[1px] outline-none"
+              onChange={(e) => {
+                setSelectedNodeFilter(e.target.value);
+                onFilterChange?.(e.target.value);
+              }}
+              className="bg-[#24242c] border border-[#383842] text-[#e3e3e8] text-[11px] rounded-[4px] px-1.5 py-[1px] outline-none max-w-[200px]"
             >
               <option value="all">所有节点</option>
-              {nodeIds.map((nid) => (
-                <option key={nid} value={nid}>
-                  {nid}
-                </option>
-              ))}
+              {nodeIds.map((nid) => {
+                const meta = resolveNodeMeta(nid, undefined, workflows);
+                return (
+                  <option key={nid} value={nid}>
+                    {meta.name} ({nid})
+                  </option>
+                );
+              })}
             </select>
           </div>
         </div>
@@ -134,11 +156,17 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
             let color = 'text-[#e4e4e7]';
             if (log.stream === 'stderr') color = 'text-[#f87171] font-semibold';
             if (log.stream === 'system') color = 'text-[#38bdf8]';
+            const meta = resolveNodeMeta(log.nodeId, undefined, workflows);
 
             return (
               <div key={log.id} className="flex items-start gap-2 leading-relaxed px-1 py-0.5 rounded hover:bg-[#222228]">
                 <span className="text-[#71717a] shrink-0 select-none">[{timeStr}]</span>
-                <span className="text-[#a5b4fc] shrink-0 font-medium">[{log.nodeId}]</span>
+                <span
+                  className="text-[#a5b4fc] shrink-0 font-medium cursor-help"
+                  title={`底层标识: ${log.nodeId}\n说明: ${meta.description}`}
+                >
+                  [{meta.name}]
+                </span>
                 <span className={`${color} whitespace-pre-wrap break-all`}>{log.message}</span>
               </div>
             );

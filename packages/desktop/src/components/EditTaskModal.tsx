@@ -14,8 +14,12 @@ import {
   AlertCircle,
   Inbox,
   ListTodo,
+  FolderGit2,
+  FolderOpen,
+  ExternalLink,
 } from 'lucide-react';
 import { Task, WorkflowDefinition, KanbanColumn } from '@openloop/core';
+import { api } from '../services/api';
 
 interface EditTaskModalProps {
   isOpen: boolean;
@@ -27,6 +31,7 @@ interface EditTaskModalProps {
     description: string;
     workflowId: string;
     kanbanColumn?: KanbanColumn;
+    workspace?: string;
   }) => Promise<void>;
 }
 
@@ -41,6 +46,8 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const [description, setDescription] = useState('');
   const [workflowId, setWorkflowId] = useState('');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>('backlog');
+  const [workspace, setWorkspace] = useState('');
+  const [isSelectingWorkspace, setIsSelectingWorkspace] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -54,6 +61,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
       setDescription(task.description || '');
       setWorkflowId(task.workflowId || workflows[0]?.id || '');
       setKanbanColumn(task.kanbanColumn || 'backlog');
+      setWorkspace(task.workspace || '');
       setErrorMsg(null);
     }
   }, [task, workflows]);
@@ -94,12 +102,41 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const isPending = task.status === 'pending';
   const currentWf = workflows.find((w) => w.id === workflowId) || workflows[0];
 
+  const getDirectoryName = (dirPath: string) => {
+    if (!dirPath) return '';
+    const trimmed = dirPath.replace(/[/\\]+$/, '');
+    const parts = trimmed.split(/[/\\]/);
+    return parts[parts.length - 1] || dirPath;
+  };
+
+  const handleSelectWorkspace = async () => {
+    if (isSelectingWorkspace) return;
+    setIsSelectingWorkspace(true);
+    if (import.meta.env?.DEV) {
+      console.log('[EditTaskModal] 用户触发选择工作区，准备调起访达...');
+    }
+    try {
+      const chosen = await api.selectDirectory({ defaultPath: workspace || undefined });
+      if (chosen) {
+        setWorkspace(chosen);
+        if (import.meta.env?.DEV) {
+          console.log('[EditTaskModal] 成功更新工作区:', chosen);
+        }
+      }
+    } catch (err) {
+      console.error('[EditTaskModal] 调起目录选择器异常:', err);
+    } finally {
+      setIsSelectingWorkspace(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
     setLoading(true);
     setErrorMsg(null);
+    const trimmedWorkspace = workspace.trim();
     if (import.meta.env?.DEV) {
       console.log('[TaskEdit] 开始提交任务更新:', {
         taskId: task.id,
@@ -107,6 +144,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         workflowId,
         description: description.trim(),
         kanbanColumn,
+        workspace: trimmedWorkspace || '未指定',
       });
     }
     try {
@@ -115,6 +153,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         description: description.trim(),
         workflowId,
         kanbanColumn,
+        workspace: trimmedWorkspace || undefined,
       });
       if (import.meta.env?.DEV) {
         console.log('[TaskEdit] 任务更新保存成功:', task.id);
@@ -218,6 +257,108 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
               onChange={(e) => setTitle(e.target.value)}
               className="w-full h-[32px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[7px] px-3 text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all"
             />
+          </div>
+
+          {/* 关联工程工作区 */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block font-medium text-[#4b4b53]">关联工程工作区</label>
+              {workspace ? (
+                <span className="text-[10.5px] text-[#189a58] font-medium flex items-center gap-1 bg-[#e4f6ec] px-1.5 py-[0.5px] rounded">
+                  <Check size={10.5} strokeWidth={2.4} /> 已绑定
+                </span>
+              ) : (
+                <span className="text-[10.5px] text-[#85858d]">
+                  独立工程目录，非默认工具目录
+                </span>
+              )}
+            </div>
+
+            {workspace ? (
+              <div className="w-full min-h-[46px] px-3 py-2 rounded-[8px] border border-[#d8d6fb] bg-[#f5f5ff]/60 flex items-center justify-between gap-2 shadow-[0_1px_2px_rgba(79,70,229,0.04)]">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="w-7 h-7 rounded-[6px] bg-[#4f46e5] text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <FolderGit2 size={14} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-[12.5px] text-[#1c1c21] truncate">
+                        {getDirectoryName(workspace)}
+                      </span>
+                      <span className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1 py-[0.5px] rounded">
+                        Workspace
+                      </span>
+                    </div>
+                    <div
+                      className="text-[11px] font-mono text-[#63636b] truncate mt-0.5 select-all"
+                      title={workspace}
+                    >
+                      {workspace}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => api.openPath(workspace)}
+                    className="h-[24px] px-2 rounded-[5px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium transition-colors shadow-sm flex items-center gap-1"
+                    title="在系统访达中定位该目录"
+                  >
+                    <ExternalLink size={11} />
+                    <span>访达</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSelectingWorkspace}
+                    onClick={handleSelectWorkspace}
+                    className="h-[24px] px-2 rounded-[5px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium transition-colors shadow-sm"
+                    title="更换其他工程目录"
+                  >
+                    {isSelectingWorkspace ? '选择中...' : '更换'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspace('');
+                      if (import.meta.env?.DEV) console.log('[EditTaskModal] 清除工作区关联');
+                    }}
+                    className="w-6 h-[24px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:text-[#d64545] hover:bg-[#fee2e2]/60 transition-colors"
+                    title="取消关联工作区"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div
+                onClick={handleSelectWorkspace}
+                className="group w-full min-h-[46px] px-3 py-2.5 rounded-[8px] border border-dashed border-[#d1d1d8] hover:border-[#4f46e5] bg-[#f9f9fb] hover:bg-[#f5f5ff]/60 cursor-pointer transition-all flex items-center justify-between shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+              >
+                <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                  <div className="w-7 h-7 rounded-[6px] bg-[#f1f1f4] group-hover:bg-[#eeedfd] group-hover:text-[#4f46e5] text-[#85858d] flex items-center justify-center shrink-0 transition-colors">
+                    <FolderGit2 size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-medium text-[#4b4b53] group-hover:text-[#4f46e5] transition-colors flex items-center gap-1.5">
+                      <span>点击关联本地工程工作区</span>
+                    </div>
+                    <div className="text-[10.5px] text-[#85858d] truncate mt-0.5">
+                      选择待迭代代码工程，执行时在此目录下自测与编码
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isSelectingWorkspace}
+                  className="px-2.5 h-[26px] rounded-[6px] bg-white border border-[#e3e3e8] group-hover:border-[#d8d6fb] text-[11px] font-medium text-[#4b4b53] group-hover:text-[#4f46e5] shadow-sm flex items-center gap-1 transition-all shrink-0"
+                >
+                  <FolderOpen size={12} />
+                  <span>{isSelectingWorkspace ? '选择中...' : '打开访达'}</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* 关联工作流 */}

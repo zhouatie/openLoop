@@ -1,7 +1,8 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
+import util from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Store } from '../store';
 import { DagEngine } from '../engine/dag-engine';
@@ -335,7 +336,7 @@ export class OpenLoopServer {
 
       if (pathname === '/api/tasks' && method === 'POST') {
         const body = await this.parseJsonBody(req);
-        const { title, workflowId, description, context, autoRun, kanbanColumn } = body;
+        const { title, workflowId, description, context, autoRun, kanbanColumn, workspace } = body;
         
         if (!workflowId) {
           return this.sendJson(res, 400, { error: 'workflowId is required' }, reqMeta);
@@ -352,6 +353,7 @@ export class OpenLoopServer {
           workflowId,
           status: 'pending',
           kanbanColumn: validColumn,
+          workspace: workspace ? String(workspace).trim() : undefined,
           createdAt: Date.now(),
           updatedAt: Date.now(),
           nodeRuns: {},
@@ -359,8 +361,8 @@ export class OpenLoopServer {
         };
 
         serverLogger.info(
-          `[Tasks:Create] 创建新任务: "${task.title}" (ID: ${task.id}, Workflow: ${workflowId}, Column: ${task.kanbanColumn}, AutoRun: ${shouldAutoRun})`,
-          { context: task.context },
+          `[Tasks:Create] 创建新任务: "${task.title}" (ID: ${task.id}, Workflow: ${workflowId}, Column: ${task.kanbanColumn}, Workspace: ${task.workspace || '未指定'}, AutoRun: ${shouldAutoRun})`,
+          { context: task.context, workspace: task.workspace },
           { taskId: task.id }
         );
 
@@ -394,9 +396,12 @@ export class OpenLoopServer {
         const existing = this.store.getTask(taskId);
         if (!existing) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
         const body = await this.parseJsonBody(req);
-        const { title, description, workflowId, context, kanbanColumn } = body;
+        const { title, description, workflowId, context, kanbanColumn, workspace } = body;
         if (title !== undefined) existing.title = title.trim();
         if (description !== undefined) existing.description = description.trim();
+        if (workspace !== undefined) {
+          existing.workspace = workspace ? String(workspace).trim() : undefined;
+        }
         if (workflowId !== undefined && existing.status === 'pending') {
           existing.workflowId = workflowId;
         }
@@ -608,6 +613,78 @@ export class OpenLoopServer {
         }
 
         return this.sendJson(res, 200, { success: true, command: cmd, sessionId }, reqMeta);
+      }
+
+      // System Directory Dialog (Web / Fallback 支持)
+      if (pathname === '/api/system/select-directory' && method === 'POST') {
+        const body = await this.parseJsonBody(req).catch(() => ({}));
+        const defaultPath = body.defaultPath;
+        serverLogger.info('[System:Dialog] 接收到系统目录选择请求', { defaultPath });
+
+        try {
+          const execAsync = util.promisify(exec);
+          let chosenPath: string | null = null;
+
+          if (process.platform === 'darwin') {
+            const promptText = '请选择工程工作区目录';
+            let script = '';
+            if (defaultPath && fs.existsSync(defaultPath)) {
+              const safePath = defaultPath.replace(/"/g, '\\"');
+              script = `osascript -e 'try' -e 'set defaultLoc to POSIX file "${safePath}"' -e 'set chosen to choose folder with prompt "${promptText}" default location defaultLoc' -e 'POSIX path of chosen' -e 'on error number -128' -e 'return ""' -e 'end try'`;
+            } else {
+              script = `osascript -e 'try' -e 'set chosen to choose folder with prompt "${promptText}"' -e 'POSIX path of chosen' -e 'on error number -128' -e 'return ""' -e 'end try'`;
+            }
+            const { stdout } = await execAsync(script);
+            const trimmed = stdout.trim();
+            chosenPath = trimmed ? trimmed.replace(/\/+$/, '') : null;
+          } else if (process.platform === 'win32') {
+            const psScript = `Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = '请选择工程工作区目录'; ${defaultPath ? `$f.SelectedPath = '${defaultPath.replace(/'/g, "''")}';` : ''} if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }`;
+            const { stdout } = await execAsync(`powershell -NoProfile -Command "${psScript.replace(/\n/g, ' ')}"`);
+            const trimmed = stdout.trim();
+            chosenPath = trimmed || null;
+          } else {
+            try {
+              const { stdout } = await execAsync('zenity --file-selection --directory --title="请选择工程工作区目录"');
+              const trimmed = stdout.trim();
+              chosenPath = trimmed || null;
+            } catch {
+              chosenPath = null;
+            }
+          }
+
+          serverLogger.info('[System:Dialog] 系统目录选择完成:', { chosenPath, canceled: !chosenPath });
+          return this.sendJson(res, 200, {
+            canceled: !chosenPath,
+            path: chosenPath || undefined,
+          }, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[System:Dialog] 唤起系统目录选择异常: ${err.message}`, err);
+          return this.sendJson(res, 200, { canceled: true, error: err.message }, reqMeta);
+        }
+      }
+
+      // System Open Path in OS file manager (Finder / Explorer)
+      if (pathname === '/api/system/open-path' && method === 'POST') {
+        const body = await this.parseJsonBody(req).catch(() => ({}));
+        const targetPath = body.path;
+        if (!targetPath) {
+          return this.sendJson(res, 400, { error: 'path is required' }, reqMeta);
+        }
+        serverLogger.info(`[System:OpenPath] 在系统文件管理器中打开路径: ${targetPath}`);
+        const execAsync = util.promisify(exec);
+        try {
+          if (process.platform === 'darwin') {
+            await execAsync(`open "${targetPath.replace(/"/g, '\\"')}"`);
+          } else if (process.platform === 'win32') {
+            await execAsync(`start "" "${targetPath.replace(/"/g, '\\"')}"`);
+          } else {
+            await execAsync(`xdg-open "${targetPath.replace(/"/g, '\\"')}"`);
+          }
+          return this.sendJson(res, 200, { success: true }, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[System:OpenPath] 打开系统路径失败: ${err.message}`, err);
+          return this.sendJson(res, 500, { success: false, error: err.message }, reqMeta);
+        }
       }
 
       this.sendJson(res, 404, { error: 'Not Found' }, reqMeta);

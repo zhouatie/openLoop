@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
 import { OpenLoopServer } from '@openloop/core';
 
@@ -41,6 +41,27 @@ function createWindow() {
     mainWindow = null;
   });
 }
+
+// 注册系统级 IPC：原生文件管理器（访达/资源管理器）目录选择
+ipcMain.handle('dialog:openDirectory', async (_event, options?: { defaultPath?: string }) => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择工程工作区目录',
+    defaultPath: options?.defaultPath,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
+// 注册系统级 IPC：在访达/资源管理器中查看定位目录
+ipcMain.handle('shell:openPath', async (_event, dirPath: string) => {
+  if (!dirPath) return false;
+  await shell.openPath(dirPath);
+  return true;
+});
 
 app.whenReady().then(async () => {
   await startServer();

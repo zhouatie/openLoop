@@ -36,12 +36,17 @@ import {
   Inbox,
   Plus,
   Lightbulb,
+  FolderGit2,
+  FolderOpen,
+  Folder,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage } from '@openloop/core';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { KanbanColumnSortDropdown } from '../components/KanbanColumnSortDropdown';
+import { NodeExecutionTimeline } from '../components/NodeExecutionTimeline';
+import { resolveNodeMeta } from '../utils/nodeMeta';
 import {
   ColumnSortRule,
   ColumnSortConfigMap,
@@ -56,7 +61,7 @@ import {
 interface KanbanViewProps {
   tasks: Task[];
   workflows: WorkflowDefinition[];
-  onOpenTaskLogs: (taskId: string) => void;
+  onOpenTaskLogs: (taskId: string, nodeId?: string) => void;
   onRefresh: () => void | Promise<void>;
   onTaskUpdate?: (task: Task) => void;
 }
@@ -460,6 +465,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     description: string;
     workflowId: string;
     kanbanColumn?: KanbanColumn;
+    workspace?: string;
   }) => {
     if (!editingTask) return;
     if (import.meta.env?.DEV) {
@@ -904,6 +910,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       colTasks.map((task) => {
                         const wf = wfMap.get(task.workflowId);
                         const currentNode = wf?.nodes.find((n) => n.id === task.currentNodeId);
+                        const currentNodeMeta = task.currentNodeId
+                          ? resolveNodeMeta(task.currentNodeId, wf, workflows)
+                          : null;
                         const nodeRuns = Object.values(task.nodeRuns || {});
                         const isCompleted = task.status === 'completed';
                         const completedCount = nodeRuns.filter((r) => r.status === 'success').length;
@@ -1018,8 +1027,26 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               {task.title}
                             </h4>
 
-                            <div className="text-[11px] text-[#85858d] mb-2 truncate">
-                              {wf?.name || task.workflowId}
+                            <div className="flex items-center gap-1.5 text-[11px] text-[#85858d] mb-2 min-w-0">
+                              <span className="truncate">{wf?.name || task.workflowId}</span>
+                              {task.workspace && (
+                                <>
+                                  <span className="shrink-0 text-[#c2c2c9]">·</span>
+                                  <span
+                                    className="flex items-center gap-1 text-[10px] font-mono text-[#63636b] bg-[#f4f4f7] px-1.5 py-[0.5px] rounded border border-[#ececf0] truncate max-w-[120px] shrink-0 hover:text-[#4f46e5] hover:border-[#d8d6fb] transition-colors"
+                                    title={`工程工作区: ${task.workspace} (点击在访达中打开)`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      api.openPath(task.workspace!);
+                                    }}
+                                  >
+                                    <FolderGit2 size={10} className="shrink-0 text-[#85858d]" />
+                                    <span className="truncate">
+                                      {task.workspace.replace(/[/\\]+$/, '').split(/[/\\]/).pop()}
+                                    </span>
+                                  </span>
+                                </>
+                              )}
                             </div>
 
                             {/* 未启动任务：卡片内一键启动按钮 */}
@@ -1126,12 +1153,12 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </div>
                             )}
 
-                            {task.status === 'running' && currentNode && (
+                            {task.status === 'running' && (currentNodeMeta || currentNode) && (
                               <div className="mb-2 px-2 py-1 rounded-[6px] bg-[#eeedfd] border border-[#d8d6fb] flex items-center justify-between gap-1.5">
                                 <div className="flex items-center gap-1.5 min-w-0">
                                   <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-ping inline-block shrink-0" />
                                   <span className="text-[10.5px] text-[#4f46e5] font-medium truncate">
-                                    正在执行: {currentNode.name}
+                                    正在执行: {currentNodeMeta?.name || currentNode?.name}
                                   </span>
                                 </div>
                                 <button
@@ -1155,7 +1182,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                   <span className="flex items-center gap-1.5 truncate">
                                     <span className="w-1.5 h-1.5 rounded-full bg-[#1c1c21] animate-pulse shrink-0" />
                                     <span className="truncate">
-                                      {currentNode?.name || 'QA 验收门禁'} · 待确认
+                                      {currentNodeMeta?.name || currentNode?.name || 'QA 验收门禁'} · 待确认
                                     </span>
                                   </span>
                                 </div>
@@ -1330,6 +1357,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     filteredTasks.map((task) => {
                       const wf = wfMap.get(task.workflowId);
                       const currentNode = wf?.nodes.find((n) => n.id === task.currentNodeId);
+                      const currentNodeMeta = task.currentNodeId
+                        ? resolveNodeMeta(task.currentNodeId, wf, workflows)
+                        : null;
                       const statusInfo = getTaskStatusInfo(task);
                       const nodeRuns = Object.values(task.nodeRuns || {});
                       const isPending = task.status === 'pending';
@@ -1378,6 +1408,30 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               <span>Agent: {currentNode?.name || 'OpenLoop Agent'}</span>
                               <span>·</span>
                               <span>流程: {wf?.name || task.workflowId}</span>
+                              {task.workspace && (
+                                <>
+                                  <span>·</span>
+                                  <span
+                                    className="text-[#63636b] font-mono flex items-center gap-1 hover:text-[#4f46e5] transition-colors"
+                                    title={`工程工作区: ${task.workspace} (点击在访达中打开)`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      api.openPath(task.workspace!);
+                                    }}
+                                  >
+                                    <FolderGit2 size={11} className="text-[#85858d]" />
+                                    <span>{task.workspace.replace(/[/\\]+$/, '').split(/[/\\]/).pop()}</span>
+                                  </span>
+                                </>
+                              )}
+                              {currentNodeMeta && (
+                                <>
+                                  <span>·</span>
+                                  <span className="text-[#4f46e5] font-medium">
+                                    当前: {currentNodeMeta.name}
+                                  </span>
+                                </>
+                              )}
                               {nodeRuns.some((r) => r.artifacts && r.artifacts.length > 0) && (
                                 <>
                                   <span>·</span>
@@ -1713,6 +1767,46 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     </div>
                   </div>
 
+                  {/* 关联工程工作区 */}
+                  <div>
+                    <div className="font-medium text-[#1c1c21] mb-1.5 flex items-center justify-between">
+                      <span>关联工程工作区</span>
+                      {selectedTask.workspace && (
+                        <button
+                          type="button"
+                          onClick={() => api.openPath(selectedTask.workspace!)}
+                          className="text-[11px] text-[#4f46e5] hover:underline flex items-center gap-1 font-normal transition-colors"
+                          title="在系统原生文件管理器中打开"
+                        >
+                          <FolderOpen size={11} /> 在访达中打开
+                        </button>
+                      )}
+                    </div>
+                    <div className="p-2.5 rounded-[7px] border border-[#ececf0] bg-[#f9f9fb] flex items-center justify-between">
+                      {selectedTask.workspace ? (
+                        <div className="min-w-0 flex-1 pr-2">
+                          <div className="flex items-center gap-1.5 font-medium text-[#1c1c21]">
+                            <FolderGit2 size={13} className="text-[#4f46e5] shrink-0" />
+                            <span className="truncate">
+                              {selectedTask.workspace.replace(/[/\\]+$/, '').split(/[/\\]/).pop()}
+                            </span>
+                            <span className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1 py-[0.5px] rounded">
+                              Workspace
+                            </span>
+                          </div>
+                          <div
+                            className="text-[11px] font-mono text-[#63636b] mt-0.5 truncate select-all"
+                            title={selectedTask.workspace}
+                          >
+                            {selectedTask.workspace}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-[#85858d] text-[11.5px] italic">未关联独立工程工作区 (默认运行时目录)</div>
+                      )}
+                    </div>
+                  </div>
+
                   {/* 任务说明与提示词 */}
                   <div>
                     <div className="font-medium text-[#1c1c21] mb-1.5">任务说明与提示词</div>
@@ -1768,43 +1862,27 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                   {/* 节点执行时序 */}
                   <div>
-                    <div className="font-medium text-[#1c1c21] mb-2">节点执行时序</div>
-                    {Object.keys(selectedTask.nodeRuns).length === 0 ? (
-                      <div className="p-4 rounded-[7px] border border-dashed border-[#e3e3e8] text-center text-[#85858d] text-[11.5px]">
-                        任务尚未触发执行，暂无节点时序数据
+                    <div className="font-medium text-[#1c1c21] mb-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span>节点执行时序</span>
+                        <span className="text-[11px] font-normal text-[#85858d]">
+                          (工作流时序轨迹)
+                        </span>
                       </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {Object.entries(selectedTask.nodeRuns).map(([nid, run]) => (
-                          <div
-                            key={nid}
-                            className="p-2.5 rounded-[7px] border border-[#ececf0] bg-[#f9f9fb] flex items-center justify-between"
-                          >
-                            <div>
-                              <div className="font-mono text-[#1c1c21] text-[12px] font-medium">{nid}</div>
-                              {run.finishedAt && run.startedAt && (
-                                <div className="text-[10.5px] text-[#85858d]">
-                                  耗时: {((run.finishedAt - run.startedAt) / 1000).toFixed(1)}s
-                                </div>
-                              )}
-                            </div>
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10.5px] font-medium ${
-                                run.status === 'success'
-                                  ? 'bg-[#e4f6ec] text-[#189a58]'
-                                  : run.status === 'waiting_approval'
-                                  ? 'bg-[#fbf0df] text-[#b45309]'
-                                  : run.status === 'running'
-                                  ? 'bg-[#eeedfd] text-[#4f46e5]'
-                                  : 'bg-[#fbe9e9] text-[#d64545]'
-                              }`}
-                            >
-                              {run.status}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                      <span className="text-[10.5px] font-mono text-[#85858d]">
+                        {Object.keys(selectedTask.nodeRuns).length} 个已记录节点
+                      </span>
+                    </div>
+
+                    <NodeExecutionTimeline
+                      task={selectedTask}
+                      workflow={wfMap.get(selectedTask.workflowId)}
+                      allWorkflows={workflows}
+                      onOpenTaskLogs={onOpenTaskLogs}
+                      onPreviewArtifact={(art) => setPreviewArtifact(art)}
+                      onApprove={(taskId, approved, feedback) => handleApprove(taskId, approved, feedback)}
+                      isApproving={approvingId === selectedTask.id}
+                    />
                   </div>
                 </div>
 

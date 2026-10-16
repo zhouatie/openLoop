@@ -166,6 +166,7 @@ export class DesktopApiService {
     context?: Record<string, any>;
     autoRun?: boolean;
     kanbanColumn?: KanbanColumn;
+    workspace?: string;
   }): Promise<Task> {
     if (import.meta.env?.DEV) {
       console.log('[UI:API] 创建新任务:', params);
@@ -202,6 +203,7 @@ export class DesktopApiService {
       workflowId?: string;
       context?: Record<string, any>;
       kanbanColumn?: KanbanColumn;
+      workspace?: string;
     }
   ): Promise<Task> {
     if (import.meta.env?.DEV) {
@@ -301,6 +303,86 @@ export class DesktopApiService {
     return requestJson<{ success: boolean }>(`${BASE_URL}/api/tasks/${taskId}/session/resume`, {
       method: 'POST',
     });
+  }
+
+  // System Dialog & File Manager
+  /**
+   * 调起系统原生文件管理器（访达/资源管理器）进行目录选择
+   * 优先走 Electron IPC，极速且原生；独立 Web 调试时自动回退至 Core Server 系统调用
+   */
+  async selectDirectory(options?: { defaultPath?: string }): Promise<string | null> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:System] 请求打开系统原生文件管理器选择工作区目录...', options);
+    }
+
+    if (window.electronAPI?.openDirectory) {
+      try {
+        const dir = await window.electronAPI.openDirectory(options);
+        if (import.meta.env?.DEV) {
+          console.log('[UI:System] Electron 原生访达目录选择返回:', dir);
+        }
+        return dir || null;
+      } catch (err) {
+        if (import.meta.env?.DEV) {
+          console.warn('[UI:System] Electron 目录选择调用失败，尝试回退:', err);
+        }
+      }
+    }
+
+    // Web Fallback: 调用本地 Core Server 提供的系统对话框接口
+    try {
+      const res = await requestJson<{ canceled: boolean; path?: string }>(
+        `${BASE_URL}/api/system/select-directory`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(options || {}),
+        }
+      );
+      if (import.meta.env?.DEV) {
+        console.log('[UI:System] Core 服务端目录选择返回:', res);
+      }
+      return res.canceled ? null : res.path || null;
+    } catch (err) {
+      if (import.meta.env?.DEV) {
+        console.error('[UI:System] 唤起系统目录选择失败:', err);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * 在系统原生文件管理器（访达 Finder / 资源管理器 Explorer）中打开并定位目录
+   */
+  async openPath(dirPath: string): Promise<boolean> {
+    if (!dirPath) return false;
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:System] 请求在访达中打开目录: ${dirPath}`);
+    }
+
+    if (window.electronAPI?.openPath) {
+      try {
+        return await window.electronAPI.openPath(dirPath);
+      } catch (err) {
+        if (import.meta.env?.DEV) {
+          console.warn('[UI:System] Electron openPath 调用失败，尝试服务端回退:', err);
+        }
+      }
+    }
+
+    try {
+      const res = await requestJson<{ success: boolean }>(`${BASE_URL}/api/system/open-path`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: dirPath }),
+      });
+      return !!res.success;
+    } catch (err) {
+      if (import.meta.env?.DEV) {
+        console.error('[UI:System] 服务端打开系统目录失败:', err);
+      }
+      return false;
+    }
   }
 }
 

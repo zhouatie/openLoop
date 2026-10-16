@@ -5,3 +5,5 @@ export * from './EditTaskModal';
 export * from './ConfirmModal';
 export * from './LogTerminalDrawer';
 export * from './KanbanColumnSortDropdown';
+export * from './NodeExecutionTimeline';
+

@@ -51,7 +51,7 @@ export function interpolateString(template: string, context: Record<string, any>
 // 通用子进程命令行执行器（真实执行子进程，具备超时保护、标准输入关闭与进程组清理机制）
 export class CliCommandExecutor implements NodeExecutor {
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
-    const { node, variables, emitLog } = ctx;
+    const { node, variables, emitLog, settings = {} } = ctx;
     const rawCommand = node.config.command;
 
     if (!rawCommand || !rawCommand.trim()) {
@@ -65,7 +65,7 @@ export class CliCommandExecutor implements NodeExecutor {
     }
 
     const command = interpolateString(rawCommand, variables);
-    const cwd = node.config.cwd || process.cwd();
+    const cwd = node.config.cwd || ctx.task.workspace || settings.defaultCwd || process.cwd();
     emitLog('system', `[执行进程] 启动命令: ${command}`);
 
     const timeoutMs = node.config.timeoutSec
@@ -73,8 +73,8 @@ export class CliCommandExecutor implements NodeExecutor {
       : 600000; // 默认 10 分钟超时
 
     executorLogger.info(
-      `[CLI:Spawn] 准备启动进程，CWD: "${cwd}", 超时设定: ${timeoutMs / 1000}s`,
-      { command: command.length > 300 ? command.slice(0, 300) + '...' : command },
+      `[CLI:Spawn] 准备启动进程，工作区 (CWD): "${cwd}", 超时设定: ${timeoutMs / 1000}s`,
+      { command: command.length > 300 ? command.slice(0, 300) + '...' : command, workspace: ctx.task.workspace },
       { taskId: ctx.task.id, nodeId: node.id }
     );
 
@@ -94,6 +94,7 @@ export class CliCommandExecutor implements NodeExecutor {
           ...node.config.env,
           TASK_ID: ctx.task.id,
           NODE_ID: node.id,
+          TASK_WORKSPACE: ctx.task.workspace || cwd,
         },
       });
 
@@ -312,15 +313,16 @@ export class AgentExecutor implements NodeExecutor {
         args.push(`--tools "${String(settings.piTools).trim()}"`);
       }
 
+      const cwd = node.config.cwd || task.workspace || settings.defaultCwd || process.cwd();
+
       executorLogger.info(
-        `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId}`,
-        { promptPreview: prompt.length > 200 ? prompt.slice(0, 200) + '...' : prompt },
+        `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId} (工作区 CWD: ${cwd})`,
+        { promptPreview: prompt.length > 200 ? prompt.slice(0, 200) + '...' : prompt, workspace: task.workspace },
         { taskId: task.id, nodeId: node.id }
       );
       emitLog('system', `[Pi Agent 会话] Session ID: ${sessionId}`);
+      emitLog('system', `[工作区 CWD] ${cwd}`);
       emitLog('system', `[终端恢复提示] 如需在终端中交互式接管，可执行: pi --session ${sessionId}`);
-
-      const cwd = node.config.cwd || settings.defaultCwd || process.cwd();
 
       return new Promise<ExecutionResult>((resolve) => {
         let settled = false;

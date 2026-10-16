@@ -140,6 +140,7 @@ export interface Task {
   workflowId: string;
   status: TaskStatus;
   kanbanColumn: KanbanColumn;
+  workspace?: string; // 关联的本地代码工程根目录工作区
   createdAt: number;
   updatedAt: number;
   currentNodeId?: string;
