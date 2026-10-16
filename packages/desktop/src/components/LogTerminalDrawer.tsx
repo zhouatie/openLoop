@@ -35,6 +35,17 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     }
   }, [filteredLogs, autoScroll]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const copyAll = () => {
     const text = filteredLogs
       .map((l) => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.nodeId}] ${l.message}`)

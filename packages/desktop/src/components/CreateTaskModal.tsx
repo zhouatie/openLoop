@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Play, Sparkles } from 'lucide-react';
 import { WorkflowDefinition } from '@openloop/core';
 
@@ -25,6 +25,17 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [workflowId, setWorkflowId] = useState(workflows[0]?.id || '');
   const [autoRun, setAutoRun] = useState(true);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 

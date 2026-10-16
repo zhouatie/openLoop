@@ -4,6 +4,7 @@ import { Header } from './components/Header';
 import { LogTerminalDrawer } from './components/LogTerminalDrawer';
 import { CreateTaskModal } from './components/CreateTaskModal';
 import { KanbanView } from './views/KanbanView';
+import { WorkflowListView } from './views/WorkflowListView';
 import { WorkflowEditorView } from './views/WorkflowEditorView';
 import { PluginManagerView } from './views/PluginManagerView';
 import { api } from './services/api';
@@ -12,6 +13,7 @@ import { Puzzle } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [activePluginId, setActivePluginId] = useState<string>('kanban');
+  const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
   const [plugins, setPlugins] = useState<PluginManifest[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -110,7 +112,12 @@ export const App: React.FC = () => {
   const currentPlugin = plugins.find((p) => p.id === activePluginId);
   const category =
     activePluginId === 'kanban' || activePluginId === 'workflow-editor' ? '使用' : '扩展';
-  const pageTitle = currentPlugin?.sidebarItem?.title || currentPlugin?.name || 'openLoop';
+  
+  const editingWorkflow = workflows.find((w) => w.id === editingWorkflowId);
+  const pageTitle =
+    activePluginId === 'workflow-editor' && editingWorkflow
+      ? `流程编排 / ${editingWorkflow.name}`
+      : currentPlugin?.sidebarItem?.title || currentPlugin?.name || 'openLoop';
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f4f4f6] text-[#1c1c21]">
@@ -118,7 +125,12 @@ export const App: React.FC = () => {
       <Sidebar
         plugins={plugins}
         activePluginId={activePluginId}
-        onSelectPlugin={(id) => setActivePluginId(id)}
+        onSelectPlugin={(id) => {
+          setActivePluginId(id);
+          if (id === 'workflow-editor') {
+            setEditingWorkflowId(null); // 回到流程列表
+          }
+        }}
         isDaemonConnected={isDaemonConnected}
       />
 
@@ -145,9 +157,20 @@ export const App: React.FC = () => {
             />
           )}
 
-          {activePluginId === 'workflow-editor' && (
-            <WorkflowEditorView
+          {activePluginId === 'workflow-editor' && !editingWorkflowId && (
+            <WorkflowListView
               workflows={workflows}
+              onSelectWorkflow={(id) => setEditingWorkflowId(id)}
+              onRefresh={refreshData}
+              onOpenTaskLogs={handleOpenTaskLogs}
+            />
+          )}
+
+          {activePluginId === 'workflow-editor' && editingWorkflowId && (
+            <WorkflowEditorView
+              workflowId={editingWorkflowId}
+              workflows={workflows}
+              onBack={() => setEditingWorkflowId(null)}
               onRefresh={refreshData}
               onOpenTaskLogs={handleOpenTaskLogs}
             />

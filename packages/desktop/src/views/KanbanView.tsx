@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Check,
   X,
@@ -81,6 +81,20 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       setApprovingId(null);
     }
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (previewArtifact) {
+          setPreviewArtifact(null);
+        } else if (selectedTask) {
+          setSelectedTask(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewArtifact, selectedTask]);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">

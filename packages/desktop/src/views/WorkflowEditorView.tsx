@@ -24,12 +24,12 @@ import {
   Terminal,
   Save,
   Play,
-  Plus,
-  Trash2,
+  ArrowLeft,
   Settings2,
+  Trash2,
   Sparkles,
 } from 'lucide-react';
-import { WorkflowDefinition, NodeType, NodeConfig } from '@openloop/core';
+import { WorkflowDefinition, NodeType } from '@openloop/core';
 import { api } from '../services/api';
 
 // 自定义节点外观（极简高质感）
@@ -126,24 +126,27 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
 };
 
 interface WorkflowEditorViewProps {
+  workflowId: string;
   workflows: WorkflowDefinition[];
+  onBack: () => void;
   onRefresh: () => void;
   onOpenTaskLogs: (taskId: string) => void;
 }
 
 export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
+  workflowId,
   workflows,
+  onBack,
   onRefresh,
   onOpenTaskLogs,
 }) => {
-  const [activeWorkflowId, setActiveWorkflowId] = useState<string>(workflows[0]?.id || '');
+  const activeWorkflow = workflows.find((w) => w.id === workflowId) || workflows[0];
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string>('');
 
   const nodeTypes = useMemo(() => ({ customNode: CustomWorkflowNode }), []);
-  const activeWorkflow = workflows.find((w) => w.id === activeWorkflowId) || workflows[0];
 
   useEffect(() => {
     if (!activeWorkflow) return;
@@ -171,7 +174,7 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
     setNodes(rfNodes);
     setEdges(rfEdges);
     setSelectedNodeId(null);
-  }, [activeWorkflowId, workflows]);
+  }, [workflowId, activeWorkflow]);
 
   const onNodesChange = useCallback(
     (changes: any) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -201,6 +204,17 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
   const handleNodeClick = (_: any, node: Node) => {
     setSelectedNodeId(node.id);
   };
+
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedNodeId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNodeId]);
 
   const addNode = (type: NodeType, label: string) => {
     const id = `node_${type}_${Date.now().toString(36).substring(3, 7)}`;
@@ -307,31 +321,48 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
     }
   };
 
+  if (!activeWorkflow) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#f4f4f6]">
+        <div className="text-[13px] text-[#85858d] mb-3">未找到指定流程</div>
+        <button
+          onClick={onBack}
+          className="h-[28px] px-3 rounded-[6px] bg-white border border-[#e3e3e8] text-[12px] text-[#1c1c21]"
+        >
+          返回流程列表
+        </button>
+      </div>
+    );
+  }
+
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const selectedNodeData = selectedNode?.data as any;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">
-      {/* 编排器顶栏 */}
+      {/* 编排器顶栏（含返回列表按钮） */}
       <div className="h-[46px] px-6 bg-white border-b border-[#e3e3e8] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
+          {/* 返回按钮 */}
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1 h-[26px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11.5px] font-medium text-[#4b4b53] transition-all shadow-sm"
+          >
+            <ArrowLeft size={12} />
+            <span>返回列表</span>
+          </button>
+
+          <span className="text-[#d1d1d8]">|</span>
+
           <div className="flex items-center gap-2">
-            <span className="text-[12px] font-medium text-[#85858d]">当前流程:</span>
-            <select
-              value={activeWorkflowId}
-              onChange={(e) => setActiveWorkflowId(e.target.value)}
-              className="h-[28px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[12px] text-[#1c1c21] outline-none"
-            >
-              {workflows.map((wf) => (
-                <option key={wf.id} value={wf.id}>
-                  {wf.name}
-                </option>
-              ))}
-            </select>
+            <span className="text-[13px] font-semibold text-[#1c1c21]">{activeWorkflow.name}</span>
+            <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
+              {activeWorkflow.id}
+            </span>
           </div>
 
           <div className="text-[11.5px] text-[#85858d] font-mono">
-            {nodes.length} 个节点 · {edges.length} 条连线
+            ({nodes.length} 节点 · {edges.length} 连线)
           </div>
         </div>
 
@@ -340,7 +371,7 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
 
           <button
             onClick={handleSave}
-            className="flex items-center gap-1 px-3 h-[26px] rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[12px] font-medium text-[#1c1c21] transition-all"
+            className="flex items-center gap-1 px-3 h-[26px] rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[12px] font-medium text-[#1c1c21] transition-all shadow-sm"
           >
             <Save size={13} />
             <span>保存编排</span>
@@ -348,10 +379,10 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
 
           <button
             onClick={handleRunNow}
-            className="flex items-center gap-1 px-3 h-[26px] rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white transition-all active:scale-95"
+            className="flex items-center gap-1 px-3 h-[26px] rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white transition-all active:scale-95 shadow-sm"
           >
             <Play size={12} strokeWidth={2.4} />
-            <span>立即运行</span>
+            <span>立即调试</span>
           </button>
         </div>
       </div>
@@ -361,7 +392,7 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
         {/* 左侧节点组件库悬浮栏 */}
         <div className="absolute top-4 left-4 z-10 bg-white border border-[#e3e3e8] rounded-[10px] p-2 shadow-[0_4px_16px_rgba(0,0,0,0.06)] flex flex-col gap-1 w-44">
           <div className="px-2 py-1 text-[10px] font-semibold text-[#85858d] tracking-wide">
-            + 编排组件库
+            + 拖拽/添加组件
           </div>
           <button
             onClick={() => addNode('agent', 'Agent 编码')}
@@ -508,7 +539,7 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
                 )}
 
                 <div>
-                  <label className="block text-[#85858d] mb-1">底座 CLI 覆盖脚本</label>
+                  <label className="block text-[#85858d] mb-1">真实 CLI 命令行脚本</label>
                   <textarea
                     rows={2.5}
                     value={selectedNodeData.config?.command || ''}
