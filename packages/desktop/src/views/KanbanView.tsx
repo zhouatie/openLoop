@@ -25,8 +25,16 @@ import {
   GitBranch,
   Copy,
   ArrowUpDown,
+  Square,
+  MessageSquare,
+  Send,
+  Pause,
+  Cpu,
+  Wrench,
+  Bot,
+  User,
 } from 'lucide-react';
-import { Task, KanbanColumn, WorkflowDefinition, NodeRun } from '@openloop/core';
+import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage } from '@openloop/core';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -87,11 +95,124 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   };
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+  const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
+
+  const handleCancelTask = async (taskId: string) => {
+    setCancellingTaskId(taskId);
+    try {
+      await api.cancelTask(taskId);
+      onRefresh();
+    } catch (e: any) {
+      alert(`终止任务失败: ${e.message}`);
+    } finally {
+      setCancellingTaskId(null);
+    }
+  };
   const [previewArtifact, setPreviewArtifact] = useState<{ name: string; path: string } | null>(null);
   const [selectedWorkflowFilter, setSelectedWorkflowFilter] = useState<string>('all');
   const [isWfDropdownOpen, setIsWfDropdownOpen] = useState(false);
   const wfDropdownRef = useRef<HTMLDivElement>(null);
   const [isGroupOpen, setIsGroupOpen] = useState(true);
+
+  // 任务侧边栏 Tab 与 Agent 会话实时交互状态
+  const [drawerTab, setDrawerTab] = useState<'overview' | 'session'>('overview');
+  const [sessionState, setSessionState] = useState<TaskSessionState | null>(null);
+  const [chatInput, setChatInput] = useState('');
+  const [isSendingChat, setIsSendingChat] = useState(false);
+  const [isPausingSession, setIsPausingSession] = useState(false);
+  const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
+  const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+  const chatTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // 打开任务抽屉时同步获取最新 Session 状态
+  useEffect(() => {
+    if (selectedTask) {
+      api.getTaskSession(selectedTask.id)
+        .then((state) => {
+          setSessionState(state);
+          // 若任务正在执行中且处于 agent 状态，或已有历史消息，可智能保留或建议查看
+        })
+        .catch(() => {});
+    } else {
+      setSessionState(null);
+      setDrawerTab('overview');
+      setChatInput('');
+    }
+  }, [selectedTask?.id]);
+
+  // 实时订阅 WebSocket 推送的 agent:chat_update 事件
+  useEffect(() => {
+    const unsub = api.on('agent:chat_update', (data: TaskSessionState) => {
+      if (selectedTask && data.taskId === selectedTask.id) {
+        setSessionState(data);
+      }
+    });
+    return () => unsub();
+  }, [selectedTask?.id]);
+
+  // 对话更新时自动平滑滚动到底部
+  useEffect(() => {
+    if (drawerTab === 'session') {
+      chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [sessionState?.messages, drawerTab]);
+
+  // 发送消息（支持运行中无缝插话 Steer 与空闲时发起交互）
+  const handleSendChat = async () => {
+    if (!selectedTask || !chatInput.trim() || isSendingChat) return;
+    const msg = chatInput.trim();
+    setChatInput('');
+    setIsSendingChat(true);
+
+    // 乐观更新界面
+    if (sessionState) {
+      setSessionState({
+        ...sessionState,
+        isBusy: true,
+        messages: [
+          ...sessionState.messages,
+          {
+            id: `opt_${Date.now()}`,
+            role: 'user',
+            content: msg,
+            timestamp: Date.now(),
+          },
+        ],
+      });
+    }
+
+    try {
+      await api.sendTaskChatMessage(selectedTask.id, msg);
+    } catch (e: any) {
+      alert(`发送消息失败: ${e.message}`);
+    } finally {
+      setIsSendingChat(false);
+      // 重置 textarea 高度
+      if (chatTextareaRef.current) {
+        chatTextareaRef.current.style.height = 'auto';
+      }
+    }
+  };
+
+  // 暂停 / 恢复当前智能体会话
+  const handleTogglePauseSession = async () => {
+    if (!selectedTask || isPausingSession) return;
+    setIsPausingSession(true);
+    try {
+      if (sessionState?.isPaused) {
+        await api.resumeTaskSession(selectedTask.id);
+      } else {
+        await api.pauseTaskSession(selectedTask.id);
+      }
+      const updated = await api.getTaskSession(selectedTask.id);
+      setSessionState(updated);
+    } catch (e: any) {
+      alert(`会话控制失败: ${e.message}`);
+    } finally {
+      setIsPausingSession(false);
+    }
+  };
 
   // 看板列排序规则状态 (持久化存取与各列独立/全局联动)
   const [columnSortConfig, setColumnSortConfig] = useState<ColumnSortConfigMap>(() =>
@@ -635,6 +756,19 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                 {task.id}
                               </span>
                               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1">
+                                {task.status === 'running' && (
+                                  <button
+                                    disabled={cancellingTaskId === task.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCancelTask(task.id);
+                                    }}
+                                    className="p-1 rounded text-[#85858d] hover:text-[#d64545] hover:bg-[#fbe9e9]"
+                                    title="终止此任务"
+                                  >
+                                    <Square size={11} className="fill-current" />
+                                  </button>
+                                )}
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -716,12 +850,47 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </div>
                             )}
 
+                            {/* 手动终止任务：克制微型状态与重新执行胶囊 */}
+                            {task.status === 'cancelled' && (
+                              <div className="my-2 p-1.5 rounded-[6px] bg-[#f4f4f6] border border-[#e3e3e8] flex items-center justify-between gap-1.5">
+                                <div className="min-w-0 flex items-center gap-1.5 text-[10.5px] text-[#63636b] font-medium truncate">
+                                  <Square size={9.5} className="fill-current text-[#85858d] shrink-0" />
+                                  <span className="truncate">已手动终止</span>
+                                </div>
+                                <button
+                                  disabled={runningTaskId === task.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRunTask(task.id);
+                                  }}
+                                  className="shrink-0 h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50"
+                                >
+                                  <RotateCcw size={9.5} />
+                                  <span>重新执行</span>
+                                </button>
+                              </div>
+                            )}
+
                             {task.status === 'running' && currentNode && (
-                              <div className="mb-2 px-2 py-1 rounded-[6px] bg-[#eeedfd] border border-[#d8d6fb] flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-ping inline-block" />
-                                <span className="text-[10.5px] text-[#4f46e5] font-medium truncate">
-                                  正在执行: {currentNode.name}
-                                </span>
+                              <div className="mb-2 px-2 py-1 rounded-[6px] bg-[#eeedfd] border border-[#d8d6fb] flex items-center justify-between gap-1.5">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-ping inline-block shrink-0" />
+                                  <span className="text-[10.5px] text-[#4f46e5] font-medium truncate">
+                                    正在执行: {currentNode.name}
+                                  </span>
+                                </div>
+                                <button
+                                  disabled={cancellingTaskId === task.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCancelTask(task.id);
+                                  }}
+                                  className="shrink-0 h-[19px] px-1.5 rounded-[4px] bg-white hover:bg-[#fee2e2] text-[#85858d] hover:text-[#d64545] border border-[#d8d6fb] hover:border-[#fecaca] text-[10px] font-medium flex items-center gap-1 transition-all"
+                                  title="终止任务"
+                                >
+                                  <Square size={8.5} className="fill-current" />
+                                  <span>{cancellingTaskId === task.id ? '终止中' : '终止'}</span>
+                                </button>
                               </div>
                             )}
 
@@ -1012,8 +1181,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </>
                             )}
 
-                            {/* 失败任务：展示 [重试] */}
-                            {task.status === 'failed' && (
+                            {/* 失败/终止任务：展示 [重试] */}
+                            {(task.status === 'failed' || task.status === 'cancelled') && (
                               <button
                                 disabled={runningTaskId === task.id}
                                 onClick={() => handleRunTask(task.id)}
@@ -1021,6 +1190,18 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               >
                                 <RotateCcw size={11} strokeWidth={2.4} />
                                 <span>重试</span>
+                              </button>
+                            )}
+
+                            {/* 运行中任务：支持随时终止 */}
+                            {isRunning && (
+                              <button
+                                disabled={cancellingTaskId === task.id}
+                                onClick={() => handleCancelTask(task.id)}
+                                className="h-[24px] px-2 rounded-[5px] border border-[#fbd5d5] bg-[#fdf2f2] hover:bg-[#fee2e2] text-[#d64545] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-sm"
+                              >
+                                <Square size={10} className="fill-current" />
+                                <span>{cancellingTaskId === task.id ? '终止中' : '终止'}</span>
                               </button>
                             )}
 
@@ -1114,229 +1295,532 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-[420px] h-full bg-white border-l border-[#e3e3e8] p-5 shadow-[0_16px_44px_rgba(20,22,30,0.22)] flex flex-col animate-in slide-in-from-right duration-150 relative z-10"
+            className="w-[520px] max-w-[90vw] h-full bg-white border-l border-[#e3e3e8] p-5 shadow-[0_16px_44px_rgba(20,22,30,0.22)] flex flex-col animate-in slide-in-from-right duration-150 relative z-10"
           >
-            <div className="flex items-center justify-between pb-3.5 border-b border-[#ececf0]">
-              <div>
-                <div className="text-[10.5px] font-mono text-[#85858d]">{selectedTask.id}</div>
-                <h3 className="text-[13.5px] font-semibold text-[#1c1c21] mt-0.5">{selectedTask.title}</h3>
+            {/* 抽屉顶部头部 */}
+            <div className="pb-3 border-b border-[#ececf0]">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 mr-2">
+                  <div className="text-[10.5px] font-mono text-[#85858d] truncate">{selectedTask.id}</div>
+                  <h3 className="text-[13.5px] font-semibold text-[#1c1c21] mt-0.5 truncate">{selectedTask.title}</h3>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => setEditingTask(selectedTask)}
+                    className="h-[26px] px-2 rounded-[5px] border border-[#e3e3e8] text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[11.5px] flex items-center gap-1 transition-colors"
+                    title="编辑此任务"
+                  >
+                    <Edit3 size={11} />
+                    <span>编辑</span>
+                  </button>
+                  <button
+                    onClick={() => setTaskToDelete(selectedTask)}
+                    className="h-[26px] w-[26px] rounded-[5px] border border-[#e3e3e8] text-[#85858d] hover:text-[#e5484d] hover:bg-[#fbe9e9] flex items-center justify-center transition-colors"
+                    title="删除任务"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                  <button
+                    onClick={() => setSelectedTask(null)}
+                    className="w-6 h-6 rounded flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] ml-1"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setEditingTask(selectedTask)}
-                  className="h-[26px] px-2 rounded-[5px] border border-[#e3e3e8] text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[11.5px] flex items-center gap-1 transition-colors"
-                  title="编辑此任务"
-                >
-                  <Edit3 size={11} />
-                  <span>编辑</span>
-                </button>
-                <button
-                  onClick={() => setTaskToDelete(selectedTask)}
-                  className="h-[26px] w-[26px] rounded-[5px] border border-[#e3e3e8] text-[#85858d] hover:text-[#e5484d] hover:bg-[#fbe9e9] flex items-center justify-center transition-colors"
-                  title="删除任务"
-                >
-                  <Trash2 size={12} />
-                </button>
-                <button
-                  onClick={() => setSelectedTask(null)}
-                  className="w-6 h-6 rounded flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] ml-1"
-                >
-                  <X size={15} />
-                </button>
-              </div>
-            </div>
 
-          <div className="flex-1 py-4 overflow-y-auto space-y-4 text-[12px]">
-            {/* 状态与泳道指标 */}
-            <div className="grid grid-cols-2 gap-2.5 p-3 rounded-[8px] bg-[#f9f9fb] border border-[#ececf0]">
-              <div>
-                <span className="text-[#85858d] text-[11px] block">当前运行状态</span>
-                <span
-                  className={`inline-block mt-1 px-2 py-0.5 rounded-[4px] text-[11px] font-medium ${
-                    getTaskStatusInfo(selectedTask).badgeClass
+              {/* 抽屉 Segmented Control 双 Tab 切换 */}
+              <div className="flex items-center gap-1 p-0.5 rounded-[7px] bg-[#f1f1f4] border border-[#e3e3e8] mt-3">
+                <button
+                  onClick={() => setDrawerTab('overview')}
+                  className={`flex-1 h-[26px] rounded-[5px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all ${
+                    drawerTab === 'overview'
+                      ? 'bg-white text-[#1c1c21] shadow-sm font-semibold'
+                      : 'text-[#63636b] hover:text-[#1c1c21]'
                   }`}
                 >
-                  {getTaskStatusInfo(selectedTask).label}
-                </span>
-              </div>
-              <div>
-                <span className="text-[#85858d] text-[11px] block">所在泳道</span>
-                <span className="font-medium text-[#1c1c21] inline-block mt-1">
-                  {selectedTask.kanbanColumn}
-                </span>
-              </div>
-            </div>
-
-            {/* 关联工作流 */}
-            <div>
-              <div className="font-medium text-[#1c1c21] mb-1.5">关联自动化流程</div>
-              <div className="p-2.5 rounded-[7px] border border-[#ececf0] bg-[#f9f9fb] flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-[#1c1c21]">
-                    {wfMap.get(selectedTask.workflowId)?.name || selectedTask.workflowId}
-                  </div>
-                  <div className="text-[11px] font-mono text-[#85858d] mt-0.5">
-                    {selectedTask.workflowId}
-                  </div>
-                </div>
-                <span className="text-[11px] font-mono text-[#85858d]">
-                  {wfMap.get(selectedTask.workflowId)?.nodes.length || 0} 节点
-                </span>
+                  <Layers size={12} />
+                  <span>任务概览</span>
+                </button>
+                <button
+                  onClick={() => setDrawerTab('session')}
+                  className={`flex-1 h-[26px] rounded-[5px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all relative ${
+                    drawerTab === 'session'
+                      ? 'bg-white text-[#1c1c21] shadow-sm font-semibold'
+                      : 'text-[#63636b] hover:text-[#1c1c21]'
+                  }`}
+                >
+                  <Bot size={12} className={sessionState?.isBusy ? 'text-[#7c3aed]' : ''} />
+                  <span>Agent 实时对话</span>
+                  {(sessionState?.isBusy || selectedTask.status === 'running') && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-pulse" />
+                  )}
+                  {(sessionState?.messages?.length || 0) > 0 && (
+                    <span className="text-[10px] font-mono px-1 rounded-full bg-[#ececf0] text-[#63636b]">
+                      {sessionState?.messages.length}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
 
-            {/* 任务说明与提示词 */}
-            <div>
-              <div className="font-medium text-[#1c1c21] mb-1.5">任务说明与提示词</div>
-              <div className="p-2.5 rounded-[7px] border border-[#ececf0] bg-[#f9f9fb] text-[#4b4b53] leading-relaxed whitespace-pre-wrap">
-                {selectedTask.description || (
-                  <span className="text-[#85858d] italic">未设置说明与 Prompt 提示词</span>
-                )}
-              </div>
-            </div>
-
-            {/* Pi Agent 会话凭证与终端恢复 */}
-            {selectedTask.context?.piSessionId && (
-              <div className="p-3 rounded-[9px] border border-[#e0e0ea] bg-[#fafaff] space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-[12px] font-semibold text-[#1c1c21]">
-                    <Terminal size={13} className="text-[#4f46e5]" />
-                    <span>Pi Agent 会话凭证</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-[#4f46e5] bg-[#eeedfd] px-1.5 py-[1px] rounded font-medium">
-                    可终端接管
-                  </span>
-                </div>
-
-                <div className="bg-[#1c1c21] text-white rounded-[6px] px-2.5 py-1.5 text-[11px] font-mono flex items-center justify-between select-all">
-                  <span className="truncate mr-2">pi --session {selectedTask.context.piSessionId}</span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(`pi --session ${selectedTask.context.piSessionId}`);
-                      setCopiedSession(true);
-                      setTimeout(() => setCopiedSession(false), 2000);
-                    }}
-                    className="shrink-0 text-[10.5px] text-[#a5a5b0] hover:text-white flex items-center gap-1 transition-colors"
-                  >
-                    {copiedSession ? <Check size={11} className="text-[#189a58]" /> : <Copy size={11} />}
-                    <span>{copiedSession ? '已复制' : '复制'}</span>
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between pt-0.5">
-                  <span className="text-[11px] text-[#85858d]">
-                    任务独立会话，历史与上下文完整保留
-                  </span>
-                  <button
-                    onClick={() => handleResumeTerminal(selectedTask.id)}
-                    className="h-[24px] px-2.5 rounded-[5px] bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
-                  >
-                    <ExternalLink size={11} />
-                    <span>在终端打开</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* 节点执行时序 */}
-            <div>
-              <div className="font-medium text-[#1c1c21] mb-2">节点执行时序</div>
-              {Object.keys(selectedTask.nodeRuns).length === 0 ? (
-                <div className="p-4 rounded-[7px] border border-dashed border-[#e3e3e8] text-center text-[#85858d] text-[11.5px]">
-                  任务尚未触发执行，暂无节点时序数据
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {Object.entries(selectedTask.nodeRuns).map(([nid, run]) => (
-                    <div
-                      key={nid}
-                      className="p-2.5 rounded-[7px] border border-[#ececf0] bg-[#f9f9fb] flex items-center justify-between"
-                    >
-                      <div>
-                        <div className="font-mono text-[#1c1c21] text-[12px] font-medium">{nid}</div>
-                        {run.finishedAt && run.startedAt && (
-                          <div className="text-[10.5px] text-[#85858d]">
-                            耗时: {((run.finishedAt - run.startedAt) / 1000).toFixed(1)}s
-                          </div>
-                        )}
-                      </div>
+            {/* TAB 1: 任务概览 */}
+            {drawerTab === 'overview' && (
+              <>
+                <div className="flex-1 py-4 overflow-y-auto space-y-4 text-[12px]">
+                  {/* 状态与泳道指标 */}
+                  <div className="grid grid-cols-2 gap-2.5 p-3 rounded-[8px] bg-[#f9f9fb] border border-[#ececf0]">
+                    <div>
+                      <span className="text-[#85858d] text-[11px] block">当前运行状态</span>
                       <span
-                        className={`px-2 py-0.5 rounded text-[10.5px] font-medium ${
-                          run.status === 'success'
-                            ? 'bg-[#e4f6ec] text-[#189a58]'
-                            : run.status === 'waiting_approval'
-                            ? 'bg-[#fbf0df] text-[#b45309]'
-                            : run.status === 'running'
-                            ? 'bg-[#eeedfd] text-[#4f46e5]'
-                            : 'bg-[#fbe9e9] text-[#d64545]'
+                        className={`inline-block mt-1 px-2 py-0.5 rounded-[4px] text-[11px] font-medium ${
+                          getTaskStatusInfo(selectedTask).badgeClass
                         }`}
                       >
-                        {run.status}
+                        {getTaskStatusInfo(selectedTask).label}
                       </span>
                     </div>
-                  ))}
+                    <div>
+                      <span className="text-[#85858d] text-[11px] block">所在泳道</span>
+                      <span className="font-medium text-[#1c1c21] inline-block mt-1">
+                        {selectedTask.kanbanColumn}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 关联工作流 */}
+                  <div>
+                    <div className="font-medium text-[#1c1c21] mb-1.5">关联自动化流程</div>
+                    <div className="p-2.5 rounded-[7px] border border-[#ececf0] bg-[#f9f9fb] flex items-center justify-between">
+                      <div>
+                        <div className="font-medium text-[#1c1c21]">
+                          {wfMap.get(selectedTask.workflowId)?.name || selectedTask.workflowId}
+                        </div>
+                        <div className="text-[11px] font-mono text-[#85858d] mt-0.5">
+                          {selectedTask.workflowId}
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-mono text-[#85858d]">
+                        {wfMap.get(selectedTask.workflowId)?.nodes.length || 0} 节点
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 任务说明与提示词 */}
+                  <div>
+                    <div className="font-medium text-[#1c1c21] mb-1.5">任务说明与提示词</div>
+                    <div className="p-2.5 rounded-[7px] border border-[#ececf0] bg-[#f9f9fb] text-[#4b4b53] leading-relaxed whitespace-pre-wrap">
+                      {selectedTask.description || (
+                        <span className="text-[#85858d] italic">未设置说明与 Prompt 提示词</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Pi Agent 会话凭证与终端恢复 */}
+                  {selectedTask.context?.piSessionId && (
+                    <div className="p-3 rounded-[9px] border border-[#e0e0ea] bg-[#fafaff] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-[12px] font-semibold text-[#1c1c21]">
+                          <Terminal size={13} className="text-[#4f46e5]" />
+                          <span>Pi Agent 会话凭证</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-[#4f46e5] bg-[#eeedfd] px-1.5 py-[1px] rounded font-medium">
+                          可终端接管
+                        </span>
+                      </div>
+
+                      <div className="bg-[#1c1c21] text-white rounded-[6px] px-2.5 py-1.5 text-[11px] font-mono flex items-center justify-between select-all">
+                        <span className="truncate mr-2">pi --session {selectedTask.context.piSessionId}</span>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(`pi --session ${selectedTask.context.piSessionId}`);
+                            setCopiedSession(true);
+                            setTimeout(() => setCopiedSession(false), 2000);
+                          }}
+                          className="shrink-0 text-[10.5px] text-[#a5a5b0] hover:text-white flex items-center gap-1 transition-colors"
+                        >
+                          {copiedSession ? <Check size={11} className="text-[#189a58]" /> : <Copy size={11} />}
+                          <span>{copiedSession ? '已复制' : '复制'}</span>
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-0.5">
+                        <span className="text-[11px] text-[#85858d]">
+                          任务独立会话，历史与上下文完整保留
+                        </span>
+                        <button
+                          onClick={() => handleResumeTerminal(selectedTask.id)}
+                          className="h-[24px] px-2.5 rounded-[5px] bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
+                        >
+                          <ExternalLink size={11} />
+                          <span>在终端打开</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 节点执行时序 */}
+                  <div>
+                    <div className="font-medium text-[#1c1c21] mb-2">节点执行时序</div>
+                    {Object.keys(selectedTask.nodeRuns).length === 0 ? (
+                      <div className="p-4 rounded-[7px] border border-dashed border-[#e3e3e8] text-center text-[#85858d] text-[11.5px]">
+                        任务尚未触发执行，暂无节点时序数据
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {Object.entries(selectedTask.nodeRuns).map(([nid, run]) => (
+                          <div
+                            key={nid}
+                            className="p-2.5 rounded-[7px] border border-[#ececf0] bg-[#f9f9fb] flex items-center justify-between"
+                          >
+                            <div>
+                              <div className="font-mono text-[#1c1c21] text-[12px] font-medium">{nid}</div>
+                              {run.finishedAt && run.startedAt && (
+                                <div className="text-[10.5px] text-[#85858d]">
+                                  耗时: {((run.finishedAt - run.startedAt) / 1000).toFixed(1)}s
+                                </div>
+                              )}
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10.5px] font-medium ${
+                                run.status === 'success'
+                                  ? 'bg-[#e4f6ec] text-[#189a58]'
+                                  : run.status === 'waiting_approval'
+                                  ? 'bg-[#fbf0df] text-[#b45309]'
+                                  : run.status === 'running'
+                                  ? 'bg-[#eeedfd] text-[#4f46e5]'
+                                  : 'bg-[#fbe9e9] text-[#d64545]'
+                              }`}
+                            >
+                              {run.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* 抽屉底部操作区 */}
-          <div className="pt-3.5 border-t border-[#ececf0] space-y-2">
-            {selectedTask.status === 'pending' && (
-              <button
-                disabled={runningTaskId === selectedTask.id}
-                onClick={() => handleRunTask(selectedTask.id)}
-                className="w-full h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm"
-              >
-                <Play size={13} strokeWidth={2.4} />
-                <span>{runningTaskId === selectedTask.id ? '正在启动...' : '立即启动此任务'}</span>
-              </button>
+                {/* 抽屉底部操作区 */}
+                <div className="pt-3.5 border-t border-[#ececf0] space-y-2">
+                  {selectedTask.status === 'pending' && (
+                    <button
+                      disabled={runningTaskId === selectedTask.id}
+                      onClick={() => handleRunTask(selectedTask.id)}
+                      className="w-full h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                    >
+                      <Play size={13} strokeWidth={2.4} />
+                      <span>{runningTaskId === selectedTask.id ? '正在启动...' : '立即启动此任务'}</span>
+                    </button>
+                  )}
+
+                  {selectedTask.status === 'failed' && (
+                    <button
+                      disabled={runningTaskId === selectedTask.id}
+                      onClick={() => handleRunTask(selectedTask.id)}
+                      className="w-full h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                    >
+                      <RotateCcw size={13} strokeWidth={2.4} />
+                      <span>{runningTaskId === selectedTask.id ? '正在重新启动...' : '重新执行此任务'}</span>
+                    </button>
+                  )}
+
+                  {selectedTask.status === 'cancelled' && (
+                    <button
+                      disabled={runningTaskId === selectedTask.id}
+                      onClick={() => handleRunTask(selectedTask.id)}
+                      className="w-full h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                    >
+                      <RotateCcw size={13} strokeWidth={2.4} />
+                      <span>{runningTaskId === selectedTask.id ? '正在重新启动...' : '重新执行此任务'}</span>
+                    </button>
+                  )}
+
+                  {selectedTask.status === 'running' && (
+                    <button
+                      disabled={cancellingTaskId === selectedTask.id}
+                      onClick={() => handleCancelTask(selectedTask.id)}
+                      className="w-full h-[32px] rounded-[7px] border border-[#fbd5d5] bg-[#fdf2f2] hover:bg-[#fee2e2] text-[#d64545] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                    >
+                      <Square size={12} className="fill-current" />
+                      <span>{cancellingTaskId === selectedTask.id ? '正在终止任务...' : '终止正在执行的任务'}</span>
+                    </button>
+                  )}
+
+                  {selectedTask.status === 'waiting_approval' && (
+                    <div className="flex gap-2">
+                      <button
+                        disabled={approvingId === selectedTask.id}
+                        onClick={() => handleApprove(selectedTask.id, true)}
+                        className="flex-1 h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                      >
+                        <Check size={13} strokeWidth={2.4} />
+                        <span>验收通过</span>
+                      </button>
+                      <button
+                        disabled={approvingId === selectedTask.id}
+                        onClick={() => handleApprove(selectedTask.id, false)}
+                        className="h-[32px] px-4 rounded-[7px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[12px] font-medium transition-all"
+                      >
+                        驳回
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      onOpenTaskLogs(selectedTask.id);
+                      setSelectedTask(null);
+                    }}
+                    className="w-full h-[32px] rounded-[7px] border border-[#e3e3e8] bg-[#f9f9fb] hover:bg-[#f1f1f4] text-[#1c1c21] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <Terminal size={13} />
+                    <span>查看此任务实时日志</span>
+                  </button>
+                </div>
+              </>
             )}
 
-            {selectedTask.status === 'failed' && (
-              <button
-                disabled={runningTaskId === selectedTask.id}
-                onClick={() => handleRunTask(selectedTask.id)}
-                className="w-full h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm"
-              >
-                <RotateCcw size={13} strokeWidth={2.4} />
-                <span>{runningTaskId === selectedTask.id ? '正在重新启动...' : '重新执行此任务'}</span>
-              </button>
-            )}
+            {/* TAB 2: Agent 实时会话与双向交互 */}
+            {drawerTab === 'session' && (
+              <div className="flex-1 flex flex-col min-h-0 pt-3">
+                {/* 顶部感知与控制条 */}
+                <div className="mb-2 px-3 py-2 rounded-[8px] bg-[#f9f9fb] border border-[#ececf0] flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full bg-[#7c3aed] inline-block shrink-0" />
+                    <span className="text-[11.5px] font-semibold text-[#1c1c21] truncate">
+                      {sessionState?.agentName || 'Pi Coding Agent'}
+                    </span>
+                    {selectedTask.context?.piSessionId && (
+                      <span
+                        className="text-[10px] font-mono text-[#85858d] bg-white px-1.5 py-0.5 rounded border border-[#e3e3e8] truncate max-w-[130px]"
+                        title={selectedTask.context.piSessionId}
+                      >
+                        {selectedTask.context.piSessionId}
+                      </span>
+                    )}
+                  </div>
 
-            {selectedTask.status === 'waiting_approval' && (
-              <div className="flex gap-2">
-                <button
-                  disabled={approvingId === selectedTask.id}
-                  onClick={() => handleApprove(selectedTask.id, true)}
-                  className="flex-1 h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
-                >
-                  <Check size={13} strokeWidth={2.4} />
-                  <span>验收通过</span>
-                </button>
-                <button
-                  disabled={approvingId === selectedTask.id}
-                  onClick={() => handleApprove(selectedTask.id, false)}
-                  className="h-[32px] px-4 rounded-[7px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[12px] font-medium transition-all"
-                >
-                  驳回
-                </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* 运行中：显示暂停按钮 */}
+                    {sessionState?.isBusy && (
+                      <button
+                        disabled={isPausingSession}
+                        onClick={handleTogglePauseSession}
+                        className="h-[22px] px-2 rounded-[4px] border border-[#e3e3e8] bg-white hover:bg-[#fee2e2] text-[#4b4b53] hover:text-[#d64545] text-[10.5px] font-medium flex items-center gap-1 transition-all shadow-sm"
+                        title="暂停智能体当前思考与执行"
+                      >
+                        <Pause size={10} />
+                        <span>{isPausingSession ? '暂停中' : '暂停'}</span>
+                      </button>
+                    )}
+
+                    {/* 已暂停：显示继续恢复按钮 */}
+                    {sessionState?.isPaused && (
+                      <button
+                        disabled={isPausingSession}
+                        onClick={handleTogglePauseSession}
+                        className="h-[22px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10.5px] font-medium flex items-center gap-1 transition-all shadow-sm"
+                        title="恢复智能体会话继续推进"
+                      >
+                        <Play size={10} strokeWidth={2.4} />
+                        <span>{isPausingSession ? '恢复中' : '继续'}</span>
+                      </button>
+                    )}
+
+                    {/* 在系统终端拉起接管 */}
+                    <button
+                      onClick={() => handleResumeTerminal(selectedTask.id)}
+                      className="h-[22px] px-1.5 rounded-[4px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#1c1c21] text-[10.5px] flex items-center gap-1 transition-all"
+                      title="在 macOS 终端中接管此会话"
+                    >
+                      <ExternalLink size={10.5} />
+                      <span>终端</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 消息滚动流 */}
+                <div className="flex-1 overflow-y-auto pr-1 space-y-3 min-h-0 text-[12px]">
+                  {(!sessionState?.messages || sessionState.messages.length === 0) ? (
+                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-6 text-[#85858d]">
+                      <div className="w-11 h-11 rounded-[10px] bg-[#f4f4f6] border border-[#e3e3e8] flex items-center justify-center mb-2.5">
+                        <Bot size={20} className="text-[#85858d]" />
+                      </div>
+                      <div className="text-[12.5px] font-medium text-[#1c1c21] mb-1">Agent 实时交互会话</div>
+                      <div className="text-[11px] text-[#85858d] leading-relaxed max-w-[280px]">
+                        启动任务后，智能体的深度思考、工具调用与代码生成将在此毫秒级流式展现；您亦可在下方随时插话或纠偏。
+                      </div>
+                    </div>
+                  ) : (
+                    sessionState.messages.map((msg) => {
+                      if (msg.role === 'user') {
+                        return (
+                          <div key={msg.id} className="flex justify-end">
+                            <div className="max-w-[85%] rounded-[9px] px-3.5 py-2.5 bg-[#f4f4f6] border border-[#e3e3e8] text-[#1c1c21] text-[12px] leading-relaxed shadow-sm">
+                              <div className="text-[9.5px] font-mono text-[#85858d] mb-1 text-right">YOU</div>
+                              <div className="whitespace-pre-wrap">{msg.content}</div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div key={msg.id} className="space-y-2">
+                          {/* 深度思考模块 Thinking */}
+                          {msg.thinking && (
+                            <div className="rounded-[7px] border border-[#e8e8ed] bg-[#fafafc] overflow-hidden text-[11px]">
+                              <button
+                                onClick={() => setExpandedThinking((p) => ({ ...p, [msg.id]: !p[msg.id] }))}
+                                className="w-full px-2.5 py-1.5 flex items-center justify-between text-[#63636b] hover:bg-[#f1f1f4] transition-colors"
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  <Sparkles size={11} className={msg.isThinking ? 'text-[#7c3aed] animate-spin' : 'text-[#7c3aed]'} />
+                                  <span className="font-medium text-[11px]">
+                                    {msg.isThinking ? '智能体深度思考中...' : '深度思考过程'}
+                                  </span>
+                                  {msg.isThinking && <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />}
+                                </div>
+                                {expandedThinking[msg.id] ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                              </button>
+                              {(expandedThinking[msg.id] || msg.isThinking) && (
+                                <div className="p-2.5 border-t border-[#e8e8ed] bg-[#f5f5f8] font-mono text-[10.5px] text-[#63636b] leading-relaxed whitespace-pre-wrap max-h-[200px] overflow-y-auto">
+                                  {msg.thinking}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* 工具调用卡片 Tools */}
+                          {msg.tools && msg.tools.length > 0 && (
+                            <div className="space-y-1.5">
+                              {msg.tools.map((tool) => (
+                                <div key={tool.id} className="rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden text-[11px]">
+                                  <div
+                                    onClick={() => setExpandedTools((p) => ({ ...p, [tool.id]: !p[tool.id] }))}
+                                    className="px-2.5 py-1.5 flex items-center justify-between cursor-pointer hover:bg-[#f9f9fb] transition-colors"
+                                  >
+                                    <div className="flex items-center gap-1.5 truncate mr-2">
+                                      <Terminal size={11} className="text-[#4f46e5] shrink-0" />
+                                      <span className="font-mono font-semibold text-[#1c1c21]">{tool.name}</span>
+                                      {tool.args && (
+                                        <span className="font-mono text-[#85858d] truncate max-w-[200px]">
+                                          {typeof tool.args === 'string' ? tool.args : JSON.stringify(tool.args)}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {tool.status === 'running' ? (
+                                        <span className="text-[#4f46e5] flex items-center gap-1 text-[10px]">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-ping" />
+                                          执行中
+                                        </span>
+                                      ) : tool.status === 'success' ? (
+                                        <span className="text-[#189a58] flex items-center gap-0.5 text-[10px]">
+                                          <Check size={10.5} />
+                                          {tool.durationMs ? `${(tool.durationMs / 1000).toFixed(1)}s` : '完成'}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[#d64545] flex items-center gap-0.5 text-[10px]">
+                                          <AlertCircle size={10.5} />
+                                          失败
+                                        </span>
+                                      )}
+                                      {expandedTools[tool.id] ? <ChevronDown size={11} className="text-[#85858d]" /> : <ChevronRight size={11} className="text-[#85858d]" />}
+                                    </div>
+                                  </div>
+                                  {expandedTools[tool.id] && (
+                                    <div className="p-2 border-t border-[#ececf0] bg-[#1c1c21] text-[#e3e3e8] font-mono text-[10px] leading-relaxed max-h-[160px] overflow-y-auto">
+                                      {tool.result ? (
+                                        <pre className="whitespace-pre-wrap">{typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2)}</pre>
+                                      ) : (
+                                        <span className="text-[#85858d]">暂无输出内容</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Assistant 回复正文 */}
+                          {msg.content && (
+                            <div className="p-3 rounded-[9px] bg-white border border-[#e3e3e8] text-[#1c1c21] text-[12px] leading-relaxed shadow-sm whitespace-pre-wrap select-text">
+                              {msg.content}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={chatMessagesEndRef} />
+                </div>
+
+                {/* 贴底悬浮输入框区 */}
+                <div className="pt-2.5 border-t border-[#ececf0] bg-white shrink-0">
+                  {/* 状态轻量提示 */}
+                  <div className="flex items-center justify-between text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
+                    <span className="flex items-center gap-1">
+                      {sessionState?.isBusy ? (
+                        <>
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />
+                          <span className="text-[#7c3aed] font-medium">运行中：发送将无缝插话 (Steer)</span>
+                        </>
+                      ) : sessionState?.isPaused ? (
+                        <>
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#b45309]" />
+                          <span className="text-[#b45309] font-medium">已暂停：发送新指令将继续推进</span>
+                        </>
+                      ) : (
+                        <span>可向当前智能体会话追问或补充指令</span>
+                      )}
+                    </span>
+                    <span className="font-mono text-[#a5a5b0] text-[10px]">⌘ + Enter 发送</span>
+                  </div>
+
+                  {/* 极简精致输入卡片 */}
+                  <div className="rounded-[8px] border border-[#e3e3e8] focus-within:border-[#1c1c21]/40 focus-within:shadow-[0_2px_8px_rgba(0,0,0,0.06)] bg-white p-2 transition-all">
+                    <textarea
+                      ref={chatTextareaRef}
+                      value={chatInput}
+                      onChange={(e) => {
+                        setChatInput(e.target.value);
+                        e.target.style.height = 'auto';
+                        e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                      }}
+                      onKeyDown={(e) => {
+                        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSendChat();
+                        }
+                      }}
+                      placeholder="给 Agent 发送指令或反馈... (⌘+Enter 发送，Shift+Enter 换行)"
+                      rows={2}
+                      className="w-full resize-none border-none outline-none text-[12px] text-[#1c1c21] placeholder:text-[#a5a5b0] bg-transparent leading-relaxed"
+                    />
+                    <div className="flex items-center justify-between pt-1 border-t border-[#f4f4f6]">
+                      <span className="text-[10px] text-[#85858d] font-mono">
+                        {chatInput.length > 0 ? `${chatInput.length} 字` : ''}
+                      </span>
+                      <button
+                        disabled={!chatInput.trim() || isSendingChat}
+                        onClick={handleSendChat}
+                        className={`h-[24px] px-3 rounded-[5px] text-[11px] font-medium flex items-center gap-1 transition-all ${
+                          chatInput.trim() && !isSendingChat
+                            ? 'bg-[#1c1c21] hover:bg-[#2e2f36] text-white shadow-sm active:scale-95'
+                            : 'bg-[#f4f4f6] text-[#a5a5b0] cursor-not-allowed'
+                        }`}
+                      >
+                        <Send size={10.5} />
+                        <span>发送</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
-
-            <button
-              onClick={() => {
-                onOpenTaskLogs(selectedTask.id);
-                setSelectedTask(null);
-              }}
-              className="w-full h-[32px] rounded-[7px] border border-[#e3e3e8] bg-[#f9f9fb] hover:bg-[#f1f1f4] text-[#1c1c21] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all"
-            >
-              <Terminal size={13} />
-              <span>查看此任务实时日志</span>
-            </button>
           </div>
         </div>
-      </div>
       )}
 
       {/* 编辑任务弹窗 */}

@@ -16,6 +16,7 @@ import {
   Search,
   ChevronRight,
   Boxes,
+  Rocket,
 } from 'lucide-react';
 import { WorkflowDefinition, NodeType } from '@openloop/core';
 import { api } from '../services/api';
@@ -37,7 +38,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
-  const [templateType, setTemplateType] = useState<'empty' | 'standard'>('standard');
+  const [templateType, setTemplateType] = useState<'empty' | 'standard' | 'deploy'>('standard');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -105,6 +106,50 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
         edges = [
           { id: 'e1', source: 'node_agent', target: 'node_hook' },
           { id: 'e2', source: 'node_hook', target: 'node_qa' },
+        ];
+      } else if (templateType === 'deploy') {
+        nodes = [
+          {
+            id: 'node_deploy_prep',
+            name: '环境与依赖预检',
+            type: 'cli' as NodeType,
+            position: { x: 80, y: 150 },
+            config: {
+              command: 'echo "[Deploy] 环境自检中..." && node -v && pnpm -v',
+            },
+          },
+          {
+            id: 'node_deploy_build',
+            name: '生产环境构建',
+            type: 'cli' as NodeType,
+            position: { x: 360, y: 150 },
+            config: {
+              command: 'pnpm build',
+            },
+          },
+          {
+            id: 'node_deploy_exec',
+            name: '应用部署上线',
+            type: 'cli' as NodeType,
+            position: { x: 640, y: 150 },
+            config: {
+              command: 'if [ -f "scripts/deploy.sh" ]; then bash scripts/deploy.sh --skip-build; else echo "[Deploy] 部署成功"; fi',
+            },
+          },
+          {
+            id: 'node_deploy_gate',
+            name: '上线发布验收',
+            type: 'qa-approval' as NodeType,
+            position: { x: 920, y: 150 },
+            config: {
+              approvalPrompt: '请核验应用部署与线上探针运行正常',
+            },
+          },
+        ];
+        edges = [
+          { id: 'e1', source: 'node_deploy_prep', target: 'node_deploy_build' },
+          { id: 'e2', source: 'node_deploy_build', target: 'node_deploy_exec' },
+          { id: 'e3', source: 'node_deploy_exec', target: 'node_deploy_gate' },
         ];
       } else {
         nodes = [
@@ -366,7 +411,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
               <div>
                 <label className="block font-medium text-[#4b4b53] mb-1.5">初始化模板</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <div
                     onClick={() => setTemplateType('standard')}
                     className={`p-2.5 rounded-[8px] border cursor-pointer transition-all ${
@@ -375,9 +420,26 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                         : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
                     }`}
                   >
-                    <div className="font-medium text-[12px] text-[#1c1c21] mb-0.5">标准全自动模板</div>
-                    <div className="text-[10.5px] text-[#85858d]">
-                      预置 Agent 编码 + Hook 触发 + QA 验收节点
+                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5">标准研发模板</div>
+                    <div className="text-[10px] text-[#85858d] line-clamp-2">
+                      预置 Agent 编码 + Hook + QA 验收
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => setTemplateType('deploy')}
+                    className={`p-2.5 rounded-[8px] border cursor-pointer transition-all ${
+                      templateType === 'deploy'
+                        ? 'border-[#0284c7] bg-[#f0f9ff] shadow-sm'
+                        : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
+                    }`}
+                  >
+                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1">
+                      <Rocket size={11} className="text-[#0284c7]" />
+                      <span>构建部署模板</span>
+                    </div>
+                    <div className="text-[10px] text-[#85858d] line-clamp-2">
+                      预检 + 全量构建 + 部署上线 + 门禁
                     </div>
                   </div>
 
@@ -389,9 +451,9 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                         : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
                     }`}
                   >
-                    <div className="font-medium text-[12px] text-[#1c1c21] mb-0.5">空白画布</div>
-                    <div className="text-[10.5px] text-[#85858d]">
-                      从单一初始 CLI 节点开始自由连线构建
+                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5">空白画布</div>
+                    <div className="text-[10px] text-[#85858d] line-clamp-2">
+                      从单一初始 CLI 节点自由连线构建
                     </div>
                   </div>
                 </div>

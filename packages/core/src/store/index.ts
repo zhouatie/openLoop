@@ -1,5 +1,5 @@
 import { SqliteStore } from './sqlite';
-import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn } from '../types';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, OpenLoopSettings } from '../types';
 
 export { SqliteStore };
 
@@ -78,11 +78,11 @@ export class Store {
   }
 
   // Settings
-  public getSettings(): Record<string, any> {
+  public getSettings(): OpenLoopSettings {
     return this.sqlite.getSettings();
   }
 
-  public updateSettings(settings: Record<string, any>): Record<string, any> {
+  public updateSettings(settings: Partial<OpenLoopSettings>): OpenLoopSettings {
     return this.sqlite.updateSettings(settings);
   }
 

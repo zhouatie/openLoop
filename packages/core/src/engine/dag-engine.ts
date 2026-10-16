@@ -1,8 +1,10 @@
 import { EventEmitter } from 'events';
+import { ChildProcess } from 'child_process';
 import { Store } from '../store';
-import { Task, WorkflowDefinition, WorkflowNode, LogEntry, KanbanColumn } from '../types';
+import { Task, WorkflowDefinition, WorkflowNode, LogEntry, KanbanColumn, TaskSessionState } from '../types';
 import { ExecutorRegistry, ExecutionContext } from '../executors';
 import { createLogger } from '../logger';
+import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 
 const dagLogger = createLogger('Engine:DAG');
 
@@ -10,6 +12,8 @@ export class DagEngine extends EventEmitter {
   private store: Store;
   private registry: ExecutorRegistry;
   private runningTasks: Set<string> = new Set();
+  private abortControllers: Map<string, AbortController> = new Map();
+  private activeProcesses: Map<string, Set<ChildProcess>> = new Map();
 
   constructor(store: Store, registry?: ExecutorRegistry) {
     super();
@@ -43,6 +47,10 @@ export class DagEngine extends EventEmitter {
     }
 
     this.runningTasks.add(taskId);
+    const abortController = new AbortController();
+    this.abortControllers.set(taskId, abortController);
+    this.activeProcesses.set(taskId, new Set());
+
     task.status = 'running';
     task.nodeRuns = {}; // 重新运行时清空历史节点状态，确保整条流水线干净重跑
     task.kanbanColumn = 'in_progress';
@@ -100,6 +108,8 @@ export class DagEngine extends EventEmitter {
       this.emit('task:update', task);
     } finally {
       this.runningTasks.delete(taskId);
+      this.abortControllers.delete(taskId);
+      this.activeProcesses.delete(taskId);
       dagLogger.debug(`任务 ${task.id} 移出 active 运行集合`, undefined, { taskId: task.id });
     }
   }
@@ -150,10 +160,19 @@ export class DagEngine extends EventEmitter {
     this.log(task.id, node.id, 'system', `>>> 开始执行节点 [${node.name}] (${node.type})`);
 
     const executor = this.registry.get(node.type);
+    const abortController = this.abortControllers.get(task.id);
     const ctx: ExecutionContext = {
       task,
       node,
       settings,
+      abortSignal: abortController?.signal,
+      registerChildProcess: (child: ChildProcess) => {
+        const procSet = this.activeProcesses.get(task.id);
+        if (procSet) {
+          procSet.add(child);
+          child.on('exit', () => procSet.delete(child));
+        }
+      },
       variables: {
         task: {
           id: task.id,
@@ -167,6 +186,12 @@ export class DagEngine extends EventEmitter {
       },
       emitLog: (stream, message) => {
         this.log(task.id, node.id, stream, message);
+      },
+      onSessionUpdate: (state: TaskSessionState) => {
+        if (!task.context) task.context = {};
+        task.context.chatMessages = state.messages;
+        this.store.saveTask(task);
+        this.emit('agent:chat_update', state);
       },
     };
 
@@ -194,6 +219,16 @@ export class DagEngine extends EventEmitter {
     run.artifacts = result.artifacts;
 
     const duration = run.finishedAt - (run.startedAt || run.finishedAt);
+
+    // 如果任务已经被手动终止 (cancelled)，保持已终止状态，直接退出流转
+    const latestTask = this.store.getTask(task.id);
+    if (latestTask && latestTask.status === 'cancelled') {
+      dagLogger.info(`任务 ${task.id} 状态已为 cancelled，退出调度流转`, undefined, {
+        taskId: task.id,
+        nodeId: node.id,
+      });
+      return;
+    }
 
     // 融合节点输出到任务全局上下文供下游插值使用
     if (result.output) {
@@ -375,6 +410,68 @@ export class DagEngine extends EventEmitter {
 
     // 继续调度下游
     await this.triggerNextNodes(task, workflow, currentNodeId);
+    return task;
+  }
+
+  /**
+   * 终止正在运行的任务
+   */
+  async cancelTask(taskId: string): Promise<Task> {
+    dagLogger.warn(`收到终止任务请求: ${taskId}`, undefined, { taskId });
+    const task = this.store.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+
+    // 1. 触发任务级 AbortController 与 Pi RPC 终止
+    const controller = this.abortControllers.get(taskId);
+    if (controller) {
+      controller.abort();
+    }
+    PiRpcSessionManager.getInstance().removeSession(taskId);
+
+    // 2. 强杀已注册的所有活跃子进程组
+    const procs = this.activeProcesses.get(taskId);
+    if (procs && procs.size > 0) {
+      const isUnix = process.platform !== 'win32';
+      for (const child of procs) {
+        try {
+          if (child.pid) {
+            dagLogger.warn(`强杀子进程树 PID: ${child.pid}`, undefined, { taskId });
+            if (isUnix) {
+              process.kill(-child.pid, 'SIGKILL');
+            } else {
+              child.kill('SIGKILL');
+            }
+          }
+        } catch (_) {}
+      }
+      procs.clear();
+    }
+
+    this.runningTasks.delete(taskId);
+    this.abortControllers.delete(taskId);
+    this.activeProcesses.delete(taskId);
+
+    // 3. 标记当前执行中节点为失败/终止
+    if (task.currentNodeId && task.nodeRuns[task.currentNodeId]) {
+      const nr = task.nodeRuns[task.currentNodeId];
+      if (nr.status === 'running') {
+        nr.status = 'failed';
+        nr.error = '任务已被手动终止';
+        nr.finishedAt = Date.now();
+      }
+    }
+
+    // 4. 更新任务状态并归位回待处理泳道
+    task.status = 'cancelled';
+    task.kanbanColumn = 'backlog';
+    this.store.saveTask(task);
+
+    this.log(task.id, 'SYSTEM', 'stderr', `[SYSTEM] 任务已被用户手动终止`);
+    this.emit('task:update', task);
+
+    dagLogger.info(`任务 ${taskId} 已成功终止并归位至待处理泳道`, undefined, { taskId });
     return task;
   }
 

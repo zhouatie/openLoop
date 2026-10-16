@@ -1,7 +1,34 @@
-import { Task, WorkflowDefinition, LogEntry, PluginManifest } from '@openloop/core';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, OpenLoopSettings } from '@openloop/core';
 
-const BASE_URL = 'http://127.0.0.1:19888';
-const WS_URL = 'ws://127.0.0.1:19888';
+function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
+  if (typeof window !== 'undefined' && window.location) {
+    const { protocol, hostname, port } = window.location;
+    // Vite 本地开发模式默认运行在 5173，指向 Core 调度服务默认端口 19888
+    if (port === '5173') {
+      const host = hostname || '127.0.0.1';
+      return {
+        httpUrl: `http://${host}:19888`,
+        wsUrl: `ws://${host}:19888`,
+      };
+    }
+    // 生产部署模式或 Core 静态托管模式：动态复用当前主机与端口
+    if (hostname) {
+      const isHttps = protocol === 'https:';
+      const wsProto = isHttps ? 'wss:' : 'ws:';
+      const portPart = port ? `:${port}` : '';
+      return {
+        httpUrl: `${protocol}//${hostname}${portPart}`,
+        wsUrl: `${wsProto}//${hostname}${portPart}`,
+      };
+    }
+  }
+  return {
+    httpUrl: 'http://127.0.0.1:19888',
+    wsUrl: 'ws://127.0.0.1:19888',
+  };
+}
+
+const { httpUrl: BASE_URL, wsUrl: WS_URL } = resolveBackendUrls();
 
 const isDev = import.meta.env?.DEV;
 
@@ -150,6 +177,13 @@ export class DesktopApiService {
     await requestJson(`${BASE_URL}/api/tasks/${id}/run`, { method: 'POST' });
   }
 
+  async cancelTask(id: string): Promise<Task> {
+    const res = await requestJson<{ success: boolean; task: Task }>(`${BASE_URL}/api/tasks/${id}/cancel`, {
+      method: 'POST',
+    });
+    return res.task;
+  }
+
   async updateTask(
     id: string,
     params: {
@@ -204,12 +238,12 @@ export class DesktopApiService {
   }
 
   // Settings
-  async getSettings(): Promise<Record<string, any>> {
-    return requestJson<Record<string, any>>(`${BASE_URL}/api/settings`);
+  async getSettings(): Promise<OpenLoopSettings> {
+    return requestJson<OpenLoopSettings>(`${BASE_URL}/api/settings`);
   }
 
-  async updateSettings(settings: Record<string, any>): Promise<Record<string, any>> {
-    return requestJson<Record<string, any>>(`${BASE_URL}/api/settings`, {
+  async updateSettings(settings: Partial<OpenLoopSettings>): Promise<OpenLoopSettings> {
+    return requestJson<OpenLoopSettings>(`${BASE_URL}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings),
@@ -219,6 +253,31 @@ export class DesktopApiService {
   // Resume task session in terminal
   async resumeTerminal(taskId: string): Promise<{ success: boolean; command: string; sessionId: string }> {
     return requestJson<{ success: boolean; command: string; sessionId: string }>(`${BASE_URL}/api/tasks/${taskId}/resume-terminal`, {
+      method: 'POST',
+    });
+  }
+
+  // Agent RPC Session & Chat
+  async getTaskSession(taskId: string): Promise<TaskSessionState> {
+    return requestJson<TaskSessionState>(`${BASE_URL}/api/tasks/${taskId}/session`);
+  }
+
+  async sendTaskChatMessage(taskId: string, message: string): Promise<any> {
+    return requestJson<any>(`${BASE_URL}/api/tasks/${taskId}/session/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  async pauseTaskSession(taskId: string): Promise<{ success: boolean }> {
+    return requestJson<{ success: boolean }>(`${BASE_URL}/api/tasks/${taskId}/session/pause`, {
+      method: 'POST',
+    });
+  }
+
+  async resumeTaskSession(taskId: string): Promise<{ success: boolean }> {
+    return requestJson<{ success: boolean }>(`${BASE_URL}/api/tasks/${taskId}/session/resume`, {
       method: 'POST',
     });
   }

@@ -9,8 +9,10 @@ import {
   RotateCcw,
   Sliders,
   Folder,
+  Download,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { OpenLoopSettings, AgentProviderType, PiThinkingLevel } from '@openloop/core';
 
 interface SettingsViewProps {
   activeSubTab?: string;
@@ -26,14 +28,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // 表单状态
-  const [agentProvider, setAgentProvider] = useState<'pi' | 'custom-cli'>('pi');
+  const [agentProvider, setAgentProvider] = useState<AgentProviderType>('pi');
   const [piModel, setPiModel] = useState('');
-  const [piThinking, setPiThinking] = useState<'off' | 'low' | 'medium' | 'high'>('medium');
+  const [piThinking, setPiThinking] = useState<PiThinkingLevel>('medium');
   const [piTools, setPiTools] = useState('read,bash,edit,write,grep,find');
   const [defaultCwd, setDefaultCwd] = useState('');
   const [autoSnapshot, setAutoSnapshot] = useState(true);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+
+  // 导出配置状态
+  const [isExporting, setIsExporting] = useState(false);
+  const [hasExported, setHasExported] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -68,15 +74,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const handleSave = async (override?: Partial<{
-    agentProvider: 'pi' | 'custom-cli';
-    piModel: string;
-    piThinking: 'off' | 'low' | 'medium' | 'high';
-    piTools: string;
-    defaultCwd: string;
-    autoSnapshot: boolean;
-  }>) => {
-    const payload = {
+  const handleSave = async (override?: Partial<OpenLoopSettings>) => {
+    const payload: OpenLoopSettings = {
       agentProvider,
       piModel,
       piThinking,
@@ -91,6 +90,68 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setTimeout(() => setSaveStatus(null), 1800);
     } catch (err: any) {
       alert(`保存失败: ${err.message}`);
+    }
+  };
+
+  const handleExportConfig = async () => {
+    if (import.meta.env?.DEV) {
+      console.log('[Settings:Export] 用户触发导出配置文件操作');
+    }
+
+    try {
+      setIsExporting(true);
+
+      // 获取当前最新的服务端配置并与当前前端状态深度合并
+      let baseSettings: OpenLoopSettings = {};
+      try {
+        baseSettings = await api.getSettings();
+      } catch (fetchErr) {
+        if (import.meta.env?.DEV) {
+          console.warn('[Settings:Export] 获取远端最新配置失败，使用当前本地状态', fetchErr);
+        }
+      }
+
+      const configToExport: OpenLoopSettings = {
+        ...baseSettings,
+        agentProvider,
+        piModel,
+        piThinking,
+        piTools,
+        defaultCwd,
+        autoSnapshot,
+      };
+
+      if (import.meta.env?.DEV) {
+        console.log('[Settings:Export] 待导出完整配置数据:', configToExport);
+      }
+
+      // 要求导出文件名为 openloop-settings.json，使用标准格式化缩进 2 格
+      const jsonContent = JSON.stringify(configToExport, null, 2);
+      const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = 'openloop-settings.json';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+
+      if (import.meta.env?.DEV) {
+        console.log(`[Settings:Export] openloop-settings.json 导出成功，文件大小: ${blob.size} 字节`);
+      }
+
+      setHasExported(true);
+      setTimeout(() => {
+        setHasExported(false);
+      }, 2000);
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[Settings:Export] 导出配置文件发生异常:', err);
+      }
+      alert(`导出配置文件失败: ${err?.message || '未知错误'}`);
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -114,6 +175,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-y-auto select-none px-8 py-6">
       <div className="max-w-[1040px] w-full space-y-5">
+        {/* ==================== 顶部标题与快捷操作栏 ==================== */}
+        <div className="flex items-center justify-between pb-1 pt-1">
+          <div>
+            <h1 className="text-[17px] font-semibold text-[#1c1c21] tracking-tight">系统设置</h1>
+            <p className="text-[12px] text-[#85858d] mt-0.5">
+              管理 openLoop 核心调度服务、代码智能体驱动与工作区环境变量
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {saveStatus && (
+              <span className="text-[11.5px] text-[#189a58] flex items-center gap-1 bg-[#eaf7ee] px-2 py-1 rounded-[6px] transition-all">
+                <Check size={12} className="stroke-[2.2]" />
+                <span>{saveStatus}</span>
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={handleExportConfig}
+              disabled={isExporting}
+              className={`h-[28px] px-3 rounded-[7px] text-[12px] font-medium flex items-center gap-1.5 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.04)] border cursor-pointer active:scale-95 ${
+                hasExported
+                  ? 'bg-[#eaf7ee] border-[#b6e8c4] text-[#189a58]'
+                  : 'bg-white hover:bg-[#fafafc] active:bg-[#f1f1f4] border-[#e3e3e8] text-[#1c1c21] hover:border-[#d0d0d7]'
+              }`}
+              title="导出当前配置为 openloop-settings.json"
+            >
+              {hasExported ? (
+                <>
+                  <Check size={13} className="stroke-[2.2]" />
+                  <span>已导出 JSON</span>
+                </>
+              ) : (
+                <>
+                  <Download size={13} className="text-[#63636b] stroke-[1.9]" />
+                  <span>导出配置文件</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
         {/* ==================== 分组 1: 代码智能体 (对齐截图中的图像/模型组) ==================== */}
         <div>
           <div className="text-[11.5px] text-[#85858d] mb-1.5 px-0.5 font-normal">
@@ -441,6 +545,50 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   className="h-[26px] px-2.5 rounded-[6px] bg-[#f1f1f4] hover:bg-[#e9e9ee] border border-[#e3e3e8] text-[11.5px] text-[#4b4b53] hover:text-[#1c1c21] transition-all"
                 >
                   配置规则...
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ==================== 分组 5: 配置文件管理 ==================== */}
+        <div>
+          <div className="text-[11.5px] text-[#85858d] mb-1.5 px-0.5 font-normal">
+            配置文件与备份
+          </div>
+
+          <div className="bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+            <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-[#1c1c21]">导出配置文件</div>
+                <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                  将当前系统运行配置（包括智能体驱动、模型参数、工具白名单与工作区路径）导出为 openloop-settings.json 文件
+                </div>
+              </div>
+
+              <div className="shrink-0 self-center">
+                <button
+                  type="button"
+                  onClick={handleExportConfig}
+                  disabled={isExporting}
+                  className={`h-[26px] px-3 rounded-[6px] text-[11.5px] font-medium flex items-center gap-1.5 border transition-all cursor-pointer active:scale-95 ${
+                    hasExported
+                      ? 'bg-[#eaf7ee] border-[#b6e8c4] text-[#189a58]'
+                      : 'bg-[#f1f1f4] hover:bg-[#e9e9ee] border-[#e3e3e8] text-[#1c1c21]'
+                  }`}
+                  title="导出为 openloop-settings.json"
+                >
+                  {hasExported ? (
+                    <>
+                      <Check size={12} className="stroke-[2.2]" />
+                      <span>已成功导出</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download size={12} className="text-[#63636b] stroke-[1.9]" />
+                      <span>导出 JSON 配置文件</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

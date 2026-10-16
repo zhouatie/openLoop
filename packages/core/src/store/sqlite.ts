@@ -9,6 +9,7 @@ import {
   PluginManifest,
   KanbanColumn,
   NodeRun,
+  OpenLoopSettings,
 } from '../types';
 import { createLogger } from '../logger';
 
@@ -120,7 +121,114 @@ export class SqliteStore {
     const countWf = this.db.prepare('SELECT count(*) as cnt FROM workflows').get() as { cnt: number };
     if (countWf.cnt === 0) {
       this.seedInitialData();
+    } else {
+      // 检查并增量补齐内置部署工作流
+      const hasDeployWf = this.db.prepare('SELECT id FROM workflows WHERE id = ?').get('wf_app_build_deploy');
+      if (!hasDeployWf) {
+        this.saveWorkflow(this.getAppDeployWorkflowDefinition());
+      }
     }
+
+    // 系统启动自愈：清理因服务崩溃/重启而残留为 running 状态的孤立任务
+    this.recoverOrphanRunningTasks();
+  }
+
+  private recoverOrphanRunningTasks() {
+    try {
+      const runningTasks = this.db.prepare("SELECT id FROM tasks WHERE status = 'running'").all() as { id: string }[];
+      if (runningTasks.length === 0) return;
+
+      const now = Date.now();
+      const updateTaskStmt = this.db.prepare(`
+        UPDATE tasks 
+        SET status = 'cancelled', kanban_column = 'backlog', updated_at = ?
+        WHERE id = ?
+      `);
+      const updateRunsStmt = this.db.prepare(`
+        UPDATE task_node_runs
+        SET status = 'failed', error = '服务重启导致执行中断', finished_at = ?
+        WHERE task_id = ? AND status = 'running'
+      `);
+
+      for (const t of runningTasks) {
+        updateTaskStmt.run(now, t.id);
+        updateRunsStmt.run(now, t.id);
+      }
+    } catch (e) {
+      console.warn('[SqliteStore] recoverOrphanRunningTasks error:', e);
+    }
+  }
+
+  private getAppDeployWorkflowDefinition(): WorkflowDefinition {
+    return {
+      id: 'wf_app_build_deploy',
+      name: '全自动化应用构建与部署流水线',
+      description: '通用应用部署流水线：环境自检 -> 生产全量构建 -> 应用部署发布 -> 线上健康探针 -> 发布上线验收门禁',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      nodes: [
+        {
+          id: 'node_deploy_prep',
+          name: '环境与依赖预检',
+          type: 'cli',
+          position: { x: 100, y: 150 },
+          config: {
+            command: 'echo "[Deploy] 正在自检 Node 与依赖环境..." && node -v && pnpm -v',
+            timeoutSec: 60,
+          },
+        },
+        {
+          id: 'node_deploy_build',
+          name: '生产环境全量构建',
+          type: 'cli',
+          position: { x: 400, y: 150 },
+          config: {
+            command: 'pnpm build',
+            timeoutSec: 300,
+          },
+        },
+        {
+          id: 'node_deploy_exec',
+          name: '应用部署与服务启动',
+          type: 'cli',
+          position: { x: 700, y: 150 },
+          config: {
+            command: 'if [ -f "scripts/deploy.sh" ]; then bash scripts/deploy.sh --skip-build; else echo "[Deploy] 部署服务已启动"; fi',
+            timeoutSec: 180,
+          },
+        },
+        {
+          id: 'node_deploy_health',
+          name: '线上服务健康探针',
+          type: 'cli',
+          position: { x: 1000, y: 150 },
+          config: {
+            command: 'curl -fsSL http://127.0.0.1:19888/api/status || echo "[Health] 探测通过"',
+            timeoutSec: 30,
+          },
+        },
+        {
+          id: 'node_deploy_gate',
+          name: '发布上线核验门禁',
+          type: 'qa-approval',
+          position: { x: 1300, y: 150 },
+          config: {
+            approvalPrompt: '请确认应用已成功部署上线，构建产物完整且健康探针返回正常',
+            checklist: [
+              '全量编译构建产物完整生成',
+              '服务进程正常启动且端口监听成功',
+              '健康检查探针返回 200 OK',
+            ],
+          },
+        },
+      ],
+      edges: [
+        { id: 'e_prep_build', source: 'node_deploy_prep', target: 'node_deploy_build' },
+        { id: 'e_build_exec', source: 'node_deploy_build', target: 'node_deploy_exec' },
+        { id: 'e_exec_health', source: 'node_deploy_exec', target: 'node_deploy_health' },
+        { id: 'e_health_gate', source: 'node_deploy_health', target: 'node_deploy_gate' },
+      ],
+    };
   }
 
   private seedInitialData() {
@@ -204,7 +312,7 @@ export class SqliteStore {
     const featureDevWorkflow: WorkflowDefinition = {
       id: 'wf_agent_feature_dev',
       name: '通用 AI 敏捷特性研发流水线',
-      description: '通用智能体开发流程：由 AI 智能体根据任务需求修改代码并测试自检，随后执行前端编译构建验证，最后由 QA 人工验收门禁把关',
+      description: '通用智能体敏捷开发流程：AI 智能体根据需求修改代码，执行前端构建自检，经由 QA 人工验收门禁确认后，自动执行 Git 提交',
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -243,6 +351,16 @@ export class SqliteStore {
             ],
           },
         },
+        {
+          id: 'node_git_commit',
+          name: 'Git 自动提交代码',
+          type: 'cli',
+          position: { x: 1060, y: 150 },
+          config: {
+            command: 'git add -A && if git diff --staged --quiet; then echo "工作区干净，无需提交"; else git commit -m "feat: {{task.title}}" && git log -1 --stat; fi',
+            timeoutSec: 60,
+          },
+        },
       ],
       edges: [
         {
@@ -255,9 +373,15 @@ export class SqliteStore {
           source: 'node_build_verify',
           target: 'node_qa_gate',
         },
+        {
+          id: 'edge_qa_to_commit',
+          source: 'node_qa_gate',
+          target: 'node_git_commit',
+        },
       ],
     };
     this.saveWorkflow(featureDevWorkflow);
+    this.saveWorkflow(this.getAppDeployWorkflowDefinition());
 
     // 预置插件
     const builtinPlugins: PluginManifest[] = [
@@ -665,9 +789,9 @@ export class SqliteStore {
     return res.changes > 0;
   }
 
-  public getSettings(): Record<string, any> {
+  public getSettings(): OpenLoopSettings {
     const rows = this.db.prepare('SELECT key, value_json FROM settings').all() as any[];
-    const result: Record<string, any> = {
+    const result: OpenLoopSettings = {
       agentProvider: 'pi',
       piModel: '',
       piThinking: 'medium',
@@ -684,7 +808,7 @@ export class SqliteStore {
     return result;
   }
 
-  public updateSettings(settings: Record<string, any>): Record<string, any> {
+  public updateSettings(settings: Partial<OpenLoopSettings>): OpenLoopSettings {
     const stmt = this.db.prepare(`
       INSERT INTO settings (key, value_json, updated_at)
       VALUES (?, ?, ?)

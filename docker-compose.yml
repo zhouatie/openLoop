@@ -1,0 +1,19 @@
+services:
+  openloop:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openloop-app
+    restart: unless-stopped
+    ports:
+      - "19888:19888"
+    environment:
+      - OPENLOOP_HOST=0.0.0.0
+      - OPENLOOP_PORT=19888
+      - NODE_ENV=production
+    volumes:
+      - openloop-data:/root/.openloop
+
+volumes:
+  openloop-data:
+    driver: local

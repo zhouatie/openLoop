@@ -3,8 +3,8 @@ import { createLogger } from './logger';
 
 const cliLogger = createLogger('ServerCLI');
 
-const port = parseInt(process.env.OPENLOOP_PORT || '19888', 10);
-const host = process.env.OPENLOOP_HOST || '127.0.0.1';
+const port = parseInt(process.env.OPENLOOP_PORT || process.env.PORT || '19888', 10);
+const host = process.env.OPENLOOP_HOST || process.env.HOST || '127.0.0.1';
 
 // 捕获全局未捕获异常，确保排查错误时堆栈完全记录到日志中
 process.on('uncaughtException', (err) => {

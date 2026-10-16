@@ -28,6 +28,8 @@ import {
   Settings2,
   Trash2,
   Sparkles,
+  GitCommit,
+  Rocket,
 } from 'lucide-react';
 import { WorkflowDefinition, NodeType } from '@openloop/core';
 import { api } from '../services/api';
@@ -85,7 +87,34 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
     },
   };
 
-  const currentConfig = typeConfig[type] || typeConfig.cli;
+  const currentConfig = useMemo(() => {
+    const isGit =
+      type === 'cli' &&
+      (nodeData.name?.toLowerCase().includes('git') ||
+        nodeData.config?.command?.toLowerCase().includes('git'));
+    if (isGit) {
+      return {
+        label: 'Git 提交',
+        icon: <GitCommit size={13} />,
+        bg: 'bg-[#1c1c21] text-white',
+        text: 'text-[#1c1c21]',
+      };
+    }
+    const isDeploy =
+      type === 'cli' &&
+      (nodeData.name?.includes('部署') ||
+        nodeData.name?.toLowerCase().includes('deploy') ||
+        nodeData.config?.command?.toLowerCase().includes('deploy'));
+    if (isDeploy) {
+      return {
+        label: '应用部署',
+        icon: <Rocket size={13} />,
+        bg: 'bg-[#0f172a] text-[#38bdf8]',
+        text: 'text-[#0f172a]',
+      };
+    }
+    return typeConfig[type] || typeConfig.cli;
+  }, [type, nodeData.name, nodeData.config?.command]);
 
   return (
     <div
@@ -216,8 +245,18 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedNodeId]);
 
-  const addNode = (type: NodeType, label: string) => {
-    const id = `node_${type}_${Date.now().toString(36).substring(3, 7)}`;
+  const addNode = (type: NodeType | 'git-commit' | 'deploy', label: string) => {
+    const isGit = type === 'git-commit';
+    const isDeploy = type === 'deploy';
+    const actualType: NodeType = (isGit || isDeploy) ? 'cli' : (type as NodeType);
+    const id = `node_${actualType}_${Date.now().toString(36).substring(3, 7)}`;
+    const defaultCommand = isGit
+      ? 'git add -A && if git diff --staged --quiet; then echo "工作区干净，无需提交"; else git commit -m "feat: {{task.title}}" && git log -1 --stat; fi'
+      : isDeploy
+      ? 'echo "[部署] 开始应用构建与部署..." && pnpm build && if [ -f "scripts/deploy.sh" ]; then bash scripts/deploy.sh --skip-build; fi'
+      : actualType === 'cli'
+      ? 'echo "cli task"'
+      : '';
     const newNode: Node = {
       id,
       type: 'customNode',
@@ -225,11 +264,11 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
       data: {
         id,
         name: label,
-        type,
+        type: actualType,
         config: {
-          command: type === 'cli' ? 'echo "cli task"' : '',
-          prompt: type === 'agent' ? '按需求完成功能' : '',
-          testUrl: type === 'midscene' ? 'http://localhost:3000' : '',
+          command: defaultCommand,
+          prompt: actualType === 'agent' ? '按需求完成功能' : '',
+          testUrl: actualType === 'midscene' ? 'http://localhost:3000' : '',
         },
       },
     };
@@ -430,6 +469,20 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
             <span>QA 人工/用例验收</span>
           </button>
           <button
+            onClick={() => addNode('git-commit', 'Git 自动提交代码')}
+            className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
+          >
+            <GitCommit size={13} className="text-[#1c1c21]" />
+            <span>Git 自动提交代码</span>
+          </button>
+          <button
+            onClick={() => addNode('deploy', '生产应用部署')}
+            className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
+          >
+            <Rocket size={13} className="text-[#0284c7]" />
+            <span>生产应用部署</span>
+          </button>
+          <button
             onClick={() => addNode('cli', '通用 CLI 命令')}
             className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
           >
@@ -539,9 +592,49 @@ export const WorkflowEditorView: React.FC<WorkflowEditorViewProps> = ({
                 )}
 
                 <div>
-                  <label className="block text-[#85858d] mb-1">真实 CLI 命令行脚本</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[#85858d]">真实 CLI 命令行脚本</label>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mb-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedNodeConfig(
+                          'command',
+                          'git add -A && if git diff --staged --quiet; then echo "工作区干净，无需提交"; else git commit -m "feat: {{task.title}}" && git log -1 --stat; fi'
+                        )
+                      }
+                      className="px-1.5 py-[2px] rounded-[4px] bg-[#f1f1f4] hover:bg-[#e9e9ee] border border-[#e3e3e8] text-[9.5px] text-[#4b4b53] flex items-center gap-1 transition-all"
+                    >
+                      <GitCommit size={10} />
+                      <span>Git 提交模板</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedNodeConfig('command', 'pnpm --filter @openloop/desktop build:renderer')
+                      }
+                      className="px-1.5 py-[2px] rounded-[4px] bg-[#f1f1f4] hover:bg-[#e9e9ee] border border-[#e3e3e8] text-[9.5px] text-[#4b4b53] flex items-center gap-1 transition-all"
+                    >
+                      <Terminal size={10} />
+                      <span>构建自检</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedNodeConfig(
+                          'command',
+                          'echo "[部署] 开始应用构建与部署..." && pnpm build && if [ -f "scripts/deploy.sh" ]; then bash scripts/deploy.sh --skip-build; fi'
+                        )
+                      }
+                      className="px-1.5 py-[2px] rounded-[4px] bg-[#f1f1f4] hover:bg-[#e9e9ee] border border-[#e3e3e8] text-[9.5px] text-[#4b4b53] flex items-center gap-1 transition-all"
+                    >
+                      <Rocket size={10} className="text-[#0284c7]" />
+                      <span>应用部署模板</span>
+                    </button>
+                  </div>
                   <textarea
-                    rows={2.5}
+                    rows={3}
                     value={selectedNodeData.config?.command || ''}
                     onChange={(e) => updateSelectedNodeConfig('command', e.target.value)}
                     className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2 font-mono text-[11px] text-[#1c1c21] outline-none resize-none"

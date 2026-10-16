@@ -1,18 +1,21 @@
-import { spawn } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { WorkflowNode, Task, LogEntry, NodeRun } from '../types';
+import { WorkflowNode, Task, LogEntry, NodeRun, TaskSessionState } from '../types';
 import { createLogger } from '../logger';
+import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 
 const executorLogger = createLogger('Executor');
 
 export interface ExecutionContext {
-
   task: Task;
   node: WorkflowNode;
   variables: Record<string, any>;
   emitLog: (stream: 'stdout' | 'stderr' | 'system', message: string) => void;
   settings?: Record<string, any>;
+  registerChildProcess?: (child: ChildProcess) => void;
+  abortSignal?: AbortSignal;
+  onSessionUpdate?: (state: TaskSessionState) => void;
 }
 
 export interface ExecutionResult {
@@ -100,11 +103,9 @@ export class CliCommandExecutor implements NodeExecutor {
         { taskId: ctx.task.id, nodeId: node.id }
       );
 
-      // 关键修复 1：非交互式执行立即关闭标准输入，防止 CLI 进程因等待 stdin 阻塞
-      if (child.stdin && !child.stdin.destroyed) {
-        try {
-          child.stdin.end();
-        } catch (_) {}
+      // 注册活跃子进程以便外部实时监控或强制终止
+      if (ctx.registerChildProcess) {
+        ctx.registerChildProcess(child);
       }
 
       // 杀死子进程组的辅助函数
@@ -120,6 +121,13 @@ export class CliCommandExecutor implements NodeExecutor {
         } catch (_) {}
       };
 
+      // 关键修复 1：非交互式执行立即关闭标准输入，防止 CLI 进程因等待 stdin 阻塞
+      if (child.stdin && !child.stdin.destroyed) {
+        try {
+          child.stdin.end();
+        } catch (_) {}
+      }
+
       const finish = (result: ExecutionResult) => {
         if (settled) return;
         settled = true;
@@ -128,6 +136,31 @@ export class CliCommandExecutor implements NodeExecutor {
         killProcessTree();
         resolve(result);
       };
+
+      // 监听外部中断信号
+      if (ctx.abortSignal) {
+        if (ctx.abortSignal.aborted) {
+          killProcessTree('SIGKILL');
+          finish({
+            status: 'failed',
+            exitCode: -1,
+            error: '任务已被用户手动终止',
+          });
+          return;
+        }
+        ctx.abortSignal.addEventListener('abort', () => {
+          executorLogger.warn(`[CLI] 收到终止信号，强杀子进程树 PID: ${child.pid}`, undefined, {
+            taskId: ctx.task.id,
+            nodeId: node.id,
+          });
+          killProcessTree('SIGKILL');
+          finish({
+            status: 'failed',
+            exitCode: -1,
+            error: '任务已被用户手动终止',
+          });
+        });
+      }
 
       // 关键修复 2：设置超时安全保护，防止自动化任务无限挂起
       timer = setTimeout(() => {
@@ -279,12 +312,8 @@ export class AgentExecutor implements NodeExecutor {
         args.push(`--tools "${String(settings.piTools).trim()}"`);
       }
 
-      // 用单引号包裹 prompt 避免 bash 特殊字符转义问题
-      const escapedPrompt = prompt.replace(/'/g, "'\\''");
-      const piCommand = `pi ${args.join(' ')} -p '${escapedPrompt}'`;
-
       executorLogger.info(
-        `[Agent:Pi] 生成 Pi Agent 执行命令，Session ID: ${sessionId}`,
+        `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId}`,
         { promptPreview: prompt.length > 200 ? prompt.slice(0, 200) + '...' : prompt },
         { taskId: task.id, nodeId: node.id }
       );
@@ -292,28 +321,73 @@ export class AgentExecutor implements NodeExecutor {
       emitLog('system', `[终端恢复提示] 如需在终端中交互式接管，可执行: pi --session ${sessionId}`);
 
       const cwd = node.config.cwd || settings.defaultCwd || process.cwd();
-      const piCtx: ExecutionContext = {
-        ...ctx,
-        node: {
-          ...node,
-          config: {
-            ...node.config,
-            command: piCommand,
-            cwd,
-          },
-        },
-      };
 
-      const result = await this.cliExecutor.execute(piCtx);
-      return {
-        ...result,
-        output: {
-          ...(result.output || {}),
-          agentProvider: 'pi',
-          piSessionId: sessionId,
-          resumeCommand: `pi --session ${sessionId}`,
-        },
-      };
+      return new Promise<ExecutionResult>((resolve) => {
+        let settled = false;
+        const finish = (result: ExecutionResult) => {
+          if (settled) return;
+          settled = true;
+          resolve(result);
+        };
+
+        const session = PiRpcSessionManager.getInstance().createSession({
+          taskId: task.id,
+          taskTitle: task.title,
+          taskDescription: task.description,
+          sessionId,
+          agentName,
+          model: settings.piModel,
+          thinking: settings.piThinking,
+          tools: settings.piTools,
+          cwd,
+          initialPrompt: prompt,
+          onLog: emitLog,
+          onUpdate: (state) => {
+            if (ctx.onSessionUpdate) {
+              ctx.onSessionUpdate(state);
+            }
+          },
+          onFinished: (error) => {
+            if (error) {
+              finish({
+                status: 'failed',
+                exitCode: 1,
+                error,
+              });
+            } else {
+              finish({
+                status: 'success',
+                exitCode: 0,
+                output: {
+                  agentProvider: 'pi',
+                  piSessionId: sessionId,
+                  resumeCommand: `pi --session ${sessionId}`,
+                },
+              });
+            }
+          },
+        });
+
+        if (ctx.abortSignal) {
+          if (ctx.abortSignal.aborted) {
+            session.terminate();
+            finish({
+              status: 'failed',
+              exitCode: -1,
+              error: '任务已被用户手动终止',
+            });
+            return;
+          }
+          ctx.abortSignal.addEventListener('abort', () => {
+            session.terminate();
+            finish({
+              status: 'failed',
+              exitCode: -1,
+              error: '任务已被用户手动终止',
+            });
+          });
+        }
+      });
     }
 
     if (!node.config.command) {

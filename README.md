@@ -54,6 +54,24 @@ pnpm dev
 pnpm desktop:start
 ```
 
+#### 方式 C：独立生产部署模式 (单端口托管)
+```bash
+# 一键编译构建并执行部署校验
+pnpm deploy
+
+# 启动全栈生产服务 (单端口 19888 同时托管 API、WebSocket 总线与 Web 前端界面)
+pnpm start:prod
+```
+服务启动后直接访问 **`http://localhost:19888`** 即可在生产环境使用。
+
+#### 方式 D：Docker 容器化部署
+```bash
+# 使用 Docker Compose 一键构建并启动
+pnpm deploy:docker
+# 或 docker compose up -d --build
+```
+容器自动暴露 `19888` 端口，并将 SQLite 数据底座持久化至本地命名卷。
+
 ### 3. 使用 openLoop CLI 进行自动化任务调用
 
 可以直接使用命令行与调度引擎进行交互：

@@ -51,6 +51,37 @@ export interface NodeConfig {
   customData?: Record<string, any>;
 }
 
+export interface ToolExecutionRecord {
+  id: string;
+  name: string;
+  args?: any;
+  result?: any;
+  status: 'running' | 'success' | 'error';
+  durationMs?: number;
+}
+
+export interface SessionChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  thinking?: string;
+  isThinking?: boolean;
+  isStreaming?: boolean;
+  tools?: ToolExecutionRecord[];
+  timestamp: number;
+}
+
+export interface TaskSessionState {
+  taskId: string;
+  active: boolean;
+  isBusy: boolean;
+  isPaused: boolean;
+  messages: SessionChatMessage[];
+  agentName?: string;
+  model?: string;
+  piSessionId?: string;
+}
+
 export interface WorkflowNode {
   id: string;
   name: string;
@@ -137,3 +168,18 @@ export interface PluginManifest {
     defaultConfig: NodeConfig;
   }>;
 }
+
+export type AgentProviderType = 'pi' | 'custom-cli';
+
+export type PiThinkingLevel = 'off' | 'low' | 'medium' | 'high';
+
+export interface OpenLoopSettings {
+  agentProvider?: AgentProviderType;
+  piModel?: string;
+  piThinking?: PiThinkingLevel;
+  piTools?: string;
+  defaultCwd?: string;
+  autoSnapshot?: boolean;
+  [key: string]: any;
+}
+

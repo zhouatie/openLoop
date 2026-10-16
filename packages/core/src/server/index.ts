@@ -1,18 +1,39 @@
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
 import { spawn } from 'child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Store } from '../store';
 import { DagEngine } from '../engine/dag-engine';
-import { Task, WorkflowDefinition, PluginManifest } from '../types';
+import { Task, WorkflowDefinition, PluginManifest, TaskSessionState } from '../types';
 import { createLogger } from '../logger';
+import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 
 const serverLogger = createLogger('Server');
 
-export interface ServerOptions {
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm',
+};
 
+export interface ServerOptions {
   port?: number;
   host?: string;
   storeDir?: string;
+  staticDir?: string;
 }
 
 export class OpenLoopServer {
@@ -23,10 +44,12 @@ export class OpenLoopServer {
   private httpServer?: http.Server;
   private wss?: WebSocketServer;
   private clients: Set<WebSocket> = new Set();
+  private staticDir?: string;
 
   constructor(options: ServerOptions = {}) {
     this.port = options.port || 19888;
     this.host = options.host || '127.0.0.1';
+    this.staticDir = options.staticDir || process.env.OPENLOOP_STATIC_DIR;
     this.store = new Store(options.storeDir);
     this.engine = new DagEngine(this.store);
 
@@ -52,6 +75,10 @@ export class OpenLoopServer {
 
     this.engine.on('log:new', (log) => {
       this.broadcast({ type: 'log:new', data: log });
+    });
+
+    this.engine.on('agent:chat_update', (data) => {
+      this.broadcast({ type: 'agent:chat_update', data });
     });
   }
 
@@ -173,6 +200,80 @@ export class OpenLoopServer {
     res.end(JSON.stringify(data));
   }
 
+  private resolveStaticDir(): string | null {
+    if (this.staticDir && fs.existsSync(this.staticDir)) {
+      return this.staticDir;
+    }
+    const candidates = [
+      path.resolve(__dirname, '../../desktop/dist'),
+      path.resolve(__dirname, '../../../desktop/dist'),
+      path.resolve(__dirname, '../../../packages/desktop/dist'),
+      path.resolve(process.cwd(), 'packages/desktop/dist'),
+      path.resolve(process.cwd(), 'dist'),
+    ];
+    for (const dir of candidates) {
+      if (fs.existsSync(dir) && fs.existsSync(path.join(dir, 'index.html'))) {
+        return dir;
+      }
+    }
+    return null;
+  }
+
+  private serveStatic(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    pathname: string,
+    reqMeta: { method: string; pathname: string; startTime: number }
+  ): boolean {
+    const staticDir = this.resolveStaticDir();
+    if (!staticDir) return false;
+
+    // 清理路径防止路径穿越
+    const cleanPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
+    let targetPath = path.join(staticDir, cleanPath);
+
+    // 目录请求默认匹配 index.html
+    if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
+      targetPath = path.join(targetPath, 'index.html');
+    }
+
+    // SPA 路由回退：非静态文件扩展名请求直接回退至 index.html
+    const hasExtension = path.extname(cleanPath) !== '';
+    if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isFile()) {
+      if (!hasExtension && fs.existsSync(path.join(staticDir, 'index.html'))) {
+        targetPath = path.join(staticDir, 'index.html');
+      } else {
+        return false;
+      }
+    }
+
+    try {
+      const ext = path.extname(targetPath).toLowerCase();
+      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      const stat = fs.statSync(targetPath);
+
+      serverLogger.debug(
+        `[Static:Serve] 命中静态资产: ${pathname} -> ${targetPath} (${stat.size} bytes)`,
+        undefined,
+        reqMeta
+      );
+
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Content-Length': stat.size,
+        'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+        'Access-Control-Allow-Origin': '*',
+      });
+
+      const stream = fs.createReadStream(targetPath);
+      stream.pipe(res);
+      return true;
+    } catch (e: any) {
+      serverLogger.warn(`[Static:Error] 传输静态资产失败: ${targetPath} - ${e.message}`);
+      return false;
+    }
+  }
+
   private async handleHttpRequest(req: http.IncomingMessage, res: http.ServerResponse) {
     // CORS 预检
     if (req.method === 'OPTIONS') {
@@ -193,6 +294,12 @@ export class OpenLoopServer {
     serverLogger.debug(`[HTTP -->] ${method} ${pathname}`);
 
     try {
+      // 静态资源托管 (支持独立 Web 生产部署，无需外部 Vite 开发服务器即可直接打开使用)
+      if (!pathname.startsWith('/api')) {
+        const handled = this.serveStatic(req, res, pathname, reqMeta);
+        if (handled) return;
+      }
+
       if (pathname === '/api/status' && method === 'GET') {
         return this.sendJson(res, 200, {
           status: 'ok',
@@ -320,6 +427,102 @@ export class OpenLoopServer {
           console.error(e);
         });
         return this.sendJson(res, 200, { success: true, message: `Task ${taskId} triggered` }, reqMeta);
+      }
+
+      // Task cancel / abort: /api/tasks/:id/cancel
+      const taskCancelMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/cancel$/);
+      if (taskCancelMatch && method === 'POST') {
+        const taskId = taskCancelMatch[1];
+        serverLogger.warn(`[Tasks:Cancel] 接收到终止任务指令: ${taskId}`, undefined, { taskId });
+        try {
+          const task = await this.engine.cancelTask(taskId);
+          return this.sendJson(res, 200, { success: true, message: `Task ${taskId} cancelled`, task }, reqMeta);
+        } catch (e: any) {
+          serverLogger.error(`[Tasks:CancelError] 终止任务失败: ${e.message}`, e, { taskId });
+          return this.sendJson(res, 500, { error: e.message }, reqMeta);
+        }
+      }
+
+      // Task session get: /api/tasks/:id/session
+      const taskSessionMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session$/);
+      if (taskSessionMatch && method === 'GET') {
+        const taskId = taskSessionMatch[1];
+        const task = this.store.getTask(taskId);
+        if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
+
+        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        if (rpcSession) {
+          return this.sendJson(res, 200, rpcSession.getState(), reqMeta);
+        }
+
+        // 无常驻 RPC 进程时，从持久化 context 中读取历史消息
+        const historicalState: TaskSessionState = {
+          taskId,
+          active: false,
+          isBusy: task.status === 'running',
+          isPaused: false,
+          messages: task.context?.chatMessages || [],
+          agentName: 'OpenLoop Agent',
+          piSessionId: task.context?.piSessionId,
+        };
+        return this.sendJson(res, 200, historicalState, reqMeta);
+      }
+
+      // Task session chat: /api/tasks/:id/session/chat
+      const taskChatMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/chat$/);
+      if (taskChatMatch && method === 'POST') {
+        const taskId = taskChatMatch[1];
+        const task = this.store.getTask(taskId);
+        if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
+        const body = await this.parseJsonBody(req);
+        const { message } = body;
+        if (!message || !message.trim()) {
+          return this.sendJson(res, 400, { error: 'Message cannot be empty' }, reqMeta);
+        }
+
+        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        if (rpcSession && rpcSession.active) {
+          rpcSession.sendUserMessage(message.trim()).catch((err) => {
+            serverLogger.error(`发送用户消息失败: ${err.message}`, undefined, { taskId });
+          });
+          return this.sendJson(res, 200, { success: true, message: 'Message sent to active session' }, reqMeta);
+        }
+
+        // 若任务未启动或当前非活跃，暂存用户输入并提示
+        if (!task.context) task.context = {};
+        if (!task.context.chatMessages) task.context.chatMessages = [];
+        task.context.chatMessages.push({
+          id: `msg_u_${Date.now()}`,
+          role: 'user',
+          content: message.trim(),
+          timestamp: Date.now(),
+        });
+        this.store.saveTask(task);
+        return this.sendJson(res, 200, { success: true, message: 'Message saved to history', active: false }, reqMeta);
+      }
+
+      // Task session pause: /api/tasks/:id/session/pause
+      const taskPauseMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/pause$/);
+      if (taskPauseMatch && method === 'POST') {
+        const taskId = taskPauseMatch[1];
+        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        if (rpcSession) {
+          const paused = await rpcSession.pause();
+          return this.sendJson(res, 200, { success: paused }, reqMeta);
+        }
+        return this.sendJson(res, 400, { error: 'No active session to pause' }, reqMeta);
+      }
+
+      // Task session resume: /api/tasks/:id/session/resume
+      const taskSessionResumeMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/resume$/);
+      if (taskSessionResumeMatch && method === 'POST') {
+        const taskId = taskSessionResumeMatch[1];
+        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        if (rpcSession) {
+          const resumed = await rpcSession.resume();
+          return this.sendJson(res, 200, { success: resumed }, reqMeta);
+        }
+        return this.sendJson(res, 400, { error: 'No active session to resume' }, reqMeta);
       }
 
       // Task resume (QA approval): /api/tasks/:id/resume
