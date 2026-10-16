@@ -6,8 +6,6 @@ import {
   Terminal,
   Search,
   Sparkles,
-  LayoutGrid,
-  List,
   ChevronDown,
   ChevronRight,
   Trash2,
@@ -101,8 +99,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   selectedWorkspaceFilter,
   onWorkspaceFilterChange,
 }) => {
-  // 默认使用看板泳道，同时支持无缝切会话列表
-  const [viewMode, setViewMode] = useState<'list' | 'kanban'>('kanban');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -168,7 +164,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [selectedWorkflowFilter, setSelectedWorkflowFilter] = useState<string>('all');
   const [isWfDropdownOpen, setIsWfDropdownOpen] = useState(false);
   const wfDropdownRef = useRef<HTMLDivElement>(null);
-  const [isGroupOpen, setIsGroupOpen] = useState(true);
 
   // Inbox 列快速添加想法状态
   const [isQuickAddingIdea, setIsQuickAddingIdea] = useState(false);
@@ -988,11 +983,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
             )}
           </div>
 
-          {/* 搜索框 (如截图中的搜索会话) */}
+          {/* 搜索框 */}
           <div className="relative w-56 ml-1">
             <input
               type="text"
-              placeholder="搜索任务或会话..."
+              placeholder="搜索任务..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full h-[28px] bg-white border border-[#e3e3e8] rounded-[6px] px-2.5 text-[12px] text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.04)] focus:border-[#b9b9c2]"
@@ -1000,141 +995,89 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
           </div>
 
           {/* 全看板列统一排序下拉选择器 */}
-          {viewMode === 'kanban' && (
-            <div className="relative" ref={boardSortDropdownRef}>
-              <button
-                type="button"
-                onClick={() => setIsBoardSortOpen(!isBoardSortOpen)}
-                className={`flex items-center gap-1.5 px-2.5 h-[28px] rounded-[6px] bg-white border transition-colors shadow-[0_1px_2px_rgba(0,0,0,0.06)] text-[12px] font-medium text-[#1c1c21] cursor-pointer hover:bg-[#f9f9fb] ${
-                  isBoardSortOpen ? 'border-[#b9b9c2] ring-2 ring-[#1c1c21]/5' : 'border-[#e3e3e8]'
-                }`}
-                title="全看板列统一排序设置"
-              >
-                <ArrowUpDown size={12} className="text-[#85858d]" />
-                <span>排序</span>
-                <span className="text-[#85858d] font-mono text-[11px] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
-                  {unifiedSortLabel}
-                </span>
-                <ChevronDown
-                  size={12}
-                  className={`text-[#85858d] transition-transform duration-150 ${isBoardSortOpen ? 'rotate-180' : ''}`}
-                />
-              </button>
+          <div className="relative" ref={boardSortDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsBoardSortOpen(!isBoardSortOpen)}
+              className={`flex items-center gap-1.5 px-2.5 h-[28px] rounded-[6px] bg-white border transition-colors shadow-[0_1px_2px_rgba(0,0,0,0.06)] text-[12px] font-medium text-[#1c1c21] cursor-pointer hover:bg-[#f9f9fb] ${
+                isBoardSortOpen ? 'border-[#b9b9c2] ring-2 ring-[#1c1c21]/5' : 'border-[#e3e3e8]'
+              }`}
+              title="全看板列统一排序设置"
+            >
+              <ArrowUpDown size={12} className="text-[#85858d]" />
+              <span>排序</span>
+              <span className="text-[#85858d] font-mono text-[11px] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
+                {unifiedSortLabel}
+              </span>
+              <ChevronDown
+                size={12}
+                className={`text-[#85858d] transition-transform duration-150 ${isBoardSortOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
 
-              {isBoardSortOpen && (
-                <div className="absolute top-[34px] left-0 w-[240px] bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_10px_26px_rgba(20,22,30,0.12)] p-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
-                  <div className="px-2.5 py-1 text-[10.5px] font-semibold text-[#85858d] uppercase tracking-wider flex items-center justify-between border-b border-[#ececf0] pb-1.5 mb-1">
-                    <span>全看板列排序</span>
-                    <span className="text-[10px] font-mono text-[#85858d]">{unifiedSortLabel}</span>
-                  </div>
-
-                  <div className="max-h-[260px] overflow-y-auto space-y-0.5 pr-0.5">
-                    {SORT_OPTIONS.map((opt) => {
-                      const isSelected =
-                        isUnifiedSort &&
-                        opt.field === firstRule.field &&
-                        opt.direction === firstRule.direction;
-
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => {
-                            handleApplySortToAll({ field: opt.field, direction: opt.direction });
-                            setIsBoardSortOpen(false);
-                          }}
-                          className={`w-full px-2 py-1.5 text-left flex items-center justify-between rounded-[6px] text-[11.5px] transition-colors cursor-pointer ${
-                            isSelected
-                              ? 'text-[#1c1c21] font-medium bg-[#f4f4f7]'
-                              : 'text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f9f9fb]'
-                          }`}
-                        >
-                          <span className="truncate">{opt.label}</span>
-                          {isSelected && <Check size={12} className="text-[#1c1c21] shrink-0 ml-1.5" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {!isUnifiedSort && (
-                    <div className="mt-1 pt-1 border-t border-[#ececf0] px-2 py-1 text-[10.5px] text-[#85858d]">
-                      部分列当前配置了独立排序规则
-                    </div>
-                  )}
-
-                  <div className="my-1 border-t border-[#ececf0]" />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleResetAllSorts();
-                      setIsBoardSortOpen(false);
-                    }}
-                    className="w-full px-2 py-1 text-left text-[10.5px] text-[#85858d] hover:text-[#d64545] hover:bg-[#fdf2f2] rounded-[5px] flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <RotateCcw size={10} />
-                    <span>恢复全列默认排序</span>
-                  </button>
+            {isBoardSortOpen && (
+              <div className="absolute top-[34px] left-0 w-[240px] bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_10px_26px_rgba(20,22,30,0.12)] p-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
+                <div className="px-2.5 py-1 text-[10.5px] font-semibold text-[#85858d] uppercase tracking-wider flex items-center justify-between border-b border-[#ececf0] pb-1.5 mb-1">
+                  <span>全看板列排序</span>
+                  <span className="text-[10px] font-mono text-[#85858d]">{unifiedSortLabel}</span>
                 </div>
-              )}
-            </div>
-          )}
-        </div>
 
-        {/* 右侧：视图切换与回收站 */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 bg-[#e6e6eb] p-[2px] rounded-[6px]">
-            <button
-              onClick={() => setViewMode('kanban')}
-              className={`flex items-center gap-1 px-2.5 h-[24px] rounded-[4px] text-[11.5px] transition-all ${
-                viewMode === 'kanban'
-                  ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
-                  : 'text-[#63636b] hover:text-[#1c1c21]'
-              }`}
-            >
-              <LayoutGrid size={12} />
-              <span>看板泳道</span>
-            </button>
-            <button
-              onClick={() => setViewMode('list')}
-              className={`flex items-center gap-1 px-2.5 h-[24px] rounded-[4px] text-[11.5px] transition-all ${
-                viewMode === 'list'
-                  ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
-                  : 'text-[#63636b] hover:text-[#1c1c21]'
-              }`}
-            >
-              <List size={12} />
-              <span>会话列表</span>
-            </button>
+                <div className="max-h-[260px] overflow-y-auto space-y-0.5 pr-0.5">
+                  {SORT_OPTIONS.map((opt) => {
+                    const isSelected =
+                      isUnifiedSort &&
+                      opt.field === firstRule.field &&
+                      opt.direction === firstRule.direction;
+
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          handleApplySortToAll({ field: opt.field, direction: opt.direction });
+                          setIsBoardSortOpen(false);
+                        }}
+                        className={`w-full px-2 py-1.5 text-left flex items-center justify-between rounded-[6px] text-[11.5px] transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'text-[#1c1c21] font-medium bg-[#f4f4f7]'
+                            : 'text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f9f9fb]'
+                        }`}
+                      >
+                        <span className="truncate">{opt.label}</span>
+                        {isSelected && <Check size={12} className="text-[#1c1c21] shrink-0 ml-1.5" />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {!isUnifiedSort && (
+                  <div className="mt-1 pt-1 border-t border-[#ececf0] px-2 py-1 text-[10.5px] text-[#85858d]">
+                    部分列当前配置了独立排序规则
+                  </div>
+                )}
+
+                <div className="my-1 border-t border-[#ececf0]" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleResetAllSorts();
+                    setIsBoardSortOpen(false);
+                  }}
+                  className="w-full px-2 py-1 text-left text-[10.5px] text-[#85858d] hover:text-[#d64545] hover:bg-[#fdf2f2] rounded-[5px] flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RotateCcw size={10} />
+                  <span>恢复全列默认排序</span>
+                </button>
+              </div>
+            )}
           </div>
-
-          <button
-            onClick={() => onRefresh()}
-            className="flex items-center gap-1 text-[11.5px] text-[#85858d] hover:text-[#1c1c21] transition-colors"
-          >
-            <RefreshCw size={12} />
-            <span>刷新</span>
-          </button>
         </div>
       </div>
 
-      {/* 视图模式 1：看板泳道 (默认满高沉浸设计) */}
-      {viewMode === 'kanban' && (
-        <div className="flex-1 min-h-0 px-6 pb-5 pt-1 flex flex-col overflow-hidden">
-          {/* 精致紧凑的状态说明 */}
-          <div className="flex items-center justify-between pb-2.5 shrink-0 text-[11.5px] text-[#85858d]">
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-[#1c1c21]">全自动化流水线看板</span>
-              <span>·</span>
-              <span>共 {filteredTasks.length} 个任务流转中</span>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-[#85858d]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#189a58] inline-block animate-pulse" />
-              <span>Core 守护流水线运行中</span>
-            </div>
-          </div>
-
-          {/* 满高泳道水平容器 */}
-          <div className="flex-1 min-h-0 flex gap-3.5 overflow-x-auto pb-1 items-stretch">
+      {/* 看板泳道 (满高沉浸设计) */}
+      <div className="flex-1 min-h-0 px-6 pb-5 pt-1.5 flex flex-col overflow-hidden">
+        {/* 满高泳道水平容器 */}
+        <div className="flex-1 min-h-0 flex gap-3.5 overflow-x-auto pb-1 items-stretch">
             {COLUMNS.map((col) => {
               const rawTasks = filteredTasks.filter((t) => t.kanbanColumn === col.key);
               const colRule = columnSortConfig[col.key] || DEFAULT_SORT_RULE;
@@ -1635,312 +1578,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
             })}
           </div>
         </div>
-      )}
-
-      {/* 视图模式 2：会话列表 */}
-      {viewMode === 'list' && (
-        <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-3">
-          {/* 横幅卡片 (1:1 还原参考图中的“记录网关对话”卡片) */}
-          <div className="bg-white border border-[#e3e3e8] rounded-[10px] p-3.5 flex items-center justify-between shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-            <div className="flex items-center gap-3">
-              {/* 黑色 macOS 胶囊 Switch 开关 (开启态) */}
-              <div className="w-[34px] h-[20px] rounded-full bg-[#1c1c21] flex items-center px-[2px] cursor-pointer shadow-inner">
-                <div className="w-[16px] h-[16px] rounded-full bg-white ml-auto shadow-sm" />
-              </div>
-
-              <div>
-                <div className="text-[13px] font-medium text-[#1c1c21]">
-                  全自动流水线状态机
-                </div>
-                <div className="text-[11.5px] text-[#85858d] mt-0.5">
-                  已开启：CLI 触发 → AI Agent 接入 → 完成 Hook → Midscene 自动化 UI 测试 → 截图拼接动图 → QA 人工/用例验收。
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={() => onRefresh()}
-              className="flex items-center gap-1 text-[11.5px] text-[#85858d] hover:text-[#4f46e5] transition-colors"
-            >
-              <RefreshCw size={12} />
-              <span>同步状态</span>
-            </button>
-          </div>
-
-          {/* 说明副文 (参考图中的浅灰说明) */}
-          <div className="text-[11px] text-[#85858d] px-1 leading-relaxed">
-            「自动化调度」下的任务由 openLoop Core 守护进程执行。每个流程节点的流转条件与 CLI 工具均可在流程编排中自由编辑；支持随时审批恢复与任务配置修改。
-          </div>
-
-          {/* 任务计数 */}
-          <div className="flex items-center justify-between px-1 pt-1 text-[11.5px] text-[#85858d]">
-            <div className="flex items-center gap-2">
-              <span>共 {filteredTasks.length} 个任务记录</span>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            {/* 目录分组行 */}
-            <div className="bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <div
-                onClick={() => setIsGroupOpen(!isGroupOpen)}
-                className="h-[34px] px-3 flex items-center justify-between bg-[#fbfbfd] border-b border-[#ececf0] cursor-pointer hover:bg-[#f4f4f7] transition-colors"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-[#85858d]">
-                    {isGroupOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  </span>
-                  <span className="text-[12px] font-medium text-[#1c1c21] truncate">
-                    全自动化研发与 QA 测试工作流
-                  </span>
-                  <span className="text-[11px] font-mono text-[#b9b9c2] truncate">
-                    /Users/zhoushitie/My/openLoop
-                  </span>
-                </div>
-                <span className="text-[11px] font-mono text-[#85858d]">
-                  {filteredTasks.length} 个会话任务
-                </span>
-              </div>
-
-              {/* 会话列表行 */}
-              {isGroupOpen && (
-                <div className="divide-y divide-[#ececf0]">
-                  {filteredTasks.length === 0 ? (
-                    <div className="p-8 text-center text-[12px] text-[#85858d]">
-                      暂无任务。点击右上角【+ 新建任务】或在终端使用 openloop task create 发起流程。
-                    </div>
-                  ) : (
-                    filteredTasks.map((task) => {
-                      const wf = wfMap.get(task.workflowId);
-                      const currentNode = wf?.nodes.find((n) => n.id === task.currentNodeId);
-                      const currentNodeMeta = task.currentNodeId
-                        ? resolveNodeMeta(task.currentNodeId, wf, workflows)
-                        : null;
-                      const statusInfo = getTaskStatusInfo(task);
-                      const nodeRuns = Object.values(task.nodeRuns || {});
-                      const isPending = task.status === 'pending';
-                      const isWaiting = task.status === 'waiting_approval';
-                      const isRunning = task.status === 'running';
-
-                      return (
-                        <div
-                          key={task.id}
-                          onClick={() => setSelectedTask(task)}
-                          className="min-h-[50px] px-3 py-2 flex items-center gap-3 hover:bg-[#f9f9fb] transition-colors cursor-pointer group"
-                        >
-                          {/* 标题与副信息 */}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[13px] font-medium text-[#1c1c21] truncate">
-                                {task.title}
-                              </span>
-                              <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
-                                {task.id}
-                              </span>
-                              {task.description && (
-                                <span className="text-[11px] text-[#85858d] truncate max-w-[200px]">
-                                  - {task.description}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[11px] text-[#85858d] flex items-center gap-2 mt-0.5 truncate">
-                              <span
-                                className={`px-1.5 py-[0.5px] rounded text-[9.5px] font-medium ${
-                                  task.kanbanColumn === 'inbox'
-                                    ? 'bg-[#f5f5ff] text-[#6366f1] border border-[#d8d6fb]'
-                                    : 'bg-[#f1f1f4] text-[#63636b] border border-[#ececf0]'
-                                }`}
-                              >
-                                {COLUMN_NAMES[task.kanbanColumn] || task.kanbanColumn}
-                              </span>
-                              <span>·</span>
-                              <span>
-                                {new Date(task.createdAt).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </span>
-                              <span>·</span>
-                              <span>Agent: {currentNode?.name || 'OpenLoop Agent'}</span>
-                              <span>·</span>
-                              <span>流程: {wf?.name || task.workflowId}</span>
-                              {task.workspace && (
-                                <>
-                                  <span>·</span>
-                                  <span
-                                    className="text-[#63636b] font-mono flex items-center gap-1 hover:text-[#4f46e5] transition-colors"
-                                    title={`工程工作区: ${task.workspace} (点击在访达中打开)`}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      api.openPath(task.workspace!);
-                                    }}
-                                  >
-                                    <FolderGit2 size={11} className="text-[#85858d]" />
-                                    <span>{task.workspace.replace(/[/\\]+$/, '').split(/[/\\]/).pop()}</span>
-                                  </span>
-                                </>
-                              )}
-                              {currentNodeMeta && (
-                                <>
-                                  <span>·</span>
-                                  <span className="text-[#4f46e5] font-medium">
-                                    当前: {currentNodeMeta.name}
-                                  </span>
-                                </>
-                              )}
-                              {nodeRuns.some((r) => r.artifacts && r.artifacts.length > 0) && (
-                                <>
-                                  <span>·</span>
-                                  <span className="text-[#4f46e5] font-medium flex items-center gap-1">
-                                    <FileImage size={11} />
-                                    <span>含 Midscene 动图产物</span>
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* 统计指标与状态展示 (修复此前未启动却显示运行中的严重 bug) */}
-                          <div className="text-right shrink-0">
-                            <div className="text-[12px] font-mono font-medium text-[#1c1c21]">
-                              {nodeRuns.length} 节点
-                            </div>
-                            <div className={`text-[11px] font-mono font-medium inline-block ${statusInfo.color}`}>
-                              {statusInfo.label}
-                            </div>
-                          </div>
-
-                          {/* 状态操作胶囊按钮组 */}
-                          <div
-                            className="flex items-center gap-1.5 shrink-0"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {/* 未启动任务：根据泳道属性优先展示流转与启动 */}
-                            {isPending && (
-                              <>
-                                {task.kanbanColumn === 'inbox' ? (
-                                  <button
-                                    disabled={movingTaskId === task.id}
-                                    onClick={() => handleMoveTaskColumn(task.id, 'backlog')}
-                                    className="h-[24px] px-2.5 rounded-[5px] bg-[#f1f1f4] hover:bg-[#e4e4e9] text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all border border-[#e3e3e8]"
-                                  >
-                                    <ArrowRight size={11} />
-                                    <span>{movingTaskId === task.id ? '移动中...' : '移入待处理'}</span>
-                                  </button>
-                                ) : (
-                                  <button
-                                    disabled={movingTaskId === task.id}
-                                    onClick={() => handleMoveTaskColumn(task.id, 'inbox')}
-                                    className="h-[24px] px-2 rounded-[5px] bg-[#f9f9fb] hover:bg-[#eeedfd] text-[#85858d] hover:text-[#6366f1] text-[11px] font-medium flex items-center gap-1 transition-all border border-[#e3e3e8]"
-                                    title="退回 Inbox 想法"
-                                  >
-                                    <Inbox size={11} />
-                                    <span>转想法</span>
-                                  </button>
-                                )}
-                                <button
-                                  disabled={runningTaskId === task.id}
-                                  onClick={() => handleRunTask(task.id)}
-                                  className="h-[24px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
-                                >
-                                  <Play size={11} strokeWidth={2.4} />
-                                  <span>{runningTaskId === task.id ? '启动中...' : '启动任务'}</span>
-                                </button>
-                                <button
-                                  onClick={() => setEditingTask(task)}
-                                  className="h-[24px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white text-[#4b4b53] hover:bg-[#f1f1f4] hover:text-[#1c1c21] text-[11.5px] flex items-center gap-1 transition-all shadow-sm"
-                                  title="编辑任务"
-                                >
-                                  <Edit3 size={11} />
-                                  <span>编辑</span>
-                                </button>
-                              </>
-                            )}
-
-                            {/* 待验收任务：展示 [验收通过] 与 [驳回] */}
-                            {isWaiting && (
-                              <>
-                                <button
-                                  onClick={() => handleApprove(task.id, true)}
-                                  className="h-[24px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
-                                >
-                                  <Check size={11} strokeWidth={2.4} />
-                                  <span>验收通过</span>
-                                </button>
-                                <button
-                                  onClick={() => handleApprove(task.id, false)}
-                                  className="h-[24px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[11.5px] font-medium transition-all"
-                                >
-                                  驳回
-                                </button>
-                              </>
-                            )}
-
-                            {/* 失败/终止任务：展示 [重试] */}
-                            {(task.status === 'failed' || task.status === 'cancelled') && (
-                              <button
-                                disabled={runningTaskId === task.id}
-                                onClick={() => handleRunTask(task.id)}
-                                className="h-[24px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
-                              >
-                                <RotateCcw size={11} strokeWidth={2.4} />
-                                <span>重试</span>
-                              </button>
-                            )}
-
-                            {/* 运行中任务：支持随时终止 */}
-                            {isRunning && (
-                              <button
-                                disabled={cancellingTaskId === task.id}
-                                onClick={() => handleCancelTask(task.id)}
-                                className="h-[24px] px-2 rounded-[5px] border border-[#fbd5d5] bg-[#fdf2f2] hover:bg-[#fee2e2] text-[#d64545] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-sm"
-                              >
-                                <Square size={10} className="fill-current" />
-                                <span>{cancellingTaskId === task.id ? '终止中' : '终止'}</span>
-                              </button>
-                            )}
-
-                            {/* 详情或运行中：可随时查看日志 */}
-                            <button
-                              onClick={() => onOpenTaskLogs(task.id)}
-                              className="h-[24px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#1c1c21] hover:bg-[#f1f1f4] text-[11.5px] font-medium transition-all shadow-sm"
-                            >
-                              <span>查看日志</span>
-                            </button>
-
-                            {/* 如果已启动过，支持在非 pending 时编辑补充说明 */}
-                            {!isPending && (
-                              <button
-                                onClick={() => setEditingTask(task)}
-                                className="w-[24px] h-[24px] rounded-[5px] border border-[#e3e3e8] bg-white text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] flex items-center justify-center transition-all shadow-sm"
-                                title="编辑说明"
-                              >
-                                <Edit3 size={11} />
-                              </button>
-                            )}
-
-                            {/* 删除按钮 */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setTaskToDelete(task);
-                              }}
-                              className="w-[24px] h-[24px] rounded-[5px] border border-[#e3e3e8] bg-white text-[#85858d] hover:text-[#e5484d] hover:bg-[#fbe9e9] flex items-center justify-center transition-all shadow-sm"
-                              title="删除此任务"
-                            >
-                              <Trash2 size={11} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 产物预览弹窗 */}
       {previewArtifact && (
