@@ -147,14 +147,53 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* 底部系统状态 */}
-      <div className="p-2.5 border-t border-[#ececf0] space-y-[2px] shrink-0">
-        <button className="w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-[7px] text-[13px] text-[#4b4b53] hover:bg-[#e9e9ee] hover:text-[#1c1c21] transition-all">
-          <Settings size={15} strokeWidth={1.8} className="text-[#85858d]" />
-          <span>设置</span>
-        </button>
+      {/* 底部系统状态与设置菜单 (1:1 对齐 Magpie 截图左下角设置弹出/展开卡片) */}
+      <div className="p-2 border-t border-[#ececf0] space-y-1.5 shrink-0">
+        {activePluginId.startsWith('settings') ? (
+          <div className="bg-white border border-[#e3e3e8] rounded-[9px] p-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.03)] space-y-[2px]">
+            <div className="px-2 py-1 text-[12px] font-semibold text-[#1c1c21] flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Settings size={13} className="text-[#85858d]" />
+                <span>设置</span>
+              </span>
+            </div>
 
-        <div className="px-2.5 h-[28px] flex items-center gap-2 text-[11px] text-[#85858d] font-mono">
+            <div className="space-y-[1px] pt-0.5">
+              {[
+                { id: 'settings-agent', label: 'Agent 驱动' },
+                { id: 'settings-general', label: '常规与工作区' },
+                { id: 'settings-about', label: '关于与核心' },
+              ].map((sub) => {
+                const isSubActive =
+                  activePluginId === sub.id ||
+                  (activePluginId === 'settings' && sub.id === 'settings-agent');
+                return (
+                  <button
+                    key={sub.id}
+                    onClick={() => onSelectPlugin(sub.id)}
+                    className={`w-full text-left px-2.5 h-[26px] rounded-[6px] text-[12px] transition-all flex items-center ${
+                      isSubActive
+                        ? 'bg-[#e4e4e9] text-[#1c1c21] font-medium'
+                        : 'text-[#4b4b53] hover:bg-[#f1f1f4] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    {sub.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => onSelectPlugin('settings-agent')}
+            className="w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-[7px] text-[13px] text-[#4b4b53] hover:bg-[#e9e9ee] hover:text-[#1c1c21] transition-all"
+          >
+            <Settings size={15} strokeWidth={1.8} className="text-[#85858d]" />
+            <span>设置</span>
+          </button>
+        )}
+
+        <div className="px-2 h-[22px] flex items-center gap-2 text-[11px] text-[#85858d] font-mono">
           <span
             className={`w-[7px] h-[7px] rounded-full shrink-0 ${
               isDaemonConnected ? 'bg-[#189a58]' : 'bg-[#d64545] animate-pulse'

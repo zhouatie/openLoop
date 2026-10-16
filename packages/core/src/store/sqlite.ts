@@ -10,6 +10,10 @@ import {
   KanbanColumn,
   NodeRun,
 } from '../types';
+import { createLogger } from '../logger';
+
+const storeLogger = createLogger('Store:SQLite');
+
 
 export class SqliteStore {
   private db: Database.Database;
@@ -25,6 +29,7 @@ export class SqliteStore {
 
     // 初始化 SQLite 连接
     this.db = new Database(this.dbFilePath);
+    storeLogger.info(`SQLite 数据底座就绪: ${this.dbFilePath}`);
     this.initDatabase();
     this.migrateFromJsonStoreIfPresent();
   }
@@ -94,6 +99,12 @@ export class SqliteStore {
         author TEXT,
         is_builtin INTEGER NOT NULL,
         manifest_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
 
@@ -188,6 +199,65 @@ export class SqliteStore {
     };
 
     this.saveWorkflow(defaultWorkflow);
+
+    // 预置通用 AI 研发流水线
+    const featureDevWorkflow: WorkflowDefinition = {
+      id: 'wf_agent_feature_dev',
+      name: '通用 AI 敏捷特性研发流水线',
+      description: '通用智能体开发流程：由 AI 智能体根据任务需求修改代码并测试自检，随后执行前端编译构建验证，最后由 QA 人工验收门禁把关',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      nodes: [
+        {
+          id: 'node_agent_coder',
+          name: 'AI Agent 编码实现',
+          type: 'agent',
+          position: { x: 100, y: 150 },
+          config: {
+            agentName: 'Pi Coding Agent',
+            prompt: '请根据需求完成代码修改与自测：\n需求：{{task.title}}\n详细说明：{{task.description}}\n请保持工程代码整洁与类型严谨。',
+            timeoutSec: 600,
+          },
+        },
+        {
+          id: 'node_build_verify',
+          name: '前端构建自检',
+          type: 'cli',
+          position: { x: 420, y: 150 },
+          config: {
+            command: 'pnpm --filter @openloop/desktop build:renderer',
+            timeoutSec: 180,
+          },
+        },
+        {
+          id: 'node_qa_gate',
+          name: 'QA 人工验收门禁',
+          type: 'qa-approval',
+          position: { x: 740, y: 150 },
+          config: {
+            approvalPrompt: '请在前端页面验证功能实现是否完整无误',
+            checklist: [
+              '功能逻辑已按需求完整实现',
+              '界面符合 Magpie 极简规范',
+              '编译与构建无报错',
+            ],
+          },
+        },
+      ],
+      edges: [
+        {
+          id: 'edge_agent_to_build',
+          source: 'node_agent_coder',
+          target: 'node_build_verify',
+        },
+        {
+          id: 'edge_build_to_qa',
+          source: 'node_build_verify',
+          target: 'node_qa_gate',
+        },
+      ],
+    };
+    this.saveWorkflow(featureDevWorkflow);
 
     // 预置插件
     const builtinPlugins: PluginManifest[] = [
@@ -512,8 +582,8 @@ export class SqliteStore {
     `);
     try {
       stmt.run(entry.id, entry.taskId, entry.nodeId, entry.timestamp, entry.stream, entry.message);
-    } catch (e) {
-      // 容错处理
+    } catch (e: any) {
+      storeLogger.warn(`持久化日志记录失败: ${e.message}`, { entryId: entry.id, taskId: entry.taskId });
     }
   }
 
@@ -592,6 +662,45 @@ export class SqliteStore {
   public deletePlugin(id: string): boolean {
     const res = this.db.prepare('DELETE FROM plugins WHERE id = ?').run(id);
     return res.changes > 0;
+  }
+
+  public getSettings(): Record<string, any> {
+    const rows = this.db.prepare('SELECT key, value_json FROM settings').all() as any[];
+    const result: Record<string, any> = {
+      agentProvider: 'pi',
+      piModel: '',
+      piThinking: 'medium',
+      piTools: '',
+      defaultCwd: process.cwd(),
+    };
+    for (const r of rows) {
+      try {
+        result[r.key] = JSON.parse(r.value_json);
+      } catch {
+        result[r.key] = r.value_json;
+      }
+    }
+    return result;
+  }
+
+  public updateSettings(settings: Record<string, any>): Record<string, any> {
+    const stmt = this.db.prepare(`
+      INSERT INTO settings (key, value_json, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value_json = excluded.value_json,
+        updated_at = excluded.updated_at
+    `);
+
+    const updateAll = this.db.transaction((obj: Record<string, any>) => {
+      const now = Date.now();
+      for (const [k, v] of Object.entries(obj)) {
+        stmt.run(k, JSON.stringify(v), now);
+      }
+    });
+
+    updateAll(settings);
+    return this.getSettings();
   }
 
   public close() {

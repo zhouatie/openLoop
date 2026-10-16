@@ -7,6 +7,7 @@ import { KanbanView } from './views/KanbanView';
 import { WorkflowListView } from './views/WorkflowListView';
 import { WorkflowEditorView } from './views/WorkflowEditorView';
 import { PluginManagerView } from './views/PluginManagerView';
+import { SettingsView } from './views/SettingsView';
 import { api } from './services/api';
 import { Task, WorkflowDefinition, LogEntry, PluginManifest } from '@openloop/core';
 import { Puzzle } from 'lucide-react';
@@ -110,14 +111,23 @@ export const App: React.FC = () => {
   };
 
   const currentPlugin = plugins.find((p) => p.id === activePluginId);
-  const category =
-    activePluginId === 'kanban' || activePluginId === 'workflow-editor' ? '使用' : '扩展';
+  const isSettings = activePluginId.startsWith('settings');
+  const category = isSettings
+    ? '设置'
+    : activePluginId === 'kanban' || activePluginId === 'workflow-editor'
+    ? '使用'
+    : '扩展';
   
   const editingWorkflow = workflows.find((w) => w.id === editingWorkflowId);
-  const pageTitle =
-    activePluginId === 'workflow-editor' && editingWorkflow
-      ? `流程编排 / ${editingWorkflow.name}`
-      : currentPlugin?.sidebarItem?.title || currentPlugin?.name || 'openLoop';
+  const pageTitle = isSettings
+    ? activePluginId === 'settings-general'
+      ? '常规与工作区'
+      : activePluginId === 'settings-about'
+      ? '关于与核心'
+      : 'Agent 驱动'
+    : activePluginId === 'workflow-editor' && editingWorkflow
+    ? `流程编排 / ${editingWorkflow.name}`
+    : currentPlugin?.sidebarItem?.title || currentPlugin?.name || 'openLoop';
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f4f4f6] text-[#1c1c21]">
@@ -180,10 +190,18 @@ export const App: React.FC = () => {
             <PluginManagerView plugins={plugins} onRefresh={refreshData} />
           )}
 
+          {isSettings && (
+            <SettingsView
+              activeSubTab={activePluginId}
+              onSelectSubTab={setActivePluginId}
+            />
+          )}
+
           {/* 第三方插件 */}
           {activePluginId !== 'kanban' &&
             activePluginId !== 'workflow-editor' &&
-            activePluginId !== 'plugin-manager' && (
+            activePluginId !== 'plugin-manager' &&
+            !isSettings && (
               <div className="flex-1 h-full p-8 flex flex-col items-center justify-center text-center">
                 <div className="w-12 h-12 rounded-[10px] bg-white border border-[#e3e3e8] shadow-sm flex items-center justify-center text-[#4f46e5] mb-3">
                   <Puzzle size={22} />

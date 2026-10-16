@@ -3,7 +3,34 @@ import { Task, WorkflowDefinition, LogEntry, PluginManifest } from '@openloop/co
 const BASE_URL = 'http://127.0.0.1:19888';
 const WS_URL = 'ws://127.0.0.1:19888';
 
+const isDev = import.meta.env?.DEV;
+
+async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const method = options?.method || 'GET';
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      if (isDev) {
+        console.warn(`[UI:API Warning] ${method} ${url} - Status: ${res.status}`, errText);
+      }
+      try {
+        return JSON.parse(errText);
+      } catch {
+        throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
+      }
+    }
+    return await res.json();
+  } catch (error: any) {
+    if (isDev) {
+      console.error(`[UI:API Error] ${method} ${url} 发生异常:`, error);
+    }
+    throw error;
+  }
+}
+
 export class DesktopApiService {
+
   private ws: WebSocket | null = null;
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
   private isConnected = false;
@@ -80,34 +107,29 @@ export class DesktopApiService {
 
   // Workflows
   async getWorkflows(): Promise<WorkflowDefinition[]> {
-    const res = await fetch(`${BASE_URL}/api/workflows`);
-    return res.json();
+    return requestJson<WorkflowDefinition[]>(`${BASE_URL}/api/workflows`);
   }
 
   async saveWorkflow(wf: WorkflowDefinition): Promise<WorkflowDefinition> {
-    const res = await fetch(`${BASE_URL}/api/workflows`, {
+    return requestJson<WorkflowDefinition>(`${BASE_URL}/api/workflows`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(wf),
     });
-    return res.json();
   }
 
   async deleteWorkflow(id: string): Promise<boolean> {
-    const res = await fetch(`${BASE_URL}/api/workflows/${id}`, { method: 'DELETE' });
-    const data = await res.json();
+    const data = await requestJson<{ success: boolean }>(`${BASE_URL}/api/workflows/${id}`, { method: 'DELETE' });
     return data.success;
   }
 
   // Tasks
   async getTasks(): Promise<Task[]> {
-    const res = await fetch(`${BASE_URL}/api/tasks`);
-    return res.json();
+    return requestJson<Task[]>(`${BASE_URL}/api/tasks`);
   }
 
   async getTask(id: string): Promise<Task> {
-    const res = await fetch(`${BASE_URL}/api/tasks/${id}`);
-    return res.json();
+    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}`);
   }
 
   async createTask(params: {
@@ -117,16 +139,15 @@ export class DesktopApiService {
     context?: Record<string, any>;
     autoRun?: boolean;
   }): Promise<Task> {
-    const res = await fetch(`${BASE_URL}/api/tasks`, {
+    return requestJson<Task>(`${BASE_URL}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    return res.json();
   }
 
   async runTask(id: string): Promise<void> {
-    await fetch(`${BASE_URL}/api/tasks/${id}/run`, { method: 'POST' });
+    await requestJson(`${BASE_URL}/api/tasks/${id}/run`, { method: 'POST' });
   }
 
   async updateTask(
@@ -138,55 +159,68 @@ export class DesktopApiService {
       context?: Record<string, any>;
     }
   ): Promise<Task> {
-    const res = await fetch(`${BASE_URL}/api/tasks/${id}`, {
+    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    return res.json();
   }
 
   async deleteTask(id: string): Promise<{ success: boolean; id: string }> {
-    const res = await fetch(`${BASE_URL}/api/tasks/${id}`, {
+    return requestJson<{ success: boolean; id: string }>(`${BASE_URL}/api/tasks/${id}`, {
       method: 'DELETE',
     });
-    return res.json();
   }
 
   async resumeTask(id: string, approved: boolean, feedback?: string): Promise<Task> {
-    const res = await fetch(`${BASE_URL}/api/tasks/${id}/resume`, {
+    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ approved, feedback }),
     });
-    return res.json();
   }
 
   async getTaskLogs(id: string): Promise<LogEntry[]> {
-    const res = await fetch(`${BASE_URL}/api/tasks/${id}/logs`);
-    return res.json();
+    return requestJson<LogEntry[]>(`${BASE_URL}/api/tasks/${id}/logs`);
   }
 
   // Plugins
   async getPlugins(): Promise<PluginManifest[]> {
-    const res = await fetch(`${BASE_URL}/api/plugins`);
-    return res.json();
+    return requestJson<PluginManifest[]>(`${BASE_URL}/api/plugins`);
   }
 
   async registerPlugin(plugin: PluginManifest): Promise<PluginManifest> {
-    const res = await fetch(`${BASE_URL}/api/plugins`, {
+    return requestJson<PluginManifest>(`${BASE_URL}/api/plugins`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(plugin),
     });
-    return res.json();
   }
 
   async deletePlugin(id: string): Promise<{ success: boolean; id: string }> {
-    const res = await fetch(`${BASE_URL}/api/plugins/${encodeURIComponent(id)}`, {
+    return requestJson<{ success: boolean; id: string }>(`${BASE_URL}/api/plugins/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
-    return res.json();
+  }
+
+  // Settings
+  async getSettings(): Promise<Record<string, any>> {
+    return requestJson<Record<string, any>>(`${BASE_URL}/api/settings`);
+  }
+
+  async updateSettings(settings: Record<string, any>): Promise<Record<string, any>> {
+    return requestJson<Record<string, any>>(`${BASE_URL}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+  }
+
+  // Resume task session in terminal
+  async resumeTerminal(taskId: string): Promise<{ success: boolean; command: string; sessionId: string }> {
+    return requestJson<{ success: boolean; command: string; sessionId: string }>(`${BASE_URL}/api/tasks/${taskId}/resume-terminal`, {
+      method: 'POST',
+    });
   }
 }
 

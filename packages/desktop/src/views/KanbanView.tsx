@@ -23,11 +23,24 @@ import {
   FileText,
   RefreshCw,
   GitBranch,
+  Copy,
+  ArrowUpDown,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition, NodeRun } from '@openloop/core';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { KanbanColumnSortDropdown } from '../components/KanbanColumnSortDropdown';
+import {
+  ColumnSortRule,
+  ColumnSortConfigMap,
+  SORT_OPTIONS,
+  DEFAULT_SORT_RULE,
+  loadColumnSortConfig,
+  saveColumnSortConfig,
+  sortTasks,
+  findSortOption,
+} from '../utils/kanbanSort';
 
 interface KanbanViewProps {
   tasks: Task[];
@@ -46,7 +59,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'backlog', title: '待处理', dotColor: 'bg-[#85858d]' },
   { key: 'agent_executing', title: 'Agent 编码中', dotColor: 'bg-[#7c3aed]' },
   { key: 'in_progress', title: '自动化流水线', dotColor: 'bg-[#1d4ed8]' },
-  { key: 'qa_review', title: 'QA 待验收', dotColor: 'bg-[#b45309]' },
+  { key: 'qa_review', title: '待验收', dotColor: 'bg-[#b45309]' },
   { key: 'done', title: '已完成', dotColor: 'bg-[#189a58]' },
 ];
 
@@ -63,6 +76,15 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [copiedSession, setCopiedSession] = useState(false);
+
+  const handleResumeTerminal = async (taskId: string) => {
+    try {
+      await api.resumeTerminal(taskId);
+    } catch (err: any) {
+      alert(`拉起终端失败: ${err.message}`);
+    }
+  };
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [previewArtifact, setPreviewArtifact] = useState<{ name: string; path: string } | null>(null);
@@ -70,6 +92,51 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [isWfDropdownOpen, setIsWfDropdownOpen] = useState(false);
   const wfDropdownRef = useRef<HTMLDivElement>(null);
   const [isGroupOpen, setIsGroupOpen] = useState(true);
+
+  // 看板列排序规则状态 (持久化存取与各列独立/全局联动)
+  const [columnSortConfig, setColumnSortConfig] = useState<ColumnSortConfigMap>(() =>
+    loadColumnSortConfig(COLUMNS.map((c) => c.key))
+  );
+  const [openSortDropdownCol, setOpenSortDropdownCol] = useState<KanbanColumn | null>(null);
+  const [isBoardSortOpen, setIsBoardSortOpen] = useState(false);
+  const boardSortDropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleSetColumnSort = (colKey: KanbanColumn, rule: ColumnSortRule) => {
+    console.log(`[KanbanView] 更新看板列 "${colKey}" 排序规则:`, rule);
+    setColumnSortConfig((prev) => {
+      const next = { ...prev, [colKey]: rule };
+      saveColumnSortConfig(next);
+      return next;
+    });
+  };
+
+  const handleApplySortToAll = (rule: ColumnSortRule) => {
+    console.log('[KanbanView] 应用排序规则至全看板所有列:', rule);
+    const next = {} as ColumnSortConfigMap;
+    for (const col of COLUMNS) {
+      next[col.key] = { ...rule };
+    }
+    saveColumnSortConfig(next);
+    setColumnSortConfig(next);
+  };
+
+  const handleResetColumnSort = (colKey: KanbanColumn) => {
+    console.log(`[KanbanView] 重置看板列 "${colKey}" 排序规则为默认`);
+    handleSetColumnSort(colKey, { ...DEFAULT_SORT_RULE });
+  };
+
+  const handleResetAllSorts = () => {
+    console.log('[KanbanView] 重置所有看板列排序规则为默认');
+    handleApplySortToAll({ ...DEFAULT_SORT_RULE });
+  };
+
+  const firstRule = columnSortConfig[COLUMNS[0].key] || DEFAULT_SORT_RULE;
+  const isUnifiedSort = COLUMNS.every((c) => {
+    const rule = columnSortConfig[c.key] || DEFAULT_SORT_RULE;
+    return rule.field === firstRule.field && rule.direction === firstRule.direction;
+  });
+  const unifiedOption = isUnifiedSort ? findSortOption(firstRule) : null;
+  const unifiedSortLabel = unifiedOption ? unifiedOption.shortLabel : '自定义';
 
   const wfMap = new Map(workflows.map((w) => [w.id, w]));
 
@@ -102,7 +169,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         };
       case 'waiting_approval':
         return {
-          label: '待 QA 验收',
+          label: '待验收',
           color: 'text-[#b45309]',
           badgeClass: 'bg-[#fef3c7] text-[#b45309] border border-[#fde68a]',
           dotClass: 'bg-[#f59e0b]',
@@ -201,6 +268,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       if (e.key === 'Escape') {
         if (isWfDropdownOpen) {
           setIsWfDropdownOpen(false);
+        } else if (isBoardSortOpen) {
+          setIsBoardSortOpen(false);
+        } else if (openSortDropdownCol) {
+          setOpenSortDropdownCol(null);
         } else if (editingTask) {
           setEditingTask(null);
         } else if (previewArtifact) {
@@ -212,19 +283,22 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isWfDropdownOpen, editingTask, previewArtifact, selectedTask]);
+  }, [isWfDropdownOpen, isBoardSortOpen, openSortDropdownCol, editingTask, previewArtifact, selectedTask]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (wfDropdownRef.current && !wfDropdownRef.current.contains(e.target as Node)) {
         setIsWfDropdownOpen(false);
       }
+      if (boardSortDropdownRef.current && !boardSortDropdownRef.current.contains(e.target as Node)) {
+        setIsBoardSortOpen(false);
+      }
     };
-    if (isWfDropdownOpen) {
+    if (isWfDropdownOpen || isBoardSortOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isWfDropdownOpen]);
+  }, [isWfDropdownOpen, isBoardSortOpen]);
 
   const currentWf = workflows.find((w) => w.id === selectedWorkflowFilter);
   const currentWfLabel = selectedWorkflowFilter === 'all' ? '全部工作流' : (currentWf?.name || selectedWorkflowFilter);
@@ -339,6 +413,86 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
               className="w-full h-[28px] bg-white border border-[#e3e3e8] rounded-[6px] px-2.5 text-[12px] text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.04)] focus:border-[#b9b9c2]"
             />
           </div>
+
+          {/* 全看板列统一排序下拉选择器 */}
+          {viewMode === 'kanban' && (
+            <div className="relative" ref={boardSortDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setIsBoardSortOpen(!isBoardSortOpen)}
+                className={`flex items-center gap-1.5 px-2.5 h-[28px] rounded-[6px] bg-white border transition-colors shadow-[0_1px_2px_rgba(0,0,0,0.06)] text-[12px] font-medium text-[#1c1c21] cursor-pointer hover:bg-[#f9f9fb] ${
+                  isBoardSortOpen ? 'border-[#b9b9c2] ring-2 ring-[#1c1c21]/5' : 'border-[#e3e3e8]'
+                }`}
+                title="全看板列统一排序设置"
+              >
+                <ArrowUpDown size={12} className="text-[#85858d]" />
+                <span>排序</span>
+                <span className="text-[#85858d] font-mono text-[11px] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
+                  {unifiedSortLabel}
+                </span>
+                <ChevronDown
+                  size={12}
+                  className={`text-[#85858d] transition-transform duration-150 ${isBoardSortOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {isBoardSortOpen && (
+                <div className="absolute top-[34px] left-0 w-[240px] bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_10px_26px_rgba(20,22,30,0.12)] p-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
+                  <div className="px-2.5 py-1 text-[10.5px] font-semibold text-[#85858d] uppercase tracking-wider flex items-center justify-between border-b border-[#ececf0] pb-1.5 mb-1">
+                    <span>全看板列排序</span>
+                    <span className="text-[10px] font-mono text-[#85858d]">{unifiedSortLabel}</span>
+                  </div>
+
+                  <div className="max-h-[260px] overflow-y-auto space-y-0.5 pr-0.5">
+                    {SORT_OPTIONS.map((opt) => {
+                      const isSelected =
+                        isUnifiedSort &&
+                        opt.field === firstRule.field &&
+                        opt.direction === firstRule.direction;
+
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            handleApplySortToAll({ field: opt.field, direction: opt.direction });
+                            setIsBoardSortOpen(false);
+                          }}
+                          className={`w-full px-2 py-1.5 text-left flex items-center justify-between rounded-[6px] text-[11.5px] transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'text-[#1c1c21] font-medium bg-[#f4f4f7]'
+                              : 'text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f9f9fb]'
+                          }`}
+                        >
+                          <span className="truncate">{opt.label}</span>
+                          {isSelected && <Check size={12} className="text-[#1c1c21] shrink-0 ml-1.5" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {!isUnifiedSort && (
+                    <div className="mt-1 pt-1 border-t border-[#ececf0] px-2 py-1 text-[10.5px] text-[#85858d]">
+                      部分列当前配置了独立排序规则
+                    </div>
+                  )}
+
+                  <div className="my-1 border-t border-[#ececf0]" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleResetAllSorts();
+                      setIsBoardSortOpen(false);
+                    }}
+                    className="w-full px-2 py-1 text-left text-[10.5px] text-[#85858d] hover:text-[#d64545] hover:bg-[#fdf2f2] rounded-[5px] flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw size={10} />
+                    <span>恢复全列默认排序</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 右侧：视图切换与回收站 */}
@@ -397,7 +551,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
           {/* 满高泳道水平容器 */}
           <div className="flex-1 min-h-0 flex gap-3.5 overflow-x-auto pb-1 items-stretch">
             {COLUMNS.map((col) => {
-              const colTasks = filteredTasks.filter((t) => t.kanbanColumn === col.key);
+              const rawTasks = filteredTasks.filter((t) => t.kanbanColumn === col.key);
+              const colRule = columnSortConfig[col.key] || DEFAULT_SORT_RULE;
+              const colTasks = sortTasks(rawTasks, colRule);
 
               return (
                 <div
@@ -405,14 +561,32 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   className="w-[280px] shrink-0 h-full bg-[#ebebef] border border-[#e3e3e8] rounded-[10px] flex flex-col min-h-0 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
                 >
                   {/* 泳道头 */}
-                  <div className="h-[36px] px-3 flex items-center justify-between border-b border-[#e3e3e8] shrink-0 bg-[#ebebef] rounded-t-[10px]">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${col.dotColor}`} />
-                      <span className="text-[12px] font-medium text-[#1c1c21]">{col.title}</span>
+                  <div className="h-[36px] px-3 flex items-center justify-between border-b border-[#e3e3e8] shrink-0 bg-[#ebebef] rounded-t-[10px] relative z-20">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${col.dotColor}`} />
+                      <span className="text-[12px] font-medium text-[#1c1c21] truncate">{col.title}</span>
                     </div>
-                    <span className="h-[18px] px-1.5 rounded-[4px] bg-white border border-[#e3e3e8] text-[11px] font-mono text-[#85858d] flex items-center">
-                      {colTasks.length}
-                    </span>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* 列独立排序规则设置控件 */}
+                      <KanbanColumnSortDropdown
+                        columnKey={col.key}
+                        columnTitle={col.title}
+                        currentRule={colRule}
+                        isOpen={openSortDropdownCol === col.key}
+                        onToggle={() =>
+                          setOpenSortDropdownCol(openSortDropdownCol === col.key ? null : col.key)
+                        }
+                        onClose={() => setOpenSortDropdownCol(null)}
+                        onSelectRule={(rule) => handleSetColumnSort(col.key, rule)}
+                        onApplyToAll={handleApplySortToAll}
+                        onReset={() => handleResetColumnSort(col.key)}
+                      />
+
+                      <span className="h-[18px] px-1.5 rounded-[4px] bg-white border border-[#e3e3e8] text-[11px] font-mono text-[#85858d] flex items-center">
+                        {colTasks.length}
+                      </span>
+                    </div>
                   </div>
 
                   {/* 泳道卡片列表：独立纵向滚动，撑满泳道全高 */}
@@ -429,6 +603,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         const completedCount = nodeRuns.filter((r) => r.status === 'success').length;
                         const totalNodes = wf?.nodes.length || 1;
                         const progressPct = Math.round((completedCount / totalNodes) * 100);
+                        const lastFailedRun = nodeRuns.slice().reverse().find((r) => r.status === 'failed');
+                        const failReason = lastFailedRun?.error || '执行中断或驳回';
 
                         return (
                           <div
@@ -436,15 +612,20 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             onClick={() => setSelectedTask(task)}
                             className={`group bg-white border rounded-[8px] p-3 transition-all cursor-pointer ${
                               task.status === 'waiting_approval'
-                                ? 'border-[#b45309] shadow-sm'
+                                ? 'border-[#1c1c21]/30 shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
+                                : task.status === 'failed'
+                                ? 'border-[#d64545]/30 shadow-[0_1px_2px_rgba(214,69,69,0.06)]'
                                 : 'border-[#e3e3e8] hover:border-[#b9b9c2] shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
                             }`}
                           >
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-[10.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
+                            <div className="flex items-center justify-between mb-1.5 min-w-0">
+                              <span
+                                className="text-[10.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0] truncate max-w-[120px]"
+                                title={task.id}
+                              >
                                 {task.id}
                               </span>
-                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -503,6 +684,29 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </div>
                             )}
 
+                            {/* 失败/驳回任务：克制优雅的错误状态与微型重试胶囊 */}
+                            {task.status === 'failed' && (
+                              <div className="my-2 p-1.5 rounded-[6px] bg-[#fdf2f2] border border-[#fbd5d5] flex items-center justify-between gap-1.5">
+                                <div className="min-w-0 flex items-center gap-1 text-[10.5px] text-[#d64545] font-medium truncate">
+                                  <AlertCircle size={11} className="shrink-0" />
+                                  <span className="truncate" title={failReason}>
+                                    {failReason}
+                                  </span>
+                                </div>
+                                <button
+                                  disabled={runningTaskId === task.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRunTask(task.id);
+                                  }}
+                                  className="shrink-0 h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50"
+                                >
+                                  <RotateCcw size={9.5} />
+                                  <span>重试</span>
+                                </button>
+                              </div>
+                            )}
+
                             {task.status === 'running' && currentNode && (
                               <div className="mb-2 px-2 py-1 rounded-[6px] bg-[#eeedfd] border border-[#d8d6fb] flex items-center gap-1.5">
                                 <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-ping inline-block" />
@@ -513,9 +717,14 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             )}
 
                             {task.status === 'waiting_approval' && (
-                              <div className="my-2 p-2 rounded-[6px] bg-[#fbf0df] border border-[#f3d0a1]">
-                                <div className="text-[11px] font-medium text-[#b45309] mb-1.5">
-                                  Midscene 动图已就绪，等待验收
+                              <div className="my-2 p-2 rounded-[7px] bg-[#f9f9fb] border border-[#e3e3e8] space-y-1.5">
+                                <div className="text-[11px] font-medium text-[#1c1c21] flex items-center justify-between">
+                                  <span className="flex items-center gap-1.5 truncate">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#1c1c21] animate-pulse shrink-0" />
+                                    <span className="truncate">
+                                      {currentNode?.name || 'QA 验收门禁'} · 待确认
+                                    </span>
+                                  </span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                   <button
@@ -524,7 +733,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                       e.stopPropagation();
                                       handleApprove(task.id, true);
                                     }}
-                                    className="flex-1 h-[22px] rounded-[5px] bg-[#189a58] hover:bg-[#147e48] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-50"
+                                    className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-50 shadow-sm"
                                   >
                                     <Check size={11} strokeWidth={2.4} />
                                     验收通过
@@ -535,7 +744,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                       e.stopPropagation();
                                       handleApprove(task.id, false);
                                     }}
-                                    className="h-[22px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white text-[#d64545] hover:bg-[#fbe9e9] text-[11px] font-medium transition-all"
+                                    className="h-[24px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[11px] font-medium transition-all"
                                   >
                                     驳回
                                   </button>
@@ -563,6 +772,25 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </div>
                             )}
 
+                            {task.context?.piSessionId && (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleResumeTerminal(task.id);
+                                }}
+                                className="mb-1.5 flex items-center justify-between text-[10px] text-[#4b4b53] bg-[#f4f4f7] hover:bg-[#eaebee] px-2 py-[2.5px] rounded-[5px] border border-[#e3e3e8] cursor-pointer transition-colors"
+                                title="点击调起终端恢复会话"
+                              >
+                                <span className="flex items-center gap-1.5 font-mono truncate">
+                                  <Terminal size={9.5} className="text-[#85858d]" />
+                                  <span>pi: {task.context.piSessionId.replace('session_', '')}</span>
+                                </span>
+                                <span className="text-[9.5px] text-[#85858d] flex items-center gap-0.5">
+                                  恢复 <ExternalLink size={8.5} />
+                                </span>
+                              </div>
+                            )}
+
                             <div className="pt-1.5 border-t border-[#ececf0] flex items-center justify-between text-[10.5px] text-[#85858d]">
                               <span>
                                 节点 {completedCount}/{totalNodes}
@@ -574,7 +802,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                       ? 'bg-[#189a58]'
                                       : task.status === 'failed'
                                       ? 'bg-[#d64545]'
-                                      : 'bg-[#4f46e5]'
+                                      : 'bg-[#1c1c21]'
                                   }`}
                                   style={{ width: `${progressPct}%` }}
                                 />
@@ -756,20 +984,20 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </>
                             )}
 
-                            {/* 待 QA 验收任务：展示 [验收通过] 与 [驳回] */}
+                            {/* 待验收任务：展示 [验收通过] 与 [驳回] */}
                             {isWaiting && (
                               <>
                                 <button
                                   onClick={() => handleApprove(task.id, true)}
-                                  className="h-[24px] px-2.5 rounded-[5px] bg-[#189a58] hover:bg-[#147e48] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
+                                  className="h-[24px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
                                 >
                                   <Check size={11} strokeWidth={2.4} />
                                   <span>验收通过</span>
                                 </button>
                                 <button
                                   onClick={() => handleApprove(task.id, false)}
-                                  className="h-[24px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white text-[#d64545] hover:bg-[#fbe9e9] text-[11.5px] font-medium transition-all"
-                                  >
+                                  className="h-[24px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[11.5px] font-medium transition-all"
+                                >
                                   驳回
                                 </button>
                               </>
@@ -780,7 +1008,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               <button
                                 disabled={runningTaskId === task.id}
                                 onClick={() => handleRunTask(task.id)}
-                                className="h-[24px] px-2.5 rounded-[5px] bg-[#e5484d] hover:bg-[#c93b40] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
+                                className="h-[24px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
                               >
                                 <RotateCcw size={11} strokeWidth={2.4} />
                                 <span>重试</span>
@@ -958,6 +1186,49 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
               </div>
             </div>
 
+            {/* Pi Agent 会话凭证与终端恢复 */}
+            {selectedTask.context?.piSessionId && (
+              <div className="p-3 rounded-[9px] border border-[#e0e0ea] bg-[#fafaff] space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-[12px] font-semibold text-[#1c1c21]">
+                    <Terminal size={13} className="text-[#4f46e5]" />
+                    <span>Pi Agent 会话凭证</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-[#4f46e5] bg-[#eeedfd] px-1.5 py-[1px] rounded font-medium">
+                    可终端接管
+                  </span>
+                </div>
+
+                <div className="bg-[#1c1c21] text-white rounded-[6px] px-2.5 py-1.5 text-[11px] font-mono flex items-center justify-between select-all">
+                  <span className="truncate mr-2">pi --session {selectedTask.context.piSessionId}</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`pi --session ${selectedTask.context.piSessionId}`);
+                      setCopiedSession(true);
+                      setTimeout(() => setCopiedSession(false), 2000);
+                    }}
+                    className="shrink-0 text-[10.5px] text-[#a5a5b0] hover:text-white flex items-center gap-1 transition-colors"
+                  >
+                    {copiedSession ? <Check size={11} className="text-[#189a58]" /> : <Copy size={11} />}
+                    <span>{copiedSession ? '已复制' : '复制'}</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between pt-0.5">
+                  <span className="text-[11px] text-[#85858d]">
+                    任务独立会话，历史与上下文完整保留
+                  </span>
+                  <button
+                    onClick={() => handleResumeTerminal(selectedTask.id)}
+                    className="h-[24px] px-2.5 rounded-[5px] bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
+                  >
+                    <ExternalLink size={11} />
+                    <span>在终端打开</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* 节点执行时序 */}
             <div>
               <div className="font-medium text-[#1c1c21] mb-2">节点执行时序</div>
@@ -1013,12 +1284,23 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
               </button>
             )}
 
+            {selectedTask.status === 'failed' && (
+              <button
+                disabled={runningTaskId === selectedTask.id}
+                onClick={() => handleRunTask(selectedTask.id)}
+                className="w-full h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm"
+              >
+                <RotateCcw size={13} strokeWidth={2.4} />
+                <span>{runningTaskId === selectedTask.id ? '正在重新启动...' : '重新执行此任务'}</span>
+              </button>
+            )}
+
             {selectedTask.status === 'waiting_approval' && (
               <div className="flex gap-2">
                 <button
                   disabled={approvingId === selectedTask.id}
                   onClick={() => handleApprove(selectedTask.id, true)}
-                  className="flex-1 h-[32px] rounded-[7px] bg-[#189a58] hover:bg-[#147e48] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                  className="flex-1 h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
                 >
                   <Check size={13} strokeWidth={2.4} />
                   <span>验收通过</span>
@@ -1026,7 +1308,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                 <button
                   disabled={approvingId === selectedTask.id}
                   onClick={() => handleApprove(selectedTask.id, false)}
-                  className="h-[32px] px-3.5 rounded-[7px] border border-[#e3e3e8] bg-white text-[#d64545] hover:bg-[#fbe9e9] text-[12px] font-medium transition-all"
+                  className="h-[32px] px-4 rounded-[7px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[12px] font-medium transition-all"
                 >
                   驳回
                 </button>

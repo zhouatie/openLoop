@@ -77,6 +77,15 @@ export class Store {
     return this.sqlite.deletePlugin(id);
   }
 
+  // Settings
+  public getSettings(): Record<string, any> {
+    return this.sqlite.getSettings();
+  }
+
+  public updateSettings(settings: Record<string, any>): Record<string, any> {
+    return this.sqlite.updateSettings(settings);
+  }
+
   public close(): void {
     this.sqlite.close();
   }
