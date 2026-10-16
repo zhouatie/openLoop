@@ -1,0 +1,81 @@
+import React from 'react';
+import { PanelLeft, ArrowUp, RefreshCw, Plus, Terminal } from 'lucide-react';
+
+interface HeaderProps {
+  category: string;
+  title: string;
+  isDaemonConnected: boolean;
+  onOpenCreateTask: () => void;
+  onToggleLogs: () => void;
+  isLogsOpen: boolean;
+  unreadLogsCount: number;
+  onRefresh: () => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({
+  category,
+  title,
+  isDaemonConnected,
+  onOpenCreateTask,
+  onToggleLogs,
+  isLogsOpen,
+  unreadLogsCount,
+  onRefresh,
+}) => {
+  return (
+    <header className="h-[46px] border-b border-[#e3e3e8] bg-white px-4 flex items-center justify-between select-none shrink-0">
+      {/* 左侧：分栏与面包屑 */}
+      <div className="flex items-center gap-2.5">
+        <button
+          className="w-[26px] h-[26px] rounded-[7px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-colors"
+          title="切换侧边栏"
+        >
+          <PanelLeft size={15} strokeWidth={1.8} />
+        </button>
+
+        <div className="flex items-center gap-1.5 text-[12.5px]">
+          <span className="text-[#85858d]">{category}</span>
+          <span className="text-[#b9b9c2]">/</span>
+          <span className="text-[#1c1c21] font-medium">{title}</span>
+        </div>
+      </div>
+
+      {/* 右侧：动作按钮 */}
+      <div className="flex items-center gap-2">
+        {/* 新建任务 */}
+        <button
+          onClick={onOpenCreateTask}
+          className="flex items-center gap-1.5 h-[26px] px-2.5 rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95"
+        >
+          <Plus size={13} strokeWidth={2.4} />
+          <span>新建任务</span>
+        </button>
+
+        {/* 终端实时日志 */}
+        <button
+          onClick={onToggleLogs}
+          className={`flex items-center gap-1.5 h-[26px] px-2.5 rounded-[7px] text-[12px] border transition-all ${
+            isLogsOpen
+              ? 'bg-[#e9e9ee] border-[#e3e3e8] text-[#1c1c21] font-medium'
+              : 'border-[#e3e3e8] bg-white text-[#4b4b53] hover:bg-[#f1f1f4] hover:text-[#1c1c21]'
+          }`}
+        >
+          <Terminal size={13} strokeWidth={1.8} className="text-[#85858d]" />
+          <span>日志</span>
+          {unreadLogsCount > 0 && (
+            <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] inline-block" />
+          )}
+        </button>
+
+        {/* 更新/刷新胶囊 */}
+        <button
+          onClick={onRefresh}
+          className="h-[26px] px-2 rounded-[7px] border border-[#e3e3e8] bg-white text-[#4b4b53] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-all flex items-center justify-center"
+          title="刷新数据"
+        >
+          <RefreshCw size={13} strokeWidth={1.8} />
+        </button>
+      </div>
+    </header>
+  );
+};

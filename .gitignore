@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+dist-electron/
+build/
+out/
+
+# OpenSpec (per user request: openSpec不需要提交)
+openspec/
+.openspec/
+
+# Pi & logs
+*.log
+.run.log
+.pi/
+.DS_Store
+*.local
+
+# openLoop runtime data
+.openloop/

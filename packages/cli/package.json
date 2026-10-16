@@ -1,0 +1,23 @@
+{
+  "name": "@openloop/cli",
+  "version": "0.1.0",
+  "description": "Command-line interface for openLoop automation platform",
+  "bin": {
+    "openloop": "./dist/index.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node ./dist/index.js"
+  },
+  "dependencies": {
+    "@openloop/core": "workspace:*",
+    "commander": "^13.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/ws": "^8.5.14",
+    "typescript": "^5.7.3"
+  }
+}
