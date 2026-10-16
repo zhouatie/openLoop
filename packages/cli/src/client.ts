@@ -1,6 +1,6 @@
 import http from 'http';
 import { WebSocket } from 'ws';
-import { Task, WorkflowDefinition, LogEntry, PluginManifest } from '@openloop/core';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn } from '@openloop/core';
 
 export class OpenLoopClient {
   private baseUrl: string;
@@ -76,8 +76,22 @@ export class OpenLoopClient {
     description?: string;
     context?: Record<string, any>;
     autoRun?: boolean;
+    kanbanColumn?: KanbanColumn;
   }): Promise<Task> {
     return this.request('/api/tasks', { method: 'POST', body: params });
+  }
+
+  async updateTask(
+    taskId: string,
+    params: {
+      title?: string;
+      description?: string;
+      workflowId?: string;
+      context?: Record<string, any>;
+      kanbanColumn?: KanbanColumn;
+    }
+  ): Promise<Task> {
+    return this.request(`/api/tasks/${taskId}`, { method: 'PATCH', body: params });
   }
 
   async runTask(taskId: string): Promise<{ success: boolean }> {

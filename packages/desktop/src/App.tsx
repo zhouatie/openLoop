@@ -9,7 +9,7 @@ import { WorkflowEditorView } from './views/WorkflowEditorView';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
 import { api } from './services/api';
-import { Task, WorkflowDefinition, LogEntry, PluginManifest } from '@openloop/core';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn } from '@openloop/core';
 import { Puzzle } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -105,9 +105,25 @@ export const App: React.FC = () => {
     workflowId: string;
     description: string;
     autoRun: boolean;
+    kanbanColumn?: KanbanColumn;
   }) => {
+    if (import.meta.env?.DEV) {
+      console.log('[App] 创建任务请求:', params);
+    }
     await api.createTask(params);
     refreshData();
+  };
+
+  const handleTaskUpdate = (updatedTask: Task) => {
+    setTasks((prev) => {
+      const idx = prev.findIndex((t) => t.id === updatedTask.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = updatedTask;
+        return next;
+      }
+      return [updatedTask, ...prev];
+    });
   };
 
   const currentPlugin = plugins.find((p) => p.id === activePluginId);
@@ -164,6 +180,7 @@ export const App: React.FC = () => {
               workflows={workflows}
               onOpenTaskLogs={handleOpenTaskLogs}
               onRefresh={refreshData}
+              onTaskUpdate={handleTaskUpdate}
             />
           )}
 

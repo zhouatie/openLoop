@@ -5,7 +5,7 @@ import { spawn } from 'child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Store } from '../store';
 import { DagEngine } from '../engine/dag-engine';
-import { Task, WorkflowDefinition, PluginManifest, TaskSessionState } from '../types';
+import { Task, WorkflowDefinition, PluginManifest, TaskSessionState, KanbanColumn } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 
@@ -335,11 +335,15 @@ export class OpenLoopServer {
 
       if (pathname === '/api/tasks' && method === 'POST') {
         const body = await this.parseJsonBody(req);
-        const { title, workflowId, description, context, autoRun = true } = body;
+        const { title, workflowId, description, context, autoRun, kanbanColumn } = body;
         
         if (!workflowId) {
           return this.sendJson(res, 400, { error: 'workflowId is required' }, reqMeta);
         }
+
+        const validColumn: KanbanColumn = kanbanColumn || 'backlog';
+        // 若未显式传入 autoRun：当目标泳道为 inbox 时默认为 false，其余默认为 true
+        const shouldAutoRun = autoRun !== undefined ? !!autoRun : (validColumn !== 'inbox');
 
         const task: Task = {
           id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -347,7 +351,7 @@ export class OpenLoopServer {
           description: description || '',
           workflowId,
           status: 'pending',
-          kanbanColumn: 'backlog',
+          kanbanColumn: validColumn,
           createdAt: Date.now(),
           updatedAt: Date.now(),
           nodeRuns: {},
@@ -355,7 +359,7 @@ export class OpenLoopServer {
         };
 
         serverLogger.info(
-          `[Tasks:Create] 创建新任务: "${task.title}" (ID: ${task.id}, Workflow: ${workflowId}, AutoRun: ${autoRun})`,
+          `[Tasks:Create] 创建新任务: "${task.title}" (ID: ${task.id}, Workflow: ${workflowId}, Column: ${task.kanbanColumn}, AutoRun: ${shouldAutoRun})`,
           { context: task.context },
           { taskId: task.id }
         );
@@ -363,7 +367,7 @@ export class OpenLoopServer {
         this.store.saveTask(task);
         this.broadcast({ type: 'task:new', data: task });
 
-        if (autoRun) {
+        if (shouldAutoRun) {
           serverLogger.info(`[Tasks:AutoRun] 异步启动任务调度: ${task.id}`, undefined, { taskId: task.id });
           setImmediate(() => {
             this.engine.runTask(task.id).catch((err) => {
@@ -390,7 +394,7 @@ export class OpenLoopServer {
         const existing = this.store.getTask(taskId);
         if (!existing) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
         const body = await this.parseJsonBody(req);
-        const { title, description, workflowId, context } = body;
+        const { title, description, workflowId, context, kanbanColumn } = body;
         if (title !== undefined) existing.title = title.trim();
         if (description !== undefined) existing.description = description.trim();
         if (workflowId !== undefined && existing.status === 'pending') {
@@ -398,6 +402,9 @@ export class OpenLoopServer {
         }
         if (context !== undefined) {
           existing.context = { ...existing.context, ...context };
+        }
+        if (kanbanColumn !== undefined) {
+          existing.kanbanColumn = kanbanColumn;
         }
         existing.updatedAt = Date.now();
         serverLogger.info(`[Tasks:Update] 更新任务信息: ${taskId}`, { updatedFields: Object.keys(body) }, { taskId });

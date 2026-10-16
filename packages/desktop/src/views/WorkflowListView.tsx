@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Workflow,
   Plus,
@@ -17,9 +17,14 @@ import {
   ChevronRight,
   Boxes,
   Rocket,
+  Pin,
+  ArrowUpDown,
+  Check,
 } from 'lucide-react';
 import { WorkflowDefinition, NodeType } from '@openloop/core';
 import { api } from '../services/api';
+
+const STORAGE_KEY_PINNED_WORKFLOWS = 'openloop_pinned_workflow_ids';
 
 interface WorkflowListViewProps {
   workflows: WorkflowDefinition[];
@@ -41,25 +46,128 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   const [templateType, setTemplateType] = useState<'empty' | 'standard' | 'deploy'>('standard');
   const [loading, setLoading] = useState(false);
 
+  // 置顶与多维排序状态
+  const [pinnedIds, setPinnedIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_PINNED_WORKFLOWS);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [sortBy, setSortBy] = useState<'updated' | 'created' | 'name'>('updated');
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
+
+  // 点击外部收起排序下拉菜单
   useEffect(() => {
-    if (!isCreateModalOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsCreateModalOpen(false);
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
+        setIsSortOpen(false);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isCreateModalOpen]);
+    if (isSortOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isSortOpen]);
 
-  const filteredWorkflows = workflows.filter((w) => {
-    if (!searchTerm) return true;
-    return (
-      w.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      w.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (w.description && w.description.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
-  });
+  // 格式化友好时间显示
+  const formatFriendlyTime = (timestamp: number) => {
+    if (!timestamp) return '未知时间';
+    const now = Date.now();
+    const diff = now - timestamp;
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+
+    if (diff < minute) {
+      return '刚刚更新';
+    }
+    if (diff < hour) {
+      return `${Math.floor(diff / minute)} 分钟前`;
+    }
+    if (diff < day) {
+      return `${Math.floor(diff / hour)} 小时前`;
+    }
+    if (diff < 2 * day) {
+      return '昨天';
+    }
+    return new Date(timestamp).toLocaleDateString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+    });
+  };
+
+  // 置顶切换
+  const handleTogglePin = (e: React.MouseEvent, wf: WorkflowDefinition) => {
+    e.stopPropagation();
+    setPinnedIds((prev) => {
+      const isPinned = prev.includes(wf.id);
+      const next = isPinned ? prev.filter((id) => id !== wf.id) : [wf.id, ...prev];
+      try {
+        localStorage.setItem(STORAGE_KEY_PINNED_WORKFLOWS, JSON.stringify(next));
+      } catch (err) {
+        console.warn('[WorkflowListView] 保存置顶失败:', err);
+      }
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowListView] 切换流程置顶状态:', {
+          id: wf.id,
+          name: wf.name,
+          pinned: !isPinned,
+          totalPinned: next.length,
+        });
+      }
+      return next;
+    });
+  };
+
+  // 切换排序方式
+  const handleSortChange = (newSort: 'updated' | 'created' | 'name') => {
+    setSortBy(newSort);
+    setIsSortOpen(false);
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowListView] 切换排序规则:', newSort);
+    }
+  };
+
+  // 综合置顶与排序规则过滤流水线
+  const filteredWorkflows = useMemo(() => {
+    return [...workflows]
+      .filter((w) => {
+        if (!searchTerm) return true;
+        const kw = searchTerm.toLowerCase();
+        return (
+          w.name.toLowerCase().includes(kw) ||
+          w.id.toLowerCase().includes(kw) ||
+          (w.description && w.description.toLowerCase().includes(kw))
+        );
+      })
+      .sort((a, b) => {
+        const aPinned = pinnedIds.includes(a.id);
+        const bPinned = pinnedIds.includes(b.id);
+        // 置顶优先在最顶部
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+
+        if (sortBy === 'updated') {
+          const aTime = a.updatedAt || a.createdAt || 0;
+          const bTime = b.updatedAt || b.createdAt || 0;
+          return bTime - aTime;
+        }
+        if (sortBy === 'created') {
+          const aTime = a.createdAt || 0;
+          const bTime = b.createdAt || 0;
+          return bTime - aTime;
+        }
+        if (sortBy === 'name') {
+          return a.name.localeCompare(b.name, 'zh-CN');
+        }
+        return 0;
+      });
+  }, [workflows, searchTerm, pinnedIds, sortBy]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,6 +376,63 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
             />
           </div>
 
+          {/* 排序方式选择下拉 */}
+          <div className="relative" ref={sortMenuRef}>
+            <button
+              onClick={() => setIsSortOpen(!isSortOpen)}
+              className={`h-[28px] px-2.5 rounded-[6px] border text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${
+                isSortOpen
+                  ? 'border-[#4f46e5] bg-white text-[#4f46e5]'
+                  : 'border-[#e3e3e8] bg-white text-[#4b4b53] hover:text-[#1c1c21] hover:border-[#b9b9c2]'
+              }`}
+            >
+              <ArrowUpDown size={11} className={isSortOpen ? 'text-[#4f46e5]' : 'text-[#85858d]'} />
+              <span>
+                {sortBy === 'updated' && '最近更新'}
+                {sortBy === 'created' && '创建时间'}
+                {sortBy === 'name' && '名称 A-Z'}
+              </span>
+            </button>
+
+            {isSortOpen && (
+              <div className="absolute right-0 top-[calc(100%+4px)] w-32 bg-white border border-[#e3e3e8] rounded-[8px] p-1 shadow-[0_8px_20px_rgba(0,0,0,0.08)] z-30 animate-in fade-in zoom-in-95 duration-100 text-[11.5px]">
+                <button
+                  onClick={() => handleSortChange('updated')}
+                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded-[5px] text-left transition-colors ${
+                    sortBy === 'updated'
+                      ? 'bg-[#eeedfd] text-[#4f46e5] font-medium'
+                      : 'text-[#4b4b53] hover:bg-[#f4f4f6]'
+                  }`}
+                >
+                  <span>最近更新</span>
+                  {sortBy === 'updated' && <Check size={11} strokeWidth={2.4} />}
+                </button>
+                <button
+                  onClick={() => handleSortChange('created')}
+                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded-[5px] text-left transition-colors ${
+                    sortBy === 'created'
+                      ? 'bg-[#eeedfd] text-[#4f46e5] font-medium'
+                      : 'text-[#4b4b53] hover:bg-[#f4f4f6]'
+                  }`}
+                >
+                  <span>创建时间</span>
+                  {sortBy === 'created' && <Check size={11} strokeWidth={2.4} />}
+                </button>
+                <button
+                  onClick={() => handleSortChange('name')}
+                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded-[5px] text-left transition-colors ${
+                    sortBy === 'name'
+                      ? 'bg-[#eeedfd] text-[#4f46e5] font-medium'
+                      : 'text-[#4b4b53] hover:bg-[#f4f4f6]'
+                  }`}
+                >
+                  <span>名称 A-Z</span>
+                  {sortBy === 'name' && <Check size={11} strokeWidth={2.4} />}
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={() => setIsCreateModalOpen(true)}
             className="flex items-center gap-1.5 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-sm"
@@ -296,29 +461,43 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           <div className="bg-white border border-[#e3e3e8] rounded-[10px] divide-y divide-[#ececf0] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
             {filteredWorkflows.map((wf) => {
               const nodeTypes = Array.from(new Set(wf.nodes.map((n) => n.type)));
-              const updatedDate = new Date(wf.updatedAt || wf.createdAt).toLocaleDateString();
+              const isPinned = pinnedIds.includes(wf.id);
+              const friendlyTime = formatFriendlyTime(wf.updatedAt || wf.createdAt);
 
               return (
                 <div
                   key={wf.id}
                   onClick={() => onSelectWorkflow(wf.id)}
-                  className="px-4 py-2.5 min-h-[56px] flex items-center justify-between hover:bg-[#f9f9fb] transition-colors cursor-pointer group"
+                  className={`px-4 py-2.5 min-h-[56px] flex items-center justify-between transition-colors cursor-pointer group ${
+                    isPinned ? 'bg-[#fafafc] hover:bg-[#f5f5fa]' : 'hover:bg-[#f9f9fb]'
+                  }`}
                 >
                   <div className="flex items-center gap-3.5 min-w-0 flex-1 pr-5">
-                    {/* 左侧工作流图标 */}
-                    <div className="w-8 h-8 rounded-[7px] bg-[#f4f4f7] border border-[#ececf0] flex items-center justify-center text-[#1c1c21] group-hover:border-[#b9b9c2] transition-colors shrink-0">
-                      <Workflow size={15} strokeWidth={2} />
+                    {/* 左侧工作流图标与置顶快捷触发 */}
+                    <div className="relative shrink-0">
+                      <div className="w-8 h-8 rounded-[7px] bg-[#f4f4f7] border border-[#ececf0] flex items-center justify-center text-[#1c1c21] group-hover:border-[#b9b9c2] transition-colors">
+                        <Workflow size={15} strokeWidth={2} />
+                      </div>
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      {/* 第一行：工作流名称 + 标识胶囊 + 节点环节能力微徽章 */}
+                      {/* 第一行：工作流名称 + 置顶胶囊 + 标识胶囊 + 节点环节能力微徽章 */}
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="text-[13px] font-semibold text-[#1c1c21] shrink-0">
                           {wf.name}
                         </span>
+
+                        {isPinned && (
+                          <span className="inline-flex items-center gap-0.5 text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded-[4px] shrink-0">
+                            <Pin size={8.5} className="rotate-45 fill-current" />
+                            已置顶
+                          </span>
+                        )}
+
                         <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[0.5px] rounded border border-[#ececf0] shrink-0">
                           {wf.id}
                         </span>
+
                         <div className="flex items-center gap-1 ml-1 overflow-hidden">
                           {nodeTypes.map((type) => getNodeBadge(type))}
                         </div>
@@ -336,7 +515,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                           <span>·</span>
                           <div className="flex items-center gap-1">
                             <Clock size={10.5} />
-                            <span>{updatedDate}</span>
+                            <span>{friendlyTime}</span>
                           </div>
                         </div>
                       </div>
@@ -348,6 +527,24 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     className="flex items-center gap-2 shrink-0 border-l border-[#ececf0] pl-4"
                     onClick={(e) => e.stopPropagation()}
                   >
+                    {/* 置顶切换图钉按钮 */}
+                    <button
+                      onClick={(e) => handleTogglePin(e, wf)}
+                      title={isPinned ? '取消置顶' : '固定在顶部'}
+                      className={`w-[25px] h-[25px] rounded-[5px] flex items-center justify-center transition-all ${
+                        isPinned
+                          ? 'bg-[#eeedfd] text-[#4f46e5] border border-[#d8d6fb] shadow-sm'
+                          : 'text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <Pin
+                        size={12}
+                        className={`transition-transform duration-200 ${
+                          isPinned ? 'rotate-45 fill-current' : 'hover:-rotate-12'
+                        }`}
+                      />
+                    </button>
+
                     <button
                       onClick={(e) => handleRunWorkflow(e, wf)}
                       className="h-[25px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"

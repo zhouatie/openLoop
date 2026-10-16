@@ -1,4 +1,4 @@
-import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, OpenLoopSettings } from '@openloop/core';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, OpenLoopSettings, KanbanColumn } from '@openloop/core';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
@@ -165,7 +165,11 @@ export class DesktopApiService {
     description?: string;
     context?: Record<string, any>;
     autoRun?: boolean;
+    kanbanColumn?: KanbanColumn;
   }): Promise<Task> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:API] 创建新任务:', params);
+    }
     return requestJson<Task>(`${BASE_URL}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -174,10 +178,16 @@ export class DesktopApiService {
   }
 
   async runTask(id: string): Promise<void> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:API] 触发任务启动:', id);
+    }
     await requestJson(`${BASE_URL}/api/tasks/${id}/run`, { method: 'POST' });
   }
 
   async cancelTask(id: string): Promise<Task> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:API] 请求终止任务:', id);
+    }
     const res = await requestJson<{ success: boolean; task: Task }>(`${BASE_URL}/api/tasks/${id}/cancel`, {
       method: 'POST',
     });
@@ -191,13 +201,24 @@ export class DesktopApiService {
       description?: string;
       workflowId?: string;
       context?: Record<string, any>;
+      kanbanColumn?: KanbanColumn;
     }
   ): Promise<Task> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 更新任务 [${id}]:`, params);
+    }
     return requestJson<Task>(`${BASE_URL}/api/tasks/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
+  }
+
+  async moveTaskColumn(id: string, column: KanbanColumn): Promise<Task> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 流转任务 [${id}] 至泳道: ${column}`);
+    }
+    return this.updateTask(id, { kanbanColumn: column });
   }
 
   async deleteTask(id: string): Promise<{ success: boolean; id: string }> {

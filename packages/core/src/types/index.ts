@@ -2,7 +2,7 @@ export type NodeStatus = 'pending' | 'running' | 'waiting_approval' | 'success' 
 
 export type TaskStatus = 'pending' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
 
-export type KanbanColumn = 'backlog' | 'in_progress' | 'agent_executing' | 'qa_review' | 'done';
+export type KanbanColumn = 'inbox' | 'backlog' | 'in_progress' | 'agent_executing' | 'qa_review' | 'done';
 
 export type NodeType = 
   | 'cli'             // 通用 CLI 脚本执行

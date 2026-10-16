@@ -33,6 +33,9 @@ import {
   Wrench,
   Bot,
   User,
+  Inbox,
+  Plus,
+  Lightbulb,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage } from '@openloop/core';
 import { api } from '../services/api';
@@ -54,7 +57,8 @@ interface KanbanViewProps {
   tasks: Task[];
   workflows: WorkflowDefinition[];
   onOpenTaskLogs: (taskId: string) => void;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
+  onTaskUpdate?: (task: Task) => void;
 }
 
 interface ColumnDef {
@@ -64,6 +68,7 @@ interface ColumnDef {
 }
 
 const COLUMNS: ColumnDef[] = [
+  { key: 'inbox', title: 'Inbox', dotColor: 'bg-[#6366f1]' },
   { key: 'backlog', title: '待处理', dotColor: 'bg-[#85858d]' },
   { key: 'agent_executing', title: 'Agent 编码中', dotColor: 'bg-[#7c3aed]' },
   { key: 'in_progress', title: '自动化流水线', dotColor: 'bg-[#1d4ed8]' },
@@ -71,11 +76,21 @@ const COLUMNS: ColumnDef[] = [
   { key: 'done', title: '已完成', dotColor: 'bg-[#189a58]' },
 ];
 
+const COLUMN_NAMES: Record<KanbanColumn, string> = {
+  inbox: 'Inbox 收集箱',
+  backlog: '待处理',
+  agent_executing: 'Agent 编码中',
+  in_progress: '自动化流水线',
+  qa_review: '待验收',
+  done: '已完成',
+};
+
 export const KanbanView: React.FC<KanbanViewProps> = ({
   tasks,
   workflows,
   onOpenTaskLogs,
   onRefresh,
+  onTaskUpdate,
 }) => {
   // 默认使用看板泳道，同时支持无缝切会话列表
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('kanban');
@@ -113,6 +128,12 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [isWfDropdownOpen, setIsWfDropdownOpen] = useState(false);
   const wfDropdownRef = useRef<HTMLDivElement>(null);
   const [isGroupOpen, setIsGroupOpen] = useState(true);
+
+  // Inbox 列快速添加想法状态
+  const [isQuickAddingIdea, setIsQuickAddingIdea] = useState(false);
+  const [quickIdeaTitle, setQuickIdeaTitle] = useState('');
+  const [isSubmittingQuickIdea, setIsSubmittingQuickIdea] = useState(false);
+  const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
 
   // 任务侧边栏 Tab 与 Agent 会话实时交互状态
   const [drawerTab, setDrawerTab] = useState<'overview' | 'session'>('overview');
@@ -328,13 +349,92 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   const handleRunTask = async (taskId: string) => {
     setRunningTaskId(taskId);
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanView] 手动启动流水线调度:', taskId);
+    }
     try {
       await api.runTask(taskId);
       onRefresh();
     } catch (e: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 启动任务失败:', e);
+      }
       alert(`启动任务失败: ${e.message}`);
     } finally {
       setRunningTaskId(null);
+    }
+  };
+
+  const handleMoveTaskColumn = async (taskId: string, targetCol: KanbanColumn) => {
+    const currentTask = tasks.find((t) => t.id === taskId);
+    if (!currentTask) return;
+
+    setMovingTaskId(taskId);
+    if (import.meta.env?.DEV) {
+      console.log(`[KanbanView] 流转任务 [${taskId}] 到泳道: ${targetCol}`);
+    }
+
+    // 1. 立即乐观更新，卡片瞬间移入目标泳道，提供零延迟交互体验
+    const optimisticTask: Task = { ...currentTask, kanbanColumn: targetCol };
+    onTaskUpdate?.(optimisticTask);
+    if (selectedTask?.id === taskId) {
+      setSelectedTask(optimisticTask);
+    }
+
+    try {
+      const updated = await api.moveTaskColumn(taskId, targetCol);
+      if (updated && onTaskUpdate) {
+        onTaskUpdate(updated);
+      }
+      if (selectedTask?.id === taskId && updated) {
+        setSelectedTask(updated);
+      }
+      await onRefresh();
+    } catch (e: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 流转泳道失败:', e);
+      }
+      // 失败回滚
+      onTaskUpdate?.(currentTask);
+      if (selectedTask?.id === taskId) {
+        setSelectedTask(currentTask);
+      }
+      alert(`移动泳道失败: ${e.message}`);
+    } finally {
+      setMovingTaskId(null);
+    }
+  };
+
+  const handleQuickAddIdea = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!quickIdeaTitle.trim() || isSubmittingQuickIdea) return;
+    const defaultWfId = workflows[0]?.id || 'wf_auto_dev_qa';
+    setIsSubmittingQuickIdea(true);
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanView] 快捷录入 Inbox 想法任务:', {
+        title: quickIdeaTitle.trim(),
+        workflowId: defaultWfId,
+        kanbanColumn: 'inbox',
+      });
+    }
+    try {
+      await api.createTask({
+        title: quickIdeaTitle.trim(),
+        workflowId: defaultWfId,
+        description: '来自 Inbox 快捷想法收集',
+        kanbanColumn: 'inbox',
+        autoRun: false,
+      });
+      setQuickIdeaTitle('');
+      setIsQuickAddingIdea(false);
+      onRefresh();
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 快捷录入想法失败:', err);
+      }
+      alert(`创建想法失败: ${err.message}`);
+    } finally {
+      setIsSubmittingQuickIdea(false);
     }
   };
 
@@ -359,6 +459,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     title: string;
     description: string;
     workflowId: string;
+    kanbanColumn?: KanbanColumn;
   }) => {
     if (!editingTask) return;
     if (import.meta.env?.DEV) {
@@ -369,10 +470,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       if (selectedTask?.id === editingTask.id) {
         setSelectedTask(updated);
       }
+      onTaskUpdate?.(updated);
       if (import.meta.env?.DEV) {
         console.log('[Kanban:TaskEdit] 任务更新成功:', updated.id);
       }
-      onRefresh();
+      await onRefresh();
     } catch (e: any) {
       if (import.meta.env?.DEV) {
         console.error('[Kanban:TaskEdit] 任务更新异常:', e);
@@ -698,6 +800,26 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Inbox 专属快速添加想法按钮 */}
+                      {col.key === 'inbox' && (
+                        <button
+                          onClick={() => {
+                            setIsQuickAddingIdea((v) => !v);
+                            if (import.meta.env?.DEV) {
+                              console.log('[KanbanView] 切换 Inbox 快速录入状态');
+                            }
+                          }}
+                          className={`w-[20px] h-[20px] rounded-[4px] border flex items-center justify-center transition-colors shadow-sm ${
+                            isQuickAddingIdea
+                              ? 'bg-[#6366f1] text-white border-[#6366f1]'
+                              : 'bg-white border-[#e3e3e8] text-[#6366f1] hover:bg-[#eeedfd]'
+                          }`}
+                          title="快速添加想法到 Inbox"
+                        >
+                          <Plus size={11} strokeWidth={2.4} />
+                        </button>
+                      )}
+
                       {/* 列独立排序规则设置控件 */}
                       <KanbanColumnSortDropdown
                         columnKey={col.key}
@@ -721,18 +843,74 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                   {/* 泳道卡片列表：独立纵向滚动，撑满泳道全高 */}
                   <div className="flex-1 min-h-0 p-2.5 overflow-y-auto space-y-2">
-                    {colTasks.length === 0 ? (
-                      <div className="h-28 border border-dashed border-[#d1d1d8] rounded-[8px] flex items-center justify-center text-[11px] text-[#85858d]">
-                        暂无任务
+                    {/* Inbox 专属轻量快捷添加输入面板 */}
+                    {col.key === 'inbox' && isQuickAddingIdea && (
+                      <form
+                        onSubmit={handleQuickAddIdea}
+                        className="bg-white border border-[#6366f1]/40 rounded-[8px] p-2.5 shadow-[0_4px_12px_rgba(99,102,241,0.08)] space-y-2 animate-in fade-in zoom-in-95 duration-100"
+                      >
+                        <div className="flex items-center justify-between text-[11px] font-medium text-[#6366f1]">
+                          <span className="flex items-center gap-1.5">
+                            <Lightbulb size={12} />
+                            <span>随手记想法</span>
+                          </span>
+                          <span className="text-[10px] text-[#85858d]">暂缓执行</span>
+                        </div>
+                        <input
+                          type="text"
+                          autoFocus
+                          placeholder="输入突发奇想，按 Enter 存入..."
+                          value={quickIdeaTitle}
+                          onChange={(e) => setQuickIdeaTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setIsQuickAddingIdea(false);
+                            }
+                          }}
+                          className="w-full h-[28px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none focus:bg-white focus:border-[#6366f1] focus:ring-1 focus:ring-[#6366f1]/20 transition-all"
+                        />
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setIsQuickAddingIdea(false)}
+                            className="h-[22px] px-2 rounded-[4px] text-[10.5px] text-[#85858d] hover:bg-[#f1f1f4]"
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={!quickIdeaTitle.trim() || isSubmittingQuickIdea}
+                            className="h-[22px] px-2.5 rounded-[4px] bg-[#6366f1] hover:bg-[#4f46e5] text-white text-[10.5px] font-medium disabled:opacity-40 transition-colors shadow-sm"
+                          >
+                            {isSubmittingQuickIdea ? '保存中...' : '存入 Inbox'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {colTasks.length === 0 && (!isQuickAddingIdea || col.key !== 'inbox') ? (
+                      <div className="h-28 border border-dashed border-[#d1d1d8] rounded-[8px] flex flex-col items-center justify-center gap-1 text-[11px] text-[#85858d]">
+                        <span>暂无任务</span>
+                        {col.key === 'inbox' && (
+                          <button
+                            onClick={() => setIsQuickAddingIdea(true)}
+                            className="text-[10.5px] text-[#6366f1] hover:underline"
+                          >
+                            + 记录第一个想法
+                          </button>
+                        )}
                       </div>
                     ) : (
                       colTasks.map((task) => {
                         const wf = wfMap.get(task.workflowId);
                         const currentNode = wf?.nodes.find((n) => n.id === task.currentNodeId);
                         const nodeRuns = Object.values(task.nodeRuns || {});
+                        const isCompleted = task.status === 'completed';
                         const completedCount = nodeRuns.filter((r) => r.status === 'success').length;
-                        const totalNodes = wf?.nodes.length || 1;
-                        const progressPct = Math.round((completedCount / totalNodes) * 100);
+                        const totalNodes = wf?.nodes.length || completedCount || 1;
+                        const displayTotal = Math.max(totalNodes, completedCount);
+                        const displayCompleted = isCompleted ? displayTotal : completedCount;
+                        const progressPct = isCompleted ? 100 : Math.round((displayCompleted / displayTotal) * 100);
                         const lastFailedRun = nodeRuns.slice().reverse().find((r) => r.status === 'failed');
                         const failReason = lastFailedRun?.error || '执行中断或驳回';
 
@@ -749,12 +927,20 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             }`}
                           >
                             <div className="flex items-center justify-between mb-1.5 min-w-0">
-                              <span
-                                className="text-[10.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0] truncate max-w-[120px]"
-                                title={task.id}
-                              >
-                                {task.id}
-                              </span>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span
+                                  className="text-[10.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0] truncate max-w-[100px]"
+                                  title={task.id}
+                                >
+                                  {task.id}
+                                </span>
+                                {task.kanbanColumn === 'inbox' && (
+                                  <span className="flex items-center gap-1 text-[9.5px] font-medium text-[#6366f1] bg-[#f5f5ff] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded shrink-0">
+                                    <Lightbulb size={9.5} />
+                                    <span>想法</span>
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1">
                                 {task.status === 'running' && (
                                   <button
@@ -767,6 +953,32 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                     title="终止此任务"
                                   >
                                     <Square size={11} className="fill-current" />
+                                  </button>
+                                )}
+                                {task.status === 'pending' && task.kanbanColumn === 'inbox' && (
+                                  <button
+                                    disabled={movingTaskId === task.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleMoveTaskColumn(task.id, 'backlog');
+                                    }}
+                                    className="p-1 rounded text-[#85858d] hover:text-[#4f46e5] hover:bg-[#eeedfd]"
+                                    title="移入待处理泳道"
+                                  >
+                                    <ArrowRight size={11} />
+                                  </button>
+                                )}
+                                {task.status === 'pending' && task.kanbanColumn === 'backlog' && (
+                                  <button
+                                    disabled={movingTaskId === task.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleMoveTaskColumn(task.id, 'inbox');
+                                    }}
+                                    className="p-1 rounded text-[#85858d] hover:text-[#6366f1] hover:bg-[#eeedfd]"
+                                    title="移入 Inbox 想法收集"
+                                  >
+                                    <Inbox size={11} />
                                   </button>
                                 )}
                                 <button
@@ -813,17 +1025,60 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             {/* 未启动任务：卡片内一键启动按钮 */}
                             {task.status === 'pending' && (
                               <div className="my-2">
-                                <button
-                                  disabled={runningTaskId === task.id}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRunTask(task.id);
-                                  }}
-                                  className="w-full h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
-                                >
-                                  <Play size={10} strokeWidth={2.4} />
-                                  <span>{runningTaskId === task.id ? '启动中...' : '启动流水线'}</span>
-                                </button>
+                                {task.kanbanColumn === 'inbox' ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      disabled={movingTaskId === task.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleMoveTaskColumn(task.id, 'backlog');
+                                      }}
+                                      className="flex-1 h-[24px] rounded-[5px] bg-[#f1f1f4] hover:bg-[#e4e4e9] text-[#1c1c21] text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 border border-[#e3e3e8]"
+                                      title="将此想法移入待处理准备执行"
+                                    >
+                                      <ArrowRight size={10} />
+                                      <span>{movingTaskId === task.id ? '移动中...' : '移入待处理'}</span>
+                                    </button>
+                                    <button
+                                      disabled={runningTaskId === task.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRunTask(task.id);
+                                      }}
+                                      className="h-[24px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
+                                      title="直接启动流水线"
+                                    >
+                                      <Play size={10} strokeWidth={2.4} />
+                                      <span>{runningTaskId === task.id ? '启动中' : '启动'}</span>
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      disabled={runningTaskId === task.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRunTask(task.id);
+                                      }}
+                                      className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
+                                    >
+                                      <Play size={10} strokeWidth={2.4} />
+                                      <span>{runningTaskId === task.id ? '启动中...' : '启动流水线'}</span>
+                                    </button>
+                                    <button
+                                      disabled={movingTaskId === task.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleMoveTaskColumn(task.id, 'inbox');
+                                      }}
+                                      className="h-[24px] px-2 rounded-[5px] bg-[#f9f9fb] hover:bg-[#eeedfd] text-[#85858d] hover:text-[#6366f1] text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all border border-[#e3e3e8]"
+                                      title="退回 Inbox 想法收集"
+                                    >
+                                      <Inbox size={10} />
+                                      <span>转想法</span>
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             )}
 
@@ -971,7 +1226,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                             <div className="pt-1.5 border-t border-[#ececf0] flex items-center justify-between text-[10.5px] text-[#85858d]">
                               <span>
-                                节点 {completedCount}/{totalNodes}
+                                节点 {displayCompleted}/{displayTotal}
                               </span>
                               <div className="w-16 bg-[#e6e6eb] rounded-full h-[3px] overflow-hidden">
                                 <div
@@ -1103,6 +1358,16 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               )}
                             </div>
                             <div className="text-[11px] text-[#85858d] flex items-center gap-2 mt-0.5 truncate">
+                              <span
+                                className={`px-1.5 py-[0.5px] rounded text-[9.5px] font-medium ${
+                                  task.kanbanColumn === 'inbox'
+                                    ? 'bg-[#f5f5ff] text-[#6366f1] border border-[#d8d6fb]'
+                                    : 'bg-[#f1f1f4] text-[#63636b] border border-[#ececf0]'
+                                }`}
+                              >
+                                {COLUMN_NAMES[task.kanbanColumn] || task.kanbanColumn}
+                              </span>
+                              <span>·</span>
                               <span>
                                 {new Date(task.createdAt).toLocaleTimeString([], {
                                   hour: '2-digit',
@@ -1140,9 +1405,29 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             className="flex items-center gap-1.5 shrink-0"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {/* 未启动任务：优先展示 [启动任务] 与 [编辑] */}
+                            {/* 未启动任务：根据泳道属性优先展示流转与启动 */}
                             {isPending && (
                               <>
+                                {task.kanbanColumn === 'inbox' ? (
+                                  <button
+                                    disabled={movingTaskId === task.id}
+                                    onClick={() => handleMoveTaskColumn(task.id, 'backlog')}
+                                    className="h-[24px] px-2.5 rounded-[5px] bg-[#f1f1f4] hover:bg-[#e4e4e9] text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all border border-[#e3e3e8]"
+                                  >
+                                    <ArrowRight size={11} />
+                                    <span>{movingTaskId === task.id ? '移动中...' : '移入待处理'}</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    disabled={movingTaskId === task.id}
+                                    onClick={() => handleMoveTaskColumn(task.id, 'inbox')}
+                                    className="h-[24px] px-2 rounded-[5px] bg-[#f9f9fb] hover:bg-[#eeedfd] text-[#85858d] hover:text-[#6366f1] text-[11px] font-medium flex items-center gap-1 transition-all border border-[#e3e3e8]"
+                                    title="退回 Inbox 想法"
+                                  >
+                                    <Inbox size={11} />
+                                    <span>转想法</span>
+                                  </button>
+                                )}
                                 <button
                                   disabled={runningTaskId === task.id}
                                   onClick={() => handleRunTask(task.id)}
@@ -1382,9 +1667,31 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     </div>
                     <div>
                       <span className="text-[#85858d] text-[11px] block">所在泳道</span>
-                      <span className="font-medium text-[#1c1c21] inline-block mt-1">
-                        {selectedTask.kanbanColumn}
-                      </span>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className="font-medium text-[#1c1c21]">
+                          {COLUMN_NAMES[selectedTask.kanbanColumn] || selectedTask.kanbanColumn}
+                        </span>
+                        {selectedTask.status === 'pending' && selectedTask.kanbanColumn === 'inbox' && (
+                          <button
+                            disabled={movingTaskId === selectedTask.id}
+                            onClick={() => handleMoveTaskColumn(selectedTask.id, 'backlog')}
+                            className="px-1.5 py-0.5 rounded bg-[#f1f1f4] hover:bg-[#eeedfd] text-[#4f46e5] text-[10px] font-medium border border-[#e3e3e8] transition-colors"
+                            title="移入待处理泳道准备执行"
+                          >
+                            {movingTaskId === selectedTask.id ? '移动中' : '移入待处理 →'}
+                          </button>
+                        )}
+                        {selectedTask.status === 'pending' && selectedTask.kanbanColumn === 'backlog' && (
+                          <button
+                            disabled={movingTaskId === selectedTask.id}
+                            onClick={() => handleMoveTaskColumn(selectedTask.id, 'inbox')}
+                            className="px-1.5 py-0.5 rounded bg-[#f1f1f4] hover:bg-[#eeedfd] text-[#6366f1] text-[10px] font-medium border border-[#e3e3e8] transition-colors"
+                            title="移至 Inbox 收集箱"
+                          >
+                            {movingTaskId === selectedTask.id ? '移动中' : '← 移至 Inbox'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1504,14 +1811,45 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                 {/* 抽屉底部操作区 */}
                 <div className="pt-3.5 border-t border-[#ececf0] space-y-2">
                   {selectedTask.status === 'pending' && (
-                    <button
-                      disabled={runningTaskId === selectedTask.id}
-                      onClick={() => handleRunTask(selectedTask.id)}
-                      className="w-full h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm"
-                    >
-                      <Play size={13} strokeWidth={2.4} />
-                      <span>{runningTaskId === selectedTask.id ? '正在启动...' : '立即启动此任务'}</span>
-                    </button>
+                    selectedTask.kanbanColumn === 'inbox' ? (
+                      <div className="flex gap-2">
+                        <button
+                          disabled={movingTaskId === selectedTask.id}
+                          onClick={() => handleMoveTaskColumn(selectedTask.id, 'backlog')}
+                          className="flex-1 h-[32px] rounded-[7px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[#1c1c21] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                        >
+                          <ArrowRight size={13} />
+                          <span>{movingTaskId === selectedTask.id ? '移动中...' : '移入待处理'}</span>
+                        </button>
+                        <button
+                          disabled={runningTaskId === selectedTask.id}
+                          onClick={() => handleRunTask(selectedTask.id)}
+                          className="flex-1 h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                        >
+                          <Play size={13} strokeWidth={2.4} />
+                          <span>{runningTaskId === selectedTask.id ? '正在启动...' : '立即启动执行'}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <button
+                          disabled={runningTaskId === selectedTask.id}
+                          onClick={() => handleRunTask(selectedTask.id)}
+                          className="w-full h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                        >
+                          <Play size={13} strokeWidth={2.4} />
+                          <span>{runningTaskId === selectedTask.id ? '正在启动...' : '立即启动此任务'}</span>
+                        </button>
+                        <button
+                          disabled={movingTaskId === selectedTask.id}
+                          onClick={() => handleMoveTaskColumn(selectedTask.id, 'inbox')}
+                          className="w-full h-[26px] rounded-[6px] border border-[#e3e3e8] bg-transparent hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#6366f1] text-[11px] font-medium flex items-center justify-center gap-1 transition-all"
+                        >
+                          <Inbox size={11} />
+                          <span>{movingTaskId === selectedTask.id ? '移动中...' : '退回 Inbox 收集箱 (暂缓)'}</span>
+                        </button>
+                      </div>
+                    )
                   )}
 
                   {selectedTask.status === 'failed' && (

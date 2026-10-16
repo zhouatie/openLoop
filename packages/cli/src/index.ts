@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { OpenLoopClient } from './client';
-import { OpenLoopServer, Store, DagEngine, Task, WorkflowDefinition, LogEntry, PluginManifest, NodeRun } from '@openloop/core';
+import { OpenLoopServer, Store, DagEngine, Task, WorkflowDefinition, LogEntry, PluginManifest, NodeRun, KanbanColumn } from '@openloop/core';
 
 const program = new Command();
 const client = new OpenLoopClient();
@@ -94,18 +94,23 @@ taskCmd
   .requiredOption('-w, --workflow <id>', '关联工作流 ID (如: wf_auto_dev_qa)')
   .option('-t, --title <title>', '任务标题', '自动化开发验证任务')
   .option('-d, --desc <desc>', '任务描述', '')
+  .option('-c, --column <column>', '看板初始泳道 (如: inbox, backlog)', 'backlog')
   .option('-f, --follow', '立即实时跟随输出日志', false)
+  .option('--no-run', '仅创建任务记录，不立即启动自动化调度')
   .action(async (options) => {
     try {
       let task: Task | undefined;
       let isLocalFallback = false;
+      const targetColumn = (options.column === 'inbox' ? 'inbox' : 'backlog') as KanbanColumn;
+      const shouldAutoRun = options.run !== false && targetColumn !== 'inbox';
 
       try {
         task = await client.createTask({
           workflowId: options.workflow,
           title: options.title,
           description: options.desc,
-          autoRun: true,
+          kanbanColumn: targetColumn,
+          autoRun: shouldAutoRun,
         });
       } catch (err: any) {
         // 如果 Daemon 没启动，直接使用本地 Store 和 DagEngine 单机运行
@@ -120,7 +125,7 @@ taskCmd
           description: options.desc,
           workflowId: options.workflow,
           status: 'pending',
-          kanbanColumn: 'backlog',
+          kanbanColumn: targetColumn,
           createdAt: Date.now(),
           updatedAt: Date.now(),
           nodeRuns: {},
@@ -137,8 +142,10 @@ taskCmd
           });
         }
 
-        // 启动任务
-        engine.runTask(localTask.id).catch((e) => console.error(e));
+        // 若允许自动执行则启动任务
+        if (shouldAutoRun) {
+          engine.runTask(localTask.id).catch((e) => console.error(e));
+        }
       }
 
       if (!task) {

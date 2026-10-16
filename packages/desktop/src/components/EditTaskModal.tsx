@@ -12,8 +12,10 @@ import {
   ArrowRight,
   Lock,
   AlertCircle,
+  Inbox,
+  ListTodo,
 } from 'lucide-react';
-import { Task, WorkflowDefinition } from '@openloop/core';
+import { Task, WorkflowDefinition, KanbanColumn } from '@openloop/core';
 
 interface EditTaskModalProps {
   isOpen: boolean;
@@ -24,6 +26,7 @@ interface EditTaskModalProps {
     title: string;
     description: string;
     workflowId: string;
+    kanbanColumn?: KanbanColumn;
   }) => Promise<void>;
 }
 
@@ -37,6 +40,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [workflowId, setWorkflowId] = useState('');
+  const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>('backlog');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -49,6 +53,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
       setTitle(task.title || '');
       setDescription(task.description || '');
       setWorkflowId(task.workflowId || workflows[0]?.id || '');
+      setKanbanColumn(task.kanbanColumn || 'backlog');
       setErrorMsg(null);
     }
   }, [task, workflows]);
@@ -101,6 +106,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         title: title.trim(),
         workflowId,
         description: description.trim(),
+        kanbanColumn,
       });
     }
     try {
@@ -108,6 +114,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         title: title.trim(),
         description: description.trim(),
         workflowId,
+        kanbanColumn,
       });
       if (import.meta.env?.DEV) {
         console.log('[TaskEdit] 任务更新保存成功:', task.id);
@@ -358,6 +365,44 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
               className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[7px] p-2.5 text-[#1c1c21] placeholder-[#85858d] outline-none resize-none focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all"
             />
           </div>
+
+          {/* 未运行任务允许调整看板泳道 */}
+          {isPending && (
+            <div>
+              <label className="block font-medium text-[#4b4b53] mb-1.5">所在看板泳道</label>
+              <div className="grid grid-cols-2 gap-2">
+                <div
+                  onClick={() => setKanbanColumn('inbox')}
+                  className={`p-2 rounded-[8px] border cursor-pointer transition-all flex items-center gap-2 ${
+                    kanbanColumn === 'inbox'
+                      ? 'bg-[#f5f5ff] border-[#6366f1] ring-1 ring-[#6366f1]/20'
+                      : 'bg-[#f9f9fb] border-[#e3e3e8] hover:bg-white'
+                  }`}
+                >
+                  <Inbox size={13} className={kanbanColumn === 'inbox' ? 'text-[#6366f1]' : 'text-[#85858d]'} />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[11.5px] font-medium text-[#1c1c21]">Inbox 收集箱</span>
+                  </div>
+                  {kanbanColumn === 'inbox' && <Check size={12} className="text-[#6366f1]" />}
+                </div>
+
+                <div
+                  onClick={() => setKanbanColumn('backlog')}
+                  className={`p-2 rounded-[8px] border cursor-pointer transition-all flex items-center gap-2 ${
+                    kanbanColumn === 'backlog'
+                      ? 'bg-[#f5f5ff] border-[#4f46e5] ring-1 ring-[#4f46e5]/20'
+                      : 'bg-[#f9f9fb] border-[#e3e3e8] hover:bg-white'
+                  }`}
+                >
+                  <ListTodo size={13} className={kanbanColumn === 'backlog' ? 'text-[#4f46e5]' : 'text-[#85858d]'} />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[11.5px] font-medium text-[#1c1c21]">待处理队列</span>
+                  </div>
+                  {kanbanColumn === 'backlog' && <Check size={12} className="text-[#4f46e5]" />}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 底部按钮栏 */}
           <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#ececf0]">

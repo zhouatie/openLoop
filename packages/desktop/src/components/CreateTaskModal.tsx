@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   X,
   Play,
@@ -10,18 +10,28 @@ import {
   Sparkles,
   Layers,
   ArrowRight,
+  Inbox,
+  ListTodo,
+  Clock,
+  Search,
 } from 'lucide-react';
-import { WorkflowDefinition, NodeType } from '@openloop/core';
+import { WorkflowDefinition, NodeType, KanbanColumn } from '@openloop/core';
+
+const STORAGE_KEY_LAST_WORKFLOW = 'openloop_last_used_workflow_id';
+const STORAGE_KEY_RECENT_WORKFLOWS = 'openloop_recent_workflow_ids';
+const MAX_RECENT_COUNT = 3;
 
 interface CreateTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   workflows: WorkflowDefinition[];
+  defaultColumn?: KanbanColumn;
   onCreate: (params: {
     title: string;
     workflowId: string;
     description: string;
     autoRun: boolean;
+    kanbanColumn?: KanbanColumn;
   }) => Promise<void>;
 }
 
@@ -29,23 +39,59 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   isOpen,
   onClose,
   workflows,
+  defaultColumn = 'backlog',
   onCreate,
 }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [workflowId, setWorkflowId] = useState(workflows[0]?.id || '');
+  const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>(defaultColumn);
   const [autoRun, setAutoRun] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [workflowSearch, setWorkflowSearch] = useState('');
+  const [recentWorkflowIds, setRecentWorkflowIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_RECENT_WORKFLOWS);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // 确保当 workflows 变更或加载时自动选中有效 ID
+  // 弹窗打开或 workflows 变更时，优先恢复本地上次使用的流程记忆
   useEffect(() => {
-    if (!workflowId && workflows.length > 0) {
+    if (!isOpen) return;
+
+    try {
+      const lastId = localStorage.getItem(STORAGE_KEY_LAST_WORKFLOW);
+      if (lastId && workflows.some((w) => w.id === lastId)) {
+        setWorkflowId(lastId);
+        if (import.meta.env?.DEV) {
+          console.log('[CreateTaskModal] 从本地记忆回填上次使用的工作流:', lastId);
+        }
+        return;
+      }
+    } catch (err) {
+      console.warn('[CreateTaskModal] 读取流程历史记忆失败:', err);
+    }
+
+    if (workflows.length > 0 && !workflows.some((w) => w.id === workflowId)) {
       setWorkflowId(workflows[0].id);
     }
-  }, [workflows, workflowId]);
+  }, [isOpen, workflows]);
+
+  // 确保当 workflows 变更或加载时根据 defaultColumn 重置
+  useEffect(() => {
+    if (isOpen) {
+      setKanbanColumn(defaultColumn);
+      if (defaultColumn === 'inbox') {
+        setAutoRun(false);
+      }
+    }
+  }, [isOpen, defaultColumn]);
 
   // 按 Esc 键优先关闭下拉菜单，再关闭整个弹窗
   useEffect(() => {
@@ -78,24 +124,150 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     };
   }, [isDropdownOpen]);
 
-  if (!isOpen) return null;
-
   const currentWf = workflows.find((w) => w.id === workflowId) || workflows[0];
+
+  // 全量流程按最近更新时间倒序排列
+  const allSortedWorkflows = useMemo(() => {
+    return [...workflows].sort(
+      (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
+    );
+  }, [workflows]);
+
+  // 最近使用的工作流（最多 3 个）
+  const recentWorkflows = useMemo(() => {
+    return recentWorkflowIds
+      .map((id) => workflows.find((w) => w.id === id))
+      .filter(Boolean) as WorkflowDefinition[];
+  }, [recentWorkflowIds, workflows]);
+
+  // 搜索过滤匹配的工作流
+  const filteredWorkflows = useMemo(() => {
+    if (!workflowSearch.trim()) return [];
+    const keyword = workflowSearch.toLowerCase().trim();
+    return allSortedWorkflows.filter(
+      (w) =>
+        w.name.toLowerCase().includes(keyword) ||
+        w.id.toLowerCase().includes(keyword) ||
+        (w.description && w.description.toLowerCase().includes(keyword))
+    );
+  }, [allSortedWorkflows, workflowSearch]);
+
+  const handleSelectWorkflow = (wf: WorkflowDefinition) => {
+    setWorkflowId(wf.id);
+    setIsDropdownOpen(false);
+    setWorkflowSearch('');
+    if (import.meta.env?.DEV) {
+      console.log('[CreateTaskModal] 用户选定工作流:', { id: wf.id, name: wf.name });
+    }
+  };
+
+  const renderWorkflowItem = (wf: WorkflowDefinition, isRecentBadge = false) => {
+    const isSelected = wf.id === currentWf?.id;
+
+    return (
+      <div
+        key={`${isRecentBadge ? 'recent-' : 'all-'}${wf.id}`}
+        onClick={() => handleSelectWorkflow(wf)}
+        className={`p-2.5 rounded-[7px] cursor-pointer transition-all flex items-start justify-between ${
+          isSelected
+            ? 'bg-[#eeedfd]/50 border border-[#d8d6fb]'
+            : 'hover:bg-[#f9f9fb] border border-transparent'
+        }`}
+      >
+        <div className="flex items-start gap-2.5 min-w-0 flex-1 pr-3">
+          <div
+            className={`w-6 h-6 rounded-[5px] flex items-center justify-center shrink-0 mt-0.5 ${
+              isSelected
+                ? 'bg-[#4f46e5] text-white shadow-sm'
+                : 'bg-[#f1f1f4] text-[#63636b]'
+            }`}
+          >
+            <Workflow size={12} />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-[12.5px] text-[#1c1c21] truncate">
+                {wf.name}
+              </span>
+              <span className="text-[9.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1 py-[0.5px] rounded">
+                {wf.id}
+              </span>
+              {isRecentBadge && (
+                <span className="px-1.5 py-[0.5px] rounded-[3px] text-[9px] font-semibold bg-[#eeedfd] text-[#4f46e5] border border-[#d8d6fb]/60 shrink-0">
+                  Recent
+                </span>
+              )}
+            </div>
+
+            <div className="text-[11px] text-[#85858d] truncate mt-0.5">
+              {wf.description || '无附加描述'}
+            </div>
+
+            {getNodeSummaryBadges(wf)}
+          </div>
+        </div>
+
+        <div className="flex flex-col items-end shrink-0 pt-0.5">
+          <span className="text-[10.5px] font-mono text-[#85858d]">
+            {wf.nodes.length} 节点
+          </span>
+          {isSelected && (
+            <span className="mt-1 flex items-center gap-1 text-[10.5px] text-[#4f46e5] font-medium">
+              <Check size={12} strokeWidth={2.4} />
+              已选中
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !workflowId) return;
 
     setLoading(true);
+    if (import.meta.env?.DEV) {
+      console.log('[CreateTaskModal] 提交创建任务:', {
+        title: title.trim(),
+        workflowId,
+        kanbanColumn,
+        autoRun,
+      });
+    }
     try {
       await onCreate({
         title: title.trim(),
         workflowId,
         description: description.trim(),
         autoRun,
+        kanbanColumn,
       });
+
+      // 保存本地记忆与 LRU 最近使用列表
+      try {
+        localStorage.setItem(STORAGE_KEY_LAST_WORKFLOW, workflowId);
+        const nextRecents = [
+          workflowId,
+          ...recentWorkflowIds.filter((id) => id !== workflowId),
+        ].slice(0, MAX_RECENT_COUNT);
+        localStorage.setItem(STORAGE_KEY_RECENT_WORKFLOWS, JSON.stringify(nextRecents));
+        setRecentWorkflowIds(nextRecents);
+
+        if (import.meta.env?.DEV) {
+          console.log('[CreateTaskModal] 更新工作流 LRU 历史记录:', {
+            lastUsed: workflowId,
+            recentWorkflows: nextRecents,
+          });
+        }
+      } catch (storageErr) {
+        console.warn('[CreateTaskModal] 保存本地流程记忆失败:', storageErr);
+      }
+
       setTitle('');
       setDescription('');
+      setWorkflowSearch('');
       setIsDropdownOpen(false);
       onClose();
     } finally {
@@ -135,6 +307,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       </div>
     );
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100">
@@ -224,66 +398,78 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
             {/* 下拉弹出浮层 Popover */}
             {isDropdownOpen && (
-              <div className="absolute top-[calc(100%+6px)] left-0 right-0 bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.12)] z-50 max-h-[240px] overflow-y-auto p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-100">
-                {workflows.map((wf) => {
-                  const isSelected = wf.id === currentWf?.id;
-
-                  return (
-                    <div
-                      key={wf.id}
-                      onClick={() => {
-                        setWorkflowId(wf.id);
-                        setIsDropdownOpen(false);
-                      }}
-                      className={`p-2.5 rounded-[7px] cursor-pointer transition-all flex items-start justify-between ${
-                        isSelected
-                          ? 'bg-[#eeedfd]/50 border border-[#d8d6fb]'
-                          : 'hover:bg-[#f9f9fb] border border-transparent'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2.5 min-w-0 flex-1 pr-3">
-                        <div
-                          className={`w-6 h-6 rounded-[5px] flex items-center justify-center shrink-0 mt-0.5 ${
-                            isSelected
-                              ? 'bg-[#4f46e5] text-white shadow-sm'
-                              : 'bg-[#f1f1f4] text-[#63636b]'
-                          }`}
-                        >
-                          <Workflow size={12} />
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-medium text-[12.5px] text-[#1c1c21] truncate">
-                              {wf.name}
-                            </span>
-                            <span className="text-[9.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1 py-[0.5px] rounded">
-                              {wf.id}
-                            </span>
-                          </div>
-
-                          <div className="text-[11px] text-[#85858d] truncate mt-0.5">
-                            {wf.description || '无附加描述'}
-                          </div>
-
-                          {getNodeSummaryBadges(wf)}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col items-end shrink-0 pt-0.5">
-                        <span className="text-[10.5px] font-mono text-[#85858d]">
-                          {wf.nodes.length} 节点
-                        </span>
-                        {isSelected && (
-                          <span className="mt-1 flex items-center gap-1 text-[10.5px] text-[#4f46e5] font-medium">
-                            <Check size={12} strokeWidth={2.4} />
-                            已选中
-                          </span>
-                        )}
-                      </div>
+              <div className="absolute top-[calc(100%+6px)] left-0 right-0 bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.12)] z-50 max-h-[290px] overflow-hidden flex flex-col p-1.5 animate-in fade-in zoom-in-95 duration-100">
+                {/* 快速搜索栏 */}
+                {workflows.length >= 3 && (
+                  <div className="px-1 pt-0.5 pb-1.5 border-b border-[#ececf0] mb-1">
+                    <div className="relative">
+                      <Search
+                        size={12}
+                        className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#85858d]"
+                      />
+                      <input
+                        type="text"
+                        placeholder="搜索工作流名称或 ID..."
+                        value={workflowSearch}
+                        onChange={(e) => setWorkflowSearch(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full h-[26px] bg-[#f4f4f6] focus:bg-white border border-transparent focus:border-[#4f46e5] rounded-[6px] pl-7 pr-2 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none transition-all"
+                      />
                     </div>
-                  );
-                })}
+                  </div>
+                )}
+
+                {/* 滚动区域 */}
+                <div className="overflow-y-auto space-y-1 flex-1 pr-0.5">
+                  {workflowSearch.trim() ? (
+                    // 处于搜索状态
+                    <div>
+                      <div className="px-2 py-1 text-[10px] font-semibold text-[#85858d] uppercase tracking-wider">
+                        搜索结果 ({filteredWorkflows.length})
+                      </div>
+                      {filteredWorkflows.length === 0 ? (
+                        <div className="py-6 text-center text-[11.5px] text-[#85858d]">
+                          未找到匹配的工作流
+                        </div>
+                      ) : (
+                        filteredWorkflows.map((wf) => renderWorkflowItem(wf))
+                      )}
+                    </div>
+                  ) : (
+                    // 常规分层视图：最近使用 + 全部流程
+                    <>
+                      {/* 最近使用分区 */}
+                      {recentWorkflows.length > 0 && (
+                        <div className="space-y-1 mb-1.5">
+                          <div className="px-2 pt-1 pb-0.5 flex items-center justify-between text-[10px] font-semibold text-[#85858d] uppercase tracking-wider">
+                            <span className="flex items-center gap-1 text-[#4f46e5]">
+                              <Clock size={10.5} /> 最近使用
+                            </span>
+                            <span className="text-[9.5px] font-normal lowercase text-[#85858d]">
+                              LRU 优先
+                            </span>
+                          </div>
+                          {recentWorkflows.map((wf) => renderWorkflowItem(wf, true))}
+                          <div className="h-[1px] bg-[#ececf0] my-1 mx-1.5" />
+                        </div>
+                      )}
+
+                      {/* 全部流程分区 */}
+                      <div className="space-y-1">
+                        <div className="px-2 pt-1 pb-0.5 flex items-center justify-between text-[10px] font-semibold text-[#85858d] uppercase tracking-wider">
+                          <span className="flex items-center gap-1">
+                            <Layers size={10.5} className="text-[#85858d]" /> 全部流程 (
+                            {allSortedWorkflows.length})
+                          </span>
+                          <span className="text-[9.5px] font-normal lowercase text-[#85858d]">
+                            按更新时间倒序
+                          </span>
+                        </div>
+                        {allSortedWorkflows.map((wf) => renderWorkflowItem(wf))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -300,6 +486,75 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             />
           </div>
 
+          {/* 看板初始归属泳道 */}
+          <div>
+            <label className="block font-medium text-[#4b4b53] mb-1.5">初始收纳位置</label>
+            <div className="grid grid-cols-2 gap-2">
+              <div
+                onClick={() => {
+                  setKanbanColumn('inbox');
+                  setAutoRun(false);
+                }}
+                className={`p-2.5 rounded-[8px] border cursor-pointer transition-all flex items-start gap-2.5 ${
+                  kanbanColumn === 'inbox'
+                    ? 'bg-[#f5f5ff] border-[#6366f1] ring-1 ring-[#6366f1]/20 shadow-sm'
+                    : 'bg-[#f9f9fb] border-[#e3e3e8] hover:bg-white hover:border-[#b9b9c2]'
+                }`}
+              >
+                <div
+                  className={`w-6 h-6 rounded-[5px] flex items-center justify-center shrink-0 mt-0.5 ${
+                    kanbanColumn === 'inbox'
+                      ? 'bg-[#6366f1] text-white shadow-sm'
+                      : 'bg-[#f1f1f4] text-[#85858d]'
+                  }`}
+                >
+                  <Inbox size={12} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-[12px] text-[#1c1c21]">Inbox 收集箱</span>
+                    {kanbanColumn === 'inbox' && (
+                      <Check size={12} className="text-[#6366f1]" strokeWidth={2.5} />
+                    )}
+                  </div>
+                  <div className="text-[10.5px] text-[#85858d] mt-0.5 leading-snug">
+                    想法与未排期需求，暂缓执行
+                  </div>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setKanbanColumn('backlog')}
+                className={`p-2.5 rounded-[8px] border cursor-pointer transition-all flex items-start gap-2.5 ${
+                  kanbanColumn === 'backlog'
+                    ? 'bg-[#f5f5ff] border-[#4f46e5] ring-1 ring-[#4f46e5]/20 shadow-sm'
+                    : 'bg-[#f9f9fb] border-[#e3e3e8] hover:bg-white hover:border-[#b9b9c2]'
+                }`}
+              >
+                <div
+                  className={`w-6 h-6 rounded-[5px] flex items-center justify-center shrink-0 mt-0.5 ${
+                    kanbanColumn === 'backlog'
+                      ? 'bg-[#4f46e5] text-white shadow-sm'
+                      : 'bg-[#f1f1f4] text-[#85858d]'
+                  }`}
+                >
+                  <ListTodo size={12} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-[12px] text-[#1c1c21]">待处理队列</span>
+                    {kanbanColumn === 'backlog' && (
+                      <Check size={12} className="text-[#4f46e5]" strokeWidth={2.5} />
+                    )}
+                  </div>
+                  <div className="text-[10.5px] text-[#85858d] mt-0.5 leading-snug">
+                    已确认的任务，排期进入流水线
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* 拟物感极佳的黑色 Switch 开关 */}
           <div
             onClick={() => setAutoRun(!autoRun)}
@@ -310,6 +565,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               <div className="text-[11px] text-[#85858d] mt-0.5">
                 {autoRun
                   ? '创建后系统将自动唤醒 Agent 与底层工具链，按 DAG 拓扑执行'
+                  : kanbanColumn === 'inbox'
+                  ? '作为想法保存在 Inbox，后续随时移入待处理或手动触发'
                   : '创建为待处理任务，后续可在看板泳道或列表中手动触发'}
               </div>
             </div>
