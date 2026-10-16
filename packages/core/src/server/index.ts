@@ -229,6 +229,36 @@ export class OpenLoopServer {
         return this.sendJson(res, 200, task);
       }
 
+      if (taskDetailMatch && (method === 'PATCH' || method === 'PUT')) {
+        const taskId = taskDetailMatch[1];
+        const existing = this.store.getTask(taskId);
+        if (!existing) return this.sendJson(res, 404, { error: 'Task not found' });
+        const body = await this.parseJsonBody(req);
+        const { title, description, workflowId, context } = body;
+        if (title !== undefined) existing.title = title.trim();
+        if (description !== undefined) existing.description = description.trim();
+        if (workflowId !== undefined && existing.status === 'pending') {
+          existing.workflowId = workflowId;
+        }
+        if (context !== undefined) {
+          existing.context = { ...existing.context, ...context };
+        }
+        existing.updatedAt = Date.now();
+        this.store.saveTask(existing);
+        this.broadcast({ type: 'task:update', data: existing });
+        return this.sendJson(res, 200, existing);
+      }
+
+      if (taskDetailMatch && method === 'DELETE') {
+        const taskId = taskDetailMatch[1];
+        const deleted = this.store.deleteTask(taskId);
+        if (deleted) {
+          this.broadcast({ type: 'task:update', data: { id: taskId, deleted: true } });
+          return this.sendJson(res, 200, { success: true, id: taskId });
+        }
+        return this.sendJson(res, 404, { error: 'Task not found' });
+      }
+
       // Task run: /api/tasks/:id/run
       const taskRunMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/run$/);
       if (taskRunMatch && method === 'POST') {

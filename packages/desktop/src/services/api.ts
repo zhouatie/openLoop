@@ -129,6 +129,30 @@ export class DesktopApiService {
     await fetch(`${BASE_URL}/api/tasks/${id}/run`, { method: 'POST' });
   }
 
+  async updateTask(
+    id: string,
+    params: {
+      title?: string;
+      description?: string;
+      workflowId?: string;
+      context?: Record<string, any>;
+    }
+  ): Promise<Task> {
+    const res = await fetch(`${BASE_URL}/api/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  }
+
+  async deleteTask(id: string): Promise<{ success: boolean; id: string }> {
+    const res = await fetch(`${BASE_URL}/api/tasks/${id}`, {
+      method: 'DELETE',
+    });
+    return res.json();
+  }
+
   async resumeTask(id: string, approved: boolean, feedback?: string): Promise<Task> {
     const res = await fetch(`${BASE_URL}/api/tasks/${id}/resume`, {
       method: 'POST',
