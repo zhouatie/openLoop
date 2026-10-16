@@ -181,6 +181,13 @@ export class DesktopApiService {
     });
     return res.json();
   }
+
+  async deletePlugin(id: string): Promise<{ success: boolean; id: string }> {
+    const res = await fetch(`${BASE_URL}/api/plugins/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    return res.json();
+  }
 }
 
 export const api = new DesktopApiService();

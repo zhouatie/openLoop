@@ -589,6 +589,11 @@ export class SqliteStore {
     return plugin;
   }
 
+  public deletePlugin(id: string): boolean {
+    const res = this.db.prepare('DELETE FROM plugins WHERE id = ?').run(id);
+    return res.changes > 0;
+  }
+
   public close() {
     this.db.close();
   }

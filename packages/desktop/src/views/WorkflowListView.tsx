@@ -162,32 +162,32 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     switch (type) {
       case 'agent':
         return (
-          <span key={type} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eeedfd] text-[#4f46e5] text-[10px] font-medium">
-            <Bot size={10} /> Agent
+          <span key={type} className="inline-flex items-center gap-1 h-[18px] px-1.5 rounded-[3px] bg-[#eeedfd] text-[#4f46e5] border border-[#d8d6fb] text-[9.5px] font-medium">
+            <Bot size={9.5} /> Agent
           </span>
         );
       case 'midscene':
         return (
-          <span key={type} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#e4f6ec] text-[#189a58] text-[10px] font-medium">
-            <Target size={10} /> Midscene
+          <span key={type} className="inline-flex items-center gap-1 h-[18px] px-1.5 rounded-[3px] bg-[#e4f6ec] text-[#189a58] border border-[#c3eed7] text-[9.5px] font-medium">
+            <Target size={9.5} /> Midscene
           </span>
         );
       case 'stitch-image':
         return (
-          <span key={type} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eff6ff] text-[#1d4ed8] text-[10px] font-medium">
-            <FileVideo size={10} /> 动图合成
+          <span key={type} className="inline-flex items-center gap-1 h-[18px] px-1.5 rounded-[3px] bg-[#eff6ff] text-[#1d4ed8] border border-[#dbeafe] text-[9.5px] font-medium">
+            <FileVideo size={9.5} /> 动图合成
           </span>
         );
       case 'hook':
         return (
-          <span key={type} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fbf0df] text-[#b45309] text-[10px] font-medium">
-            <Zap size={10} /> Hook
+          <span key={type} className="inline-flex items-center gap-1 h-[18px] px-1.5 rounded-[3px] bg-[#fbf0df] text-[#b45309] border border-[#f3d0a1] text-[9.5px] font-medium">
+            <Zap size={9.5} /> Hook
           </span>
         );
       case 'qa-approval':
         return (
-          <span key={type} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fbf0df] text-[#b45309] text-[10px] font-medium">
-            <CheckSquare size={10} /> QA验收
+          <span key={type} className="inline-flex items-center gap-1 h-[18px] px-1.5 rounded-[3px] bg-[#fbf0df] text-[#b45309] border border-[#f3d0a1] text-[9.5px] font-medium">
+            <CheckSquare size={9.5} /> QA验收
           </span>
         );
       default:
@@ -257,66 +257,67 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                 <div
                   key={wf.id}
                   onClick={() => onSelectWorkflow(wf.id)}
-                  className="p-4 flex items-center justify-between hover:bg-[#f9f9fb] transition-colors cursor-pointer group"
+                  className="px-4 py-2.5 min-h-[56px] flex items-center justify-between hover:bg-[#f9f9fb] transition-colors cursor-pointer group"
                 >
-                  <div className="flex items-start gap-3.5 min-w-0 flex-1 pr-4">
-                    <div className="w-9 h-9 rounded-[8px] bg-[#eeedfd] border border-[#d8d6fb] flex items-center justify-center text-[#4f46e5] shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
-                      <Workflow size={18} strokeWidth={2} />
+                  <div className="flex items-center gap-3.5 min-w-0 flex-1 pr-5">
+                    {/* 左侧工作流图标 */}
+                    <div className="w-8 h-8 rounded-[7px] bg-[#f4f4f7] border border-[#ececf0] flex items-center justify-center text-[#1c1c21] group-hover:border-[#b9b9c2] transition-colors shrink-0">
+                      <Workflow size={15} strokeWidth={2} />
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-[13.5px] font-medium text-[#1c1c21] truncate">
+                      {/* 第一行：工作流名称 + 标识胶囊 + 节点环节能力微徽章 */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-[13px] font-semibold text-[#1c1c21] shrink-0">
                           {wf.name}
-                        </h4>
-                        <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
+                        </span>
+                        <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[0.5px] rounded border border-[#ececf0] shrink-0">
                           {wf.id}
                         </span>
+                        <div className="flex items-center gap-1 ml-1 overflow-hidden">
+                          {nodeTypes.map((type) => getNodeBadge(type))}
+                        </div>
                       </div>
 
-                      <p className="text-[11.5px] text-[#85858d] mt-1 line-clamp-1 leading-relaxed">
-                        {wf.description || '暂无流程描述'}
-                      </p>
-
-                      <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] text-[#63636b] font-mono">
-                          {wf.nodes.length} 节点 · {wf.edges.length} 连线
-                        </span>
-                        <span className="text-[#d1d1d8]">|</span>
-                        <div className="flex items-center gap-1.5">
-                          {nodeTypes.map((type) => getNodeBadge(type))}
+                      {/* 第二行：描述文案 + 拓扑指标与更新时间 */}
+                      <div className="flex items-center justify-between mt-1 text-[11.5px] text-[#85858d]">
+                        <p className="truncate text-[#63636b] pr-4 max-w-[580px]">
+                          {wf.description || '暂无流程描述'}
+                        </p>
+                        <div className="flex items-center gap-2 shrink-0 font-mono text-[10.5px] text-[#85858d]">
+                          <span>
+                            {wf.nodes.length} 节点 · {wf.edges.length} 连线
+                          </span>
+                          <span>·</span>
+                          <div className="flex items-center gap-1">
+                            <Clock size={10.5} />
+                            <span>{updatedDate}</span>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* 右侧动作操作条 */}
+                  {/* 右侧动作操作条 (带轻量竖分隔线) */}
                   <div
-                    className="flex items-center gap-2 shrink-0"
+                    className="flex items-center gap-2 shrink-0 border-l border-[#ececf0] pl-4"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="text-right mr-3 hidden sm:block">
-                      <div className="text-[10.5px] text-[#85858d] flex items-center gap-1 justify-end">
-                        <Clock size={11} />
-                        <span>更新于 {updatedDate}</span>
-                      </div>
-                    </div>
-
                     <button
                       onClick={(e) => handleRunWorkflow(e, wf)}
-                      className="h-[26px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
+                      className="h-[25px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
                     >
-                      <Play size={11} strokeWidth={2.4} />
+                      <Play size={10} strokeWidth={2.4} />
                       <span>调试运行</span>
                     </button>
 
                     <button
                       onClick={() => onSelectWorkflow(wf.id)}
-                      className="h-[26px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#1c1c21] hover:bg-[#f1f1f4] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-sm"
+                      className="h-[25px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#1c1c21] hover:bg-[#f1f1f4] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-sm"
                     >
                       <Edit3 size={11} />
                       <span>编辑画布</span>
-                      <ChevronRight size={12} className="text-[#85858d]" />
+                      <ChevronRight size={11} className="text-[#85858d]" />
                     </button>
                   </div>
                 </div>

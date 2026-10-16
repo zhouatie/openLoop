@@ -73,6 +73,10 @@ export class Store {
     return this.sqlite.registerPlugin(plugin);
   }
 
+  public deletePlugin(id: string): boolean {
+    return this.sqlite.deletePlugin(id);
+  }
+
   public close(): void {
     this.sqlite.close();
   }

@@ -296,6 +296,12 @@ export class OpenLoopServer {
         return this.sendJson(res, 201, registered);
       }
 
+      if (pathname.startsWith('/api/plugins/') && method === 'DELETE') {
+        const id = decodeURIComponent(pathname.replace('/api/plugins/', ''));
+        const ok = this.store.deletePlugin(id);
+        return this.sendJson(res, 200, { success: ok, id });
+      }
+
       this.sendJson(res, 404, { error: 'Not Found' });
     } catch (err: any) {
       console.error('[Server Error]', err);
