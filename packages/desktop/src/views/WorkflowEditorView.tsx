@@ -44,6 +44,10 @@ import {
   CheckCircle2,
   ArrowRight,
   RefreshCw,
+  Copy,
+  Edit3,
+  Loader2,
+  Workflow,
 } from 'lucide-react';
 import {
   WorkflowDefinition,
@@ -54,6 +58,8 @@ import {
 } from '@openloop/core';
 import { api } from '../services/api';
 import { layoutWorkflowDag } from '../utils/dagLayout';
+import { EditWorkflowModal } from '../components/EditWorkflowModal';
+import { ConfirmModal } from '../components/ConfirmModal';
 
 // ==========================================
 // 1. 自定义节点外观（极简高质感 + 智能体生成发光）
@@ -220,6 +226,7 @@ interface WorkflowEditorViewProps {
   onBack: () => void;
   onRefresh: () => void;
   onOpenTaskLogs: (taskId: string) => void;
+  onSelectWorkflow?: (workflowId: string) => void;
 }
 
 // ==========================================
@@ -231,6 +238,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   onBack,
   onRefresh,
   onOpenTaskLogs,
+  onSelectWorkflow,
 }) => {
   const reactFlow = useReactFlow();
   const activeWorkflow = workflows.find((w) => w.id === workflowId) || workflows[0];
@@ -239,6 +247,16 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string>('');
+
+  // 流水线基础信息与弹窗状态
+  const [workflowName, setWorkflowName] = useState(activeWorkflow?.name || '');
+  const [workflowDescription, setWorkflowDescription] = useState(activeWorkflow?.description || '');
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
 
   // 右侧双模工作台状态：'copilot' (AI助手) | 'inspector' (节点属性)
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
@@ -296,6 +314,15 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       reactFlow.fitView({ padding: 0.25, duration: 400 });
     }, 150);
   }, [workflowId, activeWorkflow]);
+
+  // 同步当前工作流名称与描述
+  useEffect(() => {
+    if (activeWorkflow) {
+      setWorkflowName(activeWorkflow.name || '');
+      setWorkflowDescription(activeWorkflow.description || '');
+      setTitleDraft(activeWorkflow.name || '');
+    }
+  }, [activeWorkflow?.id, activeWorkflow?.name, activeWorkflow?.description]);
 
   // 拉取 Copilot 会话历史状态
   const loadCopilotSession = useCallback(async () => {
@@ -684,11 +711,16 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   };
 
   // 保存工作流
-  const handleSave = async () => {
+  const handleSave = async (overrideName?: string, overrideDesc?: string) => {
     if (!activeWorkflow) return;
+
+    const finalName = (overrideName ?? workflowName).trim() || activeWorkflow.name;
+    const finalDesc = (overrideDesc ?? workflowDescription).trim();
 
     const updatedWorkflow: WorkflowDefinition = {
       ...activeWorkflow,
+      name: finalName,
+      description: finalDesc,
       updatedAt: Date.now(),
       nodes: nodes.map((n) => ({
         id: n.id,
@@ -705,14 +737,112 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       })),
     };
 
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowEditor] 保存工作流编排:', {
+        id: updatedWorkflow.id,
+        name: updatedWorkflow.name,
+        nodeCount: updatedWorkflow.nodes.length,
+        edgeCount: updatedWorkflow.edges.length,
+      });
+    }
+
     setSaveStatus('保存中...');
     try {
       await api.saveWorkflow(updatedWorkflow);
+      setWorkflowName(finalName);
+      setWorkflowDescription(finalDesc);
       setSaveStatus('已保存');
       setTimeout(() => setSaveStatus(''), 2000);
       onRefresh();
     } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowEditor] 保存工作流失败:', err);
+      }
       setSaveStatus(`保存失败: ${err.message}`);
+    }
+  };
+
+  // 复制当前工作流
+  const handleDuplicateCurrentWorkflow = async () => {
+    if (!activeWorkflow || isDuplicating) return;
+    setIsDuplicating(true);
+    const newId = `wf_${Date.now().toString(36)}`;
+    const clonedWf: WorkflowDefinition = {
+      ...activeWorkflow,
+      id: newId,
+      name: `${workflowName || activeWorkflow.name} (副本)`,
+      description: workflowDescription || activeWorkflow.description || '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        name: (n.data as any).name,
+        type: (n.data as any).type,
+        position: n.position,
+        config: (n.data as any).config || {},
+      })),
+      edges: edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        label: e.label,
+      })),
+      variables: activeWorkflow.variables
+        ? JSON.parse(JSON.stringify(activeWorkflow.variables))
+        : undefined,
+    };
+
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowEditor] 发起流程复制:', {
+        fromId: activeWorkflow.id,
+        newId: clonedWf.id,
+        name: clonedWf.name,
+      });
+    }
+
+    try {
+      await api.saveWorkflow(clonedWf);
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowEditor] 流程复制成功:', clonedWf.id);
+      }
+      onRefresh();
+      if (onSelectWorkflow) {
+        onSelectWorkflow(newId);
+      }
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowEditor] 流程复制失败:', err);
+      }
+      alert(`复制工作流失败: ${err?.message || '未知错误'}`);
+    } finally {
+      setIsDuplicating(false);
+    }
+  };
+
+  // 确认删除当前工作流
+  const handleConfirmDeleteCurrentWorkflow = async () => {
+    if (!activeWorkflow || isDeleting) return;
+
+    setIsDeleting(true);
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowEditor] 执行删除流程:', activeWorkflow.id);
+    }
+
+    try {
+      await api.deleteWorkflow(activeWorkflow.id);
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowEditor] 流程删除成功:', activeWorkflow.id);
+      }
+      setIsDeleteModalOpen(false);
+      onRefresh();
+      onBack();
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowEditor] 删除工作流失败:', err);
+      }
+      alert(`删除工作流失败: ${err?.message || '未知错误'}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -766,12 +896,92 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
 
           <span className="text-[#e3e3e8]">|</span>
 
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-semibold text-[#1c1c21]">{activeWorkflow.name}</span>
-            <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
-              {activeWorkflow.id}
-            </span>
-          </div>
+          {/* 流程名称与快速修改 */}
+          {isEditingTitle ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                autoFocus
+                type="text"
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const trimmed = titleDraft.trim();
+                    if (trimmed) {
+                      setWorkflowName(trimmed);
+                      handleSave(trimmed);
+                    }
+                    setIsEditingTitle(false);
+                  } else if (e.key === 'Escape') {
+                    setTitleDraft(workflowName);
+                    setIsEditingTitle(false);
+                  }
+                }}
+                onBlur={() => {
+                  const trimmed = titleDraft.trim();
+                  if (trimmed && trimmed !== workflowName) {
+                    setWorkflowName(trimmed);
+                    handleSave(trimmed);
+                  }
+                  setIsEditingTitle(false);
+                }}
+                className="h-[26px] px-2 text-[13px] font-semibold text-[#1c1c21] bg-[#f9f9fb] border border-[#4f46e5] rounded-[5px] outline-none shadow-xs"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const trimmed = titleDraft.trim();
+                  if (trimmed) {
+                    setWorkflowName(trimmed);
+                    handleSave(trimmed);
+                  }
+                  setIsEditingTitle(false);
+                }}
+                className="p-1 rounded hover:bg-[#e4f6ec] text-[#189a58] transition-colors"
+                title="确定修改"
+              >
+                <Check size={12} strokeWidth={2.4} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTitleDraft(workflowName);
+                  setIsEditingTitle(false);
+                }}
+                className="p-1 rounded hover:bg-[#f1f1f4] text-[#85858d] transition-colors"
+                title="取消修改"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 group/title">
+              <span
+                onClick={() => {
+                  setTitleDraft(workflowName);
+                  setIsEditingTitle(true);
+                }}
+                className="text-[13px] font-semibold text-[#1c1c21] hover:text-[#4f46e5] cursor-pointer transition-colors"
+                title="点击重命名流程"
+              >
+                {workflowName || activeWorkflow.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setTitleDraft(workflowName);
+                  setIsEditingTitle(true);
+                }}
+                className="p-0.5 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] opacity-0 group-hover/title:opacity-100 transition-all"
+                title="快速重命名"
+              >
+                <Edit3 size={11} />
+              </button>
+              <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
+                {activeWorkflow.id}
+              </span>
+            </div>
+          )}
 
           <div className="text-[11.5px] text-[#85858d] font-mono">
             ({nodes.length} 节点 · {edges.length} 连线)
@@ -799,6 +1009,42 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             <LayoutGrid size={12} className="text-[#4f46e5]" />
             <span>自动排版</span>
           </button>
+
+          {/* 复制流程 */}
+          <button
+            onClick={handleDuplicateCurrentWorkflow}
+            disabled={isDuplicating}
+            className="flex items-center gap-1 px-2.5 h-[26px] rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11.5px] font-medium text-[#4b4b53] transition-all shadow-xs disabled:opacity-50"
+            title="克隆当前编排副本"
+          >
+            {isDuplicating ? (
+              <Loader2 size={11.5} className="animate-spin text-[#4f46e5]" />
+            ) : (
+              <Copy size={11.5} />
+            )}
+            <span>复制</span>
+          </button>
+
+          {/* 流程属性 */}
+          <button
+            onClick={() => setIsEditModalOpen(true)}
+            className="flex items-center gap-1 px-2.5 h-[26px] rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11.5px] font-medium text-[#4b4b53] transition-all shadow-xs"
+            title="编辑流程名称与业务描述"
+          >
+            <Edit3 size={11.5} />
+            <span>属性</span>
+          </button>
+
+          {/* 删除流程 */}
+          <button
+            onClick={() => setIsDeleteModalOpen(true)}
+            className="flex items-center justify-center w-[26px] h-[26px] rounded-[6px] border border-transparent hover:border-[#ffe4e6] text-[#85858d] hover:bg-[#fff1f2] hover:text-[#e11d48] transition-all"
+            title="删除此流程"
+          >
+            <Trash2 size={12} />
+          </button>
+
+          <span className="text-[#e3e3e8]">|</span>
 
           {/* AI 编排助手唤起按钮 */}
           <button
@@ -1001,6 +1247,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onNodeClick={handleNodeClick}
+            onPaneClick={() => setSelectedNodeId(null)}
             nodeTypes={nodeTypes}
             fitView
           >
@@ -1042,7 +1289,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   }`}
                 >
                   <Settings2 size={12} className="text-[#85858d]" />
-                  <span>节点属性</span>
+                  <span>{selectedNode ? '节点属性' : '流程属性'}</span>
                   {selectedNode && (
                     <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
                   )}
@@ -1396,11 +1643,95 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-center p-6 text-[#85858d]">
-                    <Settings2 size={24} className="mb-2 text-[#b9b9c2]" />
-                    <div className="text-[12px] font-medium text-[#1c1c21] mb-1">未选中节点</div>
-                    <div className="text-[11px] text-[#85858d] max-w-[200px]">
-                      点击画布中任意节点即可在此精细编辑配置，或切换至 AI 助手让 Agent 协助编排。
+                  <div className="space-y-4 text-[12px]">
+                    <div className="flex items-center justify-between pb-2 border-b border-[#ececf0]">
+                      <div className="flex items-center gap-2">
+                        <Workflow size={14} className="text-[#4f46e5]" />
+                        <span className="font-semibold text-[12.5px] text-[#1c1c21]">
+                          流水线全局配置
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={handleDuplicateCurrentWorkflow}
+                          disabled={isDuplicating}
+                          className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] transition-colors"
+                          title="复制流水线"
+                        >
+                          <Copy size={12} />
+                        </button>
+                        <button
+                          onClick={() => setIsDeleteModalOpen(true)}
+                          className="p-1 rounded text-[#85858d] hover:text-[#e11d48] hover:bg-[#fff1f2] transition-colors"
+                          title="删除该流水线"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[#85858d] mb-1 font-medium">流水线名称</label>
+                      <input
+                        type="text"
+                        value={workflowName}
+                        onChange={(e) => setWorkflowName(e.target.value)}
+                        className="w-full h-[30px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2.5 text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5] transition-all"
+                        placeholder="流水线名称"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#85858d] mb-1 font-medium">流程描述说明</label>
+                      <textarea
+                        rows={3}
+                        value={workflowDescription}
+                        onChange={(e) => setWorkflowDescription(e.target.value)}
+                        className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2.5 text-[#1c1c21] outline-none resize-none focus:bg-white focus:border-[#4f46e5] transition-all placeholder:text-[#85858d]"
+                        placeholder="描述此流水线的业务目标与流转规则..."
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#85858d] mb-1 font-medium">流水线标识 (ID)</label>
+                      <div className="px-2.5 py-1.5 rounded-[6px] bg-[#f4f4f6] font-mono text-[11px] text-[#4b4b53] border border-[#ececf0] flex items-center justify-between">
+                        <span>{activeWorkflow.id}</span>
+                        <span className="text-[10px] text-[#85858d]">系统唯一</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#f9f9fb] border border-[#ececf0] rounded-[7px] p-2.5 space-y-1.5 text-[11px] text-[#85858d]">
+                      <div className="flex items-center justify-between">
+                        <span>拓扑节点数</span>
+                        <span className="font-mono text-[#1c1c21] font-medium">{nodes.length} 个</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>拓扑依赖连线</span>
+                        <span className="font-mono text-[#1c1c21] font-medium">{edges.length} 条</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>最后更新</span>
+                        <span className="font-mono text-[#1c1c21]">
+                          {activeWorkflow.updatedAt
+                            ? new Date(activeWorkflow.updatedAt).toLocaleString('zh-CN', {
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : '刚刚'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex flex-col gap-2">
+                      <button
+                        onClick={() => handleSave()}
+                        className="w-full h-[30px] rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm"
+                      >
+                        <Save size={12} />
+                        <span>保存名称与编排</span>
+                      </button>
                     </div>
                   </div>
                 )}
@@ -1413,6 +1744,39 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* 流程信息编辑弹窗 */}
+      <EditWorkflowModal
+        isOpen={isEditModalOpen}
+        workflow={{
+          ...activeWorkflow,
+          name: workflowName || activeWorkflow.name,
+          description: workflowDescription,
+        }}
+        onClose={() => setIsEditModalOpen(false)}
+        onSave={async ({ name, description }) => {
+          setWorkflowName(name);
+          setWorkflowDescription(description);
+          await handleSave(name, description);
+        }}
+      />
+
+      {/* 删除流程确认弹窗 */}
+      <ConfirmModal
+        isOpen={isDeleteModalOpen}
+        title="删除自动化流水线"
+        targetName={workflowName || activeWorkflow.name}
+        targetTag={activeWorkflow.id}
+        description="确定要永久删除该自动化编排流程吗？此操作不可撤销，画布与节点配置将被清除。"
+        confirmText="确认删除"
+        cancelText="取消"
+        variant="danger"
+        loading={isDeleting}
+        onClose={() => {
+          if (!isDeleting) setIsDeleteModalOpen(false);
+        }}
+        onConfirm={handleConfirmDeleteCurrentWorkflow}
+      />
     </div>
   );
 };

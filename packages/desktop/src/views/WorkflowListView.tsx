@@ -20,9 +20,12 @@ import {
   Pin,
   ArrowUpDown,
   Check,
+  Loader2,
 } from 'lucide-react';
 import { WorkflowDefinition, NodeType } from '@openloop/core';
 import { api } from '../services/api';
+import { EditWorkflowModal } from '../components/EditWorkflowModal';
+import { ConfirmModal } from '../components/ConfirmModal';
 
 const STORAGE_KEY_PINNED_WORKFLOWS = 'openloop_pinned_workflow_ids';
 
@@ -45,6 +48,12 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   const [newDesc, setNewDesc] = useState('');
   const [templateType, setTemplateType] = useState<'empty' | 'standard' | 'deploy'>('standard');
   const [loading, setLoading] = useState(false);
+
+  // 流水线编辑、复制与删除状态
+  const [editTargetWf, setEditTargetWf] = useState<WorkflowDefinition | null>(null);
+  const [deleteTargetWf, setDeleteTargetWf] = useState<WorkflowDefinition | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
   // 置顶与多维排序状态
   const [pinnedIds, setPinnedIds] = useState<string[]>(() => {
@@ -311,6 +320,122 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     }
   };
 
+  // 复制工作流
+  const handleDuplicateWorkflow = async (e: React.MouseEvent, wf: WorkflowDefinition) => {
+    e.stopPropagation();
+    if (duplicatingId) return;
+
+    setDuplicatingId(wf.id);
+    const newId = `wf_${Date.now().toString(36)}`;
+    const clonedWf: WorkflowDefinition = {
+      ...wf,
+      id: newId,
+      name: `${wf.name} (副本)`,
+      description: wf.description || '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      nodes: JSON.parse(JSON.stringify(wf.nodes || [])),
+      edges: JSON.parse(JSON.stringify(wf.edges || [])),
+      variables: wf.variables ? JSON.parse(JSON.stringify(wf.variables)) : undefined,
+    };
+
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowListView] 发起流程复制:', {
+        fromId: wf.id,
+        newId: clonedWf.id,
+        name: clonedWf.name,
+      });
+    }
+
+    try {
+      await api.saveWorkflow(clonedWf);
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowListView] 流程复制成功:', clonedWf.id);
+      }
+      onRefresh();
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowListView] 流程复制失败:', err);
+      }
+      alert(`复制流程失败: ${err?.message || '未知错误'}`);
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
+
+  // 保存工作流基本信息修改
+  const handleSaveEditWorkflow = async ({
+    id,
+    name,
+    description,
+  }: {
+    id: string;
+    name: string;
+    description: string;
+  }) => {
+    const target = workflows.find((w) => w.id === id);
+    if (!target) return;
+
+    const updatedWf: WorkflowDefinition = {
+      ...target,
+      name,
+      description,
+      updatedAt: Date.now(),
+    };
+
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowListView] 更新流程信息:', {
+        id,
+        name,
+        description,
+      });
+    }
+
+    await api.saveWorkflow(updatedWf);
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowListView] 流程信息更新成功:', id);
+    }
+    setEditTargetWf(null);
+    onRefresh();
+  };
+
+  // 确认删除工作流
+  const handleConfirmDeleteWorkflow = async () => {
+    if (!deleteTargetWf) return;
+
+    setIsDeleting(true);
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowListView] 执行删除流程:', deleteTargetWf.id);
+    }
+
+    try {
+      await api.deleteWorkflow(deleteTargetWf.id);
+      // 同步移除置顶记录
+      setPinnedIds((prev) => {
+        const next = prev.filter((id) => id !== deleteTargetWf.id);
+        try {
+          localStorage.setItem(STORAGE_KEY_PINNED_WORKFLOWS, JSON.stringify(next));
+        } catch (err) {
+          console.warn('[WorkflowListView] 同步置顶列表失败:', err);
+        }
+        return next;
+      });
+
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowListView] 流程删除成功:', deleteTargetWf.id);
+      }
+      setDeleteTargetWf(null);
+      onRefresh();
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowListView] 流程删除失败:', err);
+      }
+      alert(`删除流程失败: ${err?.message || '未知错误'}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const getNodeBadge = (type: NodeType) => {
     switch (type) {
       case 'agent':
@@ -481,11 +606,30 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      {/* 第一行：工作流名称 + 置顶胶囊 + 标识胶囊 + 节点环节能力微徽章 */}
+                      {/* 第一行：工作流名称 + 快捷编辑 + 置顶胶囊 + 标识胶囊 + 节点环节能力微徽章 */}
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-[13px] font-semibold text-[#1c1c21] shrink-0">
+                        <span
+                          className="text-[13px] font-semibold text-[#1c1c21] shrink-0 hover:text-[#4f46e5] transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditTargetWf(wf);
+                          }}
+                          title="点击编辑流程基本信息"
+                        >
                           {wf.name}
                         </span>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditTargetWf(wf);
+                          }}
+                          title="编辑名称与描述"
+                          className="p-0.5 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] opacity-0 group-hover:opacity-100 transition-all"
+                        >
+                          <Edit3 size={11} />
+                        </button>
 
                         {isPinned && (
                           <span className="inline-flex items-center gap-0.5 text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded-[4px] shrink-0">
@@ -524,14 +668,14 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
                   {/* 右侧动作操作条 (带轻量竖分隔线) */}
                   <div
-                    className="flex items-center gap-2 shrink-0 border-l border-[#ececf0] pl-4"
+                    className="flex items-center gap-1.5 shrink-0 border-l border-[#ececf0] pl-3.5"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {/* 置顶切换图钉按钮 */}
                     <button
                       onClick={(e) => handleTogglePin(e, wf)}
                       title={isPinned ? '取消置顶' : '固定在顶部'}
-                      className={`w-[25px] h-[25px] rounded-[5px] flex items-center justify-center transition-all ${
+                      className={`w-[26px] h-[26px] rounded-[5px] flex items-center justify-center transition-all ${
                         isPinned
                           ? 'bg-[#eeedfd] text-[#4f46e5] border border-[#d8d6fb] shadow-sm'
                           : 'text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] opacity-0 group-hover:opacity-100'
@@ -545,9 +689,41 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                       />
                     </button>
 
+                    {/* 编辑基本信息按钮 */}
+                    <button
+                      onClick={() => setEditTargetWf(wf)}
+                      title="编辑流程名称与描述"
+                      className="w-[26px] h-[26px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-[#e3e3e8]"
+                    >
+                      <Edit3 size={11.5} />
+                    </button>
+
+                    {/* 复制流程按钮 */}
+                    <button
+                      onClick={(e) => handleDuplicateWorkflow(e, wf)}
+                      title="复制为新流程"
+                      disabled={duplicatingId === wf.id}
+                      className="w-[26px] h-[26px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-[#e3e3e8] disabled:opacity-50"
+                    >
+                      {duplicatingId === wf.id ? (
+                        <Loader2 size={11.5} className="animate-spin text-[#4f46e5]" />
+                      ) : (
+                        <Copy size={11.5} />
+                      )}
+                    </button>
+
+                    {/* 删除流程按钮 */}
+                    <button
+                      onClick={() => setDeleteTargetWf(wf)}
+                      title="删除流程"
+                      className="w-[26px] h-[26px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:bg-[#fff1f2] hover:text-[#e11d48] hover:border-[#ffe4e6] opacity-0 group-hover:opacity-100 transition-all border border-transparent"
+                    >
+                      <Trash2 size={11.5} />
+                    </button>
+
                     <button
                       onClick={(e) => handleRunWorkflow(e, wf)}
-                      className="h-[25px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
+                      className="h-[26px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm"
                     >
                       <Play size={10} strokeWidth={2.4} />
                       <span>调试运行</span>
@@ -555,9 +731,8 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
                     <button
                       onClick={() => onSelectWorkflow(wf.id)}
-                      className="h-[25px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#1c1c21] hover:bg-[#f1f1f4] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-sm"
+                      className="h-[26px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#1c1c21] hover:bg-[#f1f1f4] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-sm"
                     >
-                      <Edit3 size={11} />
                       <span>编辑画布</span>
                       <ChevronRight size={11} className="text-[#85858d]" />
                     </button>
@@ -680,6 +855,30 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           </div>
         </div>
       )}
+      {/* 编辑工作流基本信息弹窗 */}
+      <EditWorkflowModal
+        isOpen={!!editTargetWf}
+        workflow={editTargetWf}
+        onClose={() => setEditTargetWf(null)}
+        onSave={handleSaveEditWorkflow}
+      />
+
+      {/* 删除工作流二次确认弹窗 */}
+      <ConfirmModal
+        isOpen={!!deleteTargetWf}
+        title="删除自动化流水线"
+        targetName={deleteTargetWf?.name}
+        targetTag={deleteTargetWf?.id}
+        description="确定要永久删除该自动化编排流程吗？此操作不可撤销，已有关联历史任务执行记录不受影响。"
+        confirmText="确认删除"
+        cancelText="取消"
+        variant="danger"
+        loading={isDeleting}
+        onClose={() => {
+          if (!isDeleting) setDeleteTargetWf(null);
+        }}
+        onConfirm={handleConfirmDeleteWorkflow}
+      />
     </div>
   );
 };

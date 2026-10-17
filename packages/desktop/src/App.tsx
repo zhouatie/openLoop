@@ -11,11 +11,12 @@ import { SettingsView } from './views/SettingsView';
 import { api } from './services/api';
 import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { Puzzle } from 'lucide-react';
+import { BUILTIN_PLUGINS, BUILTIN_VIEW_TITLES } from './constants/builtinPlugins';
 
 export const App: React.FC = () => {
   const [activePluginId, setActivePluginId] = useState<string>('kanban');
   const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
-  const [plugins, setPlugins] = useState<PluginManifest[]>([]);
+  const [plugins, setPlugins] = useState<PluginManifest[]>(BUILTIN_PLUGINS);
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -49,7 +50,26 @@ export const App: React.FC = () => {
         api.getWorkflows(),
         api.getTasks(),
       ]);
-      setPlugins(pluginsRes);
+      if (import.meta.env?.DEV) {
+        console.log('[App] 刷新数据完成:', {
+          pluginsCount: pluginsRes?.length,
+          workflowsCount: workflowsRes?.length,
+          tasksCount: tasksRes?.length,
+        });
+      }
+      if (pluginsRes && Array.isArray(pluginsRes)) {
+        // 合并预置插件与远端加载的扩展插件，保持预置插件顺序与元数据完备
+        const mergedPlugins = [...BUILTIN_PLUGINS];
+        for (const p of pluginsRes) {
+          const idx = mergedPlugins.findIndex((m) => m.id === p.id);
+          if (idx >= 0) {
+            mergedPlugins[idx] = { ...mergedPlugins[idx], ...p };
+          } else {
+            mergedPlugins.push(p);
+          }
+        }
+        setPlugins(mergedPlugins);
+      }
       setWorkflows(workflowsRes);
       setTasks(tasksRes);
     } catch (err) {
@@ -168,7 +188,10 @@ export const App: React.FC = () => {
       : 'Agent 驱动'
     : activePluginId === 'workflow-editor' && editingWorkflow
     ? `流程编排 / ${editingWorkflow.name}`
-    : currentPlugin?.sidebarItem?.title || currentPlugin?.name || 'openLoop';
+    : currentPlugin?.sidebarItem?.title ||
+      currentPlugin?.name ||
+      BUILTIN_VIEW_TITLES[activePluginId] ||
+      '任务看板';
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f4f4f6] text-[#1c1c21]">
@@ -177,6 +200,9 @@ export const App: React.FC = () => {
         plugins={plugins}
         activePluginId={activePluginId}
         onSelectPlugin={(id) => {
+          if (import.meta.env?.DEV) {
+            console.log('[App] 切换视图插件:', id);
+          }
           setActivePluginId(id);
           if (id === 'workflow-editor') {
             setEditingWorkflowId(null); // 回到流程列表
@@ -227,6 +253,7 @@ export const App: React.FC = () => {
               onBack={() => setEditingWorkflowId(null)}
               onRefresh={refreshData}
               onOpenTaskLogs={handleOpenTaskLogs}
+              onSelectWorkflow={(id) => setEditingWorkflowId(id)}
             />
           )}
 
