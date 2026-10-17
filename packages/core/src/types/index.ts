@@ -83,6 +83,32 @@ export interface TaskSessionState {
   piSessionId?: string;
 }
 
+export interface WorkflowSessionState {
+  workflowId: string;
+  active: boolean;
+  isBusy: boolean;
+  isPaused: boolean;
+  messages: SessionChatMessage[];
+  agentName?: string;
+  model?: string;
+  piSessionId?: string;
+}
+
+export interface WorkflowActionPayload {
+  action: 'replace_all' | 'patch' | 'layout';
+  workflow?: {
+    name?: string;
+    description?: string;
+    nodes: WorkflowNode[];
+    edges: WorkflowEdge[];
+  };
+  addNodes?: WorkflowNode[];
+  updateNodes?: Partial<WorkflowNode>[];
+  removeNodeIds?: string[];
+  addEdges?: WorkflowEdge[];
+  removeEdgeIds?: string[];
+}
+
 export interface WorkflowNode {
   id: string;
   name: string;
@@ -108,6 +134,10 @@ export interface WorkflowDefinition {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   variables?: Record<string, any>;
+  context?: {
+    chatMessages?: SessionChatMessage[];
+    [key: string]: any;
+  };
 }
 
 export interface NodeRun {

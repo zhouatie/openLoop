@@ -1,22 +1,62 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
 import os from 'os';
-import { OpenLoopServer } from '@openloop/core';
+import http from 'http';
+import { spawn, ChildProcess } from 'child_process';
 
 let mainWindow: BrowserWindow | null = null;
-let server: OpenLoopServer | null = null;
+let coreProcess: ChildProcess | null = null;
 
-async function startServer() {
+// 探测指定 URL / 端口是否存活
+function checkUrlAlive(urlStr: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const parsed = new URL(urlStr);
+      const req = http.get(
+        {
+          hostname: parsed.hostname || '127.0.0.1',
+          port: parsed.port,
+          path: '/',
+        },
+        (res) => {
+          resolve(res.statusCode !== undefined);
+        }
+      );
+      req.on('error', () => resolve(false));
+      req.setTimeout(600, () => {
+        req.destroy();
+        resolve(false);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+// 确保 Core 调度服务运行（优先连接已有 19888 实例，避免重复启动及原生 ABI 冲突）
+async function ensureCoreServer() {
+  const isCoreAlive = await checkUrlAlive('http://127.0.0.1:19888');
+  if (isCoreAlive) {
+    console.log('[Desktop Main] Core Server already active on 19888, connecting directly.');
+    return;
+  }
+
   try {
-    server = new OpenLoopServer({ port: 19888, host: '127.0.0.1' });
-    await server.start();
-    console.log('[Desktop Main] Embedded Core Server started on 19888');
+    const coreCliPath = path.resolve(__dirname, '../../core/dist/server-cli.js');
+    console.log('[Desktop Main] Spawning standalone Core Server process:', coreCliPath);
+    coreProcess = spawn('node', [coreCliPath], {
+      env: { ...process.env, PORT: '19888' },
+      stdio: 'inherit',
+    });
+    coreProcess.on('error', (err) => {
+      console.warn('[Desktop Main] Core Server process notice:', err.message);
+    });
   } catch (err: any) {
-    console.log('[Desktop Main] Server start note:', err.message);
+    console.warn('[Desktop Main] Server start notice:', err.message);
   }
 }
 
-function createWindow() {
+async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 880,
@@ -31,11 +71,16 @@ function createWindow() {
     },
   });
 
-  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
-  if (devServerUrl) {
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+  const isDevRunning = await checkUrlAlive(devServerUrl);
+
+  if (isDevRunning) {
+    console.log(`[Desktop Main] Connected to Frontend Dev Server: ${devServerUrl}`);
     mainWindow.loadURL(devServerUrl);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    const distHtml = path.join(__dirname, '../dist/index.html');
+    console.log(`[Desktop Main] Loading local bundle: ${distHtml}`);
+    mainWindow.loadFile(distHtml);
   }
 
   mainWindow.on('closed', () => {
@@ -71,8 +116,8 @@ ipcMain.handle('shell:openPath', async (_event, dirPath: string) => {
 });
 
 app.whenReady().then(async () => {
-  await startServer();
-  createWindow();
+  await ensureCoreServer();
+  await createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -81,13 +126,19 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('window-all-closed', async () => {
+app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    if (server) await server.stop();
+    if (coreProcess) {
+      coreProcess.kill();
+      coreProcess = null;
+    }
     app.quit();
   }
 });
 
-app.on('will-quit', async () => {
-  if (server) await server.stop();
+app.on('will-quit', () => {
+  if (coreProcess) {
+    coreProcess.kill();
+    coreProcess = null;
+  }
 });

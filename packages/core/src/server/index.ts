@@ -7,9 +7,10 @@ import util from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Store } from '../store';
 import { DagEngine } from '../engine/dag-engine';
-import { Task, WorkflowDefinition, PluginManifest, TaskSessionState, KanbanColumn, TaskAttachment } from '../types';
+import { Task, WorkflowDefinition, PluginManifest, TaskSessionState, KanbanColumn, TaskAttachment, WorkflowSessionState } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
+import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 
 const serverLogger = createLogger('Server');
 
@@ -81,6 +82,12 @@ export class OpenLoopServer {
 
     this.engine.on('agent:chat_update', (data) => {
       this.broadcast({ type: 'agent:chat_update', data });
+    });
+
+    // 流程编排智能体 Copilot 状态推流广播
+    const copilotMgr = WorkflowCopilotManager.getInstance(this.store);
+    copilotMgr.on('update', ({ workflowId, state }) => {
+      this.broadcast({ type: 'workflow:chat_update', data: { workflowId, state } });
     });
   }
 
@@ -315,6 +322,42 @@ export class OpenLoopServer {
       if (pathname === '/api/workflows' && method === 'GET') {
         const workflows = this.store.getWorkflows();
         return this.sendJson(res, 200, workflows, reqMeta);
+      }
+
+      // Workflow Copilot 会话状态读取: GET /api/workflows/:id/session
+      const wfSessionMatch = pathname.match(/^\/api\/workflows\/([a-zA-Z0-9_-]+)\/session$/);
+      if (wfSessionMatch && method === 'GET') {
+        const wfId = wfSessionMatch[1];
+        const copilot = WorkflowCopilotManager.getInstance(this.store);
+        const state = copilot.getSessionState(wfId);
+        return this.sendJson(res, 200, state, reqMeta);
+      }
+
+      // Workflow Copilot 发送编排对话: POST /api/workflows/:id/session/chat
+      const wfChatMatch = pathname.match(/^\/api\/workflows\/([a-zA-Z0-9_-]+)\/session\/chat$/);
+      if (wfChatMatch && method === 'POST') {
+        const wfId = wfChatMatch[1];
+        const body = await this.parseJsonBody(req);
+        const { message, snapshot } = body;
+        if (!message || typeof message !== 'string') {
+          return this.sendJson(res, 400, { error: 'message string is required' }, reqMeta);
+        }
+        serverLogger.info(`[WorkflowCopilot:Chat] 收到编排对话 (Workflow: ${wfId}): "${message.slice(0, 40)}"`);
+        const copilot = WorkflowCopilotManager.getInstance(this.store);
+        copilot.sendMessage(wfId, message.trim(), snapshot).catch((err) => {
+          serverLogger.error(`[WorkflowCopilot:Chat] 发送消息异常: ${err.message}`, undefined, { workflowId: wfId });
+        });
+        return this.sendJson(res, 200, { success: true }, reqMeta);
+      }
+
+      // Workflow Copilot 重置会话: POST /api/workflows/:id/session/reset
+      const wfResetMatch = pathname.match(/^\/api\/workflows\/([a-zA-Z0-9_-]+)\/session\/reset$/);
+      if (wfResetMatch && method === 'POST') {
+        const wfId = wfResetMatch[1];
+        serverLogger.info(`[WorkflowCopilot:Reset] 重置工作流会话: ${wfId}`);
+        const copilot = WorkflowCopilotManager.getInstance(this.store);
+        copilot.resetSession(wfId);
+        return this.sendJson(res, 200, { success: true }, reqMeta);
       }
 
       if (pathname === '/api/workflows' && method === 'POST') {

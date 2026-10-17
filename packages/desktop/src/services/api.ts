@@ -1,4 +1,4 @@
-import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, OpenLoopSettings, KanbanColumn, TaskAttachment } from '@openloop/core';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, OpenLoopSettings, KanbanColumn, TaskAttachment, WorkflowSessionState } from '@openloop/core';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
@@ -148,6 +148,35 @@ export class DesktopApiService {
   async deleteWorkflow(id: string): Promise<boolean> {
     const data = await requestJson<{ success: boolean }>(`${BASE_URL}/api/workflows/${id}`, { method: 'DELETE' });
     return data.success;
+  }
+
+  // Workflow Copilot (AI 协助与零手动编排)
+  async getWorkflowSession(workflowId: string): Promise<WorkflowSessionState> {
+    return requestJson<WorkflowSessionState>(`${BASE_URL}/api/workflows/${workflowId}/session`);
+  }
+
+  async sendWorkflowChatMessage(
+    workflowId: string,
+    message: string,
+    snapshot?: { nodes?: any[]; edges?: any[]; name?: string }
+  ): Promise<{ success: boolean }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:WorkflowCopilot] 发送流程编排指令 (${workflowId}):`, message.slice(0, 40));
+    }
+    return requestJson<{ success: boolean }>(`${BASE_URL}/api/workflows/${workflowId}/session/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, snapshot }),
+    });
+  }
+
+  async resetWorkflowSession(workflowId: string): Promise<{ success: boolean }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:WorkflowCopilot] 请求重置编排助手会话 (${workflowId})`);
+    }
+    return requestJson<{ success: boolean }>(`${BASE_URL}/api/workflows/${workflowId}/session/reset`, {
+      method: 'POST',
+    });
   }
 
   // Tasks

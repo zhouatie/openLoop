@@ -648,9 +648,12 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                         : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
                     }`}
                   >
-                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5">空白画布</div>
+                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1">
+                      <Sparkles size={11} className="text-[#4f46e5]" />
+                      <span>空白 / AI 助手生成</span>
+                    </div>
                     <div className="text-[10px] text-[#85858d] line-clamp-2">
-                      从单一初始 CLI 节点自由连线构建
+                      进入后由 Agent 对话从头到尾自动编排
                     </div>
                   </div>
                 </div>
