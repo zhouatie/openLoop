@@ -197,6 +197,7 @@ export interface PluginManifest {
   description: string;
   author?: string;
   isBuiltin?: boolean;
+  entry?: string; // 插件 Web 入口 (URL 或相对路径)
   sidebarItem?: {
     id: string;
     title: string;

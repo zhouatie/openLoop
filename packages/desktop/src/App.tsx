@@ -12,6 +12,7 @@ import { WorkflowListView } from './views/WorkflowListView';
 import { WorkflowEditorView } from './views/WorkflowEditorView';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
+import { PluginSandboxContainer } from './components/PluginSandboxContainer';
 import { api } from './services/api';
 import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { Puzzle } from 'lucide-react';
@@ -306,7 +307,17 @@ export const AppContent: React.FC = () => {
           {activePluginId !== 'kanban' &&
             activePluginId !== 'workflow-editor' &&
             activePluginId !== 'plugin-manager' &&
-            !isSettings && (
+            !isSettings &&
+            (currentPlugin?.entry ? (
+              <PluginSandboxContainer
+                plugin={currentPlugin}
+                currentWorkspace={
+                  selectedWorkspaceFilter !== 'all' && selectedWorkspaceFilter !== 'none'
+                    ? selectedWorkspaceFilter
+                    : undefined
+                }
+              />
+            ) : (
               <div className="flex-1 h-full p-8 flex flex-col items-center justify-center text-center">
                 <div className="w-12 h-12 rounded-[10px] bg-white border border-[#e3e3e8] shadow-sm flex items-center justify-center text-[#4f46e5] mb-3">
                   <Puzzle size={22} />
@@ -321,7 +332,7 @@ export const AppContent: React.FC = () => {
                   Plugin ID: {currentPlugin?.id} · Version: v{currentPlugin?.version}
                 </div>
               </div>
-            )}
+            ))}
         </main>
       </div>
 
