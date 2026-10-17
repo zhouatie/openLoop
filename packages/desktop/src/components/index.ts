@@ -7,4 +7,8 @@ export * from './LogTerminalDrawer';
 export * from './KanbanColumnSortDropdown';
 export * from './NodeExecutionTimeline';
 export * from './WorkspacePicker';
+export * from './ImageLightboxModal';
+export * from './TaskAttachmentUploader';
+export * from './TaskPromptArea';
+
 

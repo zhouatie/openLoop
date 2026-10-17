@@ -37,13 +37,17 @@ import {
   FolderGit2,
   FolderOpen,
   Folder,
+  Image as ImageIcon,
+  Loader2,
+  ZoomIn,
 } from 'lucide-react';
-import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage } from '@openloop/core';
+import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage, TaskAttachment } from '@openloop/core';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { KanbanColumnSortDropdown } from '../components/KanbanColumnSortDropdown';
 import { NodeExecutionTimeline } from '../components/NodeExecutionTimeline';
+import { ImageLightboxModal } from '../components/ImageLightboxModal';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 import {
   ColumnSortRule,
@@ -89,6 +93,16 @@ const COLUMN_NAMES: Record<KanbanColumn, string> = {
   qa_review: '待验收',
   done: '已完成',
 };
+
+interface PendingChatAttachment {
+  tempId: string;
+  file: File;
+  name: string;
+  size: number;
+  previewUrl: string;
+  status: 'uploading' | 'error';
+  errorMessage?: string;
+}
 
 export const KanbanView: React.FC<KanbanViewProps> = ({
   tasks,
@@ -161,6 +175,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
   const [previewArtifact, setPreviewArtifact] = useState<{ name: string; path: string } | null>(null);
+  const [activeDetailImage, setActiveDetailImage] = useState<TaskAttachment | null>(null);
   const [selectedWorkflowFilter, setSelectedWorkflowFilter] = useState<string>('all');
   const [isWfDropdownOpen, setIsWfDropdownOpen] = useState(false);
   const wfDropdownRef = useRef<HTMLDivElement>(null);
@@ -195,6 +210,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       setSessionState(null);
       setDrawerTab('overview');
       setChatInput('');
+      setChatAttachments([]);
+      setPendingChatUploads([]);
     }
   }, [selectedTask?.id]);
 
@@ -215,12 +232,147 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   }, [sessionState?.messages, drawerTab]);
 
+  // 侧边栏 Agent 会话图片上传状态
+  const [chatAttachments, setChatAttachments] = useState<TaskAttachment[]>([]);
+  const [pendingChatUploads, setPendingChatUploads] = useState<PendingChatAttachment[]>([]);
+  const [isChatDragging, setIsChatDragging] = useState(false);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
+
+  const uploadChatFiles = async (files: File[]) => {
+    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    if (import.meta.env?.DEV) {
+      console.log('[UI:AgentChat] 开始上传待发图片附件:', imageFiles.map((f) => f.name));
+    }
+
+    const newPendingItems: PendingChatAttachment[] = imageFiles.map((f) => ({
+      tempId: `pending_chat_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      file: f,
+      name: f.name || 'image.png',
+      size: f.size,
+      previewUrl: URL.createObjectURL(f),
+      status: 'uploading',
+    }));
+
+    setPendingChatUploads((prev) => [...prev, ...newPendingItems]);
+
+    for (const item of newPendingItems) {
+      try {
+        const uploaded = await api.uploadAttachment(item.file);
+        setChatAttachments((prev) => [...prev, uploaded]);
+        URL.revokeObjectURL(item.previewUrl);
+        setPendingChatUploads((prev) => prev.filter((p) => p.tempId !== item.tempId));
+      } catch (err: any) {
+        setPendingChatUploads((prev) =>
+          prev.map((p) =>
+            p.tempId === item.tempId
+              ? { ...p, status: 'error', errorMessage: err.message || '上传失败' }
+              : p
+          )
+        );
+      }
+    }
+  };
+
+  const handleChatPaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          imageFiles.push(file);
+        }
+      }
+    }
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      uploadChatFiles(imageFiles);
+    }
+  };
+
+  const handleChatDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isChatDragging) setIsChatDragging(true);
+  };
+
+  const handleChatDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsChatDragging(false);
+    }
+  };
+
+  const handleChatDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsChatDragging(false);
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      uploadChatFiles(Array.from(e.dataTransfer.files));
+    }
+  };
+
+  const handleRemoveChatAttachment = (id: string) => {
+    setChatAttachments((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const handleRemovePendingChat = (tempId: string) => {
+    const item = pendingChatUploads.find((p) => p.tempId === tempId);
+    if (item) {
+      URL.revokeObjectURL(item.previewUrl);
+    }
+    setPendingChatUploads((prev) => prev.filter((p) => p.tempId !== tempId));
+  };
+
+  const handleRetryChatUpload = async (item: PendingChatAttachment) => {
+    setPendingChatUploads((prev) =>
+      prev.map((p) =>
+        p.tempId === item.tempId ? { ...p, status: 'uploading', errorMessage: undefined } : p
+      )
+    );
+    try {
+      const uploaded = await api.uploadAttachment(item.file);
+      setChatAttachments((prev) => [...prev, uploaded]);
+      URL.revokeObjectURL(item.previewUrl);
+      setPendingChatUploads((prev) => prev.filter((p) => p.tempId !== item.tempId));
+    } catch (err: any) {
+      setPendingChatUploads((prev) =>
+        prev.map((p) =>
+          p.tempId === item.tempId
+            ? { ...p, status: 'error', errorMessage: err.message || '上传失败' }
+            : p
+        )
+      );
+    }
+  };
+
   // 发送消息（支持运行中无缝插话 Steer 与空闲时发起交互）
   const handleSendChat = async () => {
-    if (!selectedTask || !chatInput.trim() || isSendingChat) return;
+    if (!selectedTask || isSendingChat) return;
     const msg = chatInput.trim();
+    const toSendAttachments = [...chatAttachments];
+    if (!msg && toSendAttachments.length === 0) return;
+    if (pendingChatUploads.some((p) => p.status === 'uploading')) {
+      alert('请等待图片附件上传完成后再发送');
+      return;
+    }
+
     setChatInput('');
+    setChatAttachments([]);
     setIsSendingChat(true);
+
+    if (import.meta.env?.DEV) {
+      console.log('[UI:AgentChat] 用户向 Agent 发送对话:', {
+        taskId: selectedTask.id,
+        content: msg,
+        attachmentsCount: toSendAttachments.length,
+      });
+    }
 
     // 乐观更新界面
     if (sessionState) {
@@ -233,6 +385,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
             id: `opt_${Date.now()}`,
             role: 'user',
             content: msg,
+            attachments: toSendAttachments.length > 0 ? toSendAttachments : undefined,
             timestamp: Date.now(),
           },
         ],
@@ -240,7 +393,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
 
     try {
-      await api.sendTaskChatMessage(selectedTask.id, msg);
+      await api.sendTaskChatMessage(selectedTask.id, msg, toSendAttachments);
     } catch (e: any) {
       alert(`发送消息失败: ${e.message}`);
     } finally {
@@ -573,6 +726,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     workflowId: string;
     kanbanColumn?: KanbanColumn;
     workspace?: string;
+    attachments?: TaskAttachment[];
   }) => {
     if (!editingTask) return;
     if (import.meta.env?.DEV) {
@@ -1551,22 +1705,35 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             )}
 
                             <div className="pt-1.5 border-t border-[#ececf0] flex items-center justify-between text-[10.5px] text-[#85858d]">
-                              <span>
-                                节点 {displayCompleted}/{displayTotal}
-                              </span>
-                              <div className="w-16 bg-[#e6e6eb] rounded-full h-[3px] overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full transition-all duration-300 ${
-                                    task.status === 'completed'
-                                      ? 'bg-[#189a58]'
-                                      : task.status === 'failed'
-                                      ? 'bg-[#d64545]'
-                                      : 'bg-[#1c1c21]'
-                                  }`}
-                                  style={{ width: `${progressPct}%` }}
-                                />
+                              <div className="flex items-center gap-1.5">
+                                <span>
+                                  节点 {displayCompleted}/{displayTotal}
+                                </span>
+                                {task.attachments && task.attachments.length > 0 && (
+                                  <span
+                                    className="flex items-center gap-0.5 text-[9.5px] font-mono text-[#63636b] bg-[#f4f4f7] px-1 py-[0.5px] rounded border border-[#ececf0]"
+                                    title={`${task.attachments.length} 张参考图片`}
+                                  >
+                                    <ImageIcon size={9} className="text-[#85858d]" />
+                                    <span>{task.attachments.length}</span>
+                                  </span>
+                                )}
                               </div>
-                              <span className="font-mono">{progressPct}%</span>
+                              <div className="flex items-center gap-2">
+                                <div className="w-14 bg-[#e6e6eb] rounded-full h-[3px] overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full transition-all duration-300 ${
+                                      task.status === 'completed'
+                                        ? 'bg-[#189a58]'
+                                        : task.status === 'failed'
+                                        ? 'bg-[#d64545]'
+                                        : 'bg-[#1c1c21]'
+                                    }`}
+                                    style={{ width: `${progressPct}%` }}
+                                  />
+                                </div>
+                                <span className="font-mono">{progressPct}%</span>
+                              </div>
                             </div>
                           </div>
                         );
@@ -1802,12 +1969,45 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                   {/* 任务说明与提示词 */}
                   <div>
-                    <div className="font-medium text-[#1c1c21] mb-1.5">任务说明与提示词</div>
+                    <div className="font-medium text-[#1c1c21] mb-1.5 flex items-center justify-between">
+                      <span>任务说明与提示词</span>
+                      {selectedTask.attachments && selectedTask.attachments.length > 0 && (
+                        <span className="text-[10px] text-[#85858d] font-mono">
+                          {selectedTask.attachments.length} 张参考图片
+                        </span>
+                      )}
+                    </div>
                     <div className="p-2.5 rounded-[7px] border border-[#ececf0] bg-[#f9f9fb] text-[#4b4b53] leading-relaxed whitespace-pre-wrap">
                       {selectedTask.description || (
                         <span className="text-[#85858d] italic">未设置说明与 Prompt 提示词</span>
                       )}
                     </div>
+
+                    {/* 任务图片附件画廊 */}
+                    {selectedTask.attachments && selectedTask.attachments.length > 0 && (
+                      <div className="mt-2 flex items-center gap-2 overflow-x-auto py-1 scrollbar-thin">
+                        {selectedTask.attachments.map((att) => {
+                          const displayUrl = api.getAttachmentUrl(att.url);
+                          return (
+                            <div
+                              key={att.id}
+                              onClick={() => setActiveDetailImage(att)}
+                              className="group relative w-[56px] h-[56px] shrink-0 rounded-[7px] border border-[#e3e3e8] bg-white overflow-hidden shadow-xs hover:border-[#4f46e5] cursor-pointer transition-all"
+                              title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击大图预览`}
+                            >
+                              <img
+                                src={displayUrl}
+                                alt={att.name}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                <ZoomIn size={13} className="text-white" />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Pi Agent 会话凭证与终端恢复 */}
@@ -2068,7 +2268,33 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           <div key={msg.id} className="flex justify-end">
                             <div className="max-w-[85%] rounded-[9px] px-3.5 py-2.5 bg-[#f4f4f6] border border-[#e3e3e8] text-[#1c1c21] text-[12px] leading-relaxed shadow-sm">
                               <div className="text-[9.5px] font-mono text-[#85858d] mb-1 text-right">YOU</div>
-                              <div className="whitespace-pre-wrap">{msg.content}</div>
+                              {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}
+
+                              {/* 用户随附图片缩略图画廊 */}
+                              {msg.attachments && msg.attachments.length > 0 && (
+                                <div className={`flex flex-wrap gap-1.5 ${msg.content ? 'mt-2 pt-2 border-t border-[#e6e6ec]' : ''}`}>
+                                  {msg.attachments.map((att) => {
+                                    const displayUrl = api.getAttachmentUrl(att.url);
+                                    return (
+                                      <div
+                                        key={att.id}
+                                        onClick={() => setActiveDetailImage(att)}
+                                        className="group relative w-[60px] h-[60px] rounded-[6px] border border-[#d8d8de] bg-white overflow-hidden shadow-xs hover:border-[#4f46e5] cursor-pointer transition-all"
+                                        title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击放大查看`}
+                                      >
+                                        <img
+                                          src={displayUrl}
+                                          alt={att.name}
+                                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
+                                        />
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                          <ZoomIn size={12} className="text-white" />
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                           </div>
                         );
@@ -2187,8 +2413,134 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     <span className="font-mono text-[#a5a5b0] text-[10px]">⌘ + Enter 发送</span>
                   </div>
 
+                  {/* 隐藏的图片选择器 */}
+                  <input
+                    type="file"
+                    ref={chatFileInputRef}
+                    onChange={(e) => {
+                      if (e.target.files) {
+                        uploadChatFiles(Array.from(e.target.files));
+                        e.target.value = '';
+                      }
+                    }}
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                    multiple
+                    className="hidden"
+                  />
+
                   {/* 极简精致输入卡片 */}
-                  <div className="rounded-[8px] border border-[#e3e3e8] focus-within:border-[#1c1c21]/40 focus-within:shadow-[0_2px_8px_rgba(0,0,0,0.06)] bg-white p-2 transition-all">
+                  <div
+                    onDragOver={handleChatDragOver}
+                    onDragLeave={handleChatDragLeave}
+                    onDrop={handleChatDrop}
+                    className={`relative rounded-[8px] border transition-all ${
+                      isChatDragging
+                        ? 'border-[#4f46e5] ring-2 ring-[#4f46e5]/20 bg-[#f5f4ff]'
+                        : 'border-[#e3e3e8] focus-within:border-[#1c1c21]/40 focus-within:shadow-[0_2px_8px_rgba(0,0,0,0.06)] bg-white'
+                    } p-2`}
+                  >
+                    {/* 拖拽释放遮罩 */}
+                    {isChatDragging && (
+                      <div className="absolute inset-0 z-20 rounded-[7px] bg-[#4f46e5]/10 border-2 border-dashed border-[#4f46e5] flex items-center justify-center pointer-events-none backdrop-blur-[0.5px]">
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#4f46e5]">
+                          <ImageIcon size={14} />
+                          <span>松开鼠标添加图片到 Agent 对话</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 待发送图片缩略图条带 */}
+                    {(chatAttachments.length > 0 || pendingChatUploads.length > 0) && (
+                      <div className="mb-2 pb-1.5 border-b border-[#f0f0f4] flex items-center gap-1.5 overflow-x-auto scrollbar-thin">
+                        {chatAttachments.map((att) => {
+                          const displayUrl = api.getAttachmentUrl(att.url);
+                          return (
+                            <div
+                              key={att.id}
+                              className="group relative w-[46px] h-[46px] shrink-0 rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden shadow-xs hover:border-[#4f46e5] transition-all cursor-pointer select-none"
+                              onClick={() => setActiveDetailImage(att)}
+                              title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击放大查看`}
+                            >
+                              <img src={displayUrl} alt={att.name} className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1 transition-opacity">
+                                <div className="p-0.5 rounded bg-white/20 text-white" title="放大">
+                                  <ZoomIn size={10} />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemoveChatAttachment(att.id);
+                                  }}
+                                  className="p-0.5 rounded bg-white/20 hover:bg-red-500/80 text-white"
+                                  title="移除"
+                                >
+                                  <X size={10} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {pendingChatUploads.map((pending) => (
+                          <div
+                            key={pending.tempId}
+                            className={`group relative w-[46px] h-[46px] shrink-0 rounded-[6px] border overflow-hidden shadow-xs transition-all cursor-pointer ${
+                              pending.status === 'error' ? 'border-red-300 bg-red-50/50' : 'border-[#4f46e5]/40 bg-[#f4f4f6]'
+                            }`}
+                            title={
+                              pending.status === 'error'
+                                ? `${pending.name}\n上传失败: ${pending.errorMessage || '异常'}\n点击重新上传`
+                                : pending.name
+                            }
+                            onClick={() => {
+                              if (pending.status === 'error') {
+                                handleRetryChatUpload(pending);
+                              } else {
+                                setActiveDetailImage({
+                                  name: pending.name,
+                                  url: pending.previewUrl,
+                                  size: pending.size,
+                                  id: pending.tempId,
+                                  mimeType: pending.file.type,
+                                  path: '',
+                                  createdAt: Date.now(),
+                                });
+                              }
+                            }}
+                          >
+                            <img
+                              src={pending.previewUrl}
+                              alt={pending.name}
+                              className={`w-full h-full object-cover ${pending.status === 'uploading' ? 'opacity-60 blur-[0.5px]' : ''}`}
+                            />
+                            {pending.status === 'uploading' ? (
+                              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/30 text-white">
+                                <Loader2 size={11} className="animate-spin text-white mb-0.5" />
+                                <span className="text-[7px] font-mono">上传中</span>
+                              </div>
+                            ) : (
+                              <div className="absolute inset-0 flex flex-col items-center justify-center bg-red-900/60 text-white p-0.5 text-center">
+                                <AlertCircle size={10} className="text-red-300 mb-0.5" />
+                                <span className="text-[6.5px] truncate max-w-full text-red-200">重试</span>
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemovePendingChat(pending.tempId);
+                              }}
+                              className="absolute top-0.5 right-0.5 w-3 h-3 rounded-full bg-black/60 hover:bg-black text-white flex items-center justify-center text-[8px]"
+                              title="取消"
+                            >
+                              <X size={8} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <textarea
                       ref={chatTextareaRef}
                       value={chatInput}
@@ -2197,32 +2549,57 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         e.target.style.height = 'auto';
                         e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
                       }}
+                      onPaste={handleChatPaste}
                       onKeyDown={(e) => {
                         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                           e.preventDefault();
                           handleSendChat();
                         }
                       }}
-                      placeholder="给 Agent 发送指令或反馈... (⌘+Enter 发送，Shift+Enter 换行)"
+                      placeholder="给 Agent 发送指令或反馈... 支持粘贴截图 ⌘V 或拖拽图片"
                       rows={2}
                       className="w-full resize-none border-none outline-none text-[12px] text-[#1c1c21] placeholder:text-[#a5a5b0] bg-transparent leading-relaxed"
                     />
-                    <div className="flex items-center justify-between pt-1 border-t border-[#f4f4f6]">
-                      <span className="text-[10px] text-[#85858d] font-mono">
-                        {chatInput.length > 0 ? `${chatInput.length} 字` : ''}
-                      </span>
-                      <button
-                        disabled={!chatInput.trim() || isSendingChat}
-                        onClick={handleSendChat}
-                        className={`h-[24px] px-3 rounded-[5px] text-[11px] font-medium flex items-center gap-1 transition-all ${
-                          chatInput.trim() && !isSendingChat
-                            ? 'bg-[#1c1c21] hover:bg-[#2e2f36] text-white shadow-sm active:scale-95'
-                            : 'bg-[#f4f4f6] text-[#a5a5b0] cursor-not-allowed'
-                        }`}
-                      >
-                        <Send size={10.5} />
-                        <span>发送</span>
-                      </button>
+
+                    {/* 底部工具条：添加图片 + 字数 + 发送按钮 */}
+                    <div className="flex items-center justify-between pt-1.5 border-t border-[#f4f4f6]">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => chatFileInputRef.current?.click()}
+                          className="h-[22px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] hover:border-[#1c1c21]/30 text-[#63636b] hover:text-[#1c1c21] text-[10.5px] font-medium flex items-center gap-1 transition-all"
+                          title="选择本地图片发送给 Agent"
+                        >
+                          <Plus size={10.5} strokeWidth={2.5} />
+                          <ImageIcon size={10.5} />
+                          <span>图片</span>
+                        </button>
+                        {chatAttachments.length > 0 && (
+                          <span className="text-[10px] font-mono text-[#85858d]">
+                            已选 {chatAttachments.length} 张
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {chatInput.length > 0 && (
+                          <span className="text-[10px] text-[#85858d] font-mono">
+                            {chatInput.length} 字
+                          </span>
+                        )}
+                        <button
+                          disabled={(!chatInput.trim() && chatAttachments.length === 0) || isSendingChat}
+                          onClick={handleSendChat}
+                          className={`h-[24px] px-3 rounded-[5px] text-[11px] font-medium flex items-center gap-1 transition-all ${
+                            (chatInput.trim() || chatAttachments.length > 0) && !isSendingChat
+                              ? 'bg-[#1c1c21] hover:bg-[#2e2f36] text-white shadow-sm active:scale-95'
+                              : 'bg-[#f4f4f6] text-[#a5a5b0] cursor-not-allowed'
+                          }`}
+                        >
+                          {isSendingChat ? <Loader2 size={10.5} className="animate-spin" /> : <Send size={10.5} />}
+                          <span>发送</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2239,6 +2616,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         task={editingTask}
         workflows={workflows}
         onSave={handleSaveEditedTask}
+      />
+
+      {/* 沉浸式图片灯箱大图预览 */}
+      <ImageLightboxModal
+        isOpen={!!activeDetailImage}
+        attachment={activeDetailImage}
+        onClose={() => setActiveDetailImage(null)}
       />
 
       {/* 通用删除确认弹窗 */}

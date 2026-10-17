@@ -30,6 +30,10 @@ export class Store {
     return this.sqlite.deleteWorkflow(id);
   }
 
+  public getDataDir(): string {
+    return this.sqlite.getDataDir();
+  }
+
   // Tasks
   public getTasks(): Task[] {
     return this.sqlite.getTasks();

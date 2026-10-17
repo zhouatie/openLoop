@@ -1,6 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
-import { SessionChatMessage, ToolExecutionRecord, TaskSessionState, Task } from '../types';
+import { SessionChatMessage, ToolExecutionRecord, TaskSessionState, Task, TaskAttachment } from '../types';
 import { createLogger } from '../logger';
 
 const logger = createLogger('PiRpcSession');
@@ -341,7 +341,7 @@ export class PiRpcSessionInstance extends EventEmitter {
   /**
    * 发送普通提示词（启动新轮次）
    */
-  public async sendPrompt(message: string): Promise<any> {
+  public async sendPrompt(message: string, attachments?: TaskAttachment[]): Promise<any> {
     this.isPaused = false;
     this.isBusy = true;
 
@@ -350,44 +350,78 @@ export class PiRpcSessionInstance extends EventEmitter {
       id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       role: 'user',
       content: message,
+      attachments: attachments && attachments.length > 0 ? attachments : undefined,
       timestamp: Date.now(),
     });
     this.notifyUpdate();
 
+    let actualMessage = message;
+    if (attachments && attachments.length > 0) {
+      const imagesPrompt = attachments
+        .map((att, idx) => `[参考图片 ${idx + 1}: ${att.name}] 本地文件路径: ${att.path}`)
+        .join('\n');
+      actualMessage = actualMessage
+        ? `${actualMessage}\n\n【用户随附参考图片】\n${imagesPrompt}`
+        : `【用户随附参考图片】\n${imagesPrompt}`;
+    }
+
+    logger.info(
+      `向 Agent 会话发送 Prompt: "${message.slice(0, 40)}" (含 ${attachments?.length || 0} 个图片附件)`,
+      undefined,
+      { taskId: this.taskId }
+    );
+
     return this.sendCommand({
       type: 'prompt',
-      message,
+      message: actualMessage,
     });
   }
 
   /**
    * 在运行中无缝插话 (Steer)
    */
-  public async steer(message: string): Promise<any> {
+  public async steer(message: string, attachments?: TaskAttachment[]): Promise<any> {
     this.isPaused = false;
     // 立即压入用户消息
     this.messages.push({
       id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       role: 'user',
       content: message,
+      attachments: attachments && attachments.length > 0 ? attachments : undefined,
       timestamp: Date.now(),
     });
     this.notifyUpdate();
 
+    let actualMessage = message;
+    if (attachments && attachments.length > 0) {
+      const imagesPrompt = attachments
+        .map((att, idx) => `[参考图片 ${idx + 1}: ${att.name}] 本地文件路径: ${att.path}`)
+        .join('\n');
+      actualMessage = actualMessage
+        ? `${actualMessage}\n\n【用户随附参考图片】\n${imagesPrompt}`
+        : `【用户随附参考图片】\n${imagesPrompt}`;
+    }
+
+    logger.info(
+      `向 Agent 会话进行 Steer 插话: "${message.slice(0, 40)}" (含 ${attachments?.length || 0} 个图片附件)`,
+      undefined,
+      { taskId: this.taskId }
+    );
+
     return this.sendCommand({
       type: 'steer',
-      message,
+      message: actualMessage,
     });
   }
 
   /**
    * 用户直接从输入框发消息（自动智能选择 prompt 或 steer）
    */
-  public async sendUserMessage(message: string): Promise<any> {
+  public async sendUserMessage(message: string, attachments?: TaskAttachment[]): Promise<any> {
     if (this.isBusy) {
-      return this.steer(message);
+      return this.steer(message, attachments);
     } else {
-      return this.sendPrompt(message);
+      return this.sendPrompt(message, attachments);
     }
   }
 

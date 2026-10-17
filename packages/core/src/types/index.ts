@@ -69,6 +69,7 @@ export interface SessionChatMessage {
   isStreaming?: boolean;
   tools?: ToolExecutionRecord[];
   timestamp: number;
+  attachments?: TaskAttachment[];
 }
 
 export interface TaskSessionState {
@@ -133,10 +134,21 @@ export interface LogEntry {
   message: string;
 }
 
+export interface TaskAttachment {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  path: string;       // 本地存储物理路径，供本地 CLI / Agent 读取
+  url: string;        // Core Server 访问路径 (如 /api/attachments/:id)
+  createdAt: number;
+}
+
 export interface Task {
   id: string;
   title: string;
   description?: string;
+  attachments?: TaskAttachment[]; // 关联的截图/图片附件
   workflowId: string;
   status: TaskStatus;
   kanbanColumn: KanbanColumn;

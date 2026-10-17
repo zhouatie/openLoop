@@ -1,4 +1,4 @@
-import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, OpenLoopSettings, KanbanColumn } from '@openloop/core';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, OpenLoopSettings, KanbanColumn, TaskAttachment } from '@openloop/core';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
@@ -167,6 +167,7 @@ export class DesktopApiService {
     autoRun?: boolean;
     kanbanColumn?: KanbanColumn;
     workspace?: string;
+    attachments?: TaskAttachment[];
   }): Promise<Task> {
     if (import.meta.env?.DEV) {
       console.log('[UI:API] 创建新任务:', params);
@@ -204,6 +205,7 @@ export class DesktopApiService {
       context?: Record<string, any>;
       kanbanColumn?: KanbanColumn;
       workspace?: string;
+      attachments?: TaskAttachment[];
     }
   ): Promise<Task> {
     if (import.meta.env?.DEV) {
@@ -227,6 +229,62 @@ export class DesktopApiService {
     return requestJson<{ success: boolean; id: string }>(`${BASE_URL}/api/tasks/${id}`, {
       method: 'DELETE',
     });
+  }
+
+  /**
+   * 上传图片附件 (零内存消耗流式写入核心服务并落盘)
+   */
+  async uploadAttachment(file: File): Promise<TaskAttachment> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:API] 正在上传图片附件:', { name: file.name, size: file.size, type: file.type });
+    }
+    const query = `filename=${encodeURIComponent(file.name)}`;
+    const res = await fetch(`${BASE_URL}/api/attachments?${query}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'image/png',
+      },
+      body: file,
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`上传失败 (${res.status}): ${errText || res.statusText}`);
+    }
+    const attachment: TaskAttachment = await res.json();
+    if (import.meta.env?.DEV) {
+      console.log('[UI:API] 图片附件上传成功:', attachment);
+    }
+    return attachment;
+  }
+
+  /**
+   * 删除指定的附件文件
+   */
+  async deleteAttachment(filenameOrId: string): Promise<boolean> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:API] 请求删除图片附件:', filenameOrId);
+    }
+    const filename = filenameOrId.startsWith('/api/attachments/')
+      ? filenameOrId.replace('/api/attachments/', '')
+      : filenameOrId;
+    const res = await fetch(`${BASE_URL}/api/attachments/${filename}`, {
+      method: 'DELETE',
+    });
+    return res.ok;
+  }
+
+  /**
+   * 将附件的相对/绝对路径解析为可渲染的完整 HTTP URL
+   */
+  getAttachmentUrl(pathOrUrl: string): string {
+    if (!pathOrUrl) return '';
+    if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://') || pathOrUrl.startsWith('blob:')) {
+      return pathOrUrl;
+    }
+    if (pathOrUrl.startsWith('/api/')) {
+      return `${BASE_URL}${pathOrUrl}`;
+    }
+    return `${BASE_URL}/api/attachments/${pathOrUrl}`;
   }
 
   async resumeTask(id: string, approved: boolean, feedback?: string): Promise<Task> {
@@ -285,11 +343,17 @@ export class DesktopApiService {
     return requestJson<TaskSessionState>(`${BASE_URL}/api/tasks/${taskId}/session`);
   }
 
-  async sendTaskChatMessage(taskId: string, message: string): Promise<any> {
+  async sendTaskChatMessage(taskId: string, message: string, attachments?: TaskAttachment[]): Promise<any> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 发送任务会话消息 (${taskId}):`, {
+        message: message ? message.slice(0, 40) : '',
+        attachmentsCount: attachments?.length || 0,
+      });
+    }
     return requestJson<any>(`${BASE_URL}/api/tasks/${taskId}/session/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, attachments }),
     });
   }
 

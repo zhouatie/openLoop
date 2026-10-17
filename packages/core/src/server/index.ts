@@ -1,12 +1,13 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { spawn, exec } from 'child_process';
 import util from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Store } from '../store';
 import { DagEngine } from '../engine/dag-engine';
-import { Task, WorkflowDefinition, PluginManifest, TaskSessionState, KanbanColumn } from '../types';
+import { Task, WorkflowDefinition, PluginManifest, TaskSessionState, KanbanColumn, TaskAttachment } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 
@@ -196,7 +197,7 @@ export class OpenLoopServer {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Headers': '*',
     });
     res.end(JSON.stringify(data));
   }
@@ -281,7 +282,8 @@ export class OpenLoopServer {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Max-Age': '86400',
       });
       return res.end();
     }
@@ -329,6 +331,111 @@ export class OpenLoopServer {
         return this.sendJson(res, ok ? 200 : 404, { success: ok }, reqMeta);
       }
 
+      // Attachments: POST /api/attachments (高性能流式二进制上传与 Base64 兼容)
+      if (pathname === '/api/attachments' && method === 'POST') {
+        const queryFilename = parsedUrl.searchParams.get('filename');
+        const headerFilename = req.headers['x-filename'] as string;
+        const rawFilename = queryFilename || headerFilename || '';
+        const filenameHeader = rawFilename ? decodeURIComponent(rawFilename) : 'image.png';
+        const ext = path.extname(filenameHeader).toLowerCase() || '.png';
+        const safeExt = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].includes(ext) ? ext : '.png';
+        const id = `att_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        const diskFilename = `${id}${safeExt}`;
+        const attachmentsDir = path.join(this.store.getDataDir(), 'attachments');
+        if (!fs.existsSync(attachmentsDir)) {
+          fs.mkdirSync(attachmentsDir, { recursive: true });
+        }
+        const filePath = path.join(attachmentsDir, diskFilename);
+        const contentType = (req.headers['content-type'] as string) || 'image/png';
+
+        if (contentType.includes('application/json')) {
+          const body = await this.parseJsonBody(req);
+          const { name, data, mimeType } = body;
+          const base64Data = (data || '').replace(/^data:image\/\w+;base64,/, '');
+          const buffer = Buffer.from(base64Data, 'base64');
+          fs.writeFileSync(filePath, buffer);
+          const attachment: TaskAttachment = {
+            id,
+            name: name || filenameHeader,
+            size: buffer.length,
+            mimeType: mimeType || 'image/png',
+            path: filePath,
+            url: `/api/attachments/${diskFilename}`,
+            createdAt: Date.now(),
+          };
+          serverLogger.info(`[Attachments:Create] 保存图片附件 (Base64): ${attachment.name} (${attachment.size} bytes)`);
+          return this.sendJson(res, 201, attachment, reqMeta);
+        }
+
+        // 零内存损耗管道流式写入磁盘
+        const writeStream = fs.createWriteStream(filePath);
+        req.pipe(writeStream);
+
+        await new Promise<void>((resolve, reject) => {
+          writeStream.on('finish', () => resolve());
+          writeStream.on('error', (err) => reject(err));
+          req.on('error', (err) => reject(err));
+        });
+
+        const stat = fs.statSync(filePath);
+        const attachment: TaskAttachment = {
+          id,
+          name: filenameHeader,
+          size: stat.size,
+          mimeType: contentType.split(';')[0] || 'image/png',
+          path: filePath,
+          url: `/api/attachments/${diskFilename}`,
+          createdAt: Date.now(),
+        };
+        serverLogger.info(`[Attachments:Create] 流式保存图片附件: ${attachment.name} (${attachment.size} bytes) -> ${filePath}`);
+        return this.sendJson(res, 201, attachment, reqMeta);
+      }
+
+      // Attachment serve: /api/attachments/:filename
+      const attachmentMatch = pathname.match(/^\/api\/attachments\/([a-zA-Z0-9_.-]+)$/);
+      if (attachmentMatch && method === 'GET') {
+        const rawFilename = attachmentMatch[1];
+        const safeFilename = path.basename(rawFilename);
+        const attachmentsDir = path.join(this.store.getDataDir(), 'attachments');
+        const filePath = path.join(attachmentsDir, safeFilename);
+
+        if (!fs.existsSync(filePath)) {
+          return this.sendJson(res, 404, { error: 'Attachment not found' }, reqMeta);
+        }
+
+        const ext = path.extname(safeFilename).toLowerCase();
+        const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+        const stat = fs.statSync(filePath);
+
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Content-Length': stat.size,
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Access-Control-Allow-Origin': '*',
+        });
+
+        const stream = fs.createReadStream(filePath);
+        stream.pipe(res);
+        return;
+      }
+
+      if (attachmentMatch && method === 'DELETE') {
+        const rawFilename = attachmentMatch[1];
+        const safeFilename = path.basename(rawFilename);
+        const attachmentsDir = path.join(this.store.getDataDir(), 'attachments');
+        const filePath = path.join(attachmentsDir, safeFilename);
+
+        if (fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+            serverLogger.info(`[Attachments:Delete] 删除图片附件: ${safeFilename}`);
+          } catch (e: any) {
+            serverLogger.warn(`[Attachments:Delete] 删除文件失败: ${e.message}`);
+          }
+        }
+        return this.sendJson(res, 200, { success: true }, reqMeta);
+      }
+
       // Tasks
       if (pathname === '/api/tasks' && method === 'GET') {
         return this.sendJson(res, 200, this.store.getTasks(), reqMeta);
@@ -336,7 +443,7 @@ export class OpenLoopServer {
 
       if (pathname === '/api/tasks' && method === 'POST') {
         const body = await this.parseJsonBody(req);
-        const { title, workflowId, description, context, autoRun, kanbanColumn, workspace } = body;
+        const { title, workflowId, description, context, autoRun, kanbanColumn, workspace, attachments } = body;
         
         if (!workflowId) {
           return this.sendJson(res, 400, { error: 'workflowId is required' }, reqMeta);
@@ -350,6 +457,7 @@ export class OpenLoopServer {
           id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           title: title || `自动化任务 #${Date.now()}`,
           description: description || '',
+          attachments: Array.isArray(attachments) ? attachments : undefined,
           workflowId,
           status: 'pending',
           kanbanColumn: validColumn,
@@ -396,9 +504,12 @@ export class OpenLoopServer {
         const existing = this.store.getTask(taskId);
         if (!existing) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
         const body = await this.parseJsonBody(req);
-        const { title, description, workflowId, context, kanbanColumn, workspace } = body;
+        const { title, description, workflowId, context, kanbanColumn, workspace, attachments } = body;
         if (title !== undefined) existing.title = title.trim();
         if (description !== undefined) existing.description = description.trim();
+        if (attachments !== undefined) {
+          existing.attachments = Array.isArray(attachments) ? attachments : [];
+        }
         if (workspace !== undefined) {
           existing.workspace = workspace ? String(workspace).trim() : undefined;
         }
@@ -487,14 +598,34 @@ export class OpenLoopServer {
         const task = this.store.getTask(taskId);
         if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
         const body = await this.parseJsonBody(req);
-        const { message } = body;
-        if (!message || !message.trim()) {
-          return this.sendJson(res, 400, { error: 'Message cannot be empty' }, reqMeta);
+        const { message, attachments } = body;
+        const safeAttachments: TaskAttachment[] = Array.isArray(attachments) ? attachments : [];
+        const rawMsg = typeof message === 'string' ? message.trim() : '';
+
+        if (!rawMsg && safeAttachments.length === 0) {
+          return this.sendJson(res, 400, { error: 'Message or attachments required' }, reqMeta);
+        }
+
+        const finalMessage = rawMsg || (safeAttachments.length > 0 ? '请查看我提供的图片附件并推进任务。' : '');
+
+        serverLogger.info(
+          `[AgentChat] 接收到任务会话消息 (${taskId}): "${finalMessage.slice(0, 30)}", 附件数: ${safeAttachments.length}`
+        );
+
+        // 如果用户上传了新图片，也同步累加到任务全局 attachments 中
+        if (safeAttachments.length > 0) {
+          const currentAtts = task.attachments || [];
+          const existingIds = new Set(currentAtts.map((a) => a.id));
+          const newAtts = safeAttachments.filter((a) => !existingIds.has(a.id));
+          if (newAtts.length > 0) {
+            task.attachments = [...currentAtts, ...newAtts];
+            this.store.saveTask(task);
+          }
         }
 
         const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
         if (rpcSession && rpcSession.active) {
-          rpcSession.sendUserMessage(message.trim()).catch((err) => {
+          rpcSession.sendUserMessage(finalMessage, safeAttachments).catch((err) => {
             serverLogger.error(`发送用户消息失败: ${err.message}`, undefined, { taskId });
           });
           return this.sendJson(res, 200, { success: true, message: 'Message sent to active session' }, reqMeta);
@@ -506,7 +637,8 @@ export class OpenLoopServer {
         task.context.chatMessages.push({
           id: `msg_u_${Date.now()}`,
           role: 'user',
-          content: message.trim(),
+          content: finalMessage,
+          attachments: safeAttachments.length > 0 ? safeAttachments : undefined,
           timestamp: Date.now(),
         });
         this.store.saveTask(task);

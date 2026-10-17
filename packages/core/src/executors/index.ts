@@ -310,6 +310,14 @@ export class AgentExecutor implements NodeExecutor {
         prompt = `任务需求: ${task.title}\n详细说明: ${task.description || '无详细说明'}\n\n执行要求:\n${prompt}`;
       }
 
+      // 若任务附带图片附件，注入本地物理文件路径提示，使 Agent 能够直接通过文件工具进行多模态视觉感知
+      if (task.attachments && task.attachments.length > 0) {
+        const attList = task.attachments
+          .map((att, i) => `  ${i + 1}. [${att.name}] (大小: ${(att.size / 1024).toFixed(1)} KB, 本地绝对路径: "${att.path}")`)
+          .join('\n');
+        prompt += `\n\n【任务关联参考截图/附件】\n用户为此任务附带了以下图片资源，你可以直接通过本地工具读取这些路径以分析 UI 或报错：\n${attList}`;
+      }
+
       // 3. 构建 pi CLI 执行命令
       const args: string[] = [
         `--session-id "${sessionId}"`,

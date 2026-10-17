@@ -15,8 +15,9 @@ import {
   Clock,
   Search,
 } from 'lucide-react';
-import { WorkflowDefinition, NodeType, KanbanColumn } from '@openloop/core';
+import { WorkflowDefinition, NodeType, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { WorkspacePicker } from './WorkspacePicker';
+import { TaskPromptArea } from './TaskPromptArea';
 
 const STORAGE_KEY_LAST_WORKFLOW = 'openloop_last_used_workflow_id';
 const STORAGE_KEY_RECENT_WORKFLOWS = 'openloop_recent_workflow_ids';
@@ -36,6 +37,7 @@ interface CreateTaskModalProps {
     autoRun: boolean;
     kanbanColumn?: KanbanColumn;
     workspace?: string;
+    attachments?: TaskAttachment[];
   }) => Promise<void>;
 }
 
@@ -49,6 +51,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [workflowId, setWorkflowId] = useState(workflows[0]?.id || '');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>(defaultColumn);
   const [workspace, setWorkspace] = useState('');
@@ -272,6 +275,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         autoRun,
         kanbanColumn,
         workspace: trimmedWorkspace || undefined,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
 
       // 保存本地记忆与 LRU 最近使用列表
@@ -301,6 +305,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
       setTitle('');
       setDescription('');
+      setAttachments([]);
       setWorkflowSearch('');
       setIsDropdownOpen(false);
       onClose();
@@ -512,12 +517,13 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             <label className="block text-[11px] font-medium text-[#63636b] mb-1">
               任务说明与提示词 (可选)
             </label>
-            <textarea
-              rows={2}
-              placeholder="任务背景、特定需求描述或传给 Agent 的 Prompt 覆盖项..."
+            <TaskPromptArea
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none resize-none focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all leading-normal"
+              onChange={setDescription}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              disabled={loading}
+              rows={2}
             />
           </div>
 

@@ -10,8 +10,9 @@ import {
   Inbox,
   ListTodo,
 } from 'lucide-react';
-import { Task, WorkflowDefinition, KanbanColumn } from '@openloop/core';
+import { Task, WorkflowDefinition, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { WorkspacePicker } from './WorkspacePicker';
+import { TaskPromptArea } from './TaskPromptArea';
 
 interface EditTaskModalProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ interface EditTaskModalProps {
     workflowId: string;
     kanbanColumn?: KanbanColumn;
     workspace?: string;
+    attachments?: TaskAttachment[];
   }) => Promise<void>;
 }
 
@@ -36,6 +38,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
 }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [workflowId, setWorkflowId] = useState('');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>('backlog');
   const [workspace, setWorkspace] = useState('');
@@ -50,6 +53,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
     if (task) {
       setTitle(task.title || '');
       setDescription(task.description || '');
+      setAttachments(task.attachments || []);
       setWorkflowId(task.workflowId || workflows[0]?.id || '');
       setKanbanColumn(task.kanbanColumn || 'backlog');
       setWorkspace(task.workspace || '');
@@ -117,6 +121,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         workflowId,
         kanbanColumn,
         workspace: trimmedWorkspace || undefined,
+        attachments,
       });
       if (import.meta.env?.DEV) {
         console.log('[TaskEdit] 任务更新保存成功:', task.id);
@@ -325,12 +330,13 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
             <label className="block text-[11px] font-medium text-[#63636b] mb-1">
               任务说明与提示词 (可选)
             </label>
-            <textarea
-              rows={2}
-              placeholder="输入任务背景、特定需求描述或传给 Agent 的 Prompt 覆盖项..."
+            <TaskPromptArea
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none resize-none focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all leading-normal"
+              onChange={setDescription}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              disabled={loading}
+              rows={2}
             />
           </div>
 

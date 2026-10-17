@@ -9,7 +9,7 @@ import { WorkflowEditorView } from './views/WorkflowEditorView';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
 import { api } from './services/api';
-import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn } from '@openloop/core';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { Puzzle } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -130,6 +130,7 @@ export const App: React.FC = () => {
     autoRun: boolean;
     kanbanColumn?: KanbanColumn;
     workspace?: string;
+    attachments?: TaskAttachment[];
   }) => {
     if (import.meta.env?.DEV) {
       console.log('[App] 创建任务请求:', params);

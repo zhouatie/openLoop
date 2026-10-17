@@ -64,6 +64,7 @@ export class SqliteStore {
         current_node_id TEXT,
         context_json TEXT,
         workspace TEXT,
+        attachments_json TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
@@ -121,6 +122,13 @@ export class SqliteStore {
     // 增量表结构平滑迁移：为历史已有数据库的 tasks 表补齐 workspace 字段
     try {
       this.db.exec('ALTER TABLE tasks ADD COLUMN workspace TEXT');
+    } catch {
+      // 字段已存在，忽略
+    }
+
+    // 增量表结构平滑迁移：为历史已有数据库的 tasks 表补齐 attachments_json 字段
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN attachments_json TEXT');
     } catch {
       // 字段已存在，忽略
     }
@@ -551,6 +559,10 @@ export class SqliteStore {
     return info.changes > 0;
   }
 
+  public getDataDir(): string {
+    return this.dataDir;
+  }
+
   // ================= Tasks API =================
 
   public getTasks(): Task[] {
@@ -586,6 +598,7 @@ export class SqliteStore {
       currentNodeId: tr.current_node_id || undefined,
       context: tr.context_json ? JSON.parse(tr.context_json) : {},
       workspace: tr.workspace || undefined,
+      attachments: tr.attachments_json ? JSON.parse(tr.attachments_json) : undefined,
       createdAt: tr.created_at,
       updatedAt: tr.updated_at,
       nodeRuns: runsByTask.get(tr.id) || {},
@@ -622,6 +635,7 @@ export class SqliteStore {
       currentNodeId: tr.current_node_id || undefined,
       context: tr.context_json ? JSON.parse(tr.context_json) : {},
       workspace: tr.workspace || undefined,
+      attachments: tr.attachments_json ? JSON.parse(tr.attachments_json) : undefined,
       createdAt: tr.created_at,
       updatedAt: tr.updated_at,
       nodeRuns,
@@ -633,8 +647,8 @@ export class SqliteStore {
     if (!task.createdAt) task.createdAt = task.updatedAt;
 
     const upsertTask = this.db.prepare(`
-      INSERT INTO tasks (id, title, description, workflow_id, status, kanban_column, current_node_id, context_json, workspace, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, description, workflow_id, status, kanban_column, current_node_id, context_json, workspace, attachments_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         description = excluded.description,
@@ -644,6 +658,7 @@ export class SqliteStore {
         current_node_id = excluded.current_node_id,
         context_json = excluded.context_json,
         workspace = excluded.workspace,
+        attachments_json = excluded.attachments_json,
         updated_at = excluded.updated_at
     `);
 
@@ -672,6 +687,7 @@ export class SqliteStore {
         task.currentNodeId || null,
         JSON.stringify(task.context || {}),
         task.workspace || null,
+        task.attachments && task.attachments.length > 0 ? JSON.stringify(task.attachments) : null,
         task.createdAt,
         task.updatedAt
       );
