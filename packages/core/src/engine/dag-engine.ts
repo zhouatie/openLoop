@@ -1,12 +1,65 @@
 import { EventEmitter } from 'events';
 import { ChildProcess } from 'child_process';
 import { Store } from '../store';
-import { Task, WorkflowDefinition, WorkflowNode, LogEntry, KanbanColumn, TaskSessionState } from '../types';
+import { Task, WorkflowDefinition, WorkflowNode, WorkflowEdge, LogEntry, KanbanColumn, TaskSessionState } from '../types';
 import { ExecutorRegistry, ExecutionContext } from '../executors';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 
 const dagLogger = createLogger('Engine:DAG');
+
+/**
+ * 安全表达式求值函数
+ * 支持评估例如: output === 'A', output.status === 'pass', exitCode === 0, score > 80 等表达式
+ */
+export function evaluateCondition(condition: string, evalContext: Record<string, any>): boolean {
+  if (!condition || !condition.trim()) return true;
+  const trimmed = condition.trim();
+
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+
+  try {
+    const keys = [
+      'output',
+      'exitCode',
+      'status',
+      'result',
+      'context',
+      'task',
+      'variables',
+      'window',
+      'global',
+      'process',
+      'require',
+      'module',
+      '__dirname',
+      '__filename',
+    ];
+    const vals = [
+      evalContext.output,
+      evalContext.exitCode,
+      evalContext.status,
+      evalContext.result,
+      evalContext.context || {},
+      evalContext.task || {},
+      evalContext.variables || {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ];
+
+    const fn = new Function(...keys, `"use strict"; return Boolean(${trimmed});`);
+    return Boolean(fn(...vals));
+  } catch (err: any) {
+    dagLogger.warn(`[ConditionEval] 条件表达式求值失败: "${condition}", 错误: ${err.message}`);
+    return false;
+  }
+}
 
 export class DagEngine extends EventEmitter {
   private store: Store;
@@ -277,7 +330,159 @@ export class DagEngine extends EventEmitter {
   }
 
   /**
-   * 触发下游节点
+   * 评估出边是否满足触发条件
+   */
+  private isEdgeConditionMet(
+    edge: WorkflowEdge,
+    task: Task,
+    workflow: WorkflowDefinition
+  ): boolean {
+    if (!edge.condition || !edge.condition.trim()) {
+      return true;
+    }
+    const sourceRun = task.nodeRuns[edge.source];
+    const evalContext = {
+      output: sourceRun?.output,
+      exitCode: sourceRun?.exitCode,
+      status: sourceRun?.status,
+      result: {
+        output: sourceRun?.output,
+        exitCode: sourceRun?.exitCode,
+        status: sourceRun?.status,
+        artifacts: sourceRun?.artifacts,
+      },
+      context: task.context || {},
+      task: {
+        id: task.id,
+        title: task.title,
+        description: task.description || '',
+        workspace: task.workspace || '',
+      },
+      variables: workflow.variables || {},
+    };
+
+    const passed = evaluateCondition(edge.condition, evalContext);
+    dagLogger.info(
+      `[DAG:EdgeCondition] 评估出边 [${edge.source} -> ${edge.target}] 条件 "${edge.condition}": ${passed ? '满足' : '未满足'}`,
+      {
+        edgeId: edge.id,
+        condition: edge.condition,
+        passed,
+        sourceStatus: sourceRun?.status,
+        output: sourceRun?.output,
+      },
+      { taskId: task.id, nodeId: edge.source }
+    );
+    return passed;
+  }
+
+  /**
+   * 级联跳过未命中的分支节点及其下游
+   */
+  private async cascadeSkipNode(
+    task: Task,
+    workflow: WorkflowDefinition,
+    nodeId: string
+  ): Promise<void> {
+    const node = workflow.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+
+    if (task.nodeRuns[nodeId]?.status) {
+      return;
+    }
+
+    const now = Date.now();
+    task.nodeRuns[nodeId] = {
+      nodeId,
+      status: 'skipped',
+      startedAt: now,
+      finishedAt: now,
+    };
+    this.store.saveTask(task);
+    this.emit('task:update', task);
+    this.emit('node:status', { taskId: task.id, nodeId, status: 'skipped' });
+
+    dagLogger.info(
+      `[DAG:Skip] 分支条件未命中，系统自动跳过节点 [${node.name}] (${nodeId})`,
+      undefined,
+      { taskId: task.id, nodeId }
+    );
+    this.log(task.id, nodeId, 'system', `[条件分支] 分支条件未满足，系统自动跳过节点 [${node.name}]`);
+
+    // 递归检查下游出边
+    const outgoingEdges = workflow.edges.filter((e) => e.source === nodeId);
+    for (const edge of outgoingEdges) {
+      const targetNode = workflow.nodes.find((n) => n.id === edge.target);
+      if (!targetNode || task.nodeRuns[targetNode.id]?.status) continue;
+
+      const upstreamEdges = workflow.edges.filter((e) => e.target === targetNode.id);
+      const allUpstreamResolved = upstreamEdges.every((e) => {
+        const nr = task.nodeRuns[e.source];
+        return nr && (nr.status === 'success' || nr.status === 'skipped');
+      });
+
+      if (allUpstreamResolved) {
+        const anyActiveSuccess = upstreamEdges.some((e) => {
+          const nr = task.nodeRuns[e.source];
+          if (!nr || nr.status !== 'success') return false;
+          return this.isEdgeConditionMet(e, task, workflow);
+        });
+
+        if (anyActiveSuccess) {
+          dagLogger.info(
+            `[DAG:Join] 汇聚节点 [${targetNode.name}] 检测到有效成功前置，启动调度`,
+            undefined,
+            { taskId: task.id, nodeId: targetNode.id }
+          );
+          await this.scheduleNode(task, workflow, targetNode);
+        } else {
+          await this.cascadeSkipNode(task, workflow, targetNode.id);
+        }
+      }
+    }
+  }
+
+  /**
+   * 检查工作流是否所有节点均已达到终态 (全部完成或按分支跳过)
+   */
+  private checkWorkflowCompletion(task: Task, workflow: WorkflowDefinition): boolean {
+    const allResolved = workflow.nodes.every((n) => {
+      const nr = task.nodeRuns[n.id];
+      return nr && (nr.status === 'success' || nr.status === 'skipped');
+    });
+
+    if (allResolved) {
+      const runs = Object.values(task.nodeRuns || {});
+      const hasFailed = runs.some((r) => r.status === 'failed');
+      const hasWaiting = runs.some((r) => r.status === 'waiting_approval');
+      if (hasFailed) {
+        task.status = 'failed';
+        task.kanbanColumn = 'backlog';
+      } else if (hasWaiting) {
+        task.status = 'waiting_approval';
+        task.kanbanColumn = 'qa_review';
+      } else {
+        task.status = 'completed';
+        task.kanbanColumn = 'done';
+        this.runningTasks.delete(task.id);
+        this.abortControllers.delete(task.id);
+        this.activeProcesses.delete(task.id);
+        dagLogger.info(
+          `工作流 [${workflow.name}] 全部节点执行或按分支跳过完毕，任务标记为 COMPLETED`,
+          undefined,
+          { taskId: task.id }
+        );
+        this.log(task.id, 'SYSTEM', 'system', `========== 工作流全部节点已成功执行或按条件跳过！ ==========`);
+      }
+      this.store.saveTask(task);
+      this.emit('task:update', task);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 触发下游节点 (支持多分支条件评估、未激活分支级联跳过与多路汇聚)
    */
   private async triggerNextNodes(
     task: Task,
@@ -292,70 +497,71 @@ export class DagEngine extends EventEmitter {
     );
 
     if (outgoingEdges.length === 0) {
-      // 检查是否所有节点都已经完成 (成功或跳过均视为达标完成)
-      const allCompleted = workflow.nodes.every((n) => {
-        const nr = task.nodeRuns[n.id];
-        return nr && (nr.status === 'success' || nr.status === 'skipped');
-      });
-
-      if (allCompleted) {
-        task.status = 'completed';
-        task.kanbanColumn = 'done';
-        this.runningTasks.delete(task.id);
-        this.abortControllers.delete(task.id);
-        this.activeProcesses.delete(task.id);
-        this.store.saveTask(task);
-        this.emit('task:update', task);
-        dagLogger.info(
-          `工作流 [${workflow.name}] 所有节点已成功执行或跳过完成，任务标记为 COMPLETED`,
-          undefined,
-          { taskId: task.id }
-        );
-        this.log(task.id, 'SYSTEM', 'system', `========== 工作流全部节点已成功完成或跳过！ ==========`);
-      } else {
-        // 如果当前分支终结但仍有其他分支尚未完成，综合判定当前任务状态
-        const runs = Object.values(task.nodeRuns || {});
-        const hasFailed = runs.some((r) => r.status === 'failed');
-        const hasWaiting = runs.some((r) => r.status === 'waiting_approval');
-        if (hasFailed) {
-          task.status = 'failed';
-          task.kanbanColumn = 'backlog';
-        } else if (hasWaiting) {
-          task.status = 'waiting_approval';
-          task.kanbanColumn = 'qa_review';
-        }
-        this.store.saveTask(task);
-        this.emit('task:update', task);
-      }
+      this.checkWorkflowCompletion(task, workflow);
       return;
+    }
+
+    // 记录各条出边的条件评估结果
+    const edgeResults = new Map<string, boolean>();
+    for (const edge of outgoingEdges) {
+      const passed = this.isEdgeConditionMet(edge, task, workflow);
+      edgeResults.set(edge.id, passed);
     }
 
     for (const edge of outgoingEdges) {
       const targetNode = workflow.nodes.find((n) => n.id === edge.target);
       if (!targetNode) continue;
 
-      // 检查 targetNode 的所有入边节点是否都已执行成功或跳过
       const upstreamEdges = workflow.edges.filter((e) => e.target === targetNode.id);
-      const allUpstreamSuccess = upstreamEdges.every((e) => {
+
+      // 检查 targetNode 的所有入边 source 是否都已达到终态 (success 或 skipped)
+      const allUpstreamResolved = upstreamEdges.every((e) => {
         const nr = task.nodeRuns[e.source];
         return nr && (nr.status === 'success' || nr.status === 'skipped');
       });
 
-      if (allUpstreamSuccess) {
-        dagLogger.info(
-          `下游节点 [${targetNode.name}] 前置所有依赖节点已成功完成或跳过，启动调度`,
-          undefined,
-          { taskId: task.id, nodeId: targetNode.id }
-        );
-        await this.scheduleNode(task, workflow, targetNode);
-      } else {
+      if (!allUpstreamResolved) {
         dagLogger.debug(
-          `下游节点 [${targetNode.name}] 仍有前置依赖未完成，跳过本次调度`,
+          `下游节点 [${targetNode.name}] 仍有前置依赖节点未完成，等待汇聚调度`,
           undefined,
           { taskId: task.id, nodeId: targetNode.id }
         );
+        continue;
+      }
+
+      // 所有上游均已达到终态，检查是否有任何一条入边满足激活条件
+      const anyActiveSuccess = upstreamEdges.some((e) => {
+        const nr = task.nodeRuns[e.source];
+        if (!nr || nr.status !== 'success') return false;
+        if (e.source === completedNodeId) {
+          return edgeResults.get(e.id) ?? true;
+        }
+        return this.isEdgeConditionMet(e, task, workflow);
+      });
+
+      if (anyActiveSuccess) {
+        const currentTargetStatus = task.nodeRuns[targetNode.id]?.status;
+        if (!currentTargetStatus || currentTargetStatus === 'failed') {
+          dagLogger.info(
+            `下游节点 [${targetNode.name}] 条件满足且前置依赖已就绪，启动调度`,
+            undefined,
+            { taskId: task.id, nodeId: targetNode.id }
+          );
+          await this.scheduleNode(task, workflow, targetNode);
+        }
+      } else {
+        if (!task.nodeRuns[targetNode.id]?.status) {
+          dagLogger.info(
+            `下游节点 [${targetNode.name}] 前置所有入边条件均未满足，执行级联跳过`,
+            undefined,
+            { taskId: task.id, nodeId: targetNode.id }
+          );
+          await this.cascadeSkipNode(task, workflow, targetNode.id);
+        }
       }
     }
+
+    this.checkWorkflowCompletion(task, workflow);
   }
 
   /**

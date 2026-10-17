@@ -350,6 +350,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string>('');
 
   // 流水线基础信息与弹窗状态
@@ -444,14 +445,23 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       },
     }));
 
-    const rfEdges: Edge[] = activeWorkflow.edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      label: e.label,
-      animated: true,
-      style: { stroke: '#4f46e5', strokeWidth: 1.8 },
-    }));
+    const rfEdges: Edge[] = activeWorkflow.edges.map((e) => {
+      const condition = e.condition || '';
+      const customLabel = e.label || '';
+      const displayLabel = customLabel || (condition ? `[条件] ${condition}` : undefined);
+      return {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        label: displayLabel,
+        animated: true,
+        data: {
+          condition,
+          label: customLabel,
+        },
+        style: { stroke: condition ? '#6366f1' : '#4f46e5', strokeWidth: 1.8 },
+      };
+    });
 
     // 若原始坐标全为 0，或属于旧版水平横向排列数据 (所有节点 Y 轴相近)，自动执行一次智能纵向排版
     const isOldHorizontalLayout =
@@ -468,6 +478,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     setNodes(finalNodes);
     setEdges(rfEdges);
     setSelectedNodeId(null);
+    setSelectedEdgeId(null);
 
     // 延迟平滑适配视口 (限制最大缩放倍率不超过 1.0，防止少量节点时被拉得过大)
     setTimeout(() => {
@@ -540,27 +551,82 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   );
 
   const onConnect = useCallback(
-    (params: Connection) =>
-      setEdges((eds) =>
-        addEdge(
-          {
-            ...params,
-            animated: true,
-            style: { stroke: '#4f46e5', strokeWidth: 1.8 },
-          },
-          eds
-        )
-      ),
+    (params: Connection) => {
+      const newEdgeId = `e_${params.source}_${params.target}_${Date.now().toString(36)}`;
+      const newEdge: Edge = {
+        ...params,
+        id: newEdgeId,
+        animated: true,
+        data: { condition: '', label: '' },
+        style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+      };
+      setEdges((eds) => addEdge(newEdge, eds));
+      setSelectedNodeId(null);
+      setSelectedEdgeId(newEdgeId);
+      setIsSidebarOpen(true);
+      setSidebarTab('inspector');
+    },
     []
   );
+
+  const handleEdgeClick = useCallback((_: any, edge: Edge) => {
+    if (import.meta.env?.DEV) {
+      console.log('[Workflow:EdgeClick] 聚焦连线:', edge.id, edge.source, '->', edge.target, edge.data);
+    }
+    setSelectedNodeId(null);
+    setSelectedEdgeId(edge.id);
+    setIsSidebarOpen(true);
+    setSidebarTab('inspector');
+  }, []);
+
+  const handlePaneClick = useCallback(() => {
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+  }, []);
 
   const handleNodeClick = (_: any, node: Node) => {
     if (import.meta.env?.DEV) {
       console.log('[Workflow:NodeClick] 聚焦节点:', node.id, (node.data as any)?.name);
     }
+    setSelectedEdgeId(null);
     setSelectedNodeId(node.id);
     setIsSidebarOpen(true);
   };
+
+  // 动态渲染 Edge 样式：支持高亮选中态、分支条件 Badge 气泡、发光效果
+  const renderedEdges = useMemo(() => {
+    return edges.map((e) => {
+      const isSelected = e.id === selectedEdgeId;
+      const condition = (e.data as any)?.condition || '';
+      const customLabel = (e.data as any)?.label ?? e.label;
+      const displayLabel = customLabel || (condition ? `[条件] ${condition}` : undefined);
+      return {
+        ...e,
+        label: displayLabel,
+        labelStyle: {
+          fill: isSelected ? '#3730a3' : '#4338ca',
+          fontWeight: 600,
+          fontSize: 10.5,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+        },
+        labelBgStyle: {
+          fill: isSelected ? '#ede9fe' : '#f5f3ff',
+          fillOpacity: 0.96,
+          rx: 5,
+          ry: 5,
+          stroke: isSelected ? '#6366f1' : '#c7d2fe',
+          strokeWidth: isSelected ? 1.5 : 1,
+        },
+        labelBgPadding: [6, 3] as [number, number],
+        style: {
+          ...(e.style || {}),
+          stroke: isSelected ? '#4f46e5' : condition ? '#6366f1' : '#818cf8',
+          strokeWidth: isSelected ? 2.6 : 1.8,
+          filter: isSelected ? 'drop-shadow(0 0 5px rgba(79, 70, 229, 0.45))' : undefined,
+        },
+      };
+    });
+  }, [edges, selectedEdgeId]);
 
   // 取消新节点呼吸态
   useEffect(() => {
@@ -846,7 +912,8 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           id: e.id,
           source: e.source,
           target: e.target,
-          label: e.label,
+          label: (e.data as any)?.label ?? e.label,
+          condition: (e.data as any)?.condition,
         })),
       };
 
@@ -1001,7 +1068,8 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         id: e.id,
         source: e.source,
         target: e.target,
-        label: e.label,
+        label: (e.data as any)?.label ?? e.label,
+        condition: (e.data as any)?.condition,
       })),
     };
 
@@ -1145,6 +1213,51 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     setSelectedNodeId(null);
   };
 
+  // 连线与分支属性管理
+  const selectedEdge = useMemo(
+    () => edges.find((e) => e.id === selectedEdgeId),
+    [edges, selectedEdgeId]
+  );
+
+  const edgeSourceNode = useMemo(
+    () => (selectedEdge ? nodes.find((n) => n.id === selectedEdge.source) : null),
+    [nodes, selectedEdge]
+  );
+  const edgeTargetNode = useMemo(
+    () => (selectedEdge ? nodes.find((n) => n.id === selectedEdge.target) : null),
+    [nodes, selectedEdge]
+  );
+
+  const updateSelectedEdge = (updates: { label?: string; condition?: string }) => {
+    if (!selectedEdgeId) return;
+    setEdges((eds) =>
+      eds.map((e) => {
+        if (e.id !== selectedEdgeId) return e;
+        const prevData = (e.data as any) || {};
+        const nextCondition = updates.condition !== undefined ? updates.condition : (prevData.condition ?? '');
+        const nextLabel = updates.label !== undefined ? updates.label : (prevData.label ?? e.label ?? '');
+        return {
+          ...e,
+          label: nextLabel || (nextCondition ? `[条件] ${nextCondition}` : undefined),
+          data: {
+            ...prevData,
+            condition: nextCondition,
+            label: nextLabel,
+          },
+        };
+      })
+    );
+  };
+
+  const deleteSelectedEdge = () => {
+    if (!selectedEdgeId) return;
+    if (import.meta.env?.DEV) {
+      console.log('[Workflow:DeleteEdge] 删除连线:', selectedEdgeId);
+    }
+    setEdges((eds) => eds.filter((e) => e.id !== selectedEdgeId));
+    setSelectedEdgeId(null);
+  };
+
   // 保存工作流
   const handleSave = async (overrideName?: string, overrideDesc?: string) => {
     if (!activeWorkflow) return;
@@ -1168,7 +1281,8 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         id: e.id,
         source: e.source,
         target: e.target,
-        label: e.label,
+        label: (e.data as any)?.label ?? e.label,
+        condition: (e.data as any)?.condition,
       })),
     };
 
@@ -1220,7 +1334,8 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         id: e.id,
         source: e.source,
         target: e.target,
-        label: e.label,
+        label: (e.data as any)?.label ?? e.label,
+        condition: (e.data as any)?.condition,
       })),
       variables: activeWorkflow.variables
         ? JSON.parse(JSON.stringify(activeWorkflow.variables))
@@ -1769,8 +1884,8 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             title="查看属性与配置"
           >
             <Settings2 size={12} />
-            <span>{selectedNode ? '节点属性' : '流程配置'}</span>
-            {selectedNode && (
+            <span>{selectedNode ? '节点属性' : selectedEdge ? '连线属性' : '流程配置'}</span>
+            {(selectedNode || selectedEdge) && (
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
                   isSidebarOpen && sidebarTab === 'inspector' ? 'bg-white' : 'bg-[#4f46e5]'
@@ -2224,12 +2339,13 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         <div className="flex-1 w-full h-full">
           <ReactFlow
             nodes={nodes}
-            edges={edges}
+            edges={renderedEdges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onNodeClick={handleNodeClick}
-            onPaneClick={() => setSelectedNodeId(null)}
+            onEdgeClick={handleEdgeClick}
+            onPaneClick={handlePaneClick}
             nodeTypes={nodeTypes}
             fitView
             fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
@@ -2272,8 +2388,8 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   }`}
                 >
                   <Settings2 size={12} className="text-[#85858d]" />
-                  <span>{selectedNode ? '节点属性' : '流程配置'}</span>
-                  {selectedNode && (
+                  <span>{selectedNode ? '节点属性' : selectedEdge ? '连线属性' : '流程配置'}</span>
+                  {(selectedNode || selectedEdge) && (
                     <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
                   )}
                 </button>
@@ -2855,6 +2971,160 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                         onChange={(e) => updateSelectedNodeConfig('command', e.target.value)}
                         className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2 font-mono text-[11px] text-[#1c1c21] outline-none resize-none"
                       />
+                    </div>
+                  </div>
+                ) : selectedEdge ? (
+                  <div className="space-y-4 text-[12px]">
+                    {/* 顶栏：标识与删除 */}
+                    <div className="flex items-center justify-between pb-2 border-b border-[#ececf0]">
+                      <div className="flex items-center gap-1.5 text-[11px] text-[#85858d] font-mono">
+                        <GitBranch size={13} className="text-[#4f46e5]" />
+                        <span>连线分支属性</span>
+                      </div>
+                      <button
+                        onClick={deleteSelectedEdge}
+                        className="p-1 rounded hover:bg-[#fbe9e9] text-[#d64545] transition-colors flex items-center gap-1 text-[11px]"
+                        title="删除此连线"
+                      >
+                        <Trash2 size={13} />
+                        <span>删除连线</span>
+                      </button>
+                    </div>
+
+                    {/* 起止拓扑关系指示卡片 */}
+                    <div className="p-2.5 rounded-[8px] bg-[#f9f9fb] border border-[#e3e3e8] space-y-2">
+                      <div className="text-[10px] font-semibold text-[#85858d] tracking-wide uppercase">
+                        拓扑分支流向
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-[11.5px]">
+                        <div className="flex-1 bg-white border border-[#e3e3e8] rounded-[6px] px-2 py-1.5 truncate shadow-2xs">
+                          <div className="text-[9.5px] text-[#85858d]">上游阶段</div>
+                          <div className="font-medium text-[#1c1c21] truncate">
+                            {(edgeSourceNode?.data as any)?.name || selectedEdge.source}
+                          </div>
+                        </div>
+                        <ArrowRight size={14} className="text-[#818cf8] shrink-0" />
+                        <div className="flex-1 bg-white border border-[#e3e3e8] rounded-[6px] px-2 py-1.5 truncate shadow-2xs">
+                          <div className="text-[9.5px] text-[#85858d]">目标分支</div>
+                          <div className="font-medium text-[#1c1c21] truncate">
+                            {(edgeTargetNode?.data as any)?.name || selectedEdge.target}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 分支显示标签 */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[#63636b] font-medium">分支显示标签 (Label)</label>
+                        <span className="text-[10px] text-[#85858d]">显示于画布连线上</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={(selectedEdge.data as any)?.label ?? selectedEdge.label ?? ''}
+                        onChange={(e) => updateSelectedEdge({ label: e.target.value })}
+                        className="w-full h-[32px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2.5 text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5] transition-all"
+                        placeholder="例如: A 线路 / 验收通过 / 异常重跑"
+                      />
+                    </div>
+
+                    {/* 条件表达式 */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[#63636b] font-medium flex items-center gap-1">
+                          <span>流转条件表达式 (Condition)</span>
+                        </label>
+                        <span className="text-[10px] text-[#85858d]">为空时默认无条件流转</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={(selectedEdge.data as any)?.condition ?? ''}
+                        onChange={(e) => updateSelectedEdge({ condition: e.target.value })}
+                        className="w-full h-[32px] font-mono text-[11px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2.5 text-[#4f46e5] outline-none focus:bg-white focus:border-[#4f46e5] transition-all"
+                        placeholder="例如: output === 'A' 或 exitCode === 0"
+                      />
+
+                      {/* 快捷预设按钮组 */}
+                      <div className="mt-2 space-y-1.5">
+                        <div className="text-[10.5px] text-[#85858d] flex items-center gap-1">
+                          <Sparkles size={11} className="text-[#818cf8]" />
+                          <span>常用分支条件快捷预设:</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => updateSelectedEdge({ condition: '', label: '默认流程' })}
+                            className="px-2 py-1 rounded bg-[#f3f4f6] hover:bg-[#e5e7eb] text-[#4b5563] text-[10px] font-medium transition-all"
+                          >
+                            无条件 (默认)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateSelectedEdge({ condition: "output === 'A'", label: 'A 线路' })}
+                            className="px-2 py-1 rounded bg-[#eef2ff] hover:bg-[#e0e7ff] text-[#4f46e5] text-[10px] font-mono font-medium transition-all border border-[#c7d2fe]"
+                          >
+                            output === 'A'
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateSelectedEdge({ condition: "output === 'B'", label: 'B 线路' })}
+                            className="px-2 py-1 rounded bg-[#eef2ff] hover:bg-[#e0e7ff] text-[#4f46e5] text-[10px] font-mono font-medium transition-all border border-[#c7d2fe]"
+                          >
+                            output === 'B'
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateSelectedEdge({ condition: "output === 'C'", label: 'C 线路' })}
+                            className="px-2 py-1 rounded bg-[#eef2ff] hover:bg-[#e0e7ff] text-[#4f46e5] text-[10px] font-mono font-medium transition-all border border-[#c7d2fe]"
+                          >
+                            output === 'C'
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateSelectedEdge({ condition: "exitCode === 0", label: '执行成功' })}
+                            className="px-2 py-1 rounded bg-[#ecfdf5] hover:bg-[#d1fae5] text-[#059669] text-[10px] font-mono font-medium transition-all border border-[#a7f3d0]"
+                          >
+                            exitCode === 0
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateSelectedEdge({ condition: "output?.approved === true", label: '审批通过' })}
+                            className="px-2 py-1 rounded bg-[#fffbeb] hover:bg-[#fef3c7] text-[#b45309] text-[10px] font-mono font-medium transition-all border border-[#fde68a]"
+                          >
+                            output?.approved === true
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 变量与分支机制使用说明卡片 */}
+                    <div className="bg-[#f9fafb] border border-[#ececf0] rounded-[7px] p-2.5 space-y-1.5 text-[10.5px] text-[#6b7280]">
+                      <div className="font-semibold text-[#374151] flex items-center gap-1 text-[11px]">
+                        <span>💡 多分支编排指南</span>
+                      </div>
+                      <div>
+                        • <code className="bg-[#e5e7eb] text-[#1f2937] px-1 py-0.5 rounded font-mono">output</code>：上游阶段执行返回的结构化输出数据。
+                      </div>
+                      <div>
+                        • <code className="bg-[#e5e7eb] text-[#1f2937] px-1 py-0.5 rounded font-mono">exitCode</code>：命令行退出状态码（0 代表无错误退出）。
+                      </div>
+                      <div>
+                        • <code className="bg-[#e5e7eb] text-[#1f2937] px-1 py-0.5 rounded font-mono">context</code>：当前任务关联的全局上下文变量池。
+                      </div>
+                      <div className="pt-1 text-[#85858d] border-t border-[#e5e7eb]">
+                        当一个节点连接多条出边时，满足条件的线路会继续流转，未满足的线路将被系统自动安全跳过（Skip）。
+                      </div>
+                    </div>
+
+                    {/* 保存按钮 */}
+                    <div className="pt-2">
+                      <button
+                        onClick={() => handleSave()}
+                        className="w-full h-[30px] rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm"
+                      >
+                        <Save size={12} />
+                        <span>保存工作流编排</span>
+                      </button>
                     </div>
                   </div>
                 ) : (
