@@ -9,6 +9,7 @@ import {
   Terminal,
   RefreshCw,
   CornerDownLeft,
+  PanelLeft,
 } from 'lucide-react';
 import { Kbd } from './Kbd';
 import { useShortcuts } from '../context/ShortcutContext';
@@ -30,6 +31,7 @@ interface CommandPaletteProps {
   onOpenCreateTask: () => void;
   onToggleLogs: () => void;
   onRefresh: () => void;
+  onToggleSidebar?: () => void;
 }
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
@@ -39,6 +41,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenCreateTask,
   onToggleLogs,
   onRefresh,
+  onToggleSidebar,
 }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -105,6 +108,21 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         action: () => {
           onClose();
           onOpenCreateTask();
+        },
+      },
+      {
+        id: 'action-toggle-sidebar',
+        category: '操作',
+        title: '切换侧边栏',
+        description: '展开或收起侧边栏导航面板',
+        icon: <PanelLeft size={16} strokeWidth={1.8} className="text-[#4b4b53]" />,
+        shortcutKeys: ['super', 'B'],
+        action: () => {
+          if (import.meta.env?.DEV) {
+            console.log('[CommandPalette] 执行命令: 切换侧边栏');
+          }
+          onClose();
+          onToggleSidebar?.();
         },
       },
       {

@@ -7,6 +7,7 @@ export interface ShortcutActions {
   onNavigateSettings: () => void;
   onOpenCreateTask: () => void;
   onToggleCommandPalette: () => void;
+  onToggleSidebar?: () => void;
   onEscape?: () => void;
 }
 
@@ -112,6 +113,17 @@ export const useGlobalShortcuts = (actions: ShortcutActions) => {
           console.log('[Shortcut] 触发快捷键: Super + K -> 命令面板', { superKey: activeSuper });
         }
         actionsRef.current.onToggleCommandPalette();
+        return;
+      }
+
+      // 6. Super + B: 切换侧边栏展开/收起
+      if (key === 'b' || code === 'KeyB') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (import.meta.env?.DEV) {
+          console.log('[Shortcut] 触发快捷键: Super + B -> 切换侧边栏', { superKey: activeSuper });
+        }
+        actionsRef.current.onToggleSidebar?.();
         return;
       }
     };

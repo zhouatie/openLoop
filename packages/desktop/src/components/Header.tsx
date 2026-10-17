@@ -1,6 +1,7 @@
 import React from 'react';
-import { PanelLeft, ArrowUp, RefreshCw, Plus, Terminal, Command } from 'lucide-react';
+import { PanelLeft, RefreshCw, Plus, Terminal, Command } from 'lucide-react';
 import { Kbd } from './Kbd';
+import { useShortcuts } from '../context/ShortcutContext';
 
 interface HeaderProps {
   category: string;
@@ -12,6 +13,8 @@ interface HeaderProps {
   unreadLogsCount: number;
   onRefresh: () => void;
   onOpenCommandPalette?: () => void;
+  isSidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,14 +27,33 @@ export const Header: React.FC<HeaderProps> = ({
   unreadLogsCount,
   onRefresh,
   onOpenCommandPalette,
+  isSidebarOpen = true,
+  onToggleSidebar,
 }) => {
+  const { formatCombo } = useShortcuts();
+
+  const handleToggleSidebarClick = () => {
+    if (import.meta.env?.DEV) {
+      console.log('[Header] 点击侧边栏切换按钮:', {
+        currentStatus: isSidebarOpen ? '展开' : '紧凑',
+        nextStatus: isSidebarOpen ? '收缩为纯图标模式' : '展开为完整模式',
+      });
+    }
+    onToggleSidebar?.();
+  };
+
   return (
     <header className="h-[46px] border-b border-[#e3e3e8] bg-white px-4 flex items-center justify-between select-none shrink-0">
       {/* 左侧：分栏与面包屑 */}
       <div className="flex items-center gap-2.5">
         <button
-          className="w-[26px] h-[26px] rounded-[7px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-colors"
-          title="切换侧边栏"
+          onClick={handleToggleSidebarClick}
+          className={`w-[26px] h-[26px] rounded-[7px] flex items-center justify-center transition-all ${
+            !isSidebarOpen
+              ? 'bg-[#e9e9ee] text-[#1c1c21] hover:bg-[#dfdfe4] shadow-sm'
+              : 'text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21]'
+          }`}
+          title={isSidebarOpen ? `收起侧边栏 (${formatCombo('B')})` : `展开侧边栏 (${formatCombo('B')})`}
         >
           <PanelLeft size={15} strokeWidth={1.8} />
         </button>

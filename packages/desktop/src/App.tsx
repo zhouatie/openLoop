@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { LogTerminalDrawer } from './components/LogTerminalDrawer';
@@ -40,6 +40,28 @@ export const AppContent: React.FC = () => {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
   const [isDaemonConnected, setIsDaemonConnected] = useState<boolean>(api.getConnectionStatus());
   const [sidebarOrder, setSidebarOrder] = useState<string[]>(() => getStoredSidebarOrder());
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    try {
+      const cached = localStorage.getItem('openloop_sidebar_open');
+      if (cached !== null) {
+        return cached === 'true';
+      }
+    } catch {}
+    return true;
+  });
+
+  const handleToggleSidebar = useCallback(() => {
+    setIsSidebarOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('openloop_sidebar_open', String(next));
+      } catch {}
+      if (import.meta.env?.DEV) {
+        console.log('[App] 切换侧边栏展开状态:', { previous: prev, current: next });
+      }
+      return next;
+    });
+  }, []);
 
   // 绑定全局快捷键（高频事件委托，极致性能与输入保护）
   useGlobalShortcuts({
@@ -59,6 +81,7 @@ export const AppContent: React.FC = () => {
     onToggleCommandPalette: () => {
       setIsCommandPaletteOpen((prev) => !prev);
     },
+    onToggleSidebar: handleToggleSidebar,
     onEscape: () => {
       if (isCommandPaletteOpen) {
         setIsCommandPaletteOpen(false);
@@ -248,6 +271,7 @@ export const AppContent: React.FC = () => {
           }
         }}
         isDaemonConnected={isDaemonConnected}
+        isOpen={isSidebarOpen}
       />
 
       {/* 主视图 */}
@@ -262,6 +286,8 @@ export const AppContent: React.FC = () => {
           isLogsOpen={isLogsOpen}
           unreadLogsCount={unreadLogsCount}
           onRefresh={refreshData}
+          isSidebarOpen={isSidebarOpen}
+          onToggleSidebar={handleToggleSidebar}
         />
 
         <main className="flex-1 relative overflow-hidden bg-[#f4f4f6]">
@@ -383,6 +409,7 @@ export const AppContent: React.FC = () => {
         onOpenCreateTask={() => setIsCreateTaskModalOpen(true)}
         onToggleLogs={handleToggleLogs}
         onRefresh={refreshData}
+        onToggleSidebar={handleToggleSidebar}
       />
     </div>
   );
