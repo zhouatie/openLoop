@@ -75,12 +75,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       {
         id: 'nav-plugins',
         category: '导航',
-        title: '扩展插件',
-        description: '管理已安装与内置扩展插件',
+        title: '插件扩展',
+        description: '管理侧边栏开放插件、自定义节点扩展与能力市场',
         icon: <Boxes size={16} strokeWidth={1.8} className="text-[#059669]" />,
-        shortcutKeys: ['super', '3'],
         action: () => {
-          onNavigate('plugin-manager');
+          onNavigate('settings-plugins');
           onClose();
         },
       },

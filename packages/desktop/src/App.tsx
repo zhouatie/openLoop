@@ -17,6 +17,7 @@ import { api } from './services/api';
 import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { Puzzle } from 'lucide-react';
 import { BUILTIN_PLUGINS, BUILTIN_VIEW_TITLES } from './constants/builtinPlugins';
+import { getStoredSidebarOrder } from './utils/sidebarOrder';
 
 export const AppContent: React.FC = () => {
   const [activePluginId, setActivePluginId] = useState<string>('kanban');
@@ -38,6 +39,7 @@ export const AppContent: React.FC = () => {
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
   const [isDaemonConnected, setIsDaemonConnected] = useState<boolean>(api.getConnectionStatus());
+  const [sidebarOrder, setSidebarOrder] = useState<string[]>(() => getStoredSidebarOrder());
 
   // 绑定全局快捷键（高频事件委托，极致性能与输入保护）
   useGlobalShortcuts({
@@ -47,9 +49,6 @@ export const AppContent: React.FC = () => {
     onNavigateWorkflows: () => {
       setActivePluginId('workflow-editor');
       setEditingWorkflowId(null);
-    },
-    onNavigatePlugins: () => {
-      setActivePluginId('plugin-manager');
     },
     onNavigateSettings: () => {
       setActivePluginId('settings-agent');
@@ -206,20 +205,25 @@ export const AppContent: React.FC = () => {
   };
 
   const currentPlugin = plugins.find((p) => p.id === activePluginId);
-  const isSettings = activePluginId.startsWith('settings');
-  const category = isSettings
-    ? '设置'
-    : activePluginId === 'kanban' || activePluginId === 'workflow-editor'
-    ? '使用'
-    : '扩展';
-  
+  const isSettings = activePluginId.startsWith('settings') || activePluginId === 'plugin-manager';
+  const category = isSettings ? '设置' : '功能';
+
+  let settingsSubTitle = '系统设置';
+  if (activePluginId.includes('plugin') || activePluginId === 'plugin-manager') {
+    settingsSubTitle = '插件扩展';
+  } else if (activePluginId.includes('sidebar')) {
+    settingsSubTitle = '侧边栏排序';
+  } else if (activePluginId.includes('general') || activePluginId.includes('workspace')) {
+    settingsSubTitle = '工作区与环境';
+  } else if (activePluginId.includes('shortcut')) {
+    settingsSubTitle = '快捷键';
+  } else if (activePluginId.includes('agent')) {
+    settingsSubTitle = '智能体驱动';
+  }
+
   const editingWorkflow = workflows.find((w) => w.id === editingWorkflowId);
   const pageTitle = isSettings
-    ? activePluginId === 'settings-general'
-      ? '常规与工作区'
-      : activePluginId === 'settings-about'
-      ? '关于与核心'
-      : 'Agent 驱动'
+    ? settingsSubTitle
     : activePluginId === 'workflow-editor' && editingWorkflow
     ? `流程编排 / ${editingWorkflow.name}`
     : currentPlugin?.sidebarItem?.title ||
@@ -232,6 +236,7 @@ export const AppContent: React.FC = () => {
       {/* 侧边栏 */}
       <Sidebar
         plugins={plugins}
+        sidebarOrder={sidebarOrder}
         activePluginId={activePluginId}
         onSelectPlugin={(id) => {
           if (import.meta.env?.DEV) {
@@ -292,14 +297,19 @@ export const AppContent: React.FC = () => {
             />
           )}
 
-          {activePluginId === 'plugin-manager' && (
-            <PluginManagerView plugins={plugins} onRefresh={refreshData} />
-          )}
-
           {isSettings && (
             <SettingsView
-              activeSubTab={activePluginId}
+              activeSubTab={activePluginId === 'plugin-manager' ? 'settings-plugins' : activePluginId}
               onSelectSubTab={setActivePluginId}
+              plugins={plugins}
+              sidebarOrder={sidebarOrder}
+              onUpdateSidebarOrder={(newOrder) => {
+                if (import.meta.env?.DEV) {
+                  console.log('[App] 更新侧边栏排序状态:', newOrder);
+                }
+                setSidebarOrder(newOrder);
+              }}
+              onRefreshPlugins={refreshData}
             />
           )}
 

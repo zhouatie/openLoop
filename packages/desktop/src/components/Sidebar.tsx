@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Kanban,
   Workflow,
@@ -6,16 +6,15 @@ import {
   Cpu,
   Settings,
   Puzzle,
-  Terminal,
-  Activity,
   Layers,
-  ChevronRight,
 } from 'lucide-react';
 import { PluginManifest } from '@openloop/core';
 import { useShortcuts } from '../context/ShortcutContext';
+import { getSortedSidebarPlugins } from '../utils/sidebarOrder';
 
 interface SidebarProps {
   plugins: PluginManifest[];
+  sidebarOrder?: string[];
   activePluginId: string;
   onSelectPlugin: (id: string) => void;
   isDaemonConnected: boolean;
@@ -33,25 +32,32 @@ const ICON_MAP: Record<string, React.ReactNode> = {
 
 export const Sidebar: React.FC<SidebarProps> = ({
   plugins,
+  sidebarOrder,
   activePluginId,
   onSelectPlugin,
   isDaemonConnected,
 }) => {
   const { formatCombo } = useShortcuts();
 
-  const corePlugins = plugins.filter(
-    (p) => p.id === 'kanban' || p.id === 'workflow-editor'
-  );
-  const extensionPlugins = plugins.filter(
-    (p) => p.id !== 'kanban' && p.id !== 'workflow-editor'
-  );
+  // 获取拍平并按配置排好序的侧边栏插件列表（自动排除 plugin-manager，前两项固定 kanban & workflow-editor）
+  const displayPlugins = useMemo(() => {
+    return getSortedSidebarPlugins(plugins, sidebarOrder);
+  }, [plugins, sidebarOrder]);
+
+  const isSettingsActive = activePluginId.startsWith('settings');
+
+  const handleItemClick = (id: string) => {
+    if (import.meta.env?.DEV) {
+      console.log('[Sidebar] 点击切换侧边栏导航:', { id, previous: activePluginId });
+    }
+    onSelectPlugin(id);
+  };
 
   return (
     <aside className="w-[212px] h-screen bg-[#f4f4f6] border-r border-[#e3e3e8] flex flex-col justify-between shrink-0 select-none">
-      <div className="flex flex-col min-h-0">
-        {/* 顶部：macOS 原生红黄绿窗口按钮与 openLoop Logo */}
+      <div className="flex flex-col min-h-0 flex-1">
+        {/* 顶部：macOS 原生红黄绿窗口控制按钮与 Logo */}
         <div className="h-[46px] px-4 flex items-center gap-3 shrink-0">
-          {/* Traffic lights */}
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-full bg-[#ff5f56] border border-[#e0443e] inline-block shadow-sm" />
             <span className="w-3 h-3 rounded-full bg-[#ffbd2e] border border-[#dea123] inline-block shadow-sm" />
@@ -68,144 +74,89 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* 导航菜单列表 */}
-        <div className="flex-1 overflow-y-auto px-2.5 py-1.5 space-y-3.5">
-          {/* 使用分组 */}
-          <div>
-            <div className="px-2 pt-1 pb-1 text-[11px] font-medium tracking-wide text-[#85858d]">
-              使用
-            </div>
-            <div className="space-y-[2px]">
-              {corePlugins.map((plugin) => {
-                const isActive = activePluginId === plugin.id;
-                const icon =
-                  (plugin.sidebarItem?.icon && ICON_MAP[plugin.sidebarItem.icon]) || (
-                    <Puzzle size={15} strokeWidth={1.8} />
-                  );
+        {/* 拍平的单一导航菜单列表（无“使用”、“扩展”分组） */}
+        <div className="flex-1 overflow-y-auto px-2.5 py-2 space-y-[2px]">
+          {displayPlugins.map((plugin) => {
+            const isActive = activePluginId === plugin.id;
+            const icon =
+              (plugin.sidebarItem?.icon && ICON_MAP[plugin.sidebarItem.icon]) || (
+                <Puzzle size={15} strokeWidth={1.8} />
+              );
 
-                const shortcutHint =
-                  plugin.id === 'kanban'
-                    ? formatCombo('1')
-                    : plugin.id === 'workflow-editor'
-                    ? formatCombo('2')
-                    : undefined;
-                const titleText = plugin.sidebarItem?.title || plugin.name;
+            // 仅对前两项分配全局快捷键提示
+            const shortcutHint =
+              plugin.id === 'kanban'
+                ? formatCombo('1')
+                : plugin.id === 'workflow-editor'
+                ? formatCombo('2')
+                : undefined;
 
-                return (
-                  <button
-                    key={plugin.id}
-                    onClick={() => onSelectPlugin(plugin.id)}
-                    title={shortcutHint ? `${titleText} (${shortcutHint})` : titleText}
-                    className={`w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-[7px] text-[13px] transition-all text-left ${
-                      isActive
-                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.14),0_0_0_0.5px_rgba(0,0,0,0.08)]'
-                        : 'text-[#4b4b53] hover:bg-[#e9e9ee] hover:text-[#1c1c21]'
+            const titleText = plugin.sidebarItem?.title || plugin.name;
+
+            return (
+              <button
+                key={plugin.id}
+                onClick={() => handleItemClick(plugin.id)}
+                title={shortcutHint ? `${titleText} (${shortcutHint})` : titleText}
+                className={`w-full flex items-center justify-between px-2.5 h-[30px] rounded-[7px] text-[13px] transition-all text-left group ${
+                  isActive
+                    ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.06)]'
+                    : 'text-[#4b4b53] hover:bg-[#e9e9ee] hover:text-[#1c1c21]'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span
+                    className={`shrink-0 transition-colors ${
+                      isActive ? 'text-[#1c1c21]' : 'text-[#85858d] group-hover:text-[#4b4b53]'
                     }`}
                   >
-                    <span className={isActive ? 'text-[#1c1c21]' : 'text-[#85858d]'}>
-                      {icon}
+                    {icon}
+                  </span>
+                  <span className="truncate tracking-tight">{titleText}</span>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                  {!plugin.isBuiltin && (
+                    <span className="text-[10px] text-[#4f46e5] bg-[#eeedfd] px-1.5 py-[1px] rounded font-medium">
+                      槽位
                     </span>
-                    <span className="truncate tracking-tight">{titleText}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 扩展分组 */}
-          <div>
-            <div className="px-2 pt-1 pb-1 text-[11px] font-medium tracking-wide text-[#85858d]">
-              扩展
-            </div>
-            <div className="space-y-[2px]">
-              {extensionPlugins.map((plugin) => {
-                const isActive = activePluginId === plugin.id;
-                const icon =
-                  (plugin.sidebarItem?.icon && ICON_MAP[plugin.sidebarItem.icon]) || (
-                    <Boxes size={15} strokeWidth={1.8} />
-                  );
-
-                const shortcutHint =
-                  plugin.id === 'plugin-manager' ? formatCombo('3') : undefined;
-                const titleText = plugin.sidebarItem?.title || plugin.name;
-
-                return (
-                  <button
-                    key={plugin.id}
-                    onClick={() => onSelectPlugin(plugin.id)}
-                    title={shortcutHint ? `${titleText} (${shortcutHint})` : titleText}
-                    className={`w-full flex items-center justify-between px-2.5 h-[30px] rounded-[7px] text-[13px] transition-all text-left ${
-                      isActive
-                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.14),0_0_0_0.5px_rgba(0,0,0,0.08)]'
-                        : 'text-[#4b4b53] hover:bg-[#e9e9ee] hover:text-[#1c1c21]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 truncate">
-                      <span className={isActive ? 'text-[#1c1c21]' : 'text-[#85858d]'}>
-                        {icon}
-                      </span>
-                      <span className="truncate tracking-tight">{titleText}</span>
-                    </div>
-
-                    {!plugin.isBuiltin && (
-                      <span className="text-[10px] text-[#4f46e5] bg-[#eeedfd] px-1.5 py-[1px] rounded font-medium">
-                        槽位
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                  )}
+                  {shortcutHint && (
+                    <span className="text-[10.5px] font-mono text-[#a1a1aa] tracking-tighter opacity-70 group-hover:opacity-100">
+                      {shortcutHint}
+                    </span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* 底部系统状态与设置菜单 (1:1 对齐 Magpie 截图左下角设置弹出/展开卡片) */}
-      <div className="p-2 border-t border-[#ececf0] space-y-1.5 shrink-0">
-        {activePluginId.startsWith('settings') ? (
-          <div className="bg-white border border-[#e3e3e8] rounded-[9px] p-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.03)] space-y-[2px]">
-            <div className="px-2 py-1 text-[12px] font-semibold text-[#1c1c21] flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <Settings size={13} className="text-[#85858d]" />
-                <span>设置</span>
-              </span>
-            </div>
-
-            <div className="space-y-[1px] pt-0.5">
-              {[
-                { id: 'settings-agent', label: 'Agent 驱动' },
-                { id: 'settings-general', label: '常规与工作区' },
-                { id: 'settings-about', label: '关于与核心' },
-              ].map((sub) => {
-                const isSubActive =
-                  activePluginId === sub.id ||
-                  (activePluginId === 'settings' && sub.id === 'settings-agent');
-                return (
-                  <button
-                    key={sub.id}
-                    onClick={() => onSelectPlugin(sub.id)}
-                    className={`w-full text-left px-2.5 h-[26px] rounded-[6px] text-[12px] transition-all flex items-center ${
-                      isSubActive
-                        ? 'bg-[#e4e4e9] text-[#1c1c21] font-medium'
-                        : 'text-[#4b4b53] hover:bg-[#f1f1f4] hover:text-[#1c1c21]'
-                    }`}
-                  >
-                    {sub.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => onSelectPlugin('settings-agent')}
-            title={`系统设置 (${formatCombo(',')})`}
-            className="w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-[7px] text-[13px] text-[#4b4b53] hover:bg-[#e9e9ee] hover:text-[#1c1c21] transition-all"
-          >
-            <Settings size={15} strokeWidth={1.8} className="text-[#85858d]" />
+      {/* 底部：系统设置与核心服务运行状态 */}
+      <div className="p-2 border-t border-[#ececf0] space-y-1 shrink-0">
+        <button
+          onClick={() => handleItemClick('settings')}
+          title={`系统设置 (${formatCombo(',')})`}
+          className={`w-full flex items-center justify-between px-2.5 h-[32px] rounded-[7px] text-[13px] transition-all text-left ${
+            isSettingsActive
+              ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.06)]'
+              : 'text-[#4b4b53] hover:bg-[#e9e9ee] hover:text-[#1c1c21]'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <Settings
+              size={15}
+              strokeWidth={1.8}
+              className={isSettingsActive ? 'text-[#1c1c21]' : 'text-[#85858d]'}
+            />
             <span>设置</span>
-          </button>
-        )}
+          </div>
+
+          <span className="text-[10.5px] font-mono text-[#a1a1aa] tracking-tighter">
+            {formatCombo(',')}
+          </span>
+        </button>
 
         <div className="px-2 h-[22px] flex items-center gap-2 text-[11px] text-[#85858d] font-mono">
           <span

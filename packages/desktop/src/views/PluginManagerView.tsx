@@ -27,6 +27,7 @@ import { toast } from '../components/Toast';
 interface PluginManagerViewProps {
   plugins: PluginManifest[];
   onRefresh: () => void;
+  embedded?: boolean;
 }
 
 interface CatalogPlugin {
@@ -218,7 +219,11 @@ const CATALOG_PLUGINS: CatalogPlugin[] = [
   },
 ];
 
-export const PluginManagerView: React.FC<PluginManagerViewProps> = ({ plugins, onRefresh }) => {
+export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
+  plugins,
+  onRefresh,
+  embedded = false,
+}) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'installed' | 'market'>('all');
   const [installingId, setInstallingId] = useState<string | null>(null);
@@ -339,7 +344,13 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({ plugins, o
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-y-auto select-none p-6 space-y-4">
+    <div
+      className={
+        embedded
+          ? 'w-full space-y-4'
+          : 'flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-y-auto select-none p-6 space-y-4'
+      }
+    >
       {/* 1:1 对齐 Magpie 的 pm-intro 顶部开场横幅卡片 */}
       <div className="relative overflow-hidden bg-white border border-[#e3e3e8] rounded-[14px] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] flex items-center justify-between gap-6">
         <div className="flex-1 min-w-0">

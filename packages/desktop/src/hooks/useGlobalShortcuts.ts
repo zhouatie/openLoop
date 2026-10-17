@@ -4,7 +4,6 @@ import { useShortcuts } from '../context/ShortcutContext';
 export interface ShortcutActions {
   onNavigateKanban: () => void;
   onNavigateWorkflows: () => void;
-  onNavigatePlugins: () => void;
   onNavigateSettings: () => void;
   onOpenCreateTask: () => void;
   onToggleCommandPalette: () => void;
@@ -83,18 +82,7 @@ export const useGlobalShortcuts = (actions: ShortcutActions) => {
         return;
       }
 
-      // 3. Super + 3: 导航至扩展插件
-      if (key === '3' || code === 'Digit3' || code === 'Numpad3') {
-        e.preventDefault();
-        e.stopPropagation();
-        if (import.meta.env?.DEV) {
-          console.log('[Shortcut] 触发快捷键: Super + 3 -> 扩展插件', { superKey: activeSuper });
-        }
-        actionsRef.current.onNavigatePlugins();
-        return;
-      }
-
-      // 4. Super + ,: 打开系统设置
+      // 3. Super + ,: 打开系统设置
       if (key === ',' || code === 'Comma') {
         e.preventDefault();
         e.stopPropagation();
@@ -105,7 +93,7 @@ export const useGlobalShortcuts = (actions: ShortcutActions) => {
         return;
       }
 
-      // 5. Super + N: 新建任务
+      // 4. Super + N: 新建任务
       if (key === 'n' || code === 'KeyN') {
         e.preventDefault();
         e.stopPropagation();
@@ -116,7 +104,7 @@ export const useGlobalShortcuts = (actions: ShortcutActions) => {
         return;
       }
 
-      // 6. Super + K: 唤起/切换命令面板
+      // 5. Super + K: 唤起/切换命令面板
       if (key === 'k' || code === 'KeyK') {
         e.preventDefault();
         e.stopPropagation();
