@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader2, X } from 'lucide-react';
 
 export type ConfirmVariant = 'danger' | 'warning' | 'info' | 'primary';
@@ -33,12 +33,26 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
 
+  // 日志：弹窗展示
+  useEffect(() => {
+    if (isOpen && import.meta.env?.DEV) {
+      console.log('[ConfirmModal] 打开确认对话框:', {
+        title,
+        targetName,
+        targetTag,
+      });
+    }
+  }, [isOpen, title, targetName, targetTag]);
+
   // 监听 Escape 快捷键退出
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !loading) {
+        if (import.meta.env?.DEV) {
+          console.log('[ConfirmModal] 用户按 Escape 关闭对话框');
+        }
         onClose();
       }
     };
@@ -49,17 +63,31 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 
   if (!isOpen) return null;
 
+  const handleCancelClick = () => {
+    if (import.meta.env?.DEV) {
+      console.log('[ConfirmModal] 用户点击取消');
+    }
+    onClose();
+  };
+
+  const handleConfirmClick = async () => {
+    if (import.meta.env?.DEV) {
+      console.log('[ConfirmModal] 用户点击确认执行操作:', title);
+    }
+    await onConfirm();
+  };
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100 select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/35 backdrop-blur-[2px] openloop-modal-backdrop select-none"
       onClick={() => {
-        if (!loading) onClose();
+        if (!loading) handleCancelClick();
       }}
     >
       <div
         ref={modalRef}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[380px] bg-white rounded-[12px] border border-[#e3e3e8] shadow-[0_20px_48px_rgba(20,22,30,0.16)] p-5 animate-in zoom-in-95 duration-150 -mt-12"
+        className="w-full max-w-[380px] bg-white rounded-[12px] border border-[#e3e3e8] shadow-[0_20px_48px_rgba(20,22,30,0.16)] p-5 openloop-modal-content -mt-12"
       >
         {/* 顶部标题栏：统一应用主题排版 + 右侧轻量关闭按钮 */}
         <div className="flex items-center justify-between">
@@ -69,7 +97,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
           <button
             type="button"
             disabled={loading}
-            onClick={onClose}
+            onClick={handleCancelClick}
             className="w-5 h-5 rounded-[4px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-colors -mr-1 -mt-0.5"
             title="关闭 (Esc)"
           >
@@ -113,7 +141,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
           <button
             type="button"
             disabled={loading}
-            onClick={onClose}
+            onClick={handleCancelClick}
             className="h-[28px] px-3.5 rounded-[6px] text-[#4b4b53] hover:bg-[#f1f1f4] hover:text-[#1c1c21] text-[12px] transition-colors disabled:opacity-50"
           >
             {cancelText}
@@ -121,7 +149,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
           <button
             type="button"
             disabled={loading}
-            onClick={onConfirm}
+            onClick={handleConfirmClick}
             className="h-[28px] px-4 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center gap-1.5 active:scale-95 disabled:opacity-50 transition-all shadow-sm"
           >
             {loading && <Loader2 size={12} className="animate-spin" />}

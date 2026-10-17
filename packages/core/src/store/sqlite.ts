@@ -143,6 +143,11 @@ export class SqliteStore {
       if (!hasDeployWf) {
         this.saveWorkflow(this.getAppDeployWorkflowDefinition());
       }
+      // 检查并增量补齐内置通用研发流水线
+      const hasDevWf = this.db.prepare('SELECT id FROM workflows WHERE id = ? OR name LIKE ?').get('wf_agent_feature_dev', '%通用研发%');
+      if (!hasDevWf) {
+        this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
+      }
     }
 
     // 系统启动自愈：清理因服务崩溃/重启而残留为 running 状态的孤立任务
@@ -247,6 +252,65 @@ export class SqliteStore {
     };
   }
 
+  private getGeneralDevWorkflowDefinition(): WorkflowDefinition {
+    return {
+      id: 'wf_agent_feature_dev',
+      name: '通用研发流水线',
+      description: '通用智能体敏捷开发流程：AI 智能体根据需求修改代码，执行前端构建自检，经由 QA 人工验收门禁确认',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      nodes: [
+        {
+          id: 'node_agent_coder',
+          name: 'AI Agent 编码实现',
+          type: 'agent',
+          position: { x: 100, y: 150 },
+          config: {
+            agentName: 'Pi Coding Agent',
+            prompt: '请根据需求完成代码修改与自测：\n需求：{{task.title}}\n详细说明：{{task.description}}\n请保持工程代码整洁与类型严谨。',
+            timeoutSec: 600,
+          },
+        },
+        {
+          id: 'node_build_verify',
+          name: '前端构建自检',
+          type: 'cli',
+          position: { x: 420, y: 150 },
+          config: {
+            command: 'pnpm --filter @openloop/desktop build:renderer',
+            timeoutSec: 180,
+          },
+        },
+        {
+          id: 'node_qa_gate',
+          name: 'QA 人工验收门禁',
+          type: 'qa-approval',
+          position: { x: 740, y: 150 },
+          config: {
+            approvalPrompt: '请在前端页面验证功能实现是否完整无误',
+            checklist: [
+              '功能逻辑已按需求完整实现',
+              '界面符合 Magpie 极简规范',
+              '编译与构建无报错',
+            ],
+          },
+        },
+      ],
+      edges: [
+        {
+          id: 'edge_agent_to_build',
+          source: 'node_agent_coder',
+          target: 'node_build_verify',
+        },
+        {
+          id: 'edge_build_to_qa',
+          source: 'node_build_verify',
+          target: 'node_qa_gate',
+        },
+      ],
+    };
+  }
+
   private seedInitialData() {
     // 预置默认流程：Agent 研发 -> Midscene 测试 -> 截图拼图 -> QA 验收
     const defaultWorkflow: WorkflowDefinition = {
@@ -324,79 +388,8 @@ export class SqliteStore {
 
     this.saveWorkflow(defaultWorkflow);
 
-    // 预置通用 AI 研发流水线
-    const featureDevWorkflow: WorkflowDefinition = {
-      id: 'wf_agent_feature_dev',
-      name: '通用 AI 敏捷特性研发流水线',
-      description: '通用智能体敏捷开发流程：AI 智能体根据需求修改代码，执行前端构建自检，经由 QA 人工验收门禁确认后，自动执行 Git 提交',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      nodes: [
-        {
-          id: 'node_agent_coder',
-          name: 'AI Agent 编码实现',
-          type: 'agent',
-          position: { x: 100, y: 150 },
-          config: {
-            agentName: 'Pi Coding Agent',
-            prompt: '请根据需求完成代码修改与自测：\n需求：{{task.title}}\n详细说明：{{task.description}}\n请保持工程代码整洁与类型严谨。',
-            timeoutSec: 600,
-          },
-        },
-        {
-          id: 'node_build_verify',
-          name: '前端构建自检',
-          type: 'cli',
-          position: { x: 420, y: 150 },
-          config: {
-            command: 'pnpm --filter @openloop/desktop build:renderer',
-            timeoutSec: 180,
-          },
-        },
-        {
-          id: 'node_qa_gate',
-          name: 'QA 人工验收门禁',
-          type: 'qa-approval',
-          position: { x: 740, y: 150 },
-          config: {
-            approvalPrompt: '请在前端页面验证功能实现是否完整无误',
-            checklist: [
-              '功能逻辑已按需求完整实现',
-              '界面符合 Magpie 极简规范',
-              '编译与构建无报错',
-            ],
-          },
-        },
-        {
-          id: 'node_git_commit',
-          name: 'Git 自动提交代码',
-          type: 'cli',
-          position: { x: 1060, y: 150 },
-          config: {
-            command: 'git add -A && if git diff --staged --quiet; then echo "工作区干净，无需提交"; else git commit -m "feat: {{task.title}}" && git log -1 --stat; fi',
-            timeoutSec: 60,
-          },
-        },
-      ],
-      edges: [
-        {
-          id: 'edge_agent_to_build',
-          source: 'node_agent_coder',
-          target: 'node_build_verify',
-        },
-        {
-          id: 'edge_build_to_qa',
-          source: 'node_build_verify',
-          target: 'node_qa_gate',
-        },
-        {
-          id: 'edge_qa_to_commit',
-          source: 'node_qa_gate',
-          target: 'node_git_commit',
-        },
-      ],
-    };
-    this.saveWorkflow(featureDevWorkflow);
+    // 预置通用研发流水线
+    this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
     this.saveWorkflow(this.getAppDeployWorkflowDefinition());
 
     // 预置插件

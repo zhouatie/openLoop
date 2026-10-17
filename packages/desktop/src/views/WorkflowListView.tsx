@@ -26,6 +26,8 @@ import { WorkflowDefinition, NodeType } from '@openloop/core';
 import { api } from '../services/api';
 import { EditWorkflowModal } from '../components/EditWorkflowModal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { DebugWorkflowModal } from '../components/DebugWorkflowModal';
+import { toast } from '../components/Toast';
 
 const STORAGE_KEY_PINNED_WORKFLOWS = 'openloop_pinned_workflow_ids';
 
@@ -33,7 +35,7 @@ interface WorkflowListViewProps {
   workflows: WorkflowDefinition[];
   onSelectWorkflow: (workflowId: string) => void;
   onRefresh: () => void;
-  onOpenTaskLogs: (taskId: string) => void;
+  onOpenTaskLogs: (taskId: string, nodeId?: string) => void;
 }
 
 export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
@@ -46,12 +48,13 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
-  const [templateType, setTemplateType] = useState<'empty' | 'standard' | 'deploy'>('standard');
+  const [templateType, setTemplateType] = useState<'feature_dev' | 'standard' | 'deploy' | 'empty'>('feature_dev');
   const [loading, setLoading] = useState(false);
 
-  // 流水线编辑、复制与删除状态
+  // 流水线编辑、复制、删除与调试状态
   const [editTargetWf, setEditTargetWf] = useState<WorkflowDefinition | null>(null);
   const [deleteTargetWf, setDeleteTargetWf] = useState<WorkflowDefinition | null>(null);
+  const [debugTargetWf, setDebugTargetWf] = useState<WorkflowDefinition | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
@@ -188,7 +191,56 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       let nodes = [];
       let edges = [];
 
-      if (templateType === 'standard') {
+      if (templateType === 'feature_dev') {
+        nodes = [
+          {
+            id: 'node_agent_coder',
+            name: 'AI Agent 编码实现',
+            type: 'agent' as NodeType,
+            position: { x: 100, y: 150 },
+            config: {
+              agentName: 'Pi Coding Agent',
+              prompt: '请根据需求完成代码修改与自测：\n需求：{{task.title}}\n详细说明：{{task.description}}\n请保持工程代码整洁与类型严谨。',
+              timeoutSec: 600,
+            },
+          },
+          {
+            id: 'node_build_verify',
+            name: '前端构建自检',
+            type: 'cli' as NodeType,
+            position: { x: 420, y: 150 },
+            config: {
+              command: 'pnpm --filter @openloop/desktop build:renderer',
+              timeoutSec: 180,
+            },
+          },
+          {
+            id: 'node_qa_gate',
+            name: 'QA 人工验收门禁',
+            type: 'qa-approval' as NodeType,
+            position: { x: 740, y: 150 },
+            config: {
+              approvalPrompt: '请在前端页面验证功能实现是否完整无误',
+              checklist: ['功能逻辑已按需求完整实现', '界面符合极简高质感规范', '构建与类型自检无报错'],
+            },
+          },
+          {
+            id: 'node_git_commit',
+            name: 'Git 自动提交代码',
+            type: 'cli' as NodeType,
+            position: { x: 1060, y: 150 },
+            config: {
+              command: 'git add -A && if git diff --staged --quiet; then echo "工作区干净，无需提交"; else git commit -m "feat: {{task.title}}" && git log -1 --stat; fi',
+              timeoutSec: 60,
+            },
+          },
+        ];
+        edges = [
+          { id: 'edge_agent_to_build', source: 'node_agent_coder', target: 'node_build_verify' },
+          { id: 'edge_build_to_qa', source: 'node_build_verify', target: 'node_qa_gate' },
+          { id: 'edge_qa_to_commit', source: 'node_qa_gate', target: 'node_git_commit' },
+        ];
+      } else if (templateType === 'standard') {
         nodes = [
           {
             id: 'node_agent',
@@ -294,29 +346,77 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       setIsCreateModalOpen(false);
       setNewTitle('');
       setNewDesc('');
+      toast.success(`流程「${newTitle.trim()}」创建成功`);
       onRefresh();
       // 直接打开新创建的流程画布
       onSelectWorkflow(id);
     } catch (err: any) {
-      alert(`创建流程失败: ${err.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowListView] 创建流程失败:', err);
+      }
+      toast.error(`创建流程失败: ${err?.message || '未知错误'}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRunWorkflow = async (e: React.MouseEvent, wf: WorkflowDefinition) => {
+  const handleRunWorkflow = (e: React.MouseEvent, wf: WorkflowDefinition) => {
     e.stopPropagation();
+    setDebugTargetWf(wf);
+  };
+
+  const handleStartDebug = async ({
+    title,
+    description,
+    workspace,
+    openLogsImmediately,
+  }: {
+    title: string;
+    description: string;
+    workspace?: string;
+    openLogsImmediately: boolean;
+  }) => {
+    if (!debugTargetWf) return;
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowListView] 发起编排调试执行:', {
+        workflowId: debugTargetWf.id,
+        workflowName: debugTargetWf.name,
+        title,
+        workspace,
+      });
+    }
+
     try {
       const task = await api.createTask({
-        title: `调试执行: ${wf.name}`,
-        workflowId: wf.id,
+        title,
+        description: description || undefined,
+        workflowId: debugTargetWf.id,
+        workspace: workspace || undefined,
         autoRun: true,
       });
-      alert(`已根据流程 [${wf.name}] 创建调试任务: ${task.id}`);
+
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowListView] 调试任务已创建成功:', task.id);
+      }
+
+      toast.success(`编排调试任务已触发 (${task.id})`, {
+        description: `已根据流程「${debugTargetWf.name}」自动开始运行`,
+        action: {
+          label: '查看运行日志',
+          onClick: () => onOpenTaskLogs(task.id),
+        },
+      });
+
       onRefresh();
-      onOpenTaskLogs(task.id);
+      if (openLogsImmediately) {
+        onOpenTaskLogs(task.id);
+      }
     } catch (err: any) {
-      alert(`启动失败: ${err.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowListView] 启动调试失败:', err);
+      }
+      toast.error(`启动失败: ${err?.message || '未知错误'}`);
+      throw err;
     }
   };
 
@@ -352,12 +452,13 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       if (import.meta.env?.DEV) {
         console.log('[WorkflowListView] 流程复制成功:', clonedWf.id);
       }
+      toast.success(`流程已复制为「${clonedWf.name}」`);
       onRefresh();
     } catch (err: any) {
       if (import.meta.env?.DEV) {
         console.error('[WorkflowListView] 流程复制失败:', err);
       }
-      alert(`复制流程失败: ${err?.message || '未知错误'}`);
+      toast.error(`复制流程失败: ${err?.message || '未知错误'}`);
     } finally {
       setDuplicatingId(null);
     }
@@ -424,13 +525,14 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       if (import.meta.env?.DEV) {
         console.log('[WorkflowListView] 流程删除成功:', deleteTargetWf.id);
       }
+      toast.success(`流程「${deleteTargetWf.name}」已成功删除`);
       setDeleteTargetWf(null);
       onRefresh();
     } catch (err: any) {
       if (import.meta.env?.DEV) {
         console.error('[WorkflowListView] 流程删除失败:', err);
       }
-      alert(`删除流程失败: ${err?.message || '未知错误'}`);
+      toast.error(`删除流程失败: ${err?.message || '未知错误'}`);
     } finally {
       setIsDeleting(false);
     }
@@ -783,18 +885,38 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
               <div>
                 <label className="block font-medium text-[#4b4b53] mb-1.5">初始化模板</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div
+                    onClick={() => setTemplateType('feature_dev')}
+                    className={`p-2.5 rounded-[8px] border cursor-pointer transition-all ${
+                      templateType === 'feature_dev'
+                        ? 'border-[#4f46e5] bg-[#eeedfd]/40 shadow-sm'
+                        : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
+                    }`}
+                  >
+                    <div className="font-semibold text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1.5">
+                      <Bot size={12} className="text-[#4f46e5]" />
+                      <span>通用研发流水线</span>
+                    </div>
+                    <div className="text-[10px] text-[#85858d] line-clamp-2">
+                      Agent 编码 + 构建自检 + QA 门禁 + Git 提交
+                    </div>
+                  </div>
+
                   <div
                     onClick={() => setTemplateType('standard')}
                     className={`p-2.5 rounded-[8px] border cursor-pointer transition-all ${
                       templateType === 'standard'
-                        ? 'border-[#4f46e5] bg-[#eeedfd]/30 shadow-sm'
+                        ? 'border-[#4f46e5] bg-[#eeedfd]/40 shadow-sm'
                         : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
                     }`}
                   >
-                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5">标准研发模板</div>
+                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1.5">
+                      <Zap size={12} className="text-[#b45309]" />
+                      <span>轻量研发模板</span>
+                    </div>
                     <div className="text-[10px] text-[#85858d] line-clamp-2">
-                      预置 Agent 编码 + Hook + QA 验收
+                      Agent 编码 + Hook 触发 + QA 验收
                     </div>
                   </div>
 
@@ -806,8 +928,8 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                         : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
                     }`}
                   >
-                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1">
-                      <Rocket size={11} className="text-[#0284c7]" />
+                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1.5">
+                      <Rocket size={12} className="text-[#0284c7]" />
                       <span>构建部署模板</span>
                     </div>
                     <div className="text-[10px] text-[#85858d] line-clamp-2">
@@ -819,12 +941,12 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     onClick={() => setTemplateType('empty')}
                     className={`p-2.5 rounded-[8px] border cursor-pointer transition-all ${
                       templateType === 'empty'
-                        ? 'border-[#4f46e5] bg-[#eeedfd]/30 shadow-sm'
+                        ? 'border-[#4f46e5] bg-[#eeedfd]/40 shadow-sm'
                         : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
                     }`}
                   >
-                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1">
-                      <Sparkles size={11} className="text-[#4f46e5]" />
+                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1.5">
+                      <Sparkles size={12} className="text-[#4f46e5]" />
                       <span>空白 / AI 助手生成</span>
                     </div>
                     <div className="text-[10px] text-[#85858d] line-clamp-2">
@@ -878,6 +1000,14 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           if (!isDeleting) setDeleteTargetWf(null);
         }}
         onConfirm={handleConfirmDeleteWorkflow}
+      />
+
+      {/* 编排调试流水线弹窗 */}
+      <DebugWorkflowModal
+        isOpen={!!debugTargetWf}
+        workflow={debugTargetWf}
+        onClose={() => setDebugTargetWf(null)}
+        onStartDebug={handleStartDebug}
       />
     </div>
   );

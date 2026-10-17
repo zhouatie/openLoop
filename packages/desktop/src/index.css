@@ -173,3 +173,65 @@ button {
   color: #d19a66;
 }
 
+/* ========================================================
+   自研统一通知 Toast 与弹窗 Modal 丝滑动效
+   ======================================================== */
+@keyframes openloop-toast-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes openloop-toast-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+}
+
+.openloop-toast-enter {
+  animation: openloop-toast-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.openloop-toast-leave {
+  animation: openloop-toast-out 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes openloop-modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes openloop-modal-scale-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.openloop-modal-backdrop {
+  animation: openloop-modal-fade-in 0.16s ease-out forwards;
+}
+
+.openloop-modal-content {
+  animation: openloop-modal-scale-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+

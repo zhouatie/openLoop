@@ -50,6 +50,7 @@ import { KanbanColumnSortDropdown } from '../components/KanbanColumnSortDropdown
 import { NodeExecutionTimeline } from '../components/NodeExecutionTimeline';
 import { ImageLightboxModal } from '../components/ImageLightboxModal';
 import { AgentMarkdown } from '../components/AgentMarkdown';
+import { toast } from '../components/Toast';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 import {
   ColumnSortRule,
@@ -234,7 +235,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     try {
       await api.resumeTerminal(taskId);
     } catch (err: any) {
-      alert(`拉起终端失败: ${err.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 拉起终端失败:', err);
+      }
+      toast.error(`拉起终端失败: ${err?.message || '未知错误'}`);
     }
   };
   const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -247,9 +251,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     setCancellingTaskId(taskId);
     try {
       await api.cancelTask(taskId);
+      toast.info('任务已终止');
       onRefresh();
     } catch (e: any) {
-      alert(`终止任务失败: ${e.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 终止任务失败:', e);
+      }
+      toast.error(`终止任务失败: ${e?.message || '未知错误'}`);
     } finally {
       setCancellingTaskId(null);
     }
@@ -438,7 +446,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     const toSendAttachments = [...chatAttachments];
     if (!msg && toSendAttachments.length === 0) return;
     if (pendingChatUploads.some((p) => p.status === 'uploading')) {
-      alert('请等待图片附件上传完成后再发送');
+      toast.warning('请等待图片附件上传完成后再发送');
       return;
     }
 
@@ -475,7 +483,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     try {
       await api.sendTaskChatMessage(selectedTask.id, msg, toSendAttachments);
     } catch (e: any) {
-      alert(`发送消息失败: ${e.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 发送消息失败:', e);
+      }
+      toast.error(`发送消息失败: ${e?.message || '未知错误'}`);
     } finally {
       setIsSendingChat(false);
       // 重置 textarea 高度
@@ -492,13 +503,18 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     try {
       if (sessionState?.isPaused) {
         await api.resumeTaskSession(selectedTask.id);
+        toast.info('智能体会话已恢复');
       } else {
         await api.pauseTaskSession(selectedTask.id);
+        toast.info('智能体会话已暂停');
       }
       const updated = await api.getTaskSession(selectedTask.id);
       setSessionState(updated);
     } catch (e: any) {
-      alert(`会话控制失败: ${e.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 会话控制失败:', e);
+      }
+      toast.error(`会话控制失败: ${e?.message || '未知错误'}`);
     } finally {
       setIsPausingSession(false);
     }
@@ -692,12 +708,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
     try {
       await api.runTask(taskId);
+      toast.success('任务已启动执行');
       onRefresh();
     } catch (e: any) {
       if (import.meta.env?.DEV) {
         console.error('[KanbanView] 启动任务失败:', e);
       }
-      alert(`启动任务失败: ${e.message}`);
+      toast.error(`启动任务失败: ${e?.message || '未知错误'}`);
     } finally {
       setRunningTaskId(null);
     }
@@ -716,12 +733,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       if (selectedTask?.id === taskId && updated) {
         setSelectedTask(updated);
       }
+      toast.info('节点已跳过');
       await onRefresh();
     } catch (e: any) {
       if (import.meta.env?.DEV) {
         console.error('[KanbanView] 跳过节点失败:', e);
       }
-      alert(`跳过节点失败: ${e.message}`);
+      toast.error(`跳过节点失败: ${e?.message || '未知错误'}`);
     } finally {
       setSkippingTaskId(null);
     }
@@ -741,12 +759,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       if (selectedTask?.id === taskId && updated) {
         setSelectedTask(updated);
       }
+      toast.info('已触发节点重试');
       await onRefresh();
     } catch (e: any) {
       if (import.meta.env?.DEV) {
         console.error('[KanbanView] 重试节点失败:', e);
       }
-      alert(`重试节点失败: ${e.message}`);
+      toast.error(`重试节点失败: ${e?.message || '未知错误'}`);
     } finally {
       setRetryingNodeKey(null);
     }
@@ -786,7 +805,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       if (selectedTask?.id === taskId) {
         setSelectedTask(currentTask);
       }
-      alert(`移动泳道失败: ${e.message}`);
+      toast.error(`移动泳道失败: ${e?.message || '未知错误'}`);
     } finally {
       setMovingTaskId(null);
     }
@@ -821,12 +840,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       });
       setQuickIdeaTitle('');
       setIsQuickAddingIdea(false);
+      toast.success('想法已记录至 Inbox');
       onRefresh();
     } catch (err: any) {
       if (import.meta.env?.DEV) {
         console.error('[KanbanView] 快捷录入想法失败:', err);
       }
-      alert(`创建想法失败: ${err.message}`);
+      toast.error(`创建想法失败: ${err?.message || '未知错误'}`);
     } finally {
       setIsSubmittingQuickIdea(false);
     }
@@ -844,9 +864,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         setSelectedTask(null);
       }
       setTaskToDelete(null);
+      toast.success('任务已成功删除');
       onRefresh();
     } catch (e: any) {
-      alert(`删除任务失败: ${e.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[Kanban:TaskDelete] 删除任务失败:', e);
+      }
+      toast.error(`删除任务失败: ${e?.message || '未知错误'}`);
     } finally {
       setIsDeleting(false);
     }
@@ -886,9 +910,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     setApprovingId(taskId);
     try {
       await api.resumeTask(taskId, approved, approved ? 'QA 查验通过' : '验收驳回');
+      toast.success(approved ? 'QA 验收已通过' : '已驳回验收');
       onRefresh();
     } catch (e: any) {
-      alert(`审批失败: ${e.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 审批失败:', e);
+      }
+      toast.error(`审批失败: ${e?.message || '未知错误'}`);
     } finally {
       setApprovingId(null);
     }

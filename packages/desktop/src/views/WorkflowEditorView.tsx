@@ -54,6 +54,13 @@ import {
   CheckCheck,
   Minimize2,
   Maximize2,
+  AlertCircle,
+  XCircle,
+  Square,
+  Clock,
+  RotateCcw,
+  SkipForward,
+  Bug,
 } from 'lucide-react';
 import {
   WorkflowDefinition,
@@ -61,21 +68,27 @@ import {
   WorkflowSessionState,
   SessionChatMessage,
   WorkflowActionPayload,
+  Task,
 } from '@openloop/core';
 import { api } from '../services/api';
 import { layoutWorkflowDag } from '../utils/dagLayout';
 import { EditWorkflowModal } from '../components/EditWorkflowModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AgentMarkdown } from '../components/AgentMarkdown';
+import { toast } from '../components/Toast';
+import { DebugWorkflowModal } from '../components/DebugWorkflowModal';
 
 // ==========================================
-// 1. 自定义节点外观（极简高质感 + 智能体生成发光 + 幽灵预演态）
+// 1. 自定义节点外观（极简高质感 + 智能体生成发光 + 幽灵预演态 + 编排调试实时运行态）
 // ==========================================
 const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
   const nodeData = data as any;
   const type: NodeType = nodeData.type || 'cli';
   const isNew = Boolean(nodeData.isNew);
   const isGhost = Boolean(nodeData.isGhost);
+  const executionStatus: string | undefined = nodeData.executionStatus;
+  const executionDuration: number | undefined = nodeData.executionDuration;
+  const executionError: string | undefined = nodeData.executionError;
 
   const typeConfig: Record<
     NodeType,
@@ -154,17 +167,34 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
     return typeConfig[type] || typeConfig.cli;
   }, [type, nodeData.name, nodeData.config?.command]);
 
+  const nodeStatusClasses = useMemo(() => {
+    if (isGhost) {
+      return 'border-2 border-dashed border-[#8b5cf6] bg-[#faf8ff] ring-3 ring-[#8b5cf6]/20 shadow-[0_0_18px_rgba(139,92,246,0.25)] animate-pulse';
+    }
+    if (executionStatus === 'running') {
+      return 'border-[#3b82f6] bg-[#f8faff] ring-2 ring-[#3b82f6]/40 shadow-[0_0_16px_rgba(59,130,246,0.25)] animate-pulse';
+    }
+    if (executionStatus === 'success') {
+      return 'border-[#10b981] bg-white ring-1 ring-[#10b981]/30 shadow-[0_1px_4px_rgba(16,185,129,0.12)]';
+    }
+    if (executionStatus === 'failed') {
+      return 'border-[#ef4444] bg-[#fef2f2] ring-1 ring-[#ef4444]/30 shadow-[0_1px_4px_rgba(239,68,68,0.12)]';
+    }
+    if (executionStatus === 'waiting_approval') {
+      return 'border-[#f59e0b] bg-[#fffbeb] ring-2 ring-[#f59e0b]/40 shadow-[0_0_14px_rgba(245,158,11,0.2)] animate-pulse';
+    }
+    if (selected) {
+      return 'border-[#4f46e5] bg-white shadow-[0_0_0_2px_rgba(79,70,229,0.2),0_4px_12px_rgba(0,0,0,0.08)]';
+    }
+    if (isNew) {
+      return 'border-[#6366f1] bg-white ring-2 ring-[#6366f1]/40 shadow-[0_0_14px_rgba(99,102,241,0.2)]';
+    }
+    return 'border-[#e3e3e8] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:border-[#b9b9c2]';
+  }, [isGhost, executionStatus, selected, isNew]);
+
   return (
     <div
-      className={`w-[190px] rounded-[7px] px-2.5 py-2 transition-all relative ${
-        isGhost
-          ? 'border-2 border-dashed border-[#8b5cf6] bg-[#faf8ff] ring-3 ring-[#8b5cf6]/20 shadow-[0_0_18px_rgba(139,92,246,0.25)] animate-pulse'
-          : selected
-          ? 'border-[#4f46e5] bg-white shadow-[0_0_0_2px_rgba(79,70,229,0.2),0_4px_12px_rgba(0,0,0,0.08)]'
-          : isNew
-          ? 'border-[#6366f1] bg-white ring-2 ring-[#6366f1]/40 shadow-[0_0_14px_rgba(99,102,241,0.2)]'
-          : 'border-[#e3e3e8] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:border-[#b9b9c2]'
-      }`}
+      className={`w-[195px] rounded-[7px] px-2.5 py-2 transition-all relative ${nodeStatusClasses}`}
     >
       <Handle
         type="target"
@@ -187,6 +217,26 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
               <span className="w-1 h-1 rounded-full bg-[#7c3aed] animate-ping" />
               AI预演
             </span>
+          ) : executionStatus === 'running' ? (
+            <span className="flex items-center gap-1 text-[8.5px] px-1.5 py-[0.5px] rounded bg-[#eff6ff] text-[#2563eb] font-semibold border border-[#bfdbfe]">
+              <Loader2 size={9} className="animate-spin text-[#2563eb]" />
+              执行中
+            </span>
+          ) : executionStatus === 'success' ? (
+            <span className="flex items-center gap-0.5 text-[8.5px] px-1.5 py-[0.5px] rounded bg-[#ecfdf5] text-[#059669] font-medium border border-[#a7f3d0]">
+              <CheckCircle2 size={9} className="text-[#059669]" />
+              成功{executionDuration ? ` ${executionDuration}s` : ''}
+            </span>
+          ) : executionStatus === 'failed' ? (
+            <span className="flex items-center gap-0.5 text-[8.5px] px-1.5 py-[0.5px] rounded bg-[#fef2f2] text-[#dc2626] font-medium border border-[#fecaca]">
+              <AlertCircle size={9} className="text-[#dc2626]" />
+              失败
+            </span>
+          ) : executionStatus === 'waiting_approval' ? (
+            <span className="flex items-center gap-0.5 text-[8.5px] px-1.5 py-[0.5px] rounded bg-[#fffbeb] text-[#d97706] font-medium border border-[#fde68a]">
+              <Clock size={9} className="text-[#d97706]" />
+              待审批
+            </span>
           ) : isNew ? (
             <span className="text-[8.5px] px-1 py-[0.5px] rounded bg-[#eeedfd] text-[#4f46e5] font-medium scale-95">
               已生效
@@ -208,6 +258,43 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
         {type === 'qa-approval' && (nodeData.config?.approvalPrompt || '人工与用例核验确认')}
         {type === 'cli' && (nodeData.config?.command || '执行命令行指令')}
       </div>
+
+      {/* 编排调试执行状态与快捷日志入口 */}
+      {Boolean(executionStatus) && (
+        <div className="mt-1.5 pt-1 border-t border-[#ececf0] flex items-center justify-between text-[9px]">
+          <span className="truncate max-w-[130px]">
+            {executionError ? (
+              <span className="text-[#dc2626] font-medium" title={executionError}>
+                报错: {executionError}
+              </span>
+            ) : executionStatus === 'running' ? (
+              <span className="text-[#2563eb] flex items-center gap-1 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#2563eb] animate-ping" />
+                正在执行...
+              </span>
+            ) : executionStatus === 'success' ? (
+              <span className="text-[#059669]">节点执行完毕</span>
+            ) : executionStatus === 'waiting_approval' ? (
+              <span className="text-[#d97706]">等待人工门禁审核</span>
+            ) : (
+              <span className="text-[#85858d]">执行记录就绪</span>
+            )}
+          </span>
+          {typeof nodeData.onInspectLogs === 'function' && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                nodeData.onInspectLogs(nodeData.id);
+              }}
+              className="text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
+            >
+              <span>日志</span>
+              <ArrowRight size={8} />
+            </button>
+          )}
+        </div>
+      )}
 
       <Handle
         type="source"
@@ -242,7 +329,7 @@ interface WorkflowEditorViewProps {
   workflows: WorkflowDefinition[];
   onBack: () => void;
   onRefresh: () => void;
-  onOpenTaskLogs: (taskId: string) => void;
+  onOpenTaskLogs: (taskId: string, nodeId?: string) => void;
   onSelectWorkflow?: (workflowId: string) => void;
 }
 
@@ -274,6 +361,19 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
+  const [isRunningDebug, setIsRunningDebug] = useState(false);
+  const [isResetSessionModalOpen, setIsResetSessionModalOpen] = useState(false);
+  const [isResettingSession, setIsResettingSession] = useState(false);
+
+  // 编排调试弹窗与全链路执行监控状态
+  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
+  const [activeDebugTaskId, setActiveDebugTaskId] = useState<string | null>(null);
+  const [debugTask, setDebugTask] = useState<Task | null>(null);
+  const [debugTimerSeconds, setDebugTimerSeconds] = useState(0);
+  const [isCancellingDebug, setIsCancellingDebug] = useState(false);
+  const [isExitDebugModalOpen, setIsExitDebugModalOpen] = useState(false);
+  const [isApprovingGate, setIsApprovingGate] = useState(false);
+  const dismissedDebugTaskIdsRef = useRef<Set<string>>(new Set());
 
   // 右侧边栏展开与标签页状态
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -930,16 +1030,28 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         setCopilotState((prev) => (prev?.isBusy ? { ...prev, isBusy: false } : prev));
       }, 10000);
     } catch (err: any) {
-      alert(`发送编排需求失败: ${err.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowEditor] 发送编排需求失败:', err);
+      }
+      toast.error(`发送编排需求失败: ${err?.message || '未知错误'}`);
       setCopilotState((prev) => (prev ? { ...prev, isBusy: false } : prev));
     } finally {
       setIsSendingMessage(false);
     }
   };
 
-  // 重置对话
-  const handleResetSession = async () => {
-    if (!confirm('确定要重置当前工作流的 AI 编排对话历史吗？')) return;
+  // 重置对话（点击触发自研确认弹窗）
+  const handleResetSession = () => {
+    setIsResetSessionModalOpen(true);
+  };
+
+  // 确认执行重置对话
+  const handleConfirmResetSession = async () => {
+    if (isResettingSession) return;
+    setIsResettingSession(true);
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowEditor] 执行重置 AI 对话历史:', workflowId);
+    }
     try {
       await api.resetWorkflowSession(workflowId);
       setCopilotState((prev) => (prev ? { ...prev, messages: [] } : null));
@@ -947,8 +1059,15 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       try {
         localStorage.removeItem(`openloop:wf_applied_actions:${workflowId}`);
       } catch {}
+      setIsResetSessionModalOpen(false);
+      toast.success('AI 对话历史已重置');
     } catch (err: any) {
-      alert(`重置失败: ${err.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowEditor] 重置 AI 对话历史失败:', err);
+      }
+      toast.error(`重置失败: ${err?.message || '未知错误'}`);
+    } finally {
+      setIsResettingSession(false);
     }
   };
 
@@ -1121,6 +1240,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       if (import.meta.env?.DEV) {
         console.log('[WorkflowEditor] 流程复制成功:', clonedWf.id);
       }
+      toast.success(`流程已复制为「${clonedWf.name}」`);
       onRefresh();
       if (onSelectWorkflow) {
         onSelectWorkflow(newId);
@@ -1129,7 +1249,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       if (import.meta.env?.DEV) {
         console.error('[WorkflowEditor] 流程复制失败:', err);
       }
-      alert(`复制工作流失败: ${err?.message || '未知错误'}`);
+      toast.error(`复制工作流失败: ${err?.message || '未知错误'}`);
     } finally {
       setIsDuplicating(false);
     }
@@ -1149,6 +1269,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       if (import.meta.env?.DEV) {
         console.log('[WorkflowEditor] 流程删除成功:', activeWorkflow.id);
       }
+      toast.success(`流程「${activeWorkflow.name}」已成功删除`);
       setIsDeleteModalOpen(false);
       onRefresh();
       onBack();
@@ -1156,27 +1277,316 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       if (import.meta.env?.DEV) {
         console.error('[WorkflowEditor] 删除工作流失败:', err);
       }
-      alert(`删除工作流失败: ${err?.message || '未知错误'}`);
+      toast.error(`删除工作流失败: ${err?.message || '未知错误'}`);
     } finally {
       setIsDeleting(false);
     }
   };
 
-  // 立即触发测试运行
-  const handleRunNow = async () => {
-    if (!activeWorkflow) return;
-    try {
-      const task = await api.createTask({
-        title: `编排调试: ${activeWorkflow.name}`,
+  // 页面加载或工作流切换时，自动探测当前工作流是否存在活跃执行中的调试任务并绑定监控
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const tasks = await api.getTasks();
+        if (!isMounted) return;
+        const runningTask = tasks.find(
+          (t) =>
+            t.workflowId === workflowId &&
+            (t.status === 'running' || t.status === 'waiting_approval' || t.status === 'pending')
+        );
+        if (runningTask && !activeDebugTaskId && !dismissedDebugTaskIdsRef.current.has(runningTask.id)) {
+          if (import.meta.env?.DEV) {
+            console.log('[WorkflowEditor] 自动发现并恢复关联正在运行的调试任务:', runningTask.id);
+          }
+          setActiveDebugTaskId(runningTask.id);
+          setDebugTask(runningTask);
+        }
+      } catch (err) {
+        // 静默处理获取失败
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [workflowId]);
+
+  // 轮询监控调试任务执行状态
+  useEffect(() => {
+    if (!activeDebugTaskId) return;
+
+    let isMounted = true;
+    let timerId: any = null;
+    let clockInterval: any = null;
+
+    clockInterval = setInterval(() => {
+      setDebugTimerSeconds((s) => s + 1);
+    }, 1000);
+
+    const pollTaskStatus = async () => {
+      try {
+        const latest = await api.getTask(activeDebugTaskId);
+        if (!isMounted) return;
+        setDebugTask(latest);
+
+        if (latest.status === 'completed' || latest.status === 'failed' || latest.status === 'cancelled') {
+          if (clockInterval) clearInterval(clockInterval);
+          if (timerId) clearTimeout(timerId);
+          onRefresh();
+          return;
+        }
+
+        timerId = setTimeout(pollTaskStatus, 1200);
+      } catch (err) {
+        if (import.meta.env?.DEV) {
+          console.warn('[WorkflowEditor] 轮询调试任务状态异常:', err);
+        }
+        if (isMounted) {
+          timerId = setTimeout(pollTaskStatus, 2500);
+        }
+      }
+    };
+
+    pollTaskStatus();
+
+    return () => {
+      isMounted = false;
+      if (timerId) clearTimeout(timerId);
+      if (clockInterval) clearInterval(clockInterval);
+    };
+  }, [activeDebugTaskId]);
+
+  // 当调试任务运行状态或节点流转变化时，动态将状态注入 ReactFlow nodes
+  useEffect(() => {
+    if (!debugTask) return;
+    setNodes((prevNodes) =>
+      prevNodes.map((n) => {
+        const run = debugTask.nodeRuns?.[n.id];
+        let executionStatus: string | undefined = run?.status;
+        if (!executionStatus && debugTask.currentNodeId === n.id && (debugTask.status === 'running' || debugTask.status === 'pending')) {
+          executionStatus = 'running';
+        }
+        const executionDuration =
+          run?.finishedAt && run?.startedAt
+            ? Math.max(1, Math.round((run.finishedAt - run.startedAt) / 1000))
+            : undefined;
+
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            executionStatus,
+            executionDuration,
+            executionError: run?.error,
+            onInspectLogs: (nodeId: string) => onOpenTaskLogs(debugTask.id, nodeId),
+          },
+        };
+      })
+    );
+  }, [debugTask, onOpenTaskLogs]);
+
+  // 启动编排调试全流程
+  const handleStartDebug = async ({
+    title,
+    description,
+    workspace,
+    openLogsImmediately,
+  }: {
+    title: string;
+    description: string;
+    workspace?: string;
+    openLogsImmediately: boolean;
+  }) => {
+    if (!activeWorkflow || isRunningDebug) return;
+    setIsRunningDebug(true);
+
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowEditor] 发起编排调试执行:', {
         workflowId: activeWorkflow.id,
+        workflowName: activeWorkflow.name,
+        title,
+        workspace,
+      });
+    }
+
+    try {
+      // 1. 调试前自动同步保存画布最新变动
+      await handleSave();
+
+      // 2. 创建调试任务
+      const task = await api.createTask({
+        title,
+        description: description || undefined,
+        workflowId: activeWorkflow.id,
+        workspace: workspace || undefined,
         autoRun: true,
       });
-      alert(`测试任务已触发: ${task.id}`);
+
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowEditor] 调试任务已创建并启动:', task.id);
+      }
+
+      setActiveDebugTaskId(task.id);
+      setDebugTask(task);
+      setDebugTimerSeconds(0);
       onRefresh();
-      onOpenTaskLogs(task.id);
+
+      toast.success(`编排调试任务已触发 (${task.id})`, {
+        description: `已根据流程「${activeWorkflow.name}」启动执行链路`,
+        action: {
+          label: '查看日志',
+          onClick: () => onOpenTaskLogs(task.id, task.currentNodeId),
+        },
+      });
+
+      if (openLogsImmediately) {
+        onOpenTaskLogs(task.id, task.currentNodeId);
+      }
     } catch (err: any) {
-      alert(`启动失败: ${err.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowEditor] 启动调试失败:', err);
+      }
+      toast.error(`启动调试失败: ${err?.message || '未知错误'}`);
+      throw err;
+    } finally {
+      setIsRunningDebug(false);
     }
+  };
+
+  // 中止当前调试运行
+  const handleCancelDebug = async () => {
+    if (!debugTask || isCancellingDebug) return;
+    setIsCancellingDebug(true);
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowEditor] 中止调试任务:', debugTask.id);
+    }
+    try {
+      const updated = await api.cancelTask(debugTask.id);
+      setDebugTask(updated);
+      toast.info(`调试任务已中止 (${debugTask.id})`);
+      onRefresh();
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowEditor] 中止调试任务失败:', err);
+      }
+      toast.error(`中止失败: ${err?.message || '未知错误'}`);
+    } finally {
+      setIsCancellingDebug(false);
+    }
+  };
+
+  // 单独重试指定节点
+  const handleRetryNode = async (nodeId: string) => {
+    if (!debugTask) return;
+    try {
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowEditor] 重试调试节点:', debugTask.id, nodeId);
+      }
+      const updated = await api.retryNode(debugTask.id, nodeId);
+      setDebugTask(updated);
+      toast.success(`已触发节点「${nodeId}」重试`);
+      onRefresh();
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowEditor] 重试节点失败:', err);
+      }
+      toast.error(`重试节点失败: ${err?.message || '未知错误'}`);
+    }
+  };
+
+  // 跳过指定节点
+  const handleSkipNode = async (nodeId: string) => {
+    if (!debugTask) return;
+    try {
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowEditor] 跳过调试节点:', debugTask.id, nodeId);
+      }
+      const updated = await api.skipNode(debugTask.id, nodeId);
+      setDebugTask(updated);
+      toast.info(`已跳过节点「${nodeId}」`);
+      onRefresh();
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowEditor] 跳过节点失败:', err);
+      }
+      toast.error(`跳过节点失败: ${err?.message || '未知错误'}`);
+    }
+  };
+
+  // 通过或驳回人工门禁
+  const handleApproveGate = async (approved: boolean) => {
+    if (!debugTask || isApprovingGate) return;
+    setIsApprovingGate(true);
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowEditor] 门禁审核操作:', debugTask.id, approved);
+    }
+    try {
+      const updated = await api.resumeTask(
+        debugTask.id,
+        approved,
+        approved ? '调试门禁通过' : '验收驳回'
+      );
+      setDebugTask(updated);
+      toast.success(approved ? '门禁审核已通过，继续执行' : '已驳回门禁审核');
+      onRefresh();
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[WorkflowEditor] 门禁审核失败:', err);
+      }
+      toast.error(`门禁操作失败: ${err?.message || '未知错误'}`);
+    } finally {
+      setIsApprovingGate(false);
+    }
+  };
+
+  // 退出调试并彻底恢复画布编辑模式
+  const handleExitDebug = async (cancelTask = false) => {
+    if (
+      cancelTask &&
+      debugTask &&
+      (debugTask.status === 'running' ||
+        debugTask.status === 'waiting_approval' ||
+        debugTask.status === 'pending')
+    ) {
+      try {
+        await api.cancelTask(debugTask.id);
+        toast.info(`调试任务已中止 (${debugTask.id})`);
+      } catch (err: any) {
+        if (import.meta.env?.DEV) {
+          console.error('[WorkflowEditor] 中止调试任务失败:', err);
+        }
+      }
+    }
+    if (activeDebugTaskId) {
+      dismissedDebugTaskIdsRef.current.add(activeDebugTaskId);
+    }
+    setActiveDebugTaskId(null);
+    setDebugTask(null);
+
+    // 彻底清除画布节点执行状态高亮，恢复纯净编辑模式
+    setNodes((prevNodes) =>
+      prevNodes.map((n) => {
+        const {
+          executionStatus,
+          executionDuration,
+          executionError,
+          onInspectLogs,
+          ...restData
+        } = (n.data as any) || {};
+        return {
+          ...n,
+          data: restData,
+        };
+      })
+    );
+    setIsExitDebugModalOpen(false);
+    onRefresh();
+    toast.info('已退出编排调试');
+  };
+
+  // 立即触发测试运行（打开弹窗配置）
+  const handleRunNow = async () => {
+    setIsDebugModalOpen(true);
   };
 
   if (!activeWorkflow) {
@@ -1421,15 +1831,214 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             <span>保存编排</span>
           </button>
 
-          <button
-            onClick={handleRunNow}
-            className="flex items-center gap-1 px-3 h-[26px] rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white transition-all active:scale-95 shadow-xs"
-          >
-            <Play size={12} strokeWidth={2.4} />
-            <span>立即调试</span>
-          </button>
+          {/* 编排调试按钮组 */}
+          <div className="flex items-center rounded-[6px] overflow-hidden shadow-xs border border-[#1c1c21]">
+            <button
+              onClick={handleRunNow}
+              disabled={isRunningDebug}
+              className="flex items-center gap-1 px-2.5 h-[26px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+              title="配置并启动流水线编排调试"
+            >
+              {isRunningDebug ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <Play size={11.5} strokeWidth={2.4} className="text-[#10b981]" />
+              )}
+              <span>{isRunningDebug ? '启动中...' : '立即调试'}</span>
+            </button>
+            <button
+              onClick={() => setIsDebugModalOpen(true)}
+              disabled={isRunningDebug}
+              className="px-1.5 h-[26px] bg-[#2e2f36] hover:bg-[#3f404a] text-white/90 border-l border-white/20 flex items-center justify-center transition-all cursor-pointer disabled:opacity-60"
+              title="配置调试参数并启动 (输入需求/关联工程工作区)"
+            >
+              <ChevronDown size={11} />
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* 实时调试监控控制条 (Debug Session Banner) */}
+      {activeDebugTaskId && debugTask && (
+        <div className="bg-[#1c1c21] text-white px-4 py-2 border-b border-[#2e2f36] flex items-center justify-between shrink-0 z-30 shadow-md animate-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-3">
+            {/* 状态徽标与状态文本 */}
+            <div className="flex items-center gap-2">
+              {debugTask.status === 'running' ? (
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#3b82f6] opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#3b82f6]" />
+                </span>
+              ) : debugTask.status === 'completed' ? (
+                <span className="flex items-center justify-center w-4 h-4 rounded-full bg-[#10b981] text-white text-[10px]">
+                  <Check size={11} strokeWidth={3} />
+                </span>
+              ) : debugTask.status === 'failed' ? (
+                <span className="flex items-center justify-center w-4 h-4 rounded-full bg-[#ef4444] text-white text-[10px]">
+                  <X size={11} strokeWidth={3} />
+                </span>
+              ) : (
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#f59e0b]" />
+              )}
+
+              <span className="text-[12px] font-semibold text-white">
+                {debugTask.status === 'running'
+                  ? '编排调试运行中'
+                  : debugTask.status === 'completed'
+                  ? '编排调试已完成'
+                  : debugTask.status === 'failed'
+                  ? '编排调试失败'
+                  : debugTask.status === 'cancelled'
+                  ? '编排调试已中止'
+                  : '编排调试待流转'}
+              </span>
+
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-white/70 border border-white/10">
+                {debugTask.id}
+              </span>
+            </div>
+
+            <span className="text-white/20">|</span>
+
+            {/* 当前执行步骤指示 */}
+            <div className="text-[11.5px] text-white/80 flex items-center gap-1.5">
+              <span>当前步骤:</span>
+              <span className="font-medium text-white px-1.5 py-0.5 rounded bg-white/15">
+                {nodes.find((n) => n.id === debugTask.currentNodeId)?.data?.name ||
+                  debugTask.currentNodeId ||
+                  (debugTask.status === 'completed' ? '所有节点执行完毕' : '准备就绪')}
+              </span>
+            </div>
+
+            <span className="text-white/20">|</span>
+
+            {/* 耗时计时器 */}
+            <div className="text-[11px] font-mono text-white/70 flex items-center gap-1">
+              <Clock size={11} className="text-white/50" />
+              <span>
+                {Math.floor(debugTimerSeconds / 60)
+                  .toString()
+                  .padStart(2, '0')}
+                :
+                {(debugTimerSeconds % 60).toString().padStart(2, '0')}
+              </span>
+            </div>
+          </div>
+
+          {/* 右侧操作按钮群 */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenTaskLogs(debugTask.id, debugTask.currentNodeId)}
+              className="flex items-center gap-1.5 px-2.5 h-[24px] rounded-[5px] bg-white/15 hover:bg-white/25 text-[11px] font-medium text-white transition-all shadow-2xs cursor-pointer"
+            >
+              <Terminal size={11} />
+              <span>实时终端日志</span>
+            </button>
+
+            {/* 处于人工门禁等待时，快捷提供通过与驳回 */}
+            {debugTask.status === 'waiting_approval' && (
+              <>
+                <button
+                  type="button"
+                  disabled={isApprovingGate}
+                  onClick={() => handleApproveGate(true)}
+                  className="flex items-center gap-1 px-2.5 h-[24px] rounded-[5px] bg-[#10b981]/25 hover:bg-[#10b981]/40 border border-[#10b981]/50 text-[11px] font-medium text-[#6ee7b7] transition-all cursor-pointer"
+                  title="通过当前 QA 人工门禁，继续执行后续流水线节点"
+                >
+                  {isApprovingGate ? (
+                    <Loader2 size={10} className="animate-spin" />
+                  ) : (
+                    <Check size={11} strokeWidth={2.5} />
+                  )}
+                  <span>通过门禁</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSkipNode(debugTask.currentNodeId || '')}
+                  className="flex items-center gap-1 px-2 h-[24px] rounded-[5px] bg-white/10 hover:bg-white/20 border border-white/20 text-[11px] font-medium text-white/90 transition-all cursor-pointer"
+                  title="跳过此门禁节点"
+                >
+                  <SkipForward size={10} />
+                  <span>跳过</span>
+                </button>
+              </>
+            )}
+
+            {debugTask.status === 'failed' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleRetryNode(debugTask.currentNodeId || '')}
+                  className="flex items-center gap-1 px-2.5 h-[24px] rounded-[5px] bg-[#3b82f6]/30 hover:bg-[#3b82f6]/50 border border-[#3b82f6]/50 text-[11px] font-medium text-[#93c5fd] transition-all cursor-pointer"
+                  title="单独重新执行当前失败节点"
+                >
+                  <RotateCcw size={10} />
+                  <span>重试节点</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSkipNode(debugTask.currentNodeId || '')}
+                  className="flex items-center gap-1 px-2.5 h-[24px] rounded-[5px] bg-white/10 hover:bg-white/20 border border-white/20 text-[11px] font-medium text-white/90 transition-all cursor-pointer"
+                  title="跳过失败节点继续流转"
+                >
+                  <SkipForward size={10} />
+                  <span>跳过节点</span>
+                </button>
+              </>
+            )}
+
+            {(debugTask.status === 'completed' || debugTask.status === 'failed' || debugTask.status === 'cancelled') && (
+              <button
+                type="button"
+                onClick={handleRunNow}
+                className="flex items-center gap-1 px-2.5 h-[24px] rounded-[5px] bg-white/15 hover:bg-white/25 text-[11px] font-medium text-white transition-all cursor-pointer"
+                title="重新启动编排调试"
+              >
+                <RefreshCw size={10} />
+                <span>重新调试</span>
+              </button>
+            )}
+
+            {(debugTask.status === 'running' ||
+              debugTask.status === 'waiting_approval' ||
+              debugTask.status === 'pending') && (
+              <button
+                type="button"
+                disabled={isCancellingDebug}
+                onClick={handleCancelDebug}
+                className="flex items-center gap-1 px-2 h-[24px] rounded-[5px] bg-[#ef4444]/20 hover:bg-[#ef4444]/30 border border-[#ef4444]/40 text-[11px] font-medium text-[#fca5a5] transition-all cursor-pointer"
+                title="立即中止当前调试任务"
+              >
+                <Square size={10} className="fill-[#fca5a5]" />
+                <span>{isCancellingDebug ? '正在中止...' : '中止调试'}</span>
+              </button>
+            )}
+
+            {/* 明确的退出调试按钮 */}
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  debugTask &&
+                  (debugTask.status === 'running' ||
+                    debugTask.status === 'waiting_approval' ||
+                    debugTask.status === 'pending')
+                ) {
+                  setIsExitDebugModalOpen(true);
+                } else {
+                  handleExitDebug(false);
+                }
+              }}
+              title="退出调试视图并恢复画布编辑模式"
+              className="flex items-center gap-1 px-2 h-[24px] rounded-[5px] bg-white/10 hover:bg-white/20 text-white/90 text-[11px] font-medium transition-all cursor-pointer ml-1"
+            >
+              <X size={11} />
+              <span>退出调试</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 画布核心与协同侧栏 */}
       <div className="flex-1 relative flex overflow-hidden">
@@ -2006,6 +2615,119 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                       </button>
                     </div>
 
+                    {/* 编排调试单节点执行状态与单节点试跑控制 */}
+                    {debugTask && (
+                      <div className="p-2.5 rounded-[8px] bg-[#f8f9fa] border border-[#e3e3e8] space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold text-[#1c1c21] flex items-center gap-1.5">
+                            <Bug size={11} className="text-[#4f46e5]" />
+                            <span>调试执行状态</span>
+                          </span>
+                          {(() => {
+                            const run = debugTask.nodeRuns?.[selectedNode.id];
+                            const isCurr = debugTask.currentNodeId === selectedNode.id && (debugTask.status === 'running' || debugTask.status === 'pending');
+                            if (run?.status === 'completed' || run?.status === 'success') {
+                              return (
+                                <span className="flex items-center gap-1 text-[9.5px] px-1.5 py-[1px] rounded bg-[#ecfdf5] text-[#059669] font-medium border border-[#a7f3d0]">
+                                  <CheckCircle2 size={9} />
+                                  <span>成功</span>
+                                </span>
+                              );
+                            }
+                            if (run?.status === 'failed') {
+                              return (
+                                <span className="flex items-center gap-1 text-[9.5px] px-1.5 py-[1px] rounded bg-[#fef2f2] text-[#dc2626] font-medium border border-[#fecaca]">
+                                  <AlertCircle size={9} />
+                                  <span>失败</span>
+                                </span>
+                              );
+                            }
+                            if (isCurr || run?.status === 'running') {
+                              return (
+                                <span className="flex items-center gap-1 text-[9.5px] px-1.5 py-[1px] rounded bg-[#eff6ff] text-[#2563eb] font-semibold border border-[#bfdbfe]">
+                                  <Loader2 size={9} className="animate-spin text-[#2563eb]" />
+                                  <span>执行中</span>
+                                </span>
+                              );
+                            }
+                            if (run?.status === 'waiting_approval') {
+                              return (
+                                <span className="flex items-center gap-1 text-[9.5px] px-1.5 py-[1px] rounded bg-[#fffbeb] text-[#d97706] font-medium border border-[#fde68a]">
+                                  <Clock size={9} />
+                                  <span>待验收</span>
+                                </span>
+                              );
+                            }
+                            return (
+                              <span className="text-[9.5px] px-1.5 py-[1px] rounded bg-[#f1f1f4] text-[#85858d]">
+                                未执行
+                              </span>
+                            );
+                          })()}
+                        </div>
+
+                        {(() => {
+                          const run = debugTask.nodeRuns?.[selectedNode.id];
+                          if (!run) return null;
+                          const durSec =
+                            run.finishedAt && run.startedAt
+                              ? Math.max(1, Math.round((run.finishedAt - run.startedAt) / 1000))
+                              : null;
+                          return (
+                            <div className="space-y-1 text-[10.5px] text-[#63636b]">
+                              {durSec && (
+                                <div className="flex justify-between font-mono">
+                                  <span>节点耗时:</span>
+                                  <span className="text-[#1c1c21] font-medium">{durSec} 秒</span>
+                                </div>
+                              )}
+                              {run.exitCode !== undefined && (
+                                <div className="flex justify-between font-mono">
+                                  <span>退出码:</span>
+                                  <span className="text-[#1c1c21] font-medium">{run.exitCode}</span>
+                                </div>
+                              )}
+                              {run.error && (
+                                <div className="p-1.5 rounded bg-[#fff1f2] border border-[#fecaca] text-[#dc2626] text-[10px] break-all">
+                                  {run.error}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        <div className="flex items-center gap-1.5 pt-1 border-t border-[#ececf0]">
+                          <button
+                            type="button"
+                            onClick={() => handleRetryNode(selectedNode.id)}
+                            className="flex-1 h-[24px] rounded-[5px] bg-white hover:bg-[#f1f1f4] border border-[#e3e3e8] text-[10.5px] font-medium text-[#1c1c21] flex items-center justify-center gap-1 transition-all"
+                            title="单独重试此节点"
+                          >
+                            <RotateCcw size={10} />
+                            <span>重试节点</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSkipNode(selectedNode.id)}
+                            className="flex-1 h-[24px] rounded-[5px] bg-white hover:bg-[#f1f1f4] border border-[#e3e3e8] text-[10.5px] font-medium text-[#4b4b53] flex items-center justify-center gap-1 transition-all"
+                            title="跳过此节点继续后续流转"
+                          >
+                            <SkipForward size={10} />
+                            <span>跳过节点</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onOpenTaskLogs(debugTask.id, selectedNode.id)}
+                            className="h-[24px] px-2 rounded-[5px] bg-[#eeedfd] text-[#4f46e5] text-[10.5px] font-medium flex items-center justify-center gap-1 hover:bg-[#e0e7ff] transition-all"
+                            title="查看当前节点日志"
+                          >
+                            <Terminal size={10} />
+                            <span>日志</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div>
                       <label className="block text-[#85858d] mb-1">节点名称</label>
                       <input
@@ -2273,6 +2995,45 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           if (!isDeleting) setIsDeleteModalOpen(false);
         }}
         onConfirm={handleConfirmDeleteCurrentWorkflow}
+      />
+
+      {/* 重置 AI 对话确认弹窗 */}
+      <ConfirmModal
+        isOpen={isResetSessionModalOpen}
+        title="重置 AI 编排对话"
+        targetName={`流程: ${workflowName || activeWorkflow.name}`}
+        targetTag={activeWorkflow.id}
+        description="确定要重置当前工作流的 AI 编排对话历史吗？重置后将清除与 Copilot 的历史交互记录与暂存草稿。"
+        confirmText="确认重置"
+        cancelText="取消"
+        variant="warning"
+        loading={isResettingSession}
+        onClose={() => {
+          if (!isResettingSession) setIsResetSessionModalOpen(false);
+        }}
+        onConfirm={handleConfirmResetSession}
+      />
+
+      {/* 退出调试确认弹窗 */}
+      <ConfirmModal
+        isOpen={isExitDebugModalOpen}
+        title="退出编排调试"
+        targetName={`任务: ${debugTask?.title || debugTask?.id || ''}`}
+        targetTag={debugTask?.id}
+        description="调试任务仍在后台执行中（等待门禁审批或运行中）。您可以选择中止任务并退出，或者仅退出监控视图（任务将在后台继续执行）。"
+        confirmText="中止并退出"
+        cancelText="仅退出监控"
+        variant="warning"
+        onConfirm={() => handleExitDebug(true)}
+        onClose={() => handleExitDebug(false)}
+      />
+
+      {/* 编排调试弹窗 */}
+      <DebugWorkflowModal
+        isOpen={isDebugModalOpen}
+        onClose={() => setIsDebugModalOpen(false)}
+        workflow={activeWorkflow}
+        onStartDebug={handleStartDebug}
       />
     </div>
   );

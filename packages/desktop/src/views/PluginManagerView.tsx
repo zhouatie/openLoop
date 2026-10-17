@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { PluginManifest } from '@openloop/core';
 import { api } from '../services/api';
+import { toast } from '../components/Toast';
 
 interface PluginManagerViewProps {
   plugins: PluginManifest[];
@@ -270,9 +271,13 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({ plugins, o
     setInstallingId(item.id);
     try {
       await api.registerPlugin(item.manifest);
+      toast.success(`插件「${item.manifest.name}」安装成功`);
       onRefresh();
     } catch (err: any) {
-      alert(`安装插件失败: ${err.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[PluginManager] 安装插件失败:', err);
+      }
+      toast.error(`安装插件失败: ${err?.message || '未知错误'}`);
     } finally {
       setInstallingId(null);
     }
@@ -283,9 +288,13 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({ plugins, o
     setInstallingId(pluginId);
     try {
       await api.deletePlugin(pluginId);
+      toast.success('插件已成功卸载');
       onRefresh();
     } catch (err: any) {
-      alert(`卸载失败: ${err.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[PluginManager] 卸载插件失败:', err);
+      }
+      toast.error(`卸载失败: ${err?.message || '未知错误'}`);
     } finally {
       setInstallingId(null);
     }
@@ -317,10 +326,13 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({ plugins, o
 
       await api.registerPlugin(newManifest);
       setCustomSpec('');
+      toast.success(`本地扩展 [${name}] 已成功挂载至侧边栏！`);
       onRefresh();
-      alert(`本地扩展 [${name}] 已成功挂载至侧边栏！`);
     } catch (err: any) {
-      alert(`挂载失败: ${err.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[PluginManager] 挂载本地扩展失败:', err);
+      }
+      toast.error(`挂载失败: ${err?.message || '未知错误'}`);
     } finally {
       setManualLoading(false);
     }

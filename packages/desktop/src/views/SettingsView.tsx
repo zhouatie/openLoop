@@ -17,6 +17,7 @@ import { api } from '../services/api';
 import { OpenLoopSettings, AgentProviderType, PiThinkingLevel, ShortcutSuperKey } from '@openloop/core';
 import { useShortcuts } from '../context/ShortcutContext';
 import { Kbd } from '../components/Kbd';
+import { toast } from '../components/Toast';
 
 interface SettingsViewProps {
   activeSubTab?: string;
@@ -96,7 +97,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setSaveStatus('已自动保存');
       setTimeout(() => setSaveStatus(null), 1800);
     } catch (err: any) {
-      alert(`保存失败: ${err.message}`);
+      if (import.meta.env?.DEV) {
+        console.error('[Settings] 保存配置失败:', err);
+      }
+      toast.error(`保存失败: ${err?.message || '未知错误'}`);
     }
   };
 
@@ -161,6 +165,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         console.log(`[Settings:Export] openloop-settings.json 导出成功，文件大小: ${blob.size} 字节`);
       }
 
+      toast.success('配置文件 openloop-settings.json 导出成功');
       setHasExported(true);
       setTimeout(() => {
         setHasExported(false);
@@ -169,7 +174,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (import.meta.env?.DEV) {
         console.error('[Settings:Export] 导出配置文件发生异常:', err);
       }
-      alert(`导出配置文件失败: ${err?.message || '未知错误'}`);
+      toast.error(`导出配置文件失败: ${err?.message || '未知错误'}`);
     } finally {
       setIsExporting(false);
     }

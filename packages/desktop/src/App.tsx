@@ -6,6 +6,7 @@ import { CreateTaskModal } from './components/CreateTaskModal';
 import { CommandPalette } from './components/CommandPalette';
 import { ShortcutProvider } from './context/ShortcutContext';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
+import { ToastProvider } from './components/Toast';
 import { KanbanView } from './views/KanbanView';
 import { WorkflowListView } from './views/WorkflowListView';
 import { WorkflowEditorView } from './views/WorkflowEditorView';
@@ -368,8 +369,10 @@ export const AppContent: React.FC = () => {
 
 export const App: React.FC = () => {
   return (
-    <ShortcutProvider>
-      <AppContent />
-    </ShortcutProvider>
+    <ToastProvider>
+      <ShortcutProvider>
+        <AppContent />
+      </ShortcutProvider>
+    </ToastProvider>
   );
 };
