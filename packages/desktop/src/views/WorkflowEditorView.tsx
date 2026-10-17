@@ -379,6 +379,16 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   // 右侧边栏展开与标签页状态
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<'copilot' | 'inspector'>('copilot');
+  const [qaSuites, setQaSuites] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch('http://127.0.0.1:19888/api/qa/suites')
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) setQaSuites(data);
+      })
+      .catch(() => {});
+  }, []);
 
   // 幽灵节点方案预演机制 (Ghost Preview Pipeline)
   const [ghostPreview, setGhostPreview] = useState<{
@@ -2885,14 +2895,46 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                     )}
 
                     {selectedNodeData.type === 'midscene' && (
-                      <div>
-                        <label className="block text-[#85858d] mb-1">测试目标 URL</label>
-                        <input
-                          type="text"
-                          value={selectedNodeData.config?.testUrl || ''}
-                          onChange={(e) => updateSelectedNodeConfig('testUrl', e.target.value)}
-                          className="w-full h-[28px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[#1c1c21] outline-none"
-                        />
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[#85858d] mb-1">关联 QA 测试用例 (可选)</label>
+                          <select
+                            value={selectedNodeData.config?.suiteId || ''}
+                            onChange={(e) => {
+                              const sid = e.target.value;
+                              const suite = qaSuites.find((s) => s.id === sid);
+                              updateSelectedNodeConfig('suiteId', sid);
+                              if (suite) {
+                                if (suite.targetUrl) updateSelectedNodeConfig('testUrl', suite.targetUrl);
+                                if (suite.steps) updateSelectedNodeConfig('instructions', suite.steps.map((st: any) => st.prompt));
+                              }
+                            }}
+                            className="w-full h-[30px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[#1c1c21] outline-none text-[12.5px]"
+                          >
+                            <option value="">-- 选择已有 QA 自动化测试用例 --</option>
+                            {qaSuites.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name} ({s.steps?.length || 0} 步)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[#85858d] mb-1">测试目标 URL (支持变量如 &#123;&#123;previewUrl&#125;&#125;)</label>
+                          <input
+                            type="text"
+                            value={selectedNodeData.config?.testUrl || ''}
+                            onChange={(e) => updateSelectedNodeConfig('testUrl', e.target.value)}
+                            placeholder="http://localhost:3000"
+                            className="w-full h-[28px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[#1c1c21] outline-none font-mono text-[12px]"
+                          />
+                        </div>
+
+                        <div className="p-2.5 rounded-[6px] bg-[#eff6ff]/70 border border-[#dbeafe] text-[11px] text-[#1e40af] leading-relaxed">
+                          <p className="font-semibold mb-0.5">💡 测试结果回传与下游编排：</p>
+                          <p>Midscene 测试执行完毕后，测试状态（通过/失败）、执行耗时与高清 WebP 截图将自动回传至任务上下文 <code className="bg-white/80 px-1 py-0.5 rounded font-mono">&#123;&#123;qa&#125;&#125;</code>，下游审批节点或动图生成节点可直接引用。</p>
+                        </div>
                       </div>
                     )}
 

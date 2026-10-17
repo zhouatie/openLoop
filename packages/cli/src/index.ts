@@ -405,4 +405,233 @@ pluginCmd
     }
   });
 
+// QA 自动化测试指令集 (Midscene)
+const qaCmd = program.command('qa').description('Midscene UI 自动化测试执行与用例管理');
+
+qaCmd
+  .command('list')
+  .description('列出所有已配置的 QA 自动化测试套件')
+  .action(async () => {
+    try {
+      let suites: any[] = [];
+      try {
+        suites = await client.listQaSuites();
+      } catch {
+        const store = new Store();
+        suites = store.getQaSuites();
+      }
+      console.log(`\n\x1b[1mQA 自动化测试用例 (${suites.length} 个):\x1b[0m`);
+      console.log('----------------------------------------------------------------------');
+      for (const s of suites) {
+        const statusColor = s.lastRunStatus === 'passed' ? '\x1b[32m' : s.lastRunStatus === 'failed' ? '\x1b[31m' : '\x1b[90m';
+        console.log(`\x1b[36m用例 ID:\x1b[0m    ${s.id}`);
+        console.log(`\x1b[36m名称:\x1b[0m       ${s.name}`);
+        console.log(`\x1b[36m目标地址:\x1b[0m   ${s.targetUrl}`);
+        console.log(`\x1b[36m步骤数:\x1b[0m     ${s.steps?.length || 0} 步`);
+        console.log(`\x1b[36m最后状态:\x1b[0m   ${statusColor}${s.lastRunStatus?.toUpperCase() || 'UNTESTED'}\x1b[0m`);
+        console.log('----------------------------------------------------------------------');
+      }
+    } catch (err: any) {
+      console.error(`获取 QA 用例失败: ${err.message}`);
+    }
+  });
+
+qaCmd
+  .command('run <suiteId>')
+  .description('运行指定的 QA 自动化测试用例并输出产物')
+  .option('-u, --url <url>', '覆盖目标测试地址')
+  .option('--format <format>', '输出格式: pretty 或 json', 'pretty')
+  .action(async (suiteId, options) => {
+    try {
+      if (options.format !== 'json') {
+        console.log(`\x1b[36m[Midscene QA]\x1b[0m 正在启动自动化测试: ${suiteId}...`);
+      }
+      let record: any;
+      try {
+        record = await client.runQa({
+          suiteId,
+          targetUrl: options.url,
+        });
+      } catch {
+        // 脱机/降级本地 Runner 执行
+        const store = new Store();
+        const suite = store.getQaSuiteById(suiteId);
+        if (!suite) {
+          throw new Error(`未找到用例 ID: ${suiteId}`);
+        }
+        if (options.url) suite.targetUrl = options.url;
+        const { MidsceneRunner } = require('@openloop/core');
+        const path = require('path');
+        const os = require('os');
+        const runner = new MidsceneRunner({
+          artifactBaseDir: path.join(store.getDataDir(), 'artifacts'),
+          serverBaseUrl: 'http://127.0.0.1:19888',
+          onStepStart: (idx: number, step: any) => {
+            if (options.format !== 'json') {
+              console.log(`\x1b[36m[Step ${idx + 1}]\x1b[0m 正在执行 [${step.type}]: ${step.prompt}`);
+            }
+          },
+          onStepFinish: (idx: number, rec: any) => {
+            if (options.format !== 'json') {
+              const sym = rec.status === 'passed' ? '\x1b[32m✔\x1b[0m' : '\x1b[31m✖\x1b[0m';
+              console.log(`  ${sym} 耗时: ${rec.durationMs}ms - ${rec.thought || ''}`);
+            }
+          },
+        });
+        record = await runner.runSuite(suite);
+        store.saveQaRun(record);
+      }
+
+      if (options.format === 'json') {
+        console.log(JSON.stringify(record, null, 2));
+      } else {
+        const isPass = record.status === 'passed';
+        console.log('\n================== 测试执行总结 ==================');
+        console.log(`用例名称:   ${record.suiteName}`);
+        console.log(`运行结果:   ${isPass ? '\x1b[32m✔ PASSED\x1b[0m' : '\x1b[31m✖ FAILED\x1b[0m'}`);
+        console.log(`通过步骤:   ${record.passedSteps} / ${record.totalSteps}`);
+        console.log(`总耗时:     ${(record.durationMs / 1000).toFixed(2)}s`);
+        if (record.reportUrl) {
+          console.log(`交互式报告: ${record.reportUrl}`);
+        }
+        console.log('==================================================');
+      }
+
+      if (record.status !== 'passed') {
+        process.exit(1);
+      }
+    } catch (err: any) {
+      console.error(`执行测试失败: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+// 快捷一键执行工作流命令
+program
+  .command('run [args...]')
+  .description('快捷触发流水线执行（支持自然语言 Prompt，例如: openloop run febase "部署应用到预发 211"）')
+  .option('-w, --workflow <id>', '指定工作流 ID (如: wf_febase_app_deploy)')
+  .option('-f, --follow', '实时跟随并打印执行日志', true)
+  .action(async (args: string[], options) => {
+    try {
+      let workflows: WorkflowDefinition[] = [];
+      try {
+        workflows = await client.listWorkflows();
+      } catch {
+        const store = new Store();
+        workflows = store.getWorkflows();
+      }
+
+      let selectedWorkflow: WorkflowDefinition | undefined;
+      let prompt = '';
+
+      if (options.workflow) {
+        selectedWorkflow = workflows.find((w) => w.id === options.workflow || w.name.includes(options.workflow));
+        prompt = args.join(' ');
+      } else if (args.length > 0) {
+        const firstArg = args[0];
+        const match = workflows.find((w) => w.id === firstArg || w.name.toLowerCase().includes(firstArg.toLowerCase()));
+        if (match && args.length > 1) {
+          selectedWorkflow = match;
+          prompt = args.slice(1).join(' ');
+        } else if (match && args.length === 1) {
+          selectedWorkflow = match;
+          prompt = match.name;
+        } else {
+          prompt = args.join(' ');
+          if (/部署|febase|发布|build|deploy/i.test(prompt)) {
+            selectedWorkflow = workflows.find((w) => w.id === 'wf_febase_app_deploy') || workflows[0];
+          } else {
+            selectedWorkflow = workflows[0];
+          }
+        }
+      } else {
+        selectedWorkflow = workflows.find((w) => w.id === 'wf_febase_app_deploy') || workflows[0];
+        prompt = selectedWorkflow ? `执行 ${selectedWorkflow.name}` : '';
+      }
+
+      if (!selectedWorkflow) {
+        console.error('\x1b[31m✖ 未找到可用的工作流，请先通过 openloop workflow list 检查可用流程\x1b[0m');
+        process.exit(1);
+      }
+
+      console.log(`\n\x1b[1m\x1b[36m⚡ openLoop 快捷流水线执行\x1b[0m`);
+      console.log(`----------------------------------------------------------------------`);
+      console.log(`目标工作流: \x1b[33m${selectedWorkflow.name}\x1b[0m (${selectedWorkflow.id})`);
+      console.log(`执行需求:   \x1b[32m${prompt}\x1b[0m`);
+      console.log(`----------------------------------------------------------------------\n`);
+
+      let task: Task | undefined;
+      let isLocalFallback = false;
+
+      try {
+        task = await client.createTask({
+          workflowId: selectedWorkflow.id,
+          title: prompt.slice(0, 80),
+          description: prompt,
+          kanbanColumn: 'in_progress',
+          autoRun: true,
+        });
+      } catch (err: any) {
+        console.log(`\x1b[33m[提示]\x1b[0m 核心守护进程未启动，自动使用内嵌引擎执行...`);
+        const store = new Store();
+        const engine = new DagEngine(store);
+        isLocalFallback = true;
+
+        task = store.saveTask({
+          id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          title: prompt.slice(0, 80),
+          description: prompt,
+          workflowId: selectedWorkflow.id,
+          status: 'running',
+          kanbanColumn: 'in_progress',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          nodeRuns: {},
+          context: {},
+        });
+
+        engine.on('log:new', (entry) => {
+          if (entry.taskId === task!.id) {
+            const prefix = entry.stream === 'stderr' ? '\x1b[31m[ERR]\x1b[0m' : '\x1b[32m[LOG]\x1b[0m';
+            console.log(`${prefix} [${entry.nodeId}] ${entry.message}`);
+          }
+        });
+
+        engine.runTask(task.id).catch((e) => console.error(e));
+      }
+
+      if (task && !isLocalFallback) {
+        console.log(`\x1b[32m✔ 任务已成功派发至调度引擎，任务 ID: ${task.id}\x1b[0m`);
+        console.log(`\x1b[36m--- 开始实时跟随执行日志 (Ctrl+C 可随时退出控制台) ---\x1b[0m\n`);
+
+        const closeFollow = client.followLogs(task.id, (log) => {
+          const prefix = log.stream === 'stderr' ? '\x1b[31m[ERR]\x1b[0m' : log.stream === 'system' ? '\x1b[35m[SYS]\x1b[0m' : '\x1b[32m[LOG]\x1b[0m';
+          console.log(`${prefix} [${log.nodeId}] ${log.message}`);
+        });
+
+        const timer = setInterval(async () => {
+          try {
+            const current = await client.getTask(task!.id);
+            if (current.status === 'completed' || current.status === 'failed' || current.status === 'cancelled') {
+              clearInterval(timer);
+              closeFollow();
+              console.log(`\n----------------------------------------------------------------------`);
+              if (current.status === 'completed') {
+                console.log(`\x1b[32m\x1b[1m✔ 流水线执行成功！\x1b[0m`);
+              } else {
+                console.log(`\x1b[31m\x1b[1m✖ 流水线执行终止 (状态: ${current.status})\x1b[0m`);
+              }
+              console.log(`----------------------------------------------------------------------\n`);
+              process.exit(current.status === 'completed' ? 0 : 1);
+            }
+          } catch {}
+        }, 1500);
+      }
+    } catch (err: any) {
+      console.error(`\x1b[31m执行失败: ${err.message}\x1b[0m`);
+      process.exit(1);
+    }
+  });
+
 program.parse(process.argv);

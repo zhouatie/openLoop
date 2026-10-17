@@ -34,6 +34,20 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
     },
   },
   {
+    id: 'qa-automation',
+    name: 'QA 自动化',
+    version: '1.0.0',
+    description: '基于 Midscene 多模态 AI 的 UI 自动化测试与时间轴视觉回放',
+    isBuiltin: true,
+    sidebarItem: {
+      id: 'qa-automation',
+      title: 'QA 自动化',
+      icon: 'Target',
+      order: 3,
+      path: '/qa',
+    },
+  },
+  {
     id: 'plugin-manager',
     name: '插件中心',
     version: '1.0.0',
@@ -43,7 +57,7 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
       id: 'plugin-manager',
       title: '插件扩展',
       icon: 'Boxes',
-      order: 3,
+      order: 4,
       path: '/plugins',
     },
   },
@@ -55,5 +69,6 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
 export const BUILTIN_VIEW_TITLES: Record<string, string> = {
   kanban: '任务看板',
   'workflow-editor': '流程编排',
+  'qa-automation': 'QA 自动化',
   'plugin-manager': '插件扩展',
 };

@@ -1,6 +1,6 @@
 import { PluginManifest } from '@openloop/core';
 
-export const FIXED_SIDEBAR_IDS = ['kanban', 'workflow-editor'] as const;
+export const FIXED_SIDEBAR_IDS = ['kanban', 'workflow-editor', 'qa-automation'] as const;
 export const STORAGE_KEY_SIDEBAR_ORDER = 'openloop_sidebar_order_v1';
 
 /**
@@ -50,19 +50,22 @@ export function getSortedSidebarPlugins(
 ): PluginManifest[] {
   const activeOrder = customOrder || getStoredSidebarOrder();
 
-  // 1. 获取固定前两项
+  // 1. 获取固定前三项
   const kanban = plugins.find((p) => p.id === 'kanban');
   const workflow = plugins.find((p) => p.id === 'workflow-editor');
+  const qa = plugins.find((p) => p.id === 'qa-automation');
 
   const fixedList: PluginManifest[] = [];
   if (kanban) fixedList.push(kanban);
   if (workflow) fixedList.push(workflow);
+  if (qa) fixedList.push(qa);
 
   // 2. 筛选出除了固定项和插件扩展以外的、挂载到侧边栏的扩展插件
   const others = plugins.filter(
     (p) =>
       p.id !== 'kanban' &&
       p.id !== 'workflow-editor' &&
+      p.id !== 'qa-automation' &&
       p.id !== 'plugin-manager' &&
       Boolean(p.sidebarItem)
   );
@@ -95,10 +98,10 @@ export function moveSidebarItem(
   fromIndex: number,
   toIndex: number
 ): PluginManifest[] {
-  // 保护前两项不可排序
-  if (fromIndex < 2 || toIndex < 2) {
+  // 保护前三项系统核心视图不可排序
+  if (fromIndex < 3 || toIndex < 3) {
     if (import.meta.env?.DEV) {
-      console.warn('[SidebarOrder] 忽略非法排序请求: 任务看板与流程编排为系统固定项，不可调整位置', {
+      console.warn('[SidebarOrder] 忽略非法排序请求: 核心视图不可调整位置', {
         fromIndex,
         toIndex,
       });

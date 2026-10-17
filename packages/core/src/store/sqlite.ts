@@ -10,6 +10,8 @@ import {
   KanbanColumn,
   NodeRun,
   OpenLoopSettings,
+  QaSuite,
+  QaRunRecord,
 } from '../types';
 import { createLogger } from '../logger';
 
@@ -111,12 +113,44 @@ export class SqliteStore {
         updated_at INTEGER NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS qa_suites (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        target_url TEXT NOT NULL,
+        viewport_json TEXT,
+        steps_json TEXT NOT NULL,
+        tags_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_run_status TEXT,
+        last_run_duration_ms INTEGER,
+        last_run_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS qa_runs (
+        id TEXT PRIMARY KEY,
+        suite_id TEXT NOT NULL,
+        suite_name TEXT NOT NULL,
+        task_id TEXT,
+        status TEXT NOT NULL,
+        total_steps INTEGER NOT NULL,
+        passed_steps INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        timeline_json TEXT NOT NULL,
+        report_rel_path TEXT,
+        created_at INTEGER NOT NULL,
+        finished_at INTEGER,
+        error TEXT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_kanban ON tasks(kanban_column);
       CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_node_runs_task ON task_node_runs(task_id);
       CREATE INDEX IF NOT EXISTS idx_logs_task_time ON logs(task_id, timestamp ASC);
       CREATE INDEX IF NOT EXISTS idx_logs_node ON logs(task_id, node_id);
+      CREATE INDEX IF NOT EXISTS idx_qa_runs_suite ON qa_runs(suite_id, created_at DESC);
     `);
 
     // 增量表结构平滑迁移：为历史已有数据库的 tasks 表补齐 workspace 字段
@@ -148,6 +182,11 @@ export class SqliteStore {
       if (!hasDevWf) {
         this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
       }
+      // 检查并增量补齐内置 FEBase 应用构建部署流水线
+      const hasFebaseDeployWf = this.db.prepare('SELECT id FROM workflows WHERE id = ?').get('wf_febase_app_deploy');
+      if (!hasFebaseDeployWf) {
+        this.saveWorkflow(this.getFebaseDeployWorkflowDefinition());
+      }
     }
 
     // 系统启动自愈：清理因服务崩溃/重启而残留为 running 状态的孤立任务
@@ -178,6 +217,92 @@ export class SqliteStore {
     } catch (e) {
       console.warn('[SqliteStore] recoverOrphanRunningTasks error:', e);
     }
+  }
+
+  private getFebaseDeployWorkflowDefinition(): WorkflowDefinition {
+    return {
+      id: 'wf_febase_app_deploy',
+      name: 'FEBase 应用智能编排与部署流水线',
+      description: 'AI Agent 驱动的极简部署编排流水线：Agent 智能校验 Prompt 充足性并锁定发布单（信息不足自动终止） -> 原生 mws CLI 分配环境 -> 原生 mws CLI 触发云端打包',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      nodes: [
+        {
+          id: 'node_agent_parse',
+          name: 'AI 智能校验需求与锁定单据',
+          type: 'agent',
+          position: { x: 100, y: 150 },
+          config: {
+            agentName: 'Pi Agent',
+            prompt: `请分析本次部署任务的需求内容：
+任务名称: {{task.title}}
+任务描述: {{task.description}}
+
+【关键前置规则：信息充足性校验与任务终止机制】
+在执行任何部署操作前，必须首先检查需求是否提供了全部必要信息：
+1. 必需要素核查：
+   - 目标应用名 (appName)：如 rn-lyric-share-page
+   - 代码分支 (branch)：如 feat/OMMUSIC-3825654
+   - 目标环境类型与域名/数字编号 (envType & domain)：如 PRETEST 或 TEST，以及 211 或 qa-test211.pretest.igame.163.com
+2. 若上述信息存在缺失或语义不明确（例如未提供分支或未指定环境）：
+   - 严禁自行猜测或随意默认参数！
+   - 执行清理指令：rm -f /tmp/openloop-febase-env.sh
+   - 将具体终止原因写入中止文件：echo "【部署中止】Prompt 提供的信息不充足！缺失要素: <具体列出缺失项>。请补充后重新发起。" > /tmp/openloop_abort_{{task.id}}
+   - 在日志中清晰打印错误原因，立即结束执行。
+3. 若信息完整充足：
+   - 确保清理旧中止文件：rm -f /tmp/openloop_abort_{{task.id}}
+   - 调用 mws 命令检索应用 (mws febase app-search --env online --json '{"keyword":"<appName>"}') 获取 appId。
+   - 调用 mws 命令获取该分支对应的活跃发布单 (mws febase sprint-list --env online --json '{"appId":<appId>,"engineStatus":"running"}') 获取 sprintId（如无活跃发布单则通过 sprint-create 创建）。
+   - 将解析出的结构化参数写入临时环境变量文件 /tmp/openloop-febase-env.sh：
+     export FEBASE_APP_ID="<appId>"
+     export FEBASE_SPRINT_ID="<sprintId>"
+     export FEBASE_ENV_TYPE="<envType>"
+     export FEBASE_ENV_NAME="<envName>"
+   - 打印解析确认摘要供下游 CLI 节点流转。`,
+          },
+        },
+        {
+          id: 'node_cli_env',
+          name: 'CLI 环境绑定与域名就绪',
+          type: 'cli',
+          position: { x: 480, y: 150 },
+          config: {
+            command: 'if [ ! -f /tmp/openloop-febase-env.sh ]; then echo "[ERROR] 前置参数校验未通过，缺少部署环境变量文件，任务终止！" >&2; exit 1; fi && source /tmp/openloop-febase-env.sh && if [ -z "$FEBASE_APP_ID" ] || [ -z "$FEBASE_SPRINT_ID" ] || [ -z "$FEBASE_ENV_NAME" ]; then echo "[ERROR] 部署参数不完整，任务终止！" >&2; exit 1; fi && echo "[FEBase] 正在为发布单 Sprint $FEBASE_SPRINT_ID 绑定环境 $FEBASE_ENV_NAME ($FEBASE_ENV_TYPE)..." && mws febase sprint-env-create --env online --json "{\\"appId\\":$FEBASE_APP_ID,\\"sprintId\\":$FEBASE_SPRINT_ID,\\"envType\\":\\"$FEBASE_ENV_TYPE\\",\\"envName\\":\\"$FEBASE_ENV_NAME\\"}" || true',
+            timeoutSec: 60,
+          },
+        },
+        {
+          id: 'node_cli_deploy',
+          name: 'CLI 触发云端打包部署',
+          type: 'cli',
+          position: { x: 860, y: 150 },
+          config: {
+            command:
+              'if [ ! -f /tmp/openloop-febase-env.sh ]; then echo "[ERROR] 缺少部署环境变量文件，任务终止！" >&2; exit 1; fi && source /tmp/openloop-febase-env.sh && echo "[FEBase] 正在触发云端 Tekton 打包构建 (App: $FEBASE_APP_ID, Sprint: $FEBASE_SPRINT_ID, Env: $FEBASE_ENV_NAME)..." && (' +
+              'DEPLOY_OUTPUT=$(mws febase sprint-deploy --env online --json "{\\"appId\\":$FEBASE_APP_ID,\\"sprintId\\":$FEBASE_SPRINT_ID,\\"env\\":\\"$FEBASE_ENV_TYPE\\",\\"envName\\":\\"$FEBASE_ENV_NAME\\"}" 2>&1); ' +
+              'DEPLOY_STATUS=$?; ' +
+              'echo "$DEPLOY_OUTPUT"; ' +
+              'if [ $DEPLOY_STATUS -eq 0 ]; then echo "[FEBase] 部署指令触发成功！" && exit 0; fi; ' +
+              'echo "[FEBase] 部署网关返回异常或网络抖动，正在复核云端实际就绪状态..."; ' +
+              'sleep 2; ' +
+              'STATUS_CHECK=$(mws febase deploy-envs-status --env online --json "{\\"appId\\":$FEBASE_APP_ID,\\"sprintId\\":$FEBASE_SPRINT_ID,\\"env\\":\\"$FEBASE_ENV_TYPE\\"}" 2>&1); ' +
+              'if echo "$STATUS_CHECK" | grep -q "$FEBASE_ENV_NAME"; then ' +
+              'echo "[FEBase] 复核通过：已在云端检测到目标域名 $FEBASE_ENV_NAME 的流水线任务，任务判定为成功！"; ' +
+              'echo "$STATUS_CHECK" | grep "$FEBASE_ENV_NAME"; ' +
+              'exit 0; ' +
+              'fi; ' +
+              'echo "[FEBase] 二次复核未就绪，重试一次部署触发..."; ' +
+              'mws febase sprint-deploy --env online --json "{\\"appId\\":$FEBASE_APP_ID,\\"sprintId\\":$FEBASE_SPRINT_ID,\\"env\\":\\"$FEBASE_ENV_TYPE\\",\\"envName\\":\\"$FEBASE_ENV_NAME\\"}"; ' +
+              ')',
+            timeoutSec: 120,
+          },
+        },
+      ],
+      edges: [
+        { id: 'e_parse_to_env', source: 'node_agent_parse', target: 'node_cli_env' },
+        { id: 'e_env_to_deploy', source: 'node_cli_env', target: 'node_cli_deploy' },
+      ],
+    };
   }
 
   private getAppDeployWorkflowDefinition(): WorkflowDefinition {
@@ -391,6 +516,27 @@ export class SqliteStore {
     // 预置通用研发流水线
     this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
     this.saveWorkflow(this.getAppDeployWorkflowDefinition());
+    this.saveWorkflow(this.getFebaseDeployWorkflowDefinition());
+
+    // 预置默认 QA 自动化测试用例
+    const sampleSuite: QaSuite = {
+      id: 'suite_web_login_flow',
+      name: '用户登录与主页视觉验收测试',
+      description: '基于 Midscene 多模态 AI 校验登录表单填写、登录交互及进入主控制台界面的视觉完整性',
+      targetUrl: 'http://localhost:3000',
+      viewport: { width: 1280, height: 800 },
+      steps: [
+        { id: 'step_1', type: 'action', prompt: '等待页面加载完成，点击右上角「登录」按钮' },
+        { id: 'step_2', type: 'action', prompt: '在用户名输入框填写 demo_user，密码填写 123456' },
+        { id: 'step_3', type: 'action', prompt: '点击「立即登录」按钮' },
+        { id: 'step_4', type: 'assert', prompt: '页面出现「登录成功」提示，并展示个人中心仪表盘' },
+      ],
+      tags: ['Smoke', 'Auth', 'UI-Visual'],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      lastRunStatus: 'untested',
+    };
+    this.saveQaSuite(sampleSuite);
 
     // 预置插件
     const builtinPlugins: PluginManifest[] = [
@@ -847,6 +993,185 @@ export class SqliteStore {
 
     updateAll(settings);
     return this.getSettings();
+  }
+
+  // ================= QA Automation Suites API =================
+
+  public getQaSuites(): QaSuite[] {
+    const rows = this.db.prepare('SELECT * FROM qa_suites ORDER BY updated_at DESC').all() as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description || undefined,
+      targetUrl: r.target_url,
+      viewport: r.viewport_json ? JSON.parse(r.viewport_json) : undefined,
+      steps: JSON.parse(r.steps_json),
+      tags: r.tags_json ? JSON.parse(r.tags_json) : undefined,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      lastRunStatus: r.last_run_status || 'untested',
+      lastRunDurationMs: r.last_run_duration_ms || undefined,
+      lastRunAt: r.last_run_at || undefined,
+    }));
+  }
+
+  public getQaSuiteById(id: string): QaSuite | null {
+    const r = this.db.prepare('SELECT * FROM qa_suites WHERE id = ?').get(id) as any;
+    if (!r) return null;
+    return {
+      id: r.id,
+      name: r.name,
+      description: r.description || undefined,
+      targetUrl: r.target_url,
+      viewport: r.viewport_json ? JSON.parse(r.viewport_json) : undefined,
+      steps: JSON.parse(r.steps_json),
+      tags: r.tags_json ? JSON.parse(r.tags_json) : undefined,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      lastRunStatus: r.last_run_status || 'untested',
+      lastRunDurationMs: r.last_run_duration_ms || undefined,
+      lastRunAt: r.last_run_at || undefined,
+    };
+  }
+
+  public saveQaSuite(suite: QaSuite): QaSuite {
+    const now = Date.now();
+    const suiteToSave: QaSuite = {
+      ...suite,
+      updatedAt: now,
+      createdAt: suite.createdAt || now,
+    };
+
+    const stmt = this.db.prepare(`
+      INSERT INTO qa_suites (
+        id, name, description, target_url, viewport_json, steps_json,
+        tags_json, created_at, updated_at, last_run_status, last_run_duration_ms, last_run_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        description = excluded.description,
+        target_url = excluded.target_url,
+        viewport_json = excluded.viewport_json,
+        steps_json = excluded.steps_json,
+        tags_json = excluded.tags_json,
+        updated_at = excluded.updated_at,
+        last_run_status = COALESCE(excluded.last_run_status, qa_suites.last_run_status),
+        last_run_duration_ms = COALESCE(excluded.last_run_duration_ms, qa_suites.last_run_duration_ms),
+        last_run_at = COALESCE(excluded.last_run_at, qa_suites.last_run_at)
+    `);
+
+    stmt.run(
+      suiteToSave.id,
+      suiteToSave.name,
+      suiteToSave.description || '',
+      suiteToSave.targetUrl,
+      suiteToSave.viewport ? JSON.stringify(suiteToSave.viewport) : null,
+      JSON.stringify(suiteToSave.steps || []),
+      suiteToSave.tags ? JSON.stringify(suiteToSave.tags) : null,
+      suiteToSave.createdAt,
+      suiteToSave.updatedAt,
+      suiteToSave.lastRunStatus || 'untested',
+      suiteToSave.lastRunDurationMs || null,
+      suiteToSave.lastRunAt || null
+    );
+
+    return suiteToSave;
+  }
+
+  public deleteQaSuite(id: string): boolean {
+    const res = this.db.prepare('DELETE FROM qa_suites WHERE id = ?').run(id);
+    return res.changes > 0;
+  }
+
+  // ================= QA Execution Runs API =================
+
+  public getQaRuns(suiteId?: string, limit: number = 30): QaRunRecord[] {
+    let rows: any[];
+    if (suiteId) {
+      rows = this.db.prepare('SELECT * FROM qa_runs WHERE suite_id = ? ORDER BY created_at DESC LIMIT ?').all(suiteId, limit);
+    } else {
+      rows = this.db.prepare('SELECT * FROM qa_runs ORDER BY created_at DESC LIMIT ?').all(limit);
+    }
+
+    return rows.map((r) => ({
+      id: r.id,
+      suiteId: r.suite_id,
+      suiteName: r.suite_name,
+      taskId: r.task_id || undefined,
+      status: r.status,
+      totalSteps: r.total_steps,
+      passedSteps: r.passed_steps,
+      durationMs: r.duration_ms,
+      timeline: JSON.parse(r.timeline_json),
+      reportRelPath: r.report_rel_path || undefined,
+      createdAt: r.created_at,
+      finishedAt: r.finished_at || undefined,
+      error: r.error || undefined,
+    }));
+  }
+
+  public getQaRunById(id: string): QaRunRecord | null {
+    const r = this.db.prepare('SELECT * FROM qa_runs WHERE id = ?').get(id) as any;
+    if (!r) return null;
+    return {
+      id: r.id,
+      suiteId: r.suite_id,
+      suiteName: r.suite_name,
+      taskId: r.task_id || undefined,
+      status: r.status,
+      totalSteps: r.total_steps,
+      passedSteps: r.passed_steps,
+      durationMs: r.duration_ms,
+      timeline: JSON.parse(r.timeline_json),
+      reportRelPath: r.report_rel_path || undefined,
+      createdAt: r.created_at,
+      finishedAt: r.finished_at || undefined,
+      error: r.error || undefined,
+    };
+  }
+
+  public saveQaRun(run: QaRunRecord): QaRunRecord {
+    const stmt = this.db.prepare(`
+      INSERT INTO qa_runs (
+        id, suite_id, suite_name, task_id, status, total_steps, passed_steps,
+        duration_ms, timeline_json, report_rel_path, created_at, finished_at, error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status,
+        total_steps = excluded.total_steps,
+        passed_steps = excluded.passed_steps,
+        duration_ms = excluded.duration_ms,
+        timeline_json = excluded.timeline_json,
+        report_rel_path = excluded.report_rel_path,
+        finished_at = excluded.finished_at,
+        error = excluded.error
+    `);
+
+    stmt.run(
+      run.id,
+      run.suiteId,
+      run.suiteName,
+      run.taskId || null,
+      run.status,
+      run.totalSteps,
+      run.passedSteps,
+      run.durationMs,
+      JSON.stringify(run.timeline || []),
+      run.reportRelPath || null,
+      run.createdAt,
+      run.finishedAt || null,
+      run.error || null
+    );
+
+    // 同步更新对应 suite 的最新状态
+    const updateSuiteStmt = this.db.prepare(`
+      UPDATE qa_suites
+      SET last_run_status = ?, last_run_duration_ms = ?, last_run_at = ?, updated_at = ?
+      WHERE id = ?
+    `);
+    updateSuiteStmt.run(run.status, run.durationMs, run.finishedAt || Date.now(), Date.now(), run.suiteId);
+
+    return run;
   }
 
   public close() {

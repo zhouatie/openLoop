@@ -3,6 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { LogTerminalDrawer } from './components/LogTerminalDrawer';
 import { CreateTaskModal } from './components/CreateTaskModal';
+import { QuickRunWorkflowModal } from './components/QuickRunWorkflowModal';
 import { CommandPalette } from './components/CommandPalette';
 import { ShortcutProvider } from './context/ShortcutContext';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
@@ -10,6 +11,7 @@ import { ToastProvider } from './components/Toast';
 import { KanbanView } from './views/KanbanView';
 import { WorkflowListView } from './views/WorkflowListView';
 import { WorkflowEditorView } from './views/WorkflowEditorView';
+import { QaAutomationView } from './views/QaAutomationView';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
 import { PluginSandboxContainer } from './components/PluginSandboxContainer';
@@ -37,6 +39,7 @@ export const AppContent: React.FC = () => {
     }
   });
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
+  const [isQuickRunModalOpen, setIsQuickRunModalOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
   const [isDaemonConnected, setIsDaemonConnected] = useState<boolean>(api.getConnectionStatus());
   const [sidebarOrder, setSidebarOrder] = useState<string[]>(() => getStoredSidebarOrder());
@@ -72,17 +75,26 @@ export const AppContent: React.FC = () => {
       setActivePluginId('workflow-editor');
       setEditingWorkflowId(null);
     },
+    onNavigateQa: () => {
+      setActivePluginId('qa-automation');
+    },
     onNavigateSettings: () => {
       setActivePluginId('settings-agent');
     },
     onOpenCreateTask: () => {
       setIsCreateTaskModalOpen(true);
     },
+    onQuickRunWorkflow: () => {
+      setIsQuickRunModalOpen(true);
+    },
     onToggleCommandPalette: () => {
       setIsCommandPaletteOpen((prev) => !prev);
     },
     onToggleSidebar: handleToggleSidebar,
     onEscape: () => {
+      if (isQuickRunModalOpen) {
+        setIsQuickRunModalOpen(false);
+      }
       if (isCommandPaletteOpen) {
         setIsCommandPaletteOpen(false);
       }
@@ -323,6 +335,10 @@ export const AppContent: React.FC = () => {
             />
           )}
 
+          {activePluginId === 'qa-automation' && (
+            <QaAutomationView />
+          )}
+
           {isSettings && (
             <SettingsView
               activeSubTab={activePluginId === 'plugin-manager' ? 'settings-plugins' : activePluginId}
@@ -342,6 +358,7 @@ export const AppContent: React.FC = () => {
           {/* 第三方插件 */}
           {activePluginId !== 'kanban' &&
             activePluginId !== 'workflow-editor' &&
+            activePluginId !== 'qa-automation' &&
             activePluginId !== 'plugin-manager' &&
             !isSettings &&
             (currentPlugin?.entry ? (
@@ -396,6 +413,19 @@ export const AppContent: React.FC = () => {
         }
       />
 
+      {/* 快捷流水线执行弹窗 (Super+R) */}
+      <QuickRunWorkflowModal
+        isOpen={isQuickRunModalOpen}
+        onClose={() => setIsQuickRunModalOpen(false)}
+        workflows={workflows}
+        onTaskCreated={() => {
+          refreshData();
+        }}
+        onNavigateKanban={() => {
+          setActivePluginId('kanban');
+        }}
+      />
+
       {/* 全局命令面板 (Super+K) */}
       <CommandPalette
         isOpen={isCommandPaletteOpen}
@@ -407,6 +437,7 @@ export const AppContent: React.FC = () => {
           }
         }}
         onOpenCreateTask={() => setIsCreateTaskModalOpen(true)}
+        onOpenQuickRun={() => setIsQuickRunModalOpen(true)}
         onToggleLogs={handleToggleLogs}
         onRefresh={refreshData}
         onToggleSidebar={handleToggleSidebar}

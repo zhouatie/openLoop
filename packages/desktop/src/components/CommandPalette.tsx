@@ -3,6 +3,7 @@ import {
   Search,
   Kanban,
   Workflow,
+  Target,
   Boxes,
   Settings,
   Plus,
@@ -10,6 +11,7 @@ import {
   RefreshCw,
   CornerDownLeft,
   PanelLeft,
+  Zap,
 } from 'lucide-react';
 import { Kbd } from './Kbd';
 import { useShortcuts } from '../context/ShortcutContext';
@@ -29,6 +31,7 @@ interface CommandPaletteProps {
   onClose: () => void;
   onNavigate: (pluginId: string) => void;
   onOpenCreateTask: () => void;
+  onOpenQuickRun?: () => void;
   onToggleLogs: () => void;
   onRefresh: () => void;
   onToggleSidebar?: () => void;
@@ -39,6 +42,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onClose,
   onNavigate,
   onOpenCreateTask,
+  onOpenQuickRun,
   onToggleLogs,
   onRefresh,
   onToggleSidebar,
@@ -76,6 +80,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         },
       },
       {
+        id: 'nav-qa',
+        category: '导航',
+        title: 'QA 自动化',
+        description: '基于 Midscene 多模态 AI 的 UI 自动化测试与时间轴视觉回放',
+        icon: <Target size={16} strokeWidth={1.8} className="text-[#4f46e5]" />,
+        shortcutKeys: ['super', '3'],
+        action: () => {
+          onNavigate('qa-automation');
+          onClose();
+        },
+      },
+      {
         id: 'nav-plugins',
         category: '导航',
         title: '插件扩展',
@@ -96,6 +112,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         action: () => {
           onNavigate('settings-agent');
           onClose();
+        },
+      },
+      {
+        id: 'action-quick-run',
+        category: '操作',
+        title: '快捷流水线执行',
+        description: '输入 Prompt 需求，Agent 智能校验并直接触发底层流水线',
+        icon: <Zap size={16} strokeWidth={2} className="text-amber-500 fill-amber-500/20" />,
+        shortcutKeys: ['super', 'R'],
+        action: () => {
+          onClose();
+          onOpenQuickRun?.();
         },
       },
       {

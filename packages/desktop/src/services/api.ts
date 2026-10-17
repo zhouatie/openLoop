@@ -1,4 +1,4 @@
-import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, OpenLoopSettings, KanbanColumn, TaskAttachment, WorkflowSessionState } from '@openloop/core';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, OpenLoopSettings, KanbanColumn, TaskAttachment, WorkflowSessionState, QaSuite, QaRunRecord } from '@openloop/core';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
@@ -498,6 +498,78 @@ export class DesktopApiService {
       }
       return false;
     }
+  }
+
+  // ================= QA Automation Midscene API =================
+
+  async getQaSuites(): Promise<QaSuite[]> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 拉取 QA 自动化测试用例清单');
+    }
+    return requestJson<QaSuite[]>(`${BASE_URL}/api/qa/suites`);
+  }
+
+  async getQaSuiteById(id: string): Promise<QaSuite | null> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 获取测试套件详情:', id);
+    }
+    return requestJson<QaSuite>(`${BASE_URL}/api/qa/suites/${encodeURIComponent(id)}`);
+  }
+
+  async saveQaSuite(suite: Partial<QaSuite>): Promise<QaSuite> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 保存测试套件:', suite);
+    }
+    return requestJson<QaSuite>(`${BASE_URL}/api/qa/suites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(suite),
+    });
+  }
+
+  async deleteQaSuite(id: string): Promise<boolean> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 删除测试套件:', id);
+    }
+    const res = await requestJson<{ success: boolean }>(`${BASE_URL}/api/qa/suites/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    return !!res.success;
+  }
+
+  async runQaSuite(payload: { suiteId: string; targetUrl?: string }): Promise<QaRunRecord> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 发起 Midscene 测试执行:', payload);
+    }
+    return requestJson<QaRunRecord>(`${BASE_URL}/api/qa/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getQaRuns(suiteId?: string): Promise<QaRunRecord[]> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 获取 QA 运行记录列表, suiteId:', suiteId);
+    }
+    const query = suiteId ? `?suiteId=${encodeURIComponent(suiteId)}` : '';
+    return requestJson<QaRunRecord[]>(`${BASE_URL}/api/qa/runs${query}`);
+  }
+
+  async getQaRunById(id: string): Promise<QaRunRecord | null> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 获取 QA 运行详情:', id);
+    }
+    return requestJson<QaRunRecord>(`${BASE_URL}/api/qa/runs/${encodeURIComponent(id)}`);
+  }
+
+  getArtifactUrl(pathOrUrl: string): string {
+    if (!pathOrUrl) return '';
+    if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://') || pathOrUrl.startsWith('blob:')) {
+      return pathOrUrl;
+    }
+    const clean = pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
+    return `${BASE_URL}${clean}`;
   }
 }
 

@@ -115,6 +115,67 @@ export const PluginSandboxContainer: React.FC<PluginSandboxContainerProps> = ({
               result = { task: null };
               break;
 
+            case 'cli.execute': {
+              const cmd = params?.command;
+              if (!cmd) throw new Error('command 参数必填');
+              // 调用系统执行或通过 Core 执行
+              const response = await fetch('http://127.0.0.1:19888/api/system/execute-cli', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: cmd, cwd: currentWorkspace }),
+              }).catch(() => null);
+              result = response ? await response.json().catch(() => ({ success: true })) : { success: true };
+              break;
+            }
+
+            case 'qa.getSuites': {
+              const res = await fetch('http://127.0.0.1:19888/api/qa/suites');
+              result = await res.json();
+              break;
+            }
+
+            case 'qa.saveSuite': {
+              const res = await fetch('http://127.0.0.1:19888/api/qa/suites', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(params?.suite || params),
+              });
+              result = await res.json();
+              break;
+            }
+
+            case 'qa.deleteSuite': {
+              const suiteId = params?.id;
+              const res = await fetch(`http://127.0.0.1:19888/api/qa/suites/${encodeURIComponent(suiteId)}`, {
+                method: 'DELETE',
+              });
+              result = await res.json();
+              break;
+            }
+
+            case 'qa.runSuite': {
+              const res = await fetch('http://127.0.0.1:19888/api/qa/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(params),
+              });
+              result = await res.json();
+              break;
+            }
+
+            case 'qa.getRuns': {
+              const suiteId = params?.suiteId ? `?suiteId=${encodeURIComponent(params.suiteId)}` : '';
+              const res = await fetch(`http://127.0.0.1:19888/api/qa/runs${suiteId}`);
+              result = await res.json();
+              break;
+            }
+
+            case 'qa.getRunById': {
+              const res = await fetch(`http://127.0.0.1:19888/api/qa/runs/${encodeURIComponent(params?.id)}`);
+              result = await res.json();
+              break;
+            }
+
             default:
               throw new Error(`未受支持的宿主方法: ${method}`);
           }

@@ -7,10 +7,11 @@ import util from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Store } from '../store';
 import { DagEngine } from '../engine/dag-engine';
-import { Task, WorkflowDefinition, PluginManifest, TaskSessionState, KanbanColumn, TaskAttachment, WorkflowSessionState } from '../types';
+import { Task, WorkflowDefinition, PluginManifest, TaskSessionState, KanbanColumn, TaskAttachment, WorkflowSessionState, QaSuite, QaRunRecord } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
+import { MidsceneRunner } from '../qa/midscene-runner';
 
 const serverLogger = createLogger('Server');
 
@@ -304,6 +305,24 @@ export class OpenLoopServer {
     serverLogger.debug(`[HTTP -->] ${method} ${pathname}`);
 
     try {
+      // 产物文件托管 (如 Midscene 自动化测试截图、回放 HTML 等)
+      if (pathname.startsWith('/artifacts/')) {
+        const artifactClean = path.normalize(pathname.replace(/^\/artifacts\//, '')).replace(/^(\.\.[\/\\])+/, '');
+        const targetPath = path.join(this.store.getDataDir(), 'artifacts', artifactClean);
+        if (fs.existsSync(targetPath) && fs.statSync(targetPath).isFile()) {
+          const ext = path.extname(targetPath).toLowerCase();
+          const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+          res.writeHead(200, {
+            'Content-Type': contentType,
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=86400',
+          });
+          return fs.createReadStream(targetPath).pipe(res);
+        } else {
+          return this.sendJson(res, 404, { error: 'Artifact Not Found' }, reqMeta);
+        }
+      }
+
       // 静态资源托管 (支持独立 Web 生产部署，无需外部 Vite 开发服务器即可直接打开使用)
       if (!pathname.startsWith('/api')) {
         const handled = this.serveStatic(req, res, pathname, reqMeta);
@@ -804,6 +823,108 @@ export class OpenLoopServer {
         serverLogger.info(`[Settings:Update] 更新全局配置`, { keys: Object.keys(body) });
         const updated = this.store.updateSettings(body);
         return this.sendJson(res, 200, updated, reqMeta);
+      }
+
+      // QA Automation Suites: /api/qa/suites
+      if (pathname === '/api/qa/suites' && method === 'GET') {
+        const suites = this.store.getQaSuites();
+        return this.sendJson(res, 200, suites, reqMeta);
+      }
+
+      if (pathname === '/api/qa/suites' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        if (!body.name || !body.targetUrl) {
+          return this.sendJson(res, 400, { error: 'name and targetUrl are required' }, reqMeta);
+        }
+        const suite: QaSuite = {
+          id: body.id || `suite_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          name: body.name,
+          description: body.description,
+          targetUrl: body.targetUrl,
+          viewport: body.viewport,
+          steps: body.steps || [],
+          tags: body.tags || [],
+          createdAt: body.createdAt || Date.now(),
+          updatedAt: Date.now(),
+          lastRunStatus: body.lastRunStatus || 'untested',
+        };
+        serverLogger.info(`[QA:SaveSuite] 保存测试套件: ${suite.name} (ID: ${suite.id})`);
+        const saved = this.store.saveQaSuite(suite);
+        return this.sendJson(res, 200, saved, reqMeta);
+      }
+
+      if (pathname.startsWith('/api/qa/suites/') && method === 'DELETE') {
+        const id = decodeURIComponent(pathname.replace('/api/qa/suites/', ''));
+        serverLogger.info(`[QA:DeleteSuite] 删除测试套件: ${id}`);
+        const ok = this.store.deleteQaSuite(id);
+        return this.sendJson(res, 200, { success: ok, id }, reqMeta);
+      }
+
+      // QA Automation Runs: /api/qa/runs
+      if (pathname === '/api/qa/runs' && method === 'GET') {
+        const suiteId = parsedUrl.searchParams.get('suiteId') || undefined;
+        const limitStr = parsedUrl.searchParams.get('limit');
+        const limit = limitStr ? parseInt(limitStr, 10) : 30;
+        const runs = this.store.getQaRuns(suiteId, limit);
+        return this.sendJson(res, 200, runs, reqMeta);
+      }
+
+      const qaRunMatch = pathname.match(/^\/api\/qa\/runs\/([a-zA-Z0-9_-]+)$/);
+      if (qaRunMatch && method === 'GET') {
+        const runId = qaRunMatch[1];
+        const record = this.store.getQaRunById(runId);
+        if (!record) return this.sendJson(res, 404, { error: 'QA Run Not Found' }, reqMeta);
+        return this.sendJson(res, 200, record, reqMeta);
+      }
+
+      // Execute QA Run: /api/qa/run
+      if (pathname === '/api/qa/run' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        let suite = body.suiteId ? this.store.getQaSuiteById(body.suiteId) : null;
+        if (!suite && body.targetUrl && body.steps) {
+          // 允许临时传入内联用例
+          suite = {
+            id: `temp_${Date.now()}`,
+            name: body.name || '临时执行用例',
+            targetUrl: body.targetUrl,
+            steps: body.steps,
+            viewport: body.viewport,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+        }
+        if (!suite) {
+          return this.sendJson(res, 400, { error: 'suiteId or inline suite definition is required' }, reqMeta);
+        }
+
+        const runner = new MidsceneRunner({
+          artifactBaseDir: path.join(this.store.getDataDir(), 'artifacts'),
+          serverBaseUrl: `http://${this.host}:${this.port}`,
+          onStepStart: (stepIndex, step) => {
+            this.broadcast({
+              type: 'qa:step_start',
+              data: { suiteId: suite.id, stepIndex, step },
+            });
+          },
+          onStepFinish: (stepIndex, record) => {
+            this.broadcast({
+              type: 'qa:step_finish',
+              data: { suiteId: suite.id, stepIndex, record },
+            });
+          },
+          onLog: (msg) => {
+            serverLogger.info(`[QA:LiveLog] ${msg}`);
+          },
+        });
+
+        const record = await runner.runSuite(suite, body.taskId);
+        this.store.saveQaRun(record);
+        this.broadcast({
+          type: 'qa:run_completed',
+          data: record,
+        });
+
+        return this.sendJson(res, 200, record, reqMeta);
       }
 
       // Resume terminal: /api/tasks/:id/resume-terminal

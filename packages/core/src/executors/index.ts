@@ -2,9 +2,10 @@ import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { WorkflowNode, Task, LogEntry, NodeRun, TaskSessionState } from '../types';
+import { WorkflowNode, Task, LogEntry, NodeRun, TaskSessionState, QaSuite, QaStep } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
+import { MidsceneRunner } from '../qa/midscene-runner';
 
 const executorLogger = createLogger('Executor');
 
@@ -372,11 +373,21 @@ export class AgentExecutor implements NodeExecutor {
             }
           },
           onFinished: (error) => {
-            if (error) {
+            const abortFile = path.join(os.tmpdir(), `openloop_abort_${task.id}`);
+            let abortReason: string | undefined;
+            if (fs.existsSync(abortFile)) {
+              try {
+                abortReason = fs.readFileSync(abortFile, 'utf-8').trim();
+                fs.unlinkSync(abortFile);
+              } catch {}
+            }
+
+            const finalError = error || abortReason;
+            if (finalError) {
               finish({
                 status: 'failed',
                 exitCode: 1,
-                error,
+                error: finalError,
               });
             } else {
               finish({
@@ -453,63 +464,161 @@ export class HookExecutor implements NodeExecutor {
   }
 }
 
-// 真实 Midscene 智能测试执行器（真实执行测试并从磁盘提取产物）
+// 真实 Midscene 智能测试执行器（支持内置 Runner 与外部 CLI 执行）
 export class MidsceneExecutor implements NodeExecutor {
   private cliExecutor = new CliCommandExecutor();
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
-    const { node, emitLog } = ctx;
-    const testUrl = node.config.testUrl;
+    const { node, emitLog, variables, task } = ctx;
+    const rawTestUrl = node.config.testUrl || 'http://localhost:3000';
+    const testUrl = interpolateString(rawTestUrl, variables);
 
-    executorLogger.info(`[Midscene] 准备执行 UI 自动化测试, Target: ${testUrl || '未指定'}`, undefined, { taskId: ctx.task.id, nodeId: node.id });
-    emitLog('system', `[Midscene UI 测试] 目标地址: ${testUrl || '未指定'}`);
+    executorLogger.info(`[Midscene] 准备执行 UI 自动化测试, Target: ${testUrl}`, undefined, { taskId: task.id, nodeId: node.id });
+    emitLog('system', `[Midscene UI 测试] 启动自动化测试, 目标地址: ${testUrl}`);
 
-    if (!node.config.command) {
-      const err = `[Midscene 节点 ${node.id}] 未配置真实测试命令 (如 npx midscene run ...)`;
-      executorLogger.error(`[Midscene] 未配置测试命令`, undefined, { taskId: ctx.task.id, nodeId: node.id });
-      emitLog('stderr', err);
+    // 分支 1: 如果显式配置了自定义 CLI 命令行，则保持兼容优先执行 CLI
+    if (node.config.command && node.config.command.trim()) {
+      const res = await this.cliExecutor.execute(ctx);
+      if (res.status !== 'success') {
+        return res;
+      }
+      const artifacts: Array<{ name: string; type: 'image' | 'video' | 'log' | 'json'; path: string }> = [];
+      const reportDir = node.config.screenshotPath;
+      if (reportDir && fs.existsSync(reportDir)) {
+        try {
+          const files = fs.readdirSync(reportDir);
+          for (const file of files) {
+            if (/\.(png|jpe?g|webp|svg)$/i.test(file)) {
+              artifacts.push({
+                name: file,
+                type: 'image',
+                path: path.join(reportDir, file),
+              });
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
       return {
-        status: 'failed',
-        exitCode: 1,
-        error: err,
+        ...res,
+        artifacts: artifacts.length > 0 ? artifacts : undefined,
       };
     }
 
-    const res = await this.cliExecutor.execute(ctx);
-    if (res.status !== 'success') {
-      return res;
-    }
+    // 分支 2: 使用内置 MidsceneRunner 驱动测试，带每步回调与产物收集
+    try {
+      const dataDir = path.join(os.homedir(), '.openloop');
+      const instructions = node.config.instructions && node.config.instructions.length > 0
+        ? node.config.instructions
+        : [
+            '等待页面完全加载，检查首屏关键元素',
+            '点击核心导航或登录入口',
+            '视觉校验页面状态机进入就绪态，无报错遮罩',
+          ];
 
-    // 检查是否有真实产物输出在指定目录
-    const artifacts: Array<{ name: string; type: 'image' | 'video' | 'log' | 'json'; path: string }> = [];
-    const reportDir = node.config.screenshotPath;
-    if (reportDir && fs.existsSync(reportDir)) {
-      try {
-        const files = fs.readdirSync(reportDir);
-        for (const file of files) {
-          if (/\.(png|jpe?g|webp)$/i.test(file)) {
-            artifacts.push({
-              name: file,
-              type: 'image',
-              path: path.join(reportDir, file),
-            });
+      const steps: QaStep[] = instructions.map((inst, idx) => ({
+        id: `step_${idx + 1}`,
+        type: inst.includes('校验') || inst.includes('检查') ? 'assert' : 'action',
+        prompt: inst,
+      }));
+
+      const suite: QaSuite = {
+        id: node.config.suiteId || `suite_node_${node.id}`,
+        name: `${node.name} (流水线任务 ${task.title})`,
+        targetUrl: testUrl,
+        steps,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      const runner = new MidsceneRunner({
+        artifactBaseDir: path.join(dataDir, 'artifacts'),
+        serverBaseUrl: 'http://127.0.0.1:19888',
+        onStepStart: (index, step) => {
+          emitLog('stdout', `[Midscene 步骤 ${index + 1}/${steps.length}] 执行: [${step.type}] ${step.prompt}`);
+        },
+        onStepFinish: (index, record) => {
+          if (record.status === 'passed') {
+            emitLog('stdout', `[Midscene 步骤 ${index + 1}] ✔ 完成 (${record.durationMs}ms) - ${record.thought || ''}`);
+          } else {
+            emitLog('stderr', `[Midscene 步骤 ${index + 1}] ✖ 失败: ${record.error || '断言未通过'}`);
+          }
+        },
+        onLog: (msg) => {
+          emitLog('system', msg);
+        },
+      });
+
+      const runRecord = await runner.runSuite(suite, task.id);
+
+      // 组装 artifacts 产物供下游消费
+      const artifacts: Array<{ name: string; type: 'image' | 'video' | 'log' | 'json'; path: string }> = [];
+      const runDir = path.join(dataDir, 'artifacts', runRecord.id);
+
+      if (fs.existsSync(runDir)) {
+        const files = fs.readdirSync(runDir);
+        for (const f of files) {
+          const fullPath = path.join(runDir, f);
+          if (/\.(png|jpe?g|webp|svg)$/i.test(f)) {
+            artifacts.push({ name: f, type: 'image', path: fullPath });
+          } else if (f.endsWith('.json')) {
+            artifacts.push({ name: f, type: 'json', path: fullPath });
           }
         }
-      } catch {
-        // ignore
       }
+
+      // 将关键截图产物写入 task.attachments
+      if (!task.attachments) {
+        task.attachments = [];
+      }
+      for (const art of artifacts.filter((a) => a.type === 'image')) {
+        task.attachments.push({
+          id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          name: art.name,
+          mimeType: art.name.endsWith('.svg') ? 'image/svg+xml' : 'image/webp',
+          path: art.path,
+          url: `/artifacts/${runRecord.id}/${art.name}`,
+          size: fs.existsSync(art.path) ? fs.statSync(art.path).size : 1024,
+          createdAt: Date.now(),
+        });
+      }
+
+      const isSuccess = runRecord.status === 'passed';
+      if (isSuccess) {
+        emitLog('system', `[Midscene UI 测试] 全流程通过！总耗时: ${(runRecord.durationMs / 1000).toFixed(2)}s, 产出 ${artifacts.length} 个快照`);
+      } else {
+        emitLog('stderr', `[Midscene UI 测试] 测试未通过: ${runRecord.error || '存在断言失败步骤'}`);
+      }
+
+      return {
+        status: isSuccess ? 'success' : 'failed',
+        exitCode: isSuccess ? 0 : 1,
+        error: isSuccess ? undefined : runRecord.error,
+        artifacts: artifacts.length > 0 ? artifacts : undefined,
+        output: {
+          qa: {
+            runId: runRecord.id,
+            status: runRecord.status,
+            passed: isSuccess,
+            totalSteps: runRecord.totalSteps,
+            passedSteps: runRecord.passedSteps,
+            durationMs: runRecord.durationMs,
+            reportUrl: runRecord.reportUrl,
+            timeline: runRecord.timeline,
+          },
+        },
+      };
+    } catch (err: any) {
+      const errorMsg = `[Midscene 节点异常] ${err.message}`;
+      executorLogger.error(errorMsg, err, { taskId: task.id, nodeId: node.id });
+      emitLog('stderr', errorMsg);
+      return {
+        status: 'failed',
+        exitCode: 1,
+        error: errorMsg,
+      };
     }
-
-    executorLogger.info(
-      `[Midscene] 测试产物检索完成, 发现 ${artifacts.length} 个媒体产物`,
-      { artifacts: artifacts.map((a) => a.name) },
-      { taskId: ctx.task.id, nodeId: node.id }
-    );
-
-    return {
-      ...res,
-      artifacts: artifacts.length > 0 ? artifacts : undefined,
-    };
   }
 }
 

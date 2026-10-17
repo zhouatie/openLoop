@@ -1,5 +1,5 @@
 import { SqliteStore } from './sqlite';
-import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, OpenLoopSettings } from '../types';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, OpenLoopSettings, QaSuite, QaRunRecord } from '../types';
 
 export { SqliteStore };
 
@@ -88,6 +88,35 @@ export class Store {
 
   public updateSettings(settings: Partial<OpenLoopSettings>): OpenLoopSettings {
     return this.sqlite.updateSettings(settings);
+  }
+
+  // QA Automation
+  public getQaSuites(): QaSuite[] {
+    return this.sqlite.getQaSuites();
+  }
+
+  public getQaSuiteById(id: string): QaSuite | null {
+    return this.sqlite.getQaSuiteById(id);
+  }
+
+  public saveQaSuite(suite: QaSuite): QaSuite {
+    return this.sqlite.saveQaSuite(suite);
+  }
+
+  public deleteQaSuite(id: string): boolean {
+    return this.sqlite.deleteQaSuite(id);
+  }
+
+  public getQaRuns(suiteId?: string, limit?: number): QaRunRecord[] {
+    return this.sqlite.getQaRuns(suiteId, limit);
+  }
+
+  public getQaRunById(id: string): QaRunRecord | null {
+    return this.sqlite.getQaRunById(id);
+  }
+
+  public saveQaRun(run: QaRunRecord): QaRunRecord {
+    return this.sqlite.saveQaRun(run);
   }
 
   public close(): void {

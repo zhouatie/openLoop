@@ -15,6 +15,7 @@ export * from './AgentMarkdown';
 export * from './Kbd';
 export * from './CommandPalette';
 export * from './DebugWorkflowModal';
+export * from './QuickRunWorkflowModal';
 export * from './Toast';
 
 

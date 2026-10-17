@@ -1,6 +1,6 @@
 import http from 'http';
 import { WebSocket } from 'ws';
-import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn } from '@openloop/core';
+import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, QaSuite, QaRunRecord } from '@openloop/core';
 
 export class OpenLoopClient {
   private baseUrl: string;
@@ -125,6 +125,14 @@ export class OpenLoopClient {
 
   async listPlugins(): Promise<PluginManifest[]> {
     return this.request('/api/plugins');
+  }
+
+  async listQaSuites(): Promise<QaSuite[]> {
+    return this.request('/api/qa/suites');
+  }
+
+  async runQa(params: { suiteId?: string; targetUrl?: string; steps?: any[]; taskId?: string }): Promise<QaRunRecord> {
+    return this.request('/api/qa/run', { method: 'POST', body: params });
   }
 
   followLogs(taskId: string, onLog: (log: LogEntry) => void): () => void {

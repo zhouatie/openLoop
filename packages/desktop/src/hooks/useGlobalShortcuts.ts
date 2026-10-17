@@ -4,8 +4,10 @@ import { useShortcuts } from '../context/ShortcutContext';
 export interface ShortcutActions {
   onNavigateKanban: () => void;
   onNavigateWorkflows: () => void;
+  onNavigateQa?: () => void;
   onNavigateSettings: () => void;
   onOpenCreateTask: () => void;
+  onQuickRunWorkflow?: () => void;
   onToggleCommandPalette: () => void;
   onToggleSidebar?: () => void;
   onEscape?: () => void;
@@ -83,6 +85,17 @@ export const useGlobalShortcuts = (actions: ShortcutActions) => {
         return;
       }
 
+      // 3. Super + 3: 导航至 QA 自动化
+      if ((key === '3' || code === 'Digit3' || code === 'Numpad3') && actionsRef.current.onNavigateQa) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (import.meta.env?.DEV) {
+          console.log('[Shortcut] 触发快捷键: Super + 3 -> QA 自动化', { superKey: activeSuper });
+        }
+        actionsRef.current.onNavigateQa();
+        return;
+      }
+
       // 3. Super + ,: 打开系统设置
       if (key === ',' || code === 'Comma') {
         e.preventDefault();
@@ -124,6 +137,17 @@ export const useGlobalShortcuts = (actions: ShortcutActions) => {
           console.log('[Shortcut] 触发快捷键: Super + B -> 切换侧边栏', { superKey: activeSuper });
         }
         actionsRef.current.onToggleSidebar?.();
+        return;
+      }
+
+      // 7. Super + R: 唤起快捷工作流执行弹窗
+      if (key === 'r' || code === 'KeyR') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (import.meta.env?.DEV) {
+          console.log('[Shortcut] 触发快捷键: Super + R -> 快捷工作流执行', { superKey: activeSuper });
+        }
+        actionsRef.current.onQuickRunWorkflow?.();
         return;
       }
     };

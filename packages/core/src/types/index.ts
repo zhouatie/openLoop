@@ -27,6 +27,7 @@ export interface NodeConfig {
   
   // Midscene 专用
   testUrl?: string;
+  suiteId?: string;
   instructions?: string[];
   screenshotPath?: string;
   
@@ -228,6 +229,72 @@ export interface OpenLoopSettings {
   autoSnapshot?: boolean;
   shortcutSuperKey?: ShortcutSuperKey;
   [key: string]: any;
+}
+
+export type QaStepType = 'action' | 'assert' | 'waitFor' | 'query';
+
+export interface QaStep {
+  id: string;
+  type: QaStepType;
+  prompt: string;
+  timeoutMs?: number;
+  optional?: boolean;
+}
+
+export interface QaSuite {
+  id: string;
+  name: string;
+  description?: string;
+  targetUrl: string;
+  viewport?: {
+    width: number;
+    height: number;
+    deviceScaleFactor?: number;
+    isMobile?: boolean;
+  };
+  steps: QaStep[];
+  tags?: string[];
+  createdAt: number;
+  updatedAt: number;
+  lastRunStatus?: 'passed' | 'failed' | 'running' | 'untested';
+  lastRunDurationMs?: number;
+  lastRunAt?: number;
+}
+
+export interface StepTimelineRecord {
+  stepIndex: number;
+  stepId?: string;
+  type: QaStepType;
+  prompt: string;
+  status: 'passed' | 'failed' | 'skipped';
+  durationMs: number;
+  screenshotRelPath?: string;
+  screenshotUrl?: string;
+  boundingBox?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  thought?: string;
+  error?: string;
+}
+
+export interface QaRunRecord {
+  id: string;
+  suiteId: string;
+  suiteName: string;
+  taskId?: string;
+  status: 'running' | 'passed' | 'failed';
+  totalSteps: number;
+  passedSteps: number;
+  durationMs: number;
+  timeline: StepTimelineRecord[];
+  reportRelPath?: string;
+  reportUrl?: string;
+  createdAt: number;
+  finishedAt?: number;
+  error?: string;
 }
 
 
