@@ -727,6 +727,46 @@ export class OpenLoopServer {
         return this.sendJson(res, 200, task, reqMeta);
       }
 
+      // Task skip node: /api/tasks/:id/skip-node
+      const taskSkipNodeMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/skip-node$/);
+      if (taskSkipNodeMatch && method === 'POST') {
+        const taskId = taskSkipNodeMatch[1];
+        const body = await this.parseJsonBody(req);
+        const { nodeId } = body;
+        serverLogger.info(
+          `[Tasks:SkipNode] 接收到跳过节点指令: ${taskId}, Node: ${nodeId || '自动判定'}`,
+          { nodeId },
+          { taskId }
+        );
+        try {
+          const task = await this.engine.skipNode(taskId, nodeId);
+          return this.sendJson(res, 200, task, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[Tasks:SkipNode] 跳过节点失败: ${err.message}`, err, { taskId });
+          return this.sendJson(res, 400, { error: err.message }, reqMeta);
+        }
+      }
+
+      // Task retry node: /api/tasks/:id/retry-node
+      const taskRetryNodeMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/retry-node$/);
+      if (taskRetryNodeMatch && method === 'POST') {
+        const taskId = taskRetryNodeMatch[1];
+        const body = await this.parseJsonBody(req);
+        const { nodeId } = body;
+        serverLogger.info(
+          `[Tasks:RetryNode] 接收到单节点重试指令: ${taskId}, Node: ${nodeId || '自动判定'}`,
+          { nodeId },
+          { taskId }
+        );
+        try {
+          const task = await this.engine.retryNode(taskId, nodeId);
+          return this.sendJson(res, 200, task, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[Tasks:RetryNode] 重试节点失败: ${err.message}`, err, { taskId });
+          return this.sendJson(res, 400, { error: err.message }, reqMeta);
+        }
+      }
+
       // Task logs: /api/tasks/:id/logs
       const taskLogsMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/logs$/);
       if (taskLogsMatch && method === 'GET') {

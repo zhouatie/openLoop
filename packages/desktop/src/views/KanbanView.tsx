@@ -18,6 +18,7 @@ import {
   Edit3,
   Clock,
   AlertCircle,
+  SkipForward,
   FileText,
   RefreshCw,
   GitBranch,
@@ -76,11 +77,87 @@ interface ColumnDef {
   dotColor: string;
 }
 
+interface RunningNodeVisual {
+  label: string;
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+  pingColor: string;
+  icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
+}
+
+const getRunningNodeVisual = (type?: string): RunningNodeVisual => {
+  switch (type) {
+    case 'agent':
+      return {
+        label: 'Agent 编码',
+        badgeBg: 'bg-[#f5f3ff]',
+        badgeText: 'text-[#6d28d9]',
+        badgeBorder: 'border-[#ddd6fe]',
+        pingColor: 'bg-[#7c3aed]',
+        icon: Bot,
+      };
+    case 'midscene':
+      return {
+        label: 'UI 自动化',
+        badgeBg: 'bg-[#eff6ff]',
+        badgeText: 'text-[#1d4ed8]',
+        badgeBorder: 'border-[#bfdbfe]',
+        pingColor: 'bg-[#2563eb]',
+        icon: Sparkles,
+      };
+    case 'cli':
+      return {
+        label: 'CLI 脚本',
+        badgeBg: 'bg-[#f4f4f6]',
+        badgeText: 'text-[#4b4b53]',
+        badgeBorder: 'border-[#e3e3e8]',
+        pingColor: 'bg-[#63636b]',
+        icon: Terminal,
+      };
+    case 'stitch-image':
+      return {
+        label: '产物合成',
+        badgeBg: 'bg-[#fdf2f8]',
+        badgeText: 'text-[#be185d]',
+        badgeBorder: 'border-[#fbcfe8]',
+        pingColor: 'bg-[#db2777]',
+        icon: FileImage,
+      };
+    case 'hook':
+      return {
+        label: '事件触发',
+        badgeBg: 'bg-[#fefce8]',
+        badgeText: 'text-[#a16207]',
+        badgeBorder: 'border-[#fef08a]',
+        pingColor: 'bg-[#ca8a04]',
+        icon: Cpu,
+      };
+    case 'qa-approval':
+      return {
+        label: '人工审批',
+        badgeBg: 'bg-[#fff7ed]',
+        badgeText: 'text-[#c2410c]',
+        badgeBorder: 'border-[#ffedd5]',
+        pingColor: 'bg-[#ea580c]',
+        icon: Check,
+      };
+    default:
+      return {
+        label: '自动化工序',
+        badgeBg: 'bg-[#f4f4f7]',
+        badgeText: 'text-[#4f46e5]',
+        badgeBorder: 'border-[#d8d6fb]',
+        pingColor: 'bg-[#4f46e5]',
+        icon: Layers,
+      };
+  }
+};
+
 const COLUMNS: ColumnDef[] = [
   { key: 'inbox', title: 'Inbox', dotColor: 'bg-[#6366f1]' },
   { key: 'backlog', title: '待处理', dotColor: 'bg-[#85858d]' },
-  { key: 'agent_executing', title: 'Agent 编码中', dotColor: 'bg-[#7c3aed]' },
-  { key: 'in_progress', title: '自动化流水线', dotColor: 'bg-[#1d4ed8]' },
+  { key: 'in_progress', title: '执行中', dotColor: 'bg-[#7c3aed]' },
   { key: 'qa_review', title: '待验收', dotColor: 'bg-[#b45309]' },
   { key: 'done', title: '已完成', dotColor: 'bg-[#189a58]' },
 ];
@@ -88,8 +165,8 @@ const COLUMNS: ColumnDef[] = [
 const COLUMN_NAMES: Record<KanbanColumn, string> = {
   inbox: 'Inbox 收集箱',
   backlog: '待处理',
-  agent_executing: 'Agent 编码中',
-  in_progress: '自动化流水线',
+  in_progress: '执行中',
+  agent_executing: '执行中',
   qa_review: '待验收',
   done: '已完成',
 };
@@ -161,6 +238,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   };
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+  const [skippingTaskId, setSkippingTaskId] = useState<string | null>(null);
+  const [retryingNodeKey, setRetryingNodeKey] = useState<string | null>(null);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
 
   const handleCancelTask = async (taskId: string) => {
@@ -620,6 +699,55 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       alert(`启动任务失败: ${e.message}`);
     } finally {
       setRunningTaskId(null);
+    }
+  };
+
+  const handleSkipNode = async (taskId: string, nodeId?: string) => {
+    setSkippingTaskId(taskId);
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanView] 手动跳过节点:', { taskId, nodeId });
+    }
+    try {
+      const updated = await api.skipNode(taskId, nodeId);
+      if (updated && onTaskUpdate) {
+        onTaskUpdate(updated);
+      }
+      if (selectedTask?.id === taskId && updated) {
+        setSelectedTask(updated);
+      }
+      await onRefresh();
+    } catch (e: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 跳过节点失败:', e);
+      }
+      alert(`跳过节点失败: ${e.message}`);
+    } finally {
+      setSkippingTaskId(null);
+    }
+  };
+
+  const handleRetryNode = async (taskId: string, nodeId?: string) => {
+    const key = `${taskId}:${nodeId || ''}`;
+    setRetryingNodeKey(key);
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanView] 仅重试单节点:', { taskId, nodeId });
+    }
+    try {
+      const updated = await api.retryNode(taskId, nodeId);
+      if (updated && onTaskUpdate) {
+        onTaskUpdate(updated);
+      }
+      if (selectedTask?.id === taskId && updated) {
+        setSelectedTask(updated);
+      }
+      await onRefresh();
+    } catch (e: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 重试节点失败:', e);
+      }
+      alert(`重试节点失败: ${e.message}`);
+    } finally {
+      setRetryingNodeKey(null);
     }
   };
 
@@ -1236,14 +1364,19 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         {/* 满高泳道水平容器 */}
         <div className="flex-1 min-h-0 flex gap-3.5 overflow-x-auto pb-1 items-stretch">
             {COLUMNS.map((col) => {
-              const rawTasks = filteredTasks.filter((t) => t.kanbanColumn === col.key);
+              const rawTasks = filteredTasks.filter((t) => {
+                if (col.key === 'in_progress') {
+                  return t.kanbanColumn === 'in_progress' || (t.kanbanColumn as string) === 'agent_executing';
+                }
+                return t.kanbanColumn === col.key;
+              });
               const colRule = columnSortConfig[col.key] || DEFAULT_SORT_RULE;
               const colTasks = sortTasks(rawTasks, colRule);
 
               return (
                 <div
                   key={col.key}
-                  className="w-[280px] shrink-0 h-full bg-[#ebebef] border border-[#e3e3e8] rounded-[10px] flex flex-col min-h-0 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                  className="w-[290px] shrink-0 h-full bg-[#ebebef] border border-[#e3e3e8] rounded-[10px] flex flex-col min-h-0 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
                 >
                   {/* 泳道头 */}
                   <div className="h-[36px] px-3 flex items-center justify-between border-b border-[#e3e3e8] shrink-0 bg-[#ebebef] rounded-t-[10px] relative z-20">
@@ -1565,7 +1698,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </div>
                             )}
 
-                            {/* 失败/驳回任务：克制优雅的错误状态与微型重试胶囊 */}
+                            {/* 失败/驳回任务：克制优雅的错误状态与微型重试/跳过胶囊 */}
                             {task.status === 'failed' && (
                               <div className="my-2 p-1.5 rounded-[6px] bg-[#fdf2f2] border border-[#fbd5d5] flex items-center justify-between gap-1.5">
                                 <div className="min-w-0 flex items-center gap-1 text-[10.5px] text-[#d64545] font-medium truncate">
@@ -1574,17 +1707,32 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                     {failReason}
                                   </span>
                                 </div>
-                                <button
-                                  disabled={runningTaskId === task.id}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRunTask(task.id);
-                                  }}
-                                  className="shrink-0 h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50"
-                                >
-                                  <RotateCcw size={9.5} />
-                                  <span>重试</span>
-                                </button>
+                                <div className="shrink-0 flex items-center gap-1">
+                                  <button
+                                    disabled={skippingTaskId === task.id || runningTaskId === task.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSkipNode(task.id, lastFailedRun?.nodeId);
+                                    }}
+                                    className="h-[20px] px-1.5 rounded-[4px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50"
+                                    title="跳过当前报错节点，继续后续流程或标记完成"
+                                  >
+                                    <SkipForward size={9.5} className="text-[#85858d]" />
+                                    <span>{skippingTaskId === task.id ? '跳过中' : '跳过'}</span>
+                                  </button>
+                                  <button
+                                    disabled={runningTaskId === task.id || skippingTaskId === task.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRunTask(task.id);
+                                    }}
+                                    className="h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50"
+                                    title="重新运行整条流水线"
+                                  >
+                                    <RotateCcw size={9.5} />
+                                    <span>重试</span>
+                                  </button>
+                                </div>
                               </div>
                             )}
 
@@ -1609,28 +1757,57 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </div>
                             )}
 
-                            {task.status === 'running' && (currentNodeMeta || currentNode) && (
-                              <div className="mb-2 px-2 py-1 rounded-[6px] bg-[#eeedfd] border border-[#d8d6fb] flex items-center justify-between gap-1.5">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-ping inline-block shrink-0" />
-                                  <span className="text-[10.5px] text-[#4f46e5] font-medium truncate">
-                                    正在执行: {currentNodeMeta?.name || currentNode?.name}
-                                  </span>
+                            {task.status === 'running' && (currentNodeMeta || currentNode) && (() => {
+                              const activeType = currentNode?.type || currentNodeMeta?.type;
+                              const visual = getRunningNodeVisual(activeType);
+                              const IconComp = visual.icon;
+                              const activeName = currentNodeMeta?.name || currentNode?.name || '自动化工序执行中';
+
+                              return (
+                                <div className={`mb-2 p-2 rounded-[7px] border transition-all ${visual.badgeBg} ${visual.badgeBorder}`}>
+                                  <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <span className="relative flex h-2 w-2 shrink-0">
+                                        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${visual.pingColor}`} />
+                                        <span className={`relative inline-flex rounded-full h-2 w-2 ${visual.pingColor}`} />
+                                      </span>
+                                      <span className={`text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/90 border ${visual.badgeBorder} ${visual.badgeText} flex items-center gap-1 shrink-0`}>
+                                        <IconComp size={9.5} />
+                                        <span>{visual.label}</span>
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onOpenTaskLogs(task.id, task.currentNodeId);
+                                        }}
+                                        className="h-[19px] px-1.5 rounded-[4px] bg-white/90 hover:bg-white text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all shadow-xs"
+                                        title="查看实时运行终端"
+                                      >
+                                        <Terminal size={8.5} className="text-[#85858d]" />
+                                        <span>终端</span>
+                                      </button>
+                                      <button
+                                        disabled={cancellingTaskId === task.id}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleCancelTask(task.id);
+                                        }}
+                                        className="h-[19px] px-1.5 rounded-[4px] bg-white/90 hover:bg-[#fee2e2] text-[#85858d] hover:text-[#d64545] border border-[#e3e3e8] hover:border-[#fecaca] text-[9.5px] font-medium flex items-center gap-1 transition-all shadow-xs"
+                                        title="终止任务"
+                                      >
+                                        <Square size={8} className="fill-current" />
+                                        <span>{cancellingTaskId === task.id ? '终止中' : '终止'}</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="text-[11px] font-medium text-[#1c1c21] truncate flex items-center gap-1" title={activeName}>
+                                    <span className="truncate">{activeName}</span>
+                                  </div>
                                 </div>
-                                <button
-                                  disabled={cancellingTaskId === task.id}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleCancelTask(task.id);
-                                  }}
-                                  className="shrink-0 h-[19px] px-1.5 rounded-[4px] bg-white hover:bg-[#fee2e2] text-[#85858d] hover:text-[#d64545] border border-[#d8d6fb] hover:border-[#fecaca] text-[10px] font-medium flex items-center gap-1 transition-all"
-                                  title="终止任务"
-                                >
-                                  <Square size={8.5} className="fill-current" />
-                                  <span>{cancellingTaskId === task.id ? '终止中' : '终止'}</span>
-                                </button>
-                              </div>
-                            )}
+                              );
+                            })()}
 
                             {task.status === 'waiting_approval' && (
                               <div className="my-2 p-2 rounded-[7px] bg-[#f9f9fb] border border-[#e3e3e8] space-y-1.5">
@@ -2078,6 +2255,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       onPreviewArtifact={(art) => setPreviewArtifact(art)}
                       onApprove={(taskId, approved, feedback) => handleApprove(taskId, approved, feedback)}
                       isApproving={approvingId === selectedTask.id}
+                      onSkipNode={(taskId, nodeId) => handleSkipNode(taskId, nodeId)}
+                      onRetryNode={(taskId, nodeId) => handleRetryNode(taskId, nodeId)}
+                      isSkipping={skippingTaskId === selectedTask.id}
+                      isRetryingNode={retryingNodeKey?.startsWith(selectedTask.id)}
                     />
                   </div>
                 </div>
@@ -2127,14 +2308,34 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   )}
 
                   {selectedTask.status === 'failed' && (
-                    <button
-                      disabled={runningTaskId === selectedTask.id}
-                      onClick={() => handleRunTask(selectedTask.id)}
-                      className="w-full h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm"
-                    >
-                      <RotateCcw size={13} strokeWidth={2.4} />
-                      <span>{runningTaskId === selectedTask.id ? '正在重新启动...' : '重新执行此任务'}</span>
-                    </button>
+                    <div className="space-y-1.5">
+                      <div className="flex gap-2">
+                        <button
+                          disabled={skippingTaskId === selectedTask.id}
+                          onClick={() => handleSkipNode(selectedTask.id)}
+                          className="flex-1 h-[32px] rounded-[7px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[#1c1c21] text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                        >
+                          <SkipForward size={13} strokeWidth={2} className="text-[#85858d]" />
+                          <span>{skippingTaskId === selectedTask.id ? '正在跳过...' : '跳过此失败节点'}</span>
+                        </button>
+                        <button
+                          disabled={retryingNodeKey === `${selectedTask.id}:`}
+                          onClick={() => handleRetryNode(selectedTask.id)}
+                          className="flex-1 h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                        >
+                          <RotateCcw size={13} strokeWidth={2.4} />
+                          <span>仅重试此节点</span>
+                        </button>
+                      </div>
+                      <button
+                        disabled={runningTaskId === selectedTask.id}
+                        onClick={() => handleRunTask(selectedTask.id)}
+                        className="w-full h-[26px] rounded-[6px] border border-[#e3e3e8] bg-transparent hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#1c1c21] text-[11px] font-medium flex items-center justify-center gap-1 transition-all"
+                      >
+                        <Play size={11} />
+                        <span>重新执行整条流水线</span>
+                      </button>
+                    </div>
                   )}
 
                   {selectedTask.status === 'cancelled' && (

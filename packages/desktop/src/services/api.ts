@@ -324,6 +324,28 @@ export class DesktopApiService {
     });
   }
 
+  async skipNode(id: string, nodeId?: string): Promise<Task> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 请求跳过任务 [${id}] 的节点:`, nodeId || '自动判定');
+    }
+    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/skip-node`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nodeId }),
+    });
+  }
+
+  async retryNode(id: string, nodeId?: string): Promise<Task> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 请求单独重试任务 [${id}] 的节点:`, nodeId || '自动判定');
+    }
+    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/retry-node`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nodeId }),
+    });
+  }
+
   async getTaskLogs(id: string): Promise<LogEntry[]> {
     return requestJson<LogEntry[]>(`${BASE_URL}/api/tasks/${id}/logs`);
   }

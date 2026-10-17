@@ -41,6 +41,10 @@ interface NodeExecutionTimelineProps {
   onPreviewArtifact?: (artifact: { name: string; type: string; path: string }) => void;
   onApprove?: (taskId: string, approved: boolean, feedback?: string) => void;
   isApproving?: boolean;
+  onSkipNode?: (taskId: string, nodeId: string) => void;
+  onRetryNode?: (taskId: string, nodeId: string) => void;
+  isSkipping?: boolean;
+  isRetryingNode?: boolean;
 }
 
 interface TimelineItem {
@@ -66,6 +70,10 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
   onPreviewArtifact,
   onApprove,
   isApproving = false,
+  onSkipNode,
+  onRetryNode,
+  isSkipping = false,
+  isRetryingNode = false,
 }) => {
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -475,6 +483,30 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                       className="flex items-center gap-1 shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {/* 失败节点微型快捷操作 */}
+                      {item.status === 'failed' && onSkipNode && (
+                        <button
+                          disabled={isSkipping}
+                          onClick={() => onSkipNode(task.id, item.id)}
+                          className="h-[21px] px-1.5 rounded-[4px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[10px] font-medium flex items-center gap-1 transition-colors shadow-none disabled:opacity-50"
+                          title="跳过此节点继续后续流程或标记完成"
+                        >
+                          <SkipForward size={10} className="text-[#85858d]" />
+                          <span>跳过</span>
+                        </button>
+                      )}
+                      {item.status === 'failed' && onRetryNode && (
+                        <button
+                          disabled={isRetryingNode}
+                          onClick={() => onRetryNode(task.id, item.id)}
+                          className="h-[21px] px-1.5 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-colors shadow-none active:scale-95 disabled:opacity-50"
+                          title="仅单独重试此节点"
+                        >
+                          <RotateCcw size={10} />
+                          <span>重试</span>
+                        </button>
+                      )}
+
                       {/* 查看节点日志 */}
                       <button
                         onClick={() => {
@@ -562,6 +594,28 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                             <Terminal size={10} />
                             <span>查看报错终端</span>
                           </button>
+                          {onSkipNode && (
+                            <button
+                              disabled={isSkipping}
+                              onClick={() => onSkipNode(task.id, item.id)}
+                              className="h-[20px] px-2 rounded-[4px] bg-white text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] hover:bg-[#f1f1f4] text-[10px] font-medium flex items-center gap-1 shadow-sm transition-all disabled:opacity-50"
+                              title="跳过此节点继续后续流程"
+                            >
+                              <SkipForward size={10} />
+                              <span>{isSkipping ? '跳过中...' : '跳过此步'}</span>
+                            </button>
+                          )}
+                          {onRetryNode && (
+                            <button
+                              disabled={isRetryingNode}
+                              onClick={() => onRetryNode(task.id, item.id)}
+                              className="h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 shadow-sm transition-all active:scale-95 disabled:opacity-50"
+                              title="仅重新执行此节点"
+                            >
+                              <RotateCcw size={10} />
+                              <span>{isRetryingNode ? '重试中...' : '仅重试此步'}</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}

@@ -334,6 +334,46 @@ taskCmd
     }
   });
 
+taskCmd
+  .command('skip <id> [nodeId]')
+  .description('跳过任务的指定节点（默认自动匹配报错节点）并驱动下游流转')
+  .action(async (id, nodeId) => {
+    try {
+      let task;
+      try {
+        task = await client.skipNode(id, nodeId);
+      } catch {
+        const store = new Store();
+        const engine = new DagEngine(store);
+        task = await engine.skipNode(id, nodeId);
+      }
+      console.log(`\x1b[32m✔\x1b[0m 任务 ${id} 节点跳过成功`);
+      console.log(`当前任务状态: ${task.status}, 看板泳道: ${task.kanbanColumn}`);
+    } catch (err: any) {
+      console.error(`\x1b[31m跳过节点失败:\x1b[0m ${err.message}`);
+    }
+  });
+
+taskCmd
+  .command('retry-node <id> [nodeId]')
+  .description('单独重试任务的指定节点（默认自动匹配报错节点）')
+  .action(async (id, nodeId) => {
+    try {
+      let task;
+      try {
+        task = await client.retryNode(id, nodeId);
+      } catch {
+        const store = new Store();
+        const engine = new DagEngine(store);
+        task = await engine.retryNode(id, nodeId);
+      }
+      console.log(`\x1b[32m✔\x1b[0m 任务 ${id} 节点已重新启动调度`);
+      console.log(`当前任务状态: ${task.status}, 看板泳道: ${task.kanbanColumn}`);
+    } catch (err: any) {
+      console.error(`\x1b[31m重试节点失败:\x1b[0m ${err.message}`);
+    }
+  });
+
 // 插件管理
 const pluginCmd = program.command('plugin').description('插件扩展管理');
 

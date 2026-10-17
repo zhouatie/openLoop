@@ -124,10 +124,8 @@ export class DagEngine extends EventEmitter {
   ): Promise<void> {
     task.currentNodeId = node.id;
 
-    // 动态调整看板泳道以反映当前流程阶段
-    if (node.type === 'agent') {
-      task.kanbanColumn = 'agent_executing';
-    } else if (node.type === 'qa-approval' || node.type === 'midscene') {
+    // 动态调整看板泳道以反映当前流程阶段：人工审批节点进入待验收，其他运行中节点统一处于执行中泳道
+    if (node.type === 'qa-approval') {
       task.kanbanColumn = 'qa_review';
     } else {
       task.kanbanColumn = 'in_progress';
@@ -294,23 +292,40 @@ export class DagEngine extends EventEmitter {
     );
 
     if (outgoingEdges.length === 0) {
-      // 检查是否所有节点都已经完成
+      // 检查是否所有节点都已经完成 (成功或跳过均视为达标完成)
       const allCompleted = workflow.nodes.every((n) => {
         const nr = task.nodeRuns[n.id];
-        return nr && nr.status === 'success';
+        return nr && (nr.status === 'success' || nr.status === 'skipped');
       });
 
       if (allCompleted) {
         task.status = 'completed';
         task.kanbanColumn = 'done';
+        this.runningTasks.delete(task.id);
+        this.abortControllers.delete(task.id);
+        this.activeProcesses.delete(task.id);
         this.store.saveTask(task);
         this.emit('task:update', task);
         dagLogger.info(
-          `工作流 [${workflow.name}] 所有节点已成功执行完成，任务标记为 COMPLETED`,
+          `工作流 [${workflow.name}] 所有节点已成功执行或跳过完成，任务标记为 COMPLETED`,
           undefined,
           { taskId: task.id }
         );
-        this.log(task.id, 'SYSTEM', 'system', `========== 工作流全部节点已成功执行完成！ ==========`);
+        this.log(task.id, 'SYSTEM', 'system', `========== 工作流全部节点已成功完成或跳过！ ==========`);
+      } else {
+        // 如果当前分支终结但仍有其他分支尚未完成，综合判定当前任务状态
+        const runs = Object.values(task.nodeRuns || {});
+        const hasFailed = runs.some((r) => r.status === 'failed');
+        const hasWaiting = runs.some((r) => r.status === 'waiting_approval');
+        if (hasFailed) {
+          task.status = 'failed';
+          task.kanbanColumn = 'backlog';
+        } else if (hasWaiting) {
+          task.status = 'waiting_approval';
+          task.kanbanColumn = 'qa_review';
+        }
+        this.store.saveTask(task);
+        this.emit('task:update', task);
       }
       return;
     }
@@ -319,16 +334,16 @@ export class DagEngine extends EventEmitter {
       const targetNode = workflow.nodes.find((n) => n.id === edge.target);
       if (!targetNode) continue;
 
-      // 检查 targetNode 的所有入边节点是否都已执行成功
+      // 检查 targetNode 的所有入边节点是否都已执行成功或跳过
       const upstreamEdges = workflow.edges.filter((e) => e.target === targetNode.id);
       const allUpstreamSuccess = upstreamEdges.every((e) => {
         const nr = task.nodeRuns[e.source];
-        return nr && nr.status === 'success';
+        return nr && (nr.status === 'success' || nr.status === 'skipped');
       });
 
       if (allUpstreamSuccess) {
         dagLogger.info(
-          `下游节点 [${targetNode.name}] 前置所有依赖节点已成功完成，启动调度`,
+          `下游节点 [${targetNode.name}] 前置所有依赖节点已成功完成或跳过，启动调度`,
           undefined,
           { taskId: task.id, nodeId: targetNode.id }
         );
@@ -411,6 +426,162 @@ export class DagEngine extends EventEmitter {
 
     // 继续调度下游
     await this.triggerNextNodes(task, workflow, currentNodeId);
+    return task;
+  }
+
+  /**
+   * 手动跳过指定节点并继续执行下游
+   */
+  async skipNode(taskId: string, targetNodeId?: string): Promise<Task> {
+    const task = this.store.getTask(taskId);
+    if (!task) {
+      dagLogger.error(`跳过节点失败: Task ${taskId} 未找到`, undefined, { taskId });
+      throw new Error(`Task ${taskId} not found`);
+    }
+
+    const workflow = this.store.getWorkflow(task.workflowId);
+    if (!workflow) {
+      dagLogger.error(`跳过节点失败: Workflow ${task.workflowId} 未找到`, undefined, { taskId });
+      throw new Error(`Workflow ${task.workflowId} not found`);
+    }
+
+    let nodeId = targetNodeId;
+    if (!nodeId) {
+      if (task.currentNodeId) {
+        nodeId = task.currentNodeId;
+      } else {
+        const runs = Object.values(task.nodeRuns || {});
+        const failedRun = runs.reverse().find((r) => r.status === 'failed');
+        if (failedRun) {
+          nodeId = failedRun.nodeId;
+        }
+      }
+    }
+
+    if (!nodeId) {
+      throw new Error(`无法确定要跳过的节点 ID (Task: ${taskId})`);
+    }
+
+    const node = workflow.nodes.find((n) => n.id === nodeId);
+    if (!node) {
+      throw new Error(`工作流中未找到节点 [${nodeId}]`);
+    }
+
+    dagLogger.warn(
+      `收到跳过节点指令，任务: ${taskId}, 节点: [${node.name}] (${nodeId})`,
+      undefined,
+      { taskId, nodeId }
+    );
+    this.log(task.id, nodeId, 'system', `[系统干预] 用户手动跳过了节点 [${node.name}]`);
+
+    const now = Date.now();
+    const existingRun = task.nodeRuns[nodeId];
+    if (existingRun) {
+      existingRun.status = 'skipped';
+      existingRun.finishedAt = now;
+      delete existingRun.error;
+    } else {
+      task.nodeRuns[nodeId] = {
+        nodeId,
+        status: 'skipped',
+        startedAt: now,
+        finishedAt: now,
+      };
+    }
+
+    // 确保任务执行运行时上下文就绪
+    if (!this.runningTasks.has(taskId)) {
+      this.runningTasks.add(taskId);
+    }
+    if (!this.abortControllers.has(taskId)) {
+      this.abortControllers.set(taskId, new AbortController());
+    }
+    if (!this.activeProcesses.has(taskId)) {
+      this.activeProcesses.set(taskId, new Set());
+    }
+
+    task.status = 'running';
+    task.kanbanColumn = 'in_progress';
+    this.store.saveTask(task);
+    this.emit('task:update', task);
+    this.emit('node:status', { taskId: task.id, nodeId, status: 'skipped' });
+
+    // 触发下游节点流转
+    await this.triggerNextNodes(task, workflow, nodeId);
+
+    return this.store.getTask(taskId) || task;
+  }
+
+  /**
+   * 单独重试指定失败节点（无需从头重跑前序昂贵的 Agent 节点）
+   */
+  async retryNode(taskId: string, targetNodeId?: string): Promise<Task> {
+    const task = this.store.getTask(taskId);
+    if (!task) {
+      dagLogger.error(`重试节点失败: Task ${taskId} 未找到`, undefined, { taskId });
+      throw new Error(`Task ${taskId} not found`);
+    }
+
+    const workflow = this.store.getWorkflow(task.workflowId);
+    if (!workflow) {
+      dagLogger.error(`重试节点失败: Workflow ${task.workflowId} 未找到`, undefined, { taskId });
+      throw new Error(`Workflow ${task.workflowId} not found`);
+    }
+
+    let nodeId = targetNodeId;
+    if (!nodeId) {
+      if (task.currentNodeId) {
+        nodeId = task.currentNodeId;
+      } else {
+        const runs = Object.values(task.nodeRuns || {});
+        const failedRun = runs.reverse().find((r) => r.status === 'failed');
+        if (failedRun) {
+          nodeId = failedRun.nodeId;
+        }
+      }
+    }
+
+    if (!nodeId) {
+      throw new Error(`无法确定要重试的节点 ID (Task: ${taskId})`);
+    }
+
+    const node = workflow.nodes.find((n) => n.id === nodeId);
+    if (!node) {
+      throw new Error(`工作流中未找到节点 [${nodeId}]`);
+    }
+
+    dagLogger.info(
+      `收到单节点重试指令，任务: ${taskId}, 节点: [${node.name}] (${nodeId})`,
+      undefined,
+      { taskId, nodeId }
+    );
+    this.log(task.id, nodeId, 'system', `[系统干预] 用户手动重试节点 [${node.name}]`);
+
+    if (task.nodeRuns[nodeId]) {
+      task.nodeRuns[nodeId].status = 'pending';
+      delete task.nodeRuns[nodeId].error;
+      delete task.nodeRuns[nodeId].exitCode;
+    }
+
+    if (!this.runningTasks.has(taskId)) {
+      this.runningTasks.add(taskId);
+    }
+    if (!this.abortControllers.has(taskId)) {
+      this.abortControllers.set(taskId, new AbortController());
+    }
+    if (!this.activeProcesses.has(taskId)) {
+      this.activeProcesses.set(taskId, new Set());
+    }
+
+    task.status = 'running';
+    this.store.saveTask(task);
+    this.emit('task:update', task);
+
+    // 异步触发单节点调度
+    this.scheduleNode(task, workflow, node).catch((err) => {
+      dagLogger.error(`重试节点 [${node.name}] 调度异常: ${err.message}`, err, { taskId, nodeId });
+    });
+
     return task;
   }
 
