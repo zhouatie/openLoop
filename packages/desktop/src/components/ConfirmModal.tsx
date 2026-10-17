@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Loader2 } from 'lucide-react';
+import React, { useEffect, useRef, useCallback } from 'react';
+import { Loader2, X } from 'lucide-react';
 
 export type ConfirmVariant = 'danger' | 'warning' | 'info' | 'primary';
 
@@ -9,6 +9,7 @@ export interface ConfirmModalProps {
   description?: React.ReactNode;
   targetName?: string;
   targetTag?: string;
+  targetDescription?: React.ReactNode;
   confirmText?: string;
   cancelText?: string;
   variant?: ConfirmVariant;
@@ -23,9 +24,9 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   description,
   targetName,
   targetTag,
+  targetDescription,
   confirmText = '确认',
   cancelText = '取消',
-  variant = 'danger',
   loading = false,
   onConfirm,
   onClose,
@@ -58,35 +59,56 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
       <div
         ref={modalRef}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[360px] bg-white rounded-[12px] border border-[#e3e3e8] shadow-[0_20px_48px_rgba(20,22,30,0.16)] p-5 animate-in zoom-in-95 duration-150 -mt-12"
+        className="w-full max-w-[380px] bg-white rounded-[12px] border border-[#e3e3e8] shadow-[0_20px_48px_rgba(20,22,30,0.16)] p-5 animate-in zoom-in-95 duration-150 -mt-12"
       >
-        {/* 对话框标题 */}
-        <h3 className="text-[14px] font-semibold text-[#1c1c21] tracking-tight leading-snug">
-          {title}
-        </h3>
+        {/* 顶部标题栏：统一应用主题排版 + 右侧轻量关闭按钮 */}
+        <div className="flex items-center justify-between">
+          <h3 className="text-[14px] font-semibold text-[#1c1c21] tracking-tight leading-snug">
+            {title}
+          </h3>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={onClose}
+            className="w-5 h-5 rounded-[4px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-colors -mr-1 -mt-0.5"
+            title="关闭 (Esc)"
+          >
+            <X size={14} />
+          </button>
+        </div>
 
-        {/* 目标对象展示胶囊卡片（如有） */}
-        {targetName && (
-          <div className="mt-3 px-3 py-2 rounded-[7px] bg-[#f9f9fb] border border-[#ececf0] flex items-center justify-between gap-2">
-            <span className="text-[12px] font-medium text-[#1c1c21] truncate min-w-0">
-              {targetName}
-            </span>
+        {/* 目标对象展示卡片：极简纯粹，完整展示内容，优雅自适应折行 */}
+        {(targetName || targetTag || targetDescription) && (
+          <div className="mt-3.5 px-3.5 py-2.5 rounded-[8px] bg-[#f9f9fb] border border-[#ececf0] text-left">
+            {targetName && (
+              <div
+                className="text-[12.5px] font-medium text-[#1c1c21] leading-relaxed break-words select-text max-h-[140px] overflow-y-auto"
+                title={typeof targetName === 'string' ? targetName : undefined}
+              >
+                {targetName}
+              </div>
+            )}
+            {targetDescription && (
+              <div className="text-[11.5px] text-[#63636b] mt-1 leading-relaxed break-words select-text">
+                {targetDescription}
+              </div>
+            )}
             {targetTag && (
-              <span className="text-[10px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1.5 py-[0.5px] rounded shrink-0">
+              <div className="text-[10px] font-mono text-[#85858d] mt-1 select-all">
                 {targetTag}
-              </span>
+              </div>
             )}
           </div>
         )}
 
         {/* 辅助说明描述 */}
         {description && (
-          <div className="text-[12px] text-[#63636b] mt-2.5 leading-relaxed break-words">
+          <div className="text-[12px] text-[#63636b] mt-3 leading-relaxed break-words">
             {description}
           </div>
         )}
 
-        {/* 底部按钮栏：100% 统一主题色，无生硬分割线 */}
+        {/* 底部按钮栏：严格统一当前应用主题色 (#1c1c21) */}
         <div className="mt-5 flex items-center justify-end gap-2">
           <button
             type="button"
@@ -116,6 +138,7 @@ export interface ConfirmOptions {
   description?: React.ReactNode;
   targetName?: string;
   targetTag?: string;
+  targetDescription?: React.ReactNode;
   confirmText?: string;
   cancelText?: string;
   variant?: ConfirmVariant;
@@ -168,6 +191,7 @@ export function useConfirmModal() {
       description={state.options.description}
       targetName={state.options.targetName}
       targetTag={state.options.targetTag}
+      targetDescription={state.options.targetDescription}
       confirmText={state.options.confirmText}
       cancelText={state.options.cancelText}
       variant={state.options.variant}

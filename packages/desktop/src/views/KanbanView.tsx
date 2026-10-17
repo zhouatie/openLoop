@@ -705,6 +705,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   const handleConfirmDelete = async () => {
     if (!taskToDelete) return;
+    if (import.meta.env?.DEV) {
+      console.log('[Kanban:TaskDelete] 确认删除任务:', taskToDelete.id, taskToDelete.title);
+    }
     setIsDeleting(true);
     try {
       await api.deleteTask(taskToDelete.id);
@@ -2630,7 +2633,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         isOpen={!!taskToDelete}
         title="删除任务"
         targetName={taskToDelete?.title}
-        targetTag={taskToDelete?.id}
         description="删除后此任务的所有执行日志与节点时序历史将被彻底清除，此操作不可恢复。"
         confirmText="彻底删除"
         cancelText="取消"
