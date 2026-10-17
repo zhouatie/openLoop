@@ -108,3 +108,68 @@ button {
 .react-flow__controls-button:hover {
   background: var(--pill);
 }
+
+/* ==========================================================================
+   Agent Markdown 与极简深色代码块样式 (openLoop Design System)
+   ========================================================================== */
+
+.openloop-markdown {
+  word-break: break-word;
+}
+
+/* 语法高亮 Token 配色 (One Dark / VS Code 雅致深色质感) */
+.openloop-code-dark .token.comment,
+.openloop-code-dark .token.prolog,
+.openloop-code-dark .token.doctype,
+.openloop-code-dark .token.cdata {
+  color: #636d83;
+  font-style: italic;
+}
+
+.openloop-code-dark .token.punctuation {
+  color: #abb2bf;
+}
+
+.openloop-code-dark .token.property,
+.openloop-code-dark .token.tag,
+.openloop-code-dark .token.boolean,
+.openloop-code-dark .token.number,
+.openloop-code-dark .token.constant,
+.openloop-code-dark .token.symbol,
+.openloop-code-dark .token.deleted {
+  color: #e06c75;
+}
+
+.openloop-code-dark .token.selector,
+.openloop-code-dark .token.attr-name,
+.openloop-code-dark .token.string,
+.openloop-code-dark .token.char,
+.openloop-code-dark .token.builtin,
+.openloop-code-dark .token.inserted {
+  color: #98c379;
+}
+
+.openloop-code-dark .token.operator,
+.openloop-code-dark .token.entity,
+.openloop-code-dark .token.url {
+  color: #56b6c2;
+}
+
+.openloop-code-dark .token.atrule,
+.openloop-code-dark .token.attr-value,
+.openloop-code-dark .token.keyword {
+  color: #c678dd;
+  font-weight: 500;
+}
+
+.openloop-code-dark .token.function,
+.openloop-code-dark .token.class-name {
+  color: #61afef;
+}
+
+.openloop-code-dark .token.regex,
+.openloop-code-dark .token.important,
+.openloop-code-dark .token.variable {
+  color: #d19a66;
+}
+

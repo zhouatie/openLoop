@@ -48,6 +48,12 @@ import {
   Edit3,
   Loader2,
   Workflow,
+  Compass,
+  GitBranch,
+  Eye,
+  CheckCheck,
+  Minimize2,
+  Maximize2,
 } from 'lucide-react';
 import {
   WorkflowDefinition,
@@ -60,14 +66,16 @@ import { api } from '../services/api';
 import { layoutWorkflowDag } from '../utils/dagLayout';
 import { EditWorkflowModal } from '../components/EditWorkflowModal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { AgentMarkdown } from '../components/AgentMarkdown';
 
 // ==========================================
-// 1. 自定义节点外观（极简高质感 + 智能体生成发光）
+// 1. 自定义节点外观（极简高质感 + 智能体生成发光 + 幽灵预演态）
 // ==========================================
 const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
   const nodeData = data as any;
   const type: NodeType = nodeData.type || 'cli';
   const isNew = Boolean(nodeData.isNew);
+  const isGhost = Boolean(nodeData.isGhost);
 
   const typeConfig: Record<
     NodeType,
@@ -75,43 +83,43 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
   > = {
     agent: {
       label: 'Agent 编码',
-      icon: <Bot size={13} />,
+      icon: <Bot size={11} />,
       bg: 'bg-[#eeedfd]',
       text: 'text-[#4f46e5]',
     },
     hook: {
       label: 'Hook 触发',
-      icon: <Zap size={13} />,
+      icon: <Zap size={11} />,
       bg: 'bg-[#fbf0df]',
       text: 'text-[#b45309]',
     },
     midscene: {
       label: 'Midscene 测试',
-      icon: <Target size={13} />,
+      icon: <Target size={11} />,
       bg: 'bg-[#e4f6ec]',
       text: 'text-[#189a58]',
     },
     'stitch-image': {
       label: '截图拼接动图',
-      icon: <FileVideo size={13} />,
+      icon: <FileVideo size={11} />,
       bg: 'bg-[#eff6ff]',
       text: 'text-[#1d4ed8]',
     },
     'qa-approval': {
       label: 'QA 审核验收',
-      icon: <CheckSquare size={13} />,
+      icon: <CheckSquare size={11} />,
       bg: 'bg-[#fbf0df]',
       text: 'text-[#b45309]',
     },
     cli: {
       label: 'CLI 脚本',
-      icon: <Terminal size={13} />,
+      icon: <Terminal size={11} />,
       bg: 'bg-[#f1f1f4]',
       text: 'text-[#4b4b53]',
     },
     custom: {
       label: '插件扩展',
-      icon: <Sparkles size={13} />,
+      icon: <Sparkles size={11} />,
       bg: 'bg-[#fdf2f8]',
       text: 'text-[#db2777]',
     },
@@ -125,7 +133,7 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
     if (isGit) {
       return {
         label: 'Git 提交',
-        icon: <GitCommit size={13} />,
+        icon: <GitCommit size={11} />,
         bg: 'bg-[#1c1c21] text-white',
         text: 'text-[#1c1c21]',
       };
@@ -138,7 +146,7 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
     if (isDeploy) {
       return {
         label: '应用部署',
-        icon: <Rocket size={13} />,
+        icon: <Rocket size={11} />,
         bg: 'bg-[#0f172a] text-[#38bdf8]',
         text: 'text-[#0f172a]',
       };
@@ -148,42 +156,51 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
 
   return (
     <div
-      className={`w-60 rounded-[8px] bg-white border p-3 transition-all relative ${
-        selected
-          ? 'border-[#4f46e5] shadow-[0_0_0_2px_rgba(79,70,229,0.2),0_4px_12px_rgba(0,0,0,0.08)]'
+      className={`w-[190px] rounded-[7px] px-2.5 py-2 transition-all relative ${
+        isGhost
+          ? 'border-2 border-dashed border-[#8b5cf6] bg-[#faf8ff] ring-3 ring-[#8b5cf6]/20 shadow-[0_0_18px_rgba(139,92,246,0.25)] animate-pulse'
+          : selected
+          ? 'border-[#4f46e5] bg-white shadow-[0_0_0_2px_rgba(79,70,229,0.2),0_4px_12px_rgba(0,0,0,0.08)]'
           : isNew
-          ? 'border-[#6366f1] ring-2 ring-[#6366f1]/40 shadow-[0_0_16px_rgba(99,102,241,0.25)]'
-          : 'border-[#e3e3e8] shadow-[0_1px_2px_rgba(0,0,0,0.06)] hover:border-[#b9b9c2]'
+          ? 'border-[#6366f1] bg-white ring-2 ring-[#6366f1]/40 shadow-[0_0_14px_rgba(99,102,241,0.2)]'
+          : 'border-[#e3e3e8] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:border-[#b9b9c2]'
       }`}
     >
       <Handle
         type="target"
-        position={Position.Left}
-        className="w-2.5 h-2.5 bg-[#4f46e5] border-2 border-white"
+        position={Position.Top}
+        className={`w-2 h-2 border-[1.5px] border-white ${isGhost ? 'bg-[#8b5cf6]' : 'bg-[#4f46e5]'}`}
       />
 
-      <div className="flex items-center justify-between mb-1.5">
+      <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-1.5">
-          <span className={`p-1 rounded-[4px] ${currentConfig.bg} ${currentConfig.text}`}>
+          <span className={`p-0.5 rounded-[3px] ${currentConfig.bg} ${currentConfig.text}`}>
             {currentConfig.icon}
           </span>
-          <span className={`text-[10px] font-semibold tracking-wide ${currentConfig.text}`}>
+          <span className={`text-[9.5px] font-semibold tracking-wide ${currentConfig.text}`}>
             {currentConfig.label}
           </span>
         </div>
         <div className="flex items-center gap-1">
-          {isNew && (
-            <span className="text-[9px] px-1 py-[1px] rounded bg-[#eeedfd] text-[#4f46e5] font-medium scale-95">
-              AI生成
+          {isGhost ? (
+            <span className="flex items-center gap-0.5 text-[8.5px] px-1.5 py-[0.5px] rounded-full bg-[#f3e8ff] text-[#7c3aed] font-medium border border-[#d8b4fe]">
+              <span className="w-1 h-1 rounded-full bg-[#7c3aed] animate-ping" />
+              AI预演
             </span>
-          )}
-          <span className="text-[9.5px] font-mono text-[#85858d]">{nodeData.id}</span>
+          ) : isNew ? (
+            <span className="text-[8.5px] px-1 py-[0.5px] rounded bg-[#eeedfd] text-[#4f46e5] font-medium scale-95">
+              已生效
+            </span>
+          ) : null}
+          <span className="text-[9px] font-mono text-[#85858d]">{nodeData.id}</span>
         </div>
       </div>
 
-      <div className="text-[12.5px] font-medium text-[#1c1c21] truncate">{nodeData.name}</div>
+      <div className="text-[11.5px] font-medium text-[#1c1c21] truncate leading-tight">{nodeData.name}</div>
 
-      <div className="mt-1.5 text-[10px] text-[#85858d] font-mono bg-[#f9f9fb] border border-[#ececf0] px-2 py-1 rounded-[4px] truncate">
+      <div className={`mt-1 text-[9px] font-mono px-1.5 py-0.5 rounded-[3px] truncate border ${
+        isGhost ? 'bg-[#f5f3ff] text-[#6b21a8] border-[#e9d5ff]' : 'text-[#85858d] bg-[#f9f9fb] border-[#ececf0]'
+      }`}>
         {type === 'agent' && (nodeData.config?.prompt || 'Agent 自动实现需求')}
         {type === 'midscene' && (nodeData.config?.testUrl || '智能断言与多步截屏')}
         {type === 'stitch-image' && (nodeData.config?.outputFile || '生成动图 preview.gif')}
@@ -194,8 +211,8 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
 
       <Handle
         type="source"
-        position={Position.Right}
-        className="w-2.5 h-2.5 bg-[#4f46e5] border-2 border-white"
+        position={Position.Bottom}
+        className={`w-2 h-2 border-[1.5px] border-white ${isGhost ? 'bg-[#8b5cf6]' : 'bg-[#4f46e5]'}`}
       />
     </div>
   );
@@ -258,15 +275,53 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
 
-  // 右侧双模工作台状态：'copilot' (AI助手) | 'inspector' (节点属性)
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
-  const [rightPanelTab, setRightPanelTab] = useState<'copilot' | 'inspector'>('copilot');
+  // 右侧边栏展开与标签页状态
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<'copilot' | 'inspector'>('copilot');
+
+  // 幽灵节点方案预演机制 (Ghost Preview Pipeline)
+  const [ghostPreview, setGhostPreview] = useState<{
+    active: boolean;
+    originalNodes: Node[];
+    originalEdges: Edge[];
+    actionPayload: WorkflowActionPayload;
+    messageId?: string;
+    summary: string;
+  } | null>(null);
+
+  // 保证闭包与异步回调永远能读取到画布真实最新节点与配置，杜绝 stale state
+  const nodesRef = useRef<Node[]>(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef<Edge[]>(edges);
+  edgesRef.current = edges;
+  const ghostPreviewRef = useRef<typeof ghostPreview>(ghostPreview);
+  ghostPreviewRef.current = ghostPreview;
+  const activeWorkflowRef = useRef<typeof activeWorkflow>(activeWorkflow);
+  activeWorkflowRef.current = activeWorkflow;
+  const handlePreviewRef = useRef<((action: WorkflowActionPayload, messageId?: string) => void) | null>(null);
 
   // Copilot 会话状态
   const [copilotState, setCopilotState] = useState<WorkflowSessionState | null>(null);
   const [inputMessage, setInputMessage] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
-  const [appliedActionIds, setAppliedActionIds] = useState<Set<string>>(new Set());
+  const [appliedActionIds, setAppliedActionIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(`openloop:wf_applied_actions:${workflowId}`);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  // 当 workflowId 切换时，重新同步 appliedActionIds
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`openloop:wf_applied_actions:${workflowId}`);
+      setAppliedActionIds(raw ? new Set(JSON.parse(raw)) : new Set());
+    } catch {
+      setAppliedActionIds(new Set());
+    }
+  }, [workflowId]);
   const [undoSnapshot, setUndoSnapshot] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
 
@@ -298,10 +353,15 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       style: { stroke: '#4f46e5', strokeWidth: 1.8 },
     }));
 
-    // 若原始坐标全为 0 或重叠，进行一次初始智能排版
-    const needsInitialLayout =
+    // 若原始坐标全为 0，或属于旧版水平横向排列数据 (所有节点 Y 轴相近)，自动执行一次智能纵向排版
+    const isOldHorizontalLayout =
       rfNodes.length > 1 &&
-      rfNodes.every((n) => n.position.x === 0 && n.position.y === 0);
+      rfNodes.every((n) => Math.abs(n.position.y - rfNodes[0].position.y) < 20);
+
+    const needsInitialLayout =
+      (rfNodes.length > 1 &&
+        rfNodes.every((n) => n.position.x === 0 && n.position.y === 0)) ||
+      isOldHorizontalLayout;
 
     const finalNodes = needsInitialLayout ? layoutWorkflowDag(rfNodes, rfEdges) : rfNodes;
 
@@ -309,9 +369,9 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     setEdges(rfEdges);
     setSelectedNodeId(null);
 
-    // 延迟平滑适配视口
+    // 延迟平滑适配视口 (限制最大缩放倍率不超过 1.0，防止少量节点时被拉得过大)
     setTimeout(() => {
-      reactFlow.fitView({ padding: 0.25, duration: 400 });
+      reactFlow.fitView({ padding: 0.3, maxZoom: 1, duration: 400 });
     }, 150);
   }, [workflowId, activeWorkflow]);
 
@@ -344,17 +404,29 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     const unsub = api.on('workflow:chat_update', (payload: any) => {
       if (payload && payload.workflowId === workflowId && payload.state) {
         setCopilotState(payload.state);
+
+        // 如果最后一条助手消息包含可执行 Action，且尚未被采纳或预演过，自动在画布唤起幽灵方案预演
+        const msgs = payload.state.messages || [];
+        if (msgs.length > 0) {
+          const lastMsg = msgs[msgs.length - 1];
+          if (lastMsg.role === 'assistant') {
+            const action = parseWorkflowAction(lastMsg.content);
+            if (action && !appliedActionIds.has(lastMsg.id)) {
+              handlePreviewRef.current?.(action, lastMsg.id);
+            }
+          }
+        }
       }
     });
     return () => unsub();
-  }, [workflowId]);
+  }, [workflowId, appliedActionIds]);
 
   // 滚动到聊天窗口最底
   useEffect(() => {
-    if (rightPanelTab === 'copilot' && rightPanelOpen) {
+    if (isSidebarOpen && sidebarTab === 'copilot') {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [copilotState?.messages, rightPanelTab, rightPanelOpen]);
+  }, [copilotState?.messages, isSidebarOpen, sidebarTab]);
 
   // React Flow 内部更新
   const onNodesChange = useCallback(
@@ -383,10 +455,11 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   );
 
   const handleNodeClick = (_: any, node: Node) => {
+    if (import.meta.env?.DEV) {
+      console.log('[Workflow:NodeClick] 聚焦节点:', node.id, (node.data as any)?.name);
+    }
     setSelectedNodeId(node.id);
-    // 点击节点自动切到属性编辑，方便精细微调
-    setRightPanelOpen(true);
-    setRightPanelTab('inspector');
+    setIsSidebarOpen(true);
   };
 
   // 取消新节点呼吸态
@@ -399,18 +472,6 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     return () => clearTimeout(timer);
   }, [nodes]);
 
-  // 键盘 Esc 取消选中
-  useEffect(() => {
-    if (!selectedNodeId) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setSelectedNodeId(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeId]);
-
   // 快捷一键自动排版 (Auto Layout)
   const handleAutoLayout = useCallback(() => {
     if (import.meta.env?.DEV) {
@@ -419,25 +480,68 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     const layouted = layoutWorkflowDag(nodes, edges);
     setNodes(layouted);
     setTimeout(() => {
-      reactFlow.fitView({ padding: 0.25, duration: 500 });
+      reactFlow.fitView({ padding: 0.3, maxZoom: 1, duration: 500 });
     }, 50);
   }, [nodes, edges, reactFlow]);
 
-  // 应用 Agent 编排指令到画布 (Apply Action)
-  const applyWorkflowAction = useCallback(
+  // 触发幽灵方案预演 (在画布上呈现半透明与流光连线)
+  const handlePreviewWorkflowAction = useCallback(
     (actionPayload: WorkflowActionPayload, messageId?: string) => {
       if (!actionPayload) return;
 
       if (import.meta.env?.DEV) {
-        console.log('[WorkflowCopilot] 应用编排 Action 到画布:', actionPayload);
+        console.log('[Workflow:GhostPreview] 激活预演方案:', {
+          action: actionPayload.action,
+          messageId,
+        });
       }
 
-      // 保存当前状态供撤销 (Undo)
-      setUndoSnapshot({ nodes: [...nodes], edges: [...edges] });
+      const currentNodes = nodesRef.current;
+      const currentEdges = edgesRef.current;
+      const currentGhost = ghostPreviewRef.current;
+
+      // 备份当前真实节点与连线 (排除现有幽灵节点)
+      let baseNodes = currentGhost
+        ? currentGhost.originalNodes
+        : currentNodes.filter((n) => !n.data?.isGhost);
+      let baseEdges = currentGhost
+        ? currentGhost.originalEdges
+        : currentEdges.filter((e) => !e.data?.isGhost);
+
+      // 安全基准兜底：若 baseNodes 为空，但 activeWorkflow 中存在有效节点，以 activeWorkflow 为基准避免画布空白
+      if (
+        baseNodes.length === 0 &&
+        activeWorkflowRef.current?.nodes &&
+        activeWorkflowRef.current.nodes.length > 0
+      ) {
+        baseNodes = activeWorkflowRef.current.nodes.map((n) => ({
+          id: n.id,
+          type: 'customNode',
+          position: n.position || { x: 100, y: 100 },
+          data: {
+            id: n.id,
+            name: n.name,
+            type: n.type,
+            config: n.config,
+          },
+        }));
+        baseEdges = activeWorkflowRef.current.edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          label: e.label,
+          animated: true,
+          style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+        }));
+      }
+
+      let previewNodes: Node[] = [];
+      let previewEdges: Edge[] = [];
+      let summaryText = '';
 
       if (actionPayload.action === 'replace_all' && actionPayload.workflow) {
         const wf = actionPayload.workflow;
-        const newNodes: Node[] = (wf.nodes || []).map((n) => ({
+        previewNodes = (wf.nodes || []).map((n) => ({
           id: n.id,
           type: 'customNode',
           position: n.position || { x: 0, y: 0 },
@@ -446,52 +550,41 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             name: n.name,
             type: n.type,
             config: n.config || {},
-            isNew: true,
+            isGhost: true,
           },
         }));
 
-        const newEdges: Edge[] = (wf.edges || []).map((e) => ({
+        previewEdges = (wf.edges || []).map((e) => ({
           id: e.id || `e_${e.source}_${e.target}`,
           source: e.source,
           target: e.target,
           label: e.label,
           animated: true,
-          style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+          style: { stroke: '#8b5cf6', strokeWidth: 2, strokeDasharray: '5,5' },
         }));
 
-        // 自动完成 DAG 层级对齐排版
-        const layoutedNodes = layoutWorkflowDag(newNodes, newEdges);
-        setNodes(layoutedNodes);
-        setEdges(newEdges);
-
-        if (messageId) {
-          setAppliedActionIds((prev) => new Set([...prev, messageId]));
-        }
-
-        setTimeout(() => {
-          reactFlow.fitView({ padding: 0.25, duration: 600 });
-        }, 80);
+        summaryText = `全量规划：包含 ${previewNodes.length} 个流水线阶段`;
       } else if (actionPayload.action === 'patch') {
-        let updatedNodes = [...nodes];
-        let updatedEdges = [...edges];
+        previewNodes = [...baseNodes];
+        previewEdges = [...baseEdges];
 
         // 1. 删除节点与连线
         if (actionPayload.removeNodeIds && actionPayload.removeNodeIds.length > 0) {
           const toRemove = new Set(actionPayload.removeNodeIds);
-          updatedNodes = updatedNodes.filter((n) => !toRemove.has(n.id));
-          updatedEdges = updatedEdges.filter(
+          previewNodes = previewNodes.filter((n) => !toRemove.has(n.id));
+          previewEdges = previewEdges.filter(
             (e) => !toRemove.has(e.source) && !toRemove.has(e.target)
           );
         }
         if (actionPayload.removeEdgeIds && actionPayload.removeEdgeIds.length > 0) {
           const toRemoveEdges = new Set(actionPayload.removeEdgeIds);
-          updatedEdges = updatedEdges.filter((e) => !toRemoveEdges.has(e.id));
+          previewEdges = previewEdges.filter((e) => !toRemoveEdges.has(e.id));
         }
 
         // 2. 更新既有节点
         if (actionPayload.updateNodes && actionPayload.updateNodes.length > 0) {
           const updateMap = new Map(actionPayload.updateNodes.map((u) => [u.id!, u]));
-          updatedNodes = updatedNodes.map((n) => {
+          previewNodes = previewNodes.map((n) => {
             const patch = updateMap.get(n.id);
             if (!patch) return n;
             return {
@@ -500,18 +593,18 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                 ...n.data,
                 name: patch.name || n.data.name,
                 config: { ...n.data.config, ...(patch.config || {}) },
-                isNew: true,
+                isGhost: true,
               },
             };
           });
         }
 
-        // 3. 追加新节点
+        // 3. 追加新节点 (幽灵态)
         if (actionPayload.addNodes && actionPayload.addNodes.length > 0) {
-          const existingIds = new Set(updatedNodes.map((n) => n.id));
+          const existingIds = new Set(previewNodes.map((n) => n.id));
           for (const n of actionPayload.addNodes) {
             if (!existingIds.has(n.id)) {
-              updatedNodes.push({
+              previewNodes.push({
                 id: n.id,
                 type: 'customNode',
                 position: n.position || { x: 0, y: 0 },
@@ -520,46 +613,241 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   name: n.name,
                   type: n.type,
                   config: n.config || {},
-                  isNew: true,
+                  isGhost: true,
                 },
               });
             }
           }
         }
 
-        // 4. 追加新连线
+        // 4. 追加新连线 (幽灵态)
         if (actionPayload.addEdges && actionPayload.addEdges.length > 0) {
-          const existingEdgeIds = new Set(updatedEdges.map((e) => e.id));
+          const existingEdgeIds = new Set(previewEdges.map((e) => e.id));
           for (const e of actionPayload.addEdges) {
             const edgeId = e.id || `e_${e.source}_${e.target}`;
             if (!existingEdgeIds.has(edgeId)) {
-              updatedEdges.push({
+              previewEdges.push({
                 id: edgeId,
                 source: e.source,
                 target: e.target,
                 label: e.label,
                 animated: true,
-                style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+                style: { stroke: '#8b5cf6', strokeWidth: 2, strokeDasharray: '5,5' },
               });
             }
           }
         }
 
-        const layoutedNodes = layoutWorkflowDag(updatedNodes, updatedEdges);
-        setNodes(layoutedNodes);
-        setEdges(updatedEdges);
-
-        if (messageId) {
-          setAppliedActionIds((prev) => new Set([...prev, messageId]));
+        // 动态生成直观的提示摘要
+        const parts: string[] = [];
+        if (actionPayload.removeNodeIds && actionPayload.removeNodeIds.length > 0) {
+          parts.push(`移除 ${actionPayload.removeNodeIds.length} 个阶段`);
         }
-
-        setTimeout(() => {
-          reactFlow.fitView({ padding: 0.25, duration: 600 });
-        }, 80);
+        if (actionPayload.addNodes && actionPayload.addNodes.length > 0) {
+          parts.push(`新增 ${actionPayload.addNodes.length} 个阶段`);
+        }
+        if (actionPayload.updateNodes && actionPayload.updateNodes.length > 0) {
+          parts.push(`调整 ${actionPayload.updateNodes.length} 个阶段`);
+        }
+        summaryText = parts.length > 0 ? `链路局部调整：${parts.join('，')}` : '链路局部微调，更新拓扑依赖';
       }
+
+      // 异常保护：若 previewNodes 意外为空，但原始基准存在节点，则不盲目清空画布
+      if (previewNodes.length === 0 && baseNodes.length > 0 && actionPayload.action === 'patch') {
+        console.warn('[Workflow:GhostPreview] 预演计算后节点为空，保留基准节点避免画布空白');
+        previewNodes = [...baseNodes];
+        previewEdges = [...baseEdges];
+      }
+
+      const layoutedNodes = layoutWorkflowDag(previewNodes, previewEdges);
+      setNodes(layoutedNodes);
+      setEdges(previewEdges);
+
+      setGhostPreview({
+        active: true,
+        originalNodes: baseNodes,
+        originalEdges: baseEdges,
+        actionPayload,
+        messageId,
+        summary: summaryText,
+      });
+
+      setTimeout(() => {
+        reactFlow.fitView({ padding: 0.3, maxZoom: 1, duration: 500 });
+      }, 60);
     },
-    [nodes, edges, reactFlow]
+    [reactFlow]
   );
+  handlePreviewRef.current = handlePreviewWorkflowAction;
+
+  // 一键正式合入幽灵预演方案到画布 (Apply Commit) 并自动保存到后端数据库
+  const handleCommitGhostPreview = useCallback(async () => {
+    const currentGhost = ghostPreviewRef.current;
+    if (!currentGhost) return;
+
+    if (import.meta.env?.DEV) {
+      console.log('[Workflow:ApplyCommit] 采纳合入预演方案并持久化保存');
+    }
+
+    // 保存当前真实状态供撤销 (Undo)
+    setUndoSnapshot({
+      nodes: currentGhost.originalNodes,
+      edges: currentGhost.originalEdges,
+    });
+
+    // 固化节点与边
+    const committedNodes = nodesRef.current.map((n) => ({
+      ...n,
+      data: {
+        ...n.data,
+        isGhost: false,
+        isNew: true,
+      },
+    }));
+
+    const committedEdges = edgesRef.current.map((e) => ({
+      ...e,
+      style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+    }));
+
+    setNodes(committedNodes);
+    setEdges(committedEdges);
+
+    if (currentGhost.messageId) {
+      setAppliedActionIds((prev) => {
+        const next = new Set([...prev, currentGhost.messageId!]);
+        try {
+          localStorage.setItem(
+            `openloop:wf_applied_actions:${workflowId}`,
+            JSON.stringify(Array.from(next))
+          );
+        } catch {}
+        return next;
+      });
+    }
+
+    setGhostPreview(null);
+
+    // 自动持久化保存到后端数据库，并刷新外部列表缓存
+    const targetWf = activeWorkflowRef.current;
+    if (targetWf) {
+      const updatedWorkflow: WorkflowDefinition = {
+        ...targetWf,
+        name: workflowName || targetWf.name,
+        description: workflowDescription || targetWf.description,
+        nodes: committedNodes.map((n) => ({
+          id: n.id,
+          name: (n.data as any)?.name || '未命名节点',
+          type: (n.data as any)?.type || 'cli',
+          position: n.position,
+          config: (n.data as any)?.config || {},
+        })),
+        edges: committedEdges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          label: e.label,
+        })),
+      };
+
+      setSaveStatus('方案已合入并自动保存');
+      try {
+        await api.saveWorkflow(updatedWorkflow);
+        setTimeout(() => setSaveStatus(''), 2500);
+        onRefresh();
+      } catch (err: any) {
+        console.error('[Workflow:ApplyCommit] 自动保存失败:', err);
+        setSaveStatus(`自动保存失败: ${err.message}`);
+      }
+    }
+  }, [workflowId, workflowName, workflowDescription, onRefresh]);
+
+  // 放弃预演 (Discard Ghost Preview)
+  const handleDiscardGhostPreview = useCallback(() => {
+    const currentGhost = ghostPreviewRef.current;
+    if (!currentGhost) return;
+
+    if (import.meta.env?.DEV) {
+      console.log('[Workflow:Discard] 放弃预演方案');
+    }
+
+    let fallbackNodes = currentGhost.originalNodes;
+    let fallbackEdges = currentGhost.originalEdges;
+
+    // 安全回退：如果原始节点被异常保存为空，自动从 activeWorkflow 恢复完整拓扑
+    if (
+      fallbackNodes.length === 0 &&
+      activeWorkflowRef.current?.nodes &&
+      activeWorkflowRef.current.nodes.length > 0
+    ) {
+      fallbackNodes = activeWorkflowRef.current.nodes.map((n) => ({
+        id: n.id,
+        type: 'customNode',
+        position: n.position || { x: 100, y: 100 },
+        data: {
+          id: n.id,
+          name: n.name,
+          type: n.type,
+          config: n.config,
+        },
+      }));
+      fallbackEdges = activeWorkflowRef.current.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        label: e.label,
+        animated: true,
+        style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+      }));
+    }
+
+    setNodes(fallbackNodes);
+    setEdges(fallbackEdges);
+    setGhostPreview(null);
+
+    setTimeout(() => {
+      reactFlow.fitView({ padding: 0.3, maxZoom: 1, duration: 400 });
+    }, 50);
+  }, [reactFlow]);
+
+  // 直接全量/增量应用 (兼容历史消息里的直接应用)
+  const applyWorkflowAction = useCallback(
+    (actionPayload: WorkflowActionPayload, messageId?: string) => {
+      handlePreviewWorkflowAction(actionPayload, messageId);
+      // 紧接着立即合入
+      setTimeout(() => {
+        handleCommitGhostPreview();
+      }, 50);
+    },
+    [handlePreviewWorkflowAction, handleCommitGhostPreview]
+  );
+
+  // 键盘快捷键 (Enter 采纳预演，Esc 放弃预演或取消选中节点)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (ghostPreview?.active) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          const target = e.target as HTMLElement;
+          if (target.tagName !== 'TEXTAREA' && target.tagName !== 'INPUT') {
+            e.preventDefault();
+            handleCommitGhostPreview();
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          handleDiscardGhostPreview();
+        }
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        if (selectedNodeId) {
+          setSelectedNodeId(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [ghostPreview, selectedNodeId, handleCommitGhostPreview, handleDiscardGhostPreview]);
 
   // 撤销上一步编排变更
   const handleUndo = useCallback(() => {
@@ -568,7 +856,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     setEdges(undoSnapshot.edges);
     setUndoSnapshot(null);
     setTimeout(() => {
-      reactFlow.fitView({ padding: 0.25, duration: 500 });
+      reactFlow.fitView({ padding: 0.3, maxZoom: 1, duration: 500 });
     }, 50);
   }, [undoSnapshot, reactFlow]);
 
@@ -577,19 +865,39 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     const content = (textToSend || inputMessage).trim();
     if (!content || isSendingMessage) return;
 
+    if (import.meta.env?.DEV) {
+      console.log('[Workflow:Dispatch] 发送编排指令:', {
+        workflowId,
+        content: content.slice(0, 40),
+        focusNodeId: selectedNodeId || null,
+      });
+    }
+
+    // 若当前正在预演旧方案，先清除
+    if (ghostPreview) {
+      handleDiscardGhostPreview();
+    }
+
     setInputMessage('');
     setIsSendingMessage(true);
+    // 自动展开右侧栏并切到助手
+    setIsSidebarOpen(true);
+    setSidebarTab('copilot');
 
-    // 构建当前画布快照上下文
+    // 构建当前真实画布快照上下文 (排除幽灵节点)
+    const realNodes = nodes.filter((n) => !n.data?.isGhost);
+    const realEdges = edges.filter((e) => !e.data?.isGhost);
+
     const snapshot = {
       name: activeWorkflow?.name,
-      nodes: nodes.map((n) => ({
+      focusNodeId: selectedNodeId || undefined,
+      nodes: realNodes.map((n) => ({
         id: n.id,
         name: (n.data as any).name,
         type: (n.data as any).type,
         config: (n.data as any).config,
       })),
-      edges: edges.map((e) => ({
+      edges: realEdges.map((e) => ({
         id: e.id,
         source: e.source,
         target: e.target,
@@ -611,13 +919,19 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       isBusy: true,
       isPaused: false,
       messages: [...(prev?.messages || []), userMsg],
-      agentName: 'Workflow Architect Copilot',
+      agentName: 'Workflow Copilot',
     }));
 
     try {
       await api.sendWorkflowChatMessage(workflowId, content, snapshot);
+
+      // 设置 10 秒前端超时兜底，防止网络或后端挂起时一直转圈
+      setTimeout(() => {
+        setCopilotState((prev) => (prev?.isBusy ? { ...prev, isBusy: false } : prev));
+      }, 10000);
     } catch (err: any) {
       alert(`发送编排需求失败: ${err.message}`);
+      setCopilotState((prev) => (prev ? { ...prev, isBusy: false } : prev));
     } finally {
       setIsSendingMessage(false);
     }
@@ -630,6 +944,9 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       await api.resetWorkflowSession(workflowId);
       setCopilotState((prev) => (prev ? { ...prev, messages: [] } : null));
       setAppliedActionIds(new Set());
+      try {
+        localStorage.removeItem(`openloop:wf_applied_actions:${workflowId}`);
+      } catch {}
     } catch (err: any) {
       alert(`重置失败: ${err.message}`);
     }
@@ -667,8 +984,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     };
     setNodes((nds) => [...nds, newNode]);
     setSelectedNodeId(id);
-    setRightPanelOpen(true);
-    setRightPanelTab('inspector');
+    setIsInspectorOpen(true);
   };
 
   // 属性更新
@@ -1025,14 +1341,32 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             <span>复制</span>
           </button>
 
-          {/* 流程属性 */}
+          {/* 属性配置面板开关 */}
           <button
-            onClick={() => setIsEditModalOpen(true)}
-            className="flex items-center gap-1 px-2.5 h-[26px] rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11.5px] font-medium text-[#4b4b53] transition-all shadow-xs"
-            title="编辑流程名称与业务描述"
+            onClick={() => {
+              if (isSidebarOpen && sidebarTab === 'inspector') {
+                setIsSidebarOpen(false);
+              } else {
+                setIsSidebarOpen(true);
+                setSidebarTab('inspector');
+              }
+            }}
+            className={`flex items-center gap-1.5 px-2.5 h-[26px] rounded-[6px] border text-[11.5px] font-medium transition-all shadow-xs ${
+              isSidebarOpen && sidebarTab === 'inspector'
+                ? 'bg-[#1c1c21] border-[#1c1c21] text-white'
+                : 'bg-white border-[#e3e3e8] hover:bg-[#f1f1f4] text-[#4b4b53]'
+            }`}
+            title="查看属性与配置"
           >
-            <Edit3 size={11.5} />
-            <span>属性</span>
+            <Settings2 size={12} />
+            <span>{selectedNode ? '节点属性' : '流程配置'}</span>
+            {selectedNode && (
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  isSidebarOpen && sidebarTab === 'inspector' ? 'bg-white' : 'bg-[#4f46e5]'
+                }`}
+              />
+            )}
           </button>
 
           {/* 删除流程 */}
@@ -1049,14 +1383,19 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           {/* AI 编排助手唤起按钮 */}
           <button
             onClick={() => {
-              setRightPanelOpen(true);
-              setRightPanelTab('copilot');
+              if (isSidebarOpen && sidebarTab === 'copilot') {
+                setIsSidebarOpen(false);
+              } else {
+                setIsSidebarOpen(true);
+                setSidebarTab('copilot');
+              }
             }}
             className={`flex items-center gap-1.5 px-3 h-[26px] rounded-[6px] border transition-all shadow-xs text-[11.5px] font-medium ${
-              rightPanelOpen && rightPanelTab === 'copilot'
+              isSidebarOpen && sidebarTab === 'copilot'
                 ? 'bg-[#eeedfd] border-[#c7d2fe] text-[#4f46e5]'
                 : 'bg-white border-[#e3e3e8] hover:bg-[#f1f1f4] text-[#1c1c21]'
             }`}
+            title="展开/收起 AI 编排助手"
           >
             <Sparkles
               size={12}
@@ -1158,23 +1497,23 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           </button>
         </div>
 
-        {/* 零手动编排欢迎态（Empty / Welcome State Overlay，当节点数 <= 1 时出现） */}
-        {nodes.length <= 1 && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 bg-white/95 backdrop-blur-md border border-[#c7d2fe] p-4 rounded-[12px] shadow-[0_8px_32px_rgba(79,70,229,0.12)] max-w-xl w-[90%] pointer-events-auto">
+        {/* 零手动编排欢迎态（Empty / Welcome State Overlay，当节点数 <= 1 且无幽灵预演时出现） */}
+        {nodes.length <= 1 && !ghostPreview && (
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-white/95 backdrop-blur-md border border-[#c7d2fe] p-4 rounded-[12px] shadow-[0_8px_32px_rgba(79,70,229,0.12)] max-w-xl w-[90%] pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-300">
             <div className="flex items-center justify-between pb-2 border-b border-[#ececf0] mb-3">
               <div className="flex items-center gap-2">
                 <span className="p-1 rounded-[6px] bg-[#eeedfd] text-[#4f46e5]">
                   <Wand2 size={14} />
                 </span>
                 <span className="text-[12.5px] font-semibold text-[#1c1c21]">
-                  零手动编排 · 欢迎使用 AI 流程架构师
+                  欢迎使用 AI 编排助手
                 </span>
               </div>
               <span className="text-[10px] text-[#6366f1] font-mono">Zero-Touch Orchestration</span>
             </div>
 
             <p className="text-[11.5px] text-[#63636b] mb-3 leading-relaxed">
-              无需手动拖拽节点，点击下方常用方案或在右侧输入自然语言，智能体将自动规划节点、依赖与排版：
+              无需手动拖拽节点，点击下方常用方案或在右侧助手输入业务需求，AI 将为您全景规划阶段与拓扑：
             </p>
 
             <div className="grid grid-cols-3 gap-2">
@@ -1238,6 +1577,40 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           </div>
         )}
 
+        {/* 画布幽灵预演确认浮层 (Ghost Preview Action Bar) */}
+        {ghostPreview?.active && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 animate-in fade-in slide-in-from-top-3 duration-300 pointer-events-auto">
+            <div className="flex items-center gap-3 px-4 py-2 rounded-full bg-[#1c1c21]/95 backdrop-blur-md text-white shadow-2xl border border-[#7c3aed]/50 ring-4 ring-[#7c3aed]/15">
+              <div className="flex items-center gap-2">
+                <Sparkles size={14} className="text-[#a78bfa] animate-spin" />
+                <span className="text-[12px] font-medium tracking-wide">
+                  {ghostPreview.summary}
+                </span>
+              </div>
+
+              <div className="h-3 w-[1px] bg-white/20" />
+
+              <button
+                onClick={handleCommitGhostPreview}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#6366f1] hover:bg-[#4f46e5] text-white text-[11px] font-semibold transition-all shadow-sm active:scale-95"
+              >
+                <Check size={12} strokeWidth={2.5} />
+                <span>采纳合入</span>
+                <span className="opacity-60 text-[9.5px] font-mono ml-0.5">Enter</span>
+              </button>
+
+              <button
+                onClick={handleDiscardGhostPreview}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white text-[11px] transition-all"
+              >
+                <X size={12} />
+                <span>放弃</span>
+                <span className="opacity-60 text-[9.5px] font-mono ml-0.5">Esc</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* React Flow 画布主体 */}
         <div className="flex-1 w-full h-full">
           <ReactFlow
@@ -1250,22 +1623,23 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             onPaneClick={() => setSelectedNodeId(null)}
             nodeTypes={nodeTypes}
             fitView
+            fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
           >
             <Background color="#d1d1d8" gap={18} size={1} />
             <Controls />
           </ReactFlow>
         </div>
 
-        {/* 右侧双模工作台侧栏 (AI Copilot & Node Inspector) */}
-        {rightPanelOpen && (
-          <div className="w-80 md:w-96 border-l border-[#e3e3e8] bg-white flex flex-col z-20 shadow-[-4px_0_16px_rgba(0,0,0,0.04)] animate-in slide-in-from-right duration-200">
+        {/* 右侧工作台侧栏 (AI 编排助手 & 属性配置) */}
+        {isSidebarOpen && (
+          <div className="w-[420px] 2xl:w-[460px] border-l border-[#e3e3e8] bg-white flex flex-col z-20 shadow-[-4px_0_16px_rgba(0,0,0,0.04)] animate-in slide-in-from-right duration-200">
             {/* 顶栏 Tab 切换器 */}
             <div className="h-[42px] px-3 border-b border-[#e3e3e8] flex items-center justify-between shrink-0 bg-[#fafafc]">
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => setRightPanelTab('copilot')}
+                  onClick={() => setSidebarTab('copilot')}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] text-[11.5px] font-medium transition-all ${
-                    rightPanelTab === 'copilot'
+                    sidebarTab === 'copilot'
                       ? 'bg-white text-[#4f46e5] shadow-xs border border-[#e3e3e8]'
                       : 'text-[#85858d] hover:text-[#1c1c21]'
                   }`}
@@ -1281,15 +1655,15 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                 </button>
 
                 <button
-                  onClick={() => setRightPanelTab('inspector')}
+                  onClick={() => setSidebarTab('inspector')}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] text-[11.5px] font-medium transition-all ${
-                    rightPanelTab === 'inspector'
+                    sidebarTab === 'inspector'
                       ? 'bg-white text-[#1c1c21] shadow-xs border border-[#e3e3e8]'
                       : 'text-[#85858d] hover:text-[#1c1c21]'
                   }`}
                 >
                   <Settings2 size={12} className="text-[#85858d]" />
-                  <span>{selectedNode ? '节点属性' : '流程属性'}</span>
+                  <span>{selectedNode ? '节点属性' : '流程配置'}</span>
                   {selectedNode && (
                     <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
                   )}
@@ -1297,7 +1671,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
               </div>
 
               <div className="flex items-center gap-1">
-                {rightPanelTab === 'copilot' && (
+                {sidebarTab === 'copilot' && (
                   <button
                     onClick={handleResetSession}
                     title="清空对话历史"
@@ -1307,7 +1681,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   </button>
                 )}
                 <button
-                  onClick={() => setRightPanelOpen(false)}
+                  onClick={() => setIsSidebarOpen(false)}
                   title="收起侧栏"
                   className="p-1 rounded hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#1c1c21] transition-colors"
                 >
@@ -1317,24 +1691,66 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             </div>
 
             {/* Tab 1: AI 编排助手 */}
-            {rightPanelTab === 'copilot' && (
+            {sidebarTab === 'copilot' && (
               <div className="flex-1 flex flex-col min-h-0 bg-white">
+                {/* 模式状态指示条 */}
+                <div className="px-3.5 py-1.5 bg-[#f9f9fb] border-b border-[#ececf0] flex items-center justify-between text-[11px] shrink-0">
+                  {selectedNode ? (
+                    <div className="flex items-center gap-1.5 text-[#7c3aed]">
+                      <GitBranch size={11} />
+                      <span className="font-medium">参考节点:</span>
+                      <span className="font-semibold text-[#1c1c21] truncate max-w-[150px]">
+                        {selectedNode.data.name}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedNodeId(null);
+                        }}
+                        className="text-[#85858d] hover:text-red-500 text-[12px] ml-0.5"
+                        title="取消聚焦，回到全局编排模式"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-[#4f46e5]">
+                      <Compass size={11} />
+                      <span className="font-medium">全流程编排模式</span>
+                      <span className="text-[#85858d] font-mono text-[10px]">
+                        ({nodes.filter((n) => !n.data?.isGhost).length} 个节点)
+                      </span>
+                    </div>
+                  )}
+
+                  {copilotState?.isBusy && (
+                    <div className="flex items-center gap-1 text-[10.5px] text-[#7c3aed] font-medium animate-pulse">
+                      <Sparkles size={10} className="animate-spin" />
+                      <span>规划中...</span>
+                    </div>
+                  )}
+                </div>
+
                 {/* 消息滚动流 */}
                 <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0 text-[12px]">
                   {(!copilotState?.messages || copilotState.messages.length === 0) ? (
-                    <div className="h-full min-h-[260px] flex flex-col items-center justify-center text-center p-4 text-[#85858d]">
+                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-4 text-[#85858d]">
                       <div className="w-10 h-10 rounded-[10px] bg-[#eeedfd] border border-[#c7d2fe] flex items-center justify-center mb-2.5 text-[#4f46e5]">
                         <Bot size={20} />
                       </div>
                       <div className="text-[12.5px] font-semibold text-[#1c1c21] mb-1">
-                        AI 流程编排架构师
+                        {selectedNode
+                          ? `以【${selectedNode.data.name}】为参考规划链路`
+                          : '自动化工作流编排助手'}
                       </div>
                       <div className="text-[11px] text-[#85858d] leading-relaxed max-w-[260px]">
-                        直接输入您的业务目标，Agent 将为您全自动规划节点类型、CLI 脚本与执行拓扑。
+                        {selectedNode
+                          ? '输入需求可在当前节点后追加自动化测试、人工验收门禁或结果通知，AI 将自动处理依赖接驳。'
+                          : '直接输入您的业务目标，AI 将为您全自动规划节点类型、CLI 脚本与执行拓扑。'}
                       </div>
                     </div>
                   ) : (
-                    copilotState.messages.map((msg) => {
+                    copilotState.messages.map((msg, msgIdx) => {
                       if (msg.role === 'user') {
                         return (
                           <div key={msg.id} className="flex justify-end">
@@ -1351,15 +1767,15 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                       // 助理回复 (支持思考流与编排 Action 卡片解析)
                       const actionPayload = parseWorkflowAction(msg.content);
                       const isApplied = appliedActionIds.has(msg.id);
+                      const isCurrentlyPreviewing = ghostPreview?.messageId === msg.id;
 
-                      // 提取正文文本（过滤掉冗长的 raw markdown 块）
                       const cleanContent = msg.content
                         .replace(/```(?:workflow-action|json)?\s*[\s\S]*?```/g, '')
                         .trim();
 
                       return (
                         <div key={msg.id} className="space-y-2">
-                          {/* 深度思考模块 Thinking */}
+                          {/* 思考过程模块 Thinking */}
                           {msg.thinking && (
                             <div className="rounded-[7px] border border-[#e8e8ed] bg-[#fafafc] overflow-hidden text-[11px]">
                               <button
@@ -1378,7 +1794,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                                     }
                                   />
                                   <span className="font-medium text-[11px]">
-                                    {msg.isThinking ? '智能体深度思考中...' : '编排架构思考过程'}
+                                    {msg.isThinking ? '思考中...' : '编排思考过程'}
                                   </span>
                                 </div>
                                 {expandedThinking[msg.id] ? (
@@ -1397,12 +1813,15 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
 
                           {/* 助理消息正文 */}
                           {cleanContent && (
-                            <div className="p-3 rounded-[9px] bg-white border border-[#e3e3e8] text-[#1c1c21] text-[11.5px] leading-relaxed shadow-xs whitespace-pre-wrap">
-                              {cleanContent}
+                            <div className="p-3 rounded-[9px] bg-white border border-[#e3e3e8] shadow-xs select-text">
+                              <AgentMarkdown
+                                content={cleanContent}
+                                isStreaming={!!copilotState?.isBusy && msgIdx === copilotState.messages.length - 1}
+                              />
                             </div>
                           )}
 
-                          {/* 结构化 Action 卡片 (高质感预览与一键应用) */}
+                          {/* 结构化 Action 卡片 (画布预演与一键合入) */}
                           {actionPayload && (
                             <div className="p-3 rounded-[9px] bg-[#f8f9ff] border border-[#c7d2fe] shadow-xs space-y-2">
                               <div className="flex items-center justify-between">
@@ -1410,16 +1829,14 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                                   <CheckCircle2 size={13} className="text-[#4f46e5]" />
                                   <span className="text-[11.5px] font-semibold text-[#1c1c21]">
                                     {actionPayload.action === 'replace_all'
-                                      ? '全新 DAG 拓扑方案'
+                                      ? '全新流程拓扑方案'
                                       : '局部增量编排补丁'}
                                   </span>
                                 </div>
                                 <span className="text-[9.5px] font-mono text-[#6366f1] bg-[#eeedfd] px-1.5 py-[1px] rounded">
                                   {actionPayload.action === 'replace_all'
-                                    ? `${actionPayload.workflow?.nodes?.length || 0} 节点 · ${
-                                        actionPayload.workflow?.edges?.length || 0
-                                      } 连线`
-                                    : '增量变更'}
+                                    ? `${actionPayload.workflow?.nodes?.length || 0} 个节点`
+                                    : `+${actionPayload.addNodes?.length || 0} 节点`}
                                 </span>
                               </div>
 
@@ -1430,17 +1847,49 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                               )}
 
                               <div className="pt-1 flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => applyWorkflowAction(actionPayload, msg.id)}
-                                  className={`flex items-center gap-1 px-3 py-1 rounded-[5px] text-[11px] font-medium transition-all shadow-xs ${
-                                    isApplied
-                                      ? 'bg-[#e4f6ec] text-[#189a58] border border-[#a3e635]'
-                                      : 'bg-[#4f46e5] hover:bg-[#4338ca] text-white active:scale-95'
-                                  }`}
-                                >
-                                  <Check size={11} strokeWidth={2.4} />
-                                  <span>{isApplied ? '已同步画布 (重新应用)' : '立即应用到画布'}</span>
-                                </button>
+                                {isApplied ? (
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1 px-2.5 py-1 rounded-[5px] text-[11px] font-medium bg-[#e4f6ec] text-[#189a58] border border-[#bbf7d0]">
+                                      <Check size={11} strokeWidth={2.5} />
+                                      <span>已合入画布</span>
+                                    </div>
+                                    <button
+                                      onClick={() => {
+                                        handlePreviewWorkflowAction(actionPayload, msg.id);
+                                        setTimeout(() => handleCommitGhostPreview(), 60);
+                                      }}
+                                      title="如画布已被后续改动，可点击重新应用此方案"
+                                      className="text-[10.5px] text-[#85858d] hover:text-[#4f46e5] hover:underline px-1 py-0.5 transition-colors"
+                                    >
+                                      重新应用
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => handlePreviewWorkflowAction(actionPayload, msg.id)}
+                                      className={`flex items-center gap-1 px-2.5 py-1 rounded-[5px] text-[11px] font-medium transition-all shadow-xs ${
+                                        isCurrentlyPreviewing
+                                          ? 'bg-[#f3e8ff] text-[#7c3aed] border border-[#d8b4fe] font-semibold'
+                                          : 'bg-white hover:bg-[#f1f1f4] text-[#4b4b53] border border-[#e3e3e8]'
+                                      }`}
+                                    >
+                                      <Eye size={11} />
+                                      <span>{isCurrentlyPreviewing ? '画布预演中...' : '在画布预演'}</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        handlePreviewWorkflowAction(actionPayload, msg.id);
+                                        setTimeout(() => handleCommitGhostPreview(), 60);
+                                      }}
+                                      className="flex items-center gap-1 px-3 py-1 rounded-[5px] text-[11px] font-medium transition-all shadow-xs bg-[#4f46e5] hover:bg-[#4338ca] text-white active:scale-95"
+                                    >
+                                      <Check size={11} strokeWidth={2.4} />
+                                      <span>直接合入</span>
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </div>
                           )}
@@ -1451,58 +1900,102 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   <div ref={chatEndRef} />
                 </div>
 
-                {/* 底部输入框 */}
-                <div className="p-3 border-t border-[#e3e3e8] bg-[#fafafc]">
-                  <div className="flex items-center justify-between mb-1.5 text-[10px] text-[#85858d]">
-                    <div className="flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#189a58]" />
-                      <span>已连接画布拓扑 ({nodes.length} 个节点上下文)</span>
-                    </div>
-                    {selectedNode && (
-                      <span className="truncate max-w-[130px] text-[#4f46e5] font-mono">
-                        焦点: {selectedNode.data.name}
-                      </span>
-                    )}
-                  </div>
+                {/* 推荐快捷指令胶囊条 */}
+                <div className="px-3 py-1.5 bg-[#fafafc] border-t border-[#ececf0] flex items-center gap-1.5 overflow-x-auto text-[10.5px] shrink-0">
+                  <span className="text-[#85858d] shrink-0">建议:</span>
+                  {selectedNode ? (
+                    <>
+                      <button
+                        onClick={() => handleSendMessage(`在节点【${selectedNode.data.name}】后追加 Midscene 视觉回归测试`)}
+                        className="px-2 py-0.5 rounded-full bg-white hover:bg-[#eeedfd] border border-[#e3e3e8] hover:border-[#c7d2fe] text-[#4f46e5] shrink-0 transition-all"
+                      >
+                        + 串联 UI 测试
+                      </button>
+                      <button
+                        onClick={() => handleSendMessage(`在节点【${selectedNode.data.name}】后接入 QA 人工验收门禁`)}
+                        className="px-2 py-0.5 rounded-full bg-white hover:bg-[#fef3c7] border border-[#e3e3e8] hover:border-[#fde68a] text-[#b45309] shrink-0 transition-all"
+                      >
+                        + 插入 QA 门禁
+                      </button>
+                      <button
+                        onClick={() => handleSendMessage(`为节点【${selectedNode.data.name}】配置阶段完成 Webhook 通知`)}
+                        className="px-2 py-0.5 rounded-full bg-white hover:bg-[#f1f1f4] border border-[#e3e3e8] text-[#4b4b53] shrink-0 transition-all"
+                      >
+                        + 阶段完成通知
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => handleSendMessage('规划一个自动化 PR 审查流水线')}
+                        className="px-2 py-0.5 rounded-full bg-white hover:bg-[#eeedfd] border border-[#e3e3e8] hover:border-[#c7d2fe] text-[#4f46e5] shrink-0 transition-all"
+                      >
+                        PR 审查流水线
+                      </button>
+                      <button
+                        onClick={() => handleSendMessage('设计一个生产环境构建与自动化部署流水线')}
+                        className="px-2 py-0.5 rounded-full bg-white hover:bg-[#eff6ff] border border-[#e3e3e8] hover:border-[#bfdbfe] text-[#1d4ed8] shrink-0 transition-all"
+                      >
+                        构建与部署
+                      </button>
+                      <button
+                        onClick={() => handleSendMessage('检查当前流程拓扑，优化并发阶段并指出潜在断点')}
+                        className="px-2 py-0.5 rounded-full bg-white hover:bg-[#f1f1f4] border border-[#e3e3e8] text-[#4b4b53] shrink-0 transition-all"
+                      >
+                        流程拓扑体检
+                      </button>
+                    </>
+                  )}
+                </div>
 
+                {/* 底部输入框 */}
+                <div className="p-3 border-t border-[#e3e3e8] bg-white">
                   <div className="relative">
                     <textarea
                       rows={2}
                       value={inputMessage}
                       onChange={(e) => setInputMessage(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                           e.preventDefault();
                           handleSendMessage();
                         }
                       }}
-                      placeholder="向 Agent 描述您的流程需求，Enter 发送..."
-                      className="w-full bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[7px] p-2 pr-9 text-[11.5px] text-[#1c1c21] outline-none resize-none shadow-xs"
+                      placeholder={
+                        selectedNode
+                          ? `以【${selectedNode.data.name}】为参考扩充链路，或描述全流程...`
+                          : '向 AI 描述您的流程需求...'
+                      }
+                      className="w-full bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[8px] p-2 pr-10 text-[11.5px] text-[#1c1c21] outline-none resize-none shadow-xs transition-all placeholder:text-[#85858d]"
                     />
 
                     <button
                       onClick={() => handleSendMessage()}
                       disabled={!inputMessage.trim() || isSendingMessage}
-                      className="absolute right-2 bottom-2.5 p-1 rounded-[5px] bg-[#4f46e5] hover:bg-[#4338ca] disabled:opacity-40 text-white transition-all shadow-xs"
+                      title="发送 (⌘ + Enter)"
+                      className="absolute right-2.5 bottom-2.5 p-1.5 rounded-[6px] bg-[#4f46e5] hover:bg-[#4338ca] disabled:opacity-40 text-white transition-all shadow-xs active:scale-95"
                     >
-                      <Send size={11} />
+                      <Send size={12} />
                     </button>
+                  </div>
+                  <div className="flex items-center justify-between mt-1.5 px-0.5 text-[10px] text-[#85858d]">
+                    <span>Enter 换行</span>
+                    <span className="font-mono bg-[#f0f0f4] text-[#6b7280] px-1.5 py-0.5 rounded text-[9.5px]">
+                      ⌘ + Enter 发送
+                    </span>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Tab 2: 节点属性编辑 (保留精细手动微调) */}
-            {rightPanelTab === 'inspector' && (
+            {/* Tab 2: 属性配置 (节点参数详情 / 流水线全局配置) */}
+            {sidebarTab === 'inspector' && (
               <div className="flex-1 flex flex-col justify-between p-4 overflow-y-auto">
                 {selectedNode && selectedNodeData ? (
                   <div className="space-y-3.5 text-[12px]">
                     <div className="flex items-center justify-between pb-2 border-b border-[#ececf0]">
-                      <div className="flex items-center gap-2">
-                        <Settings2 size={14} className="text-[#4f46e5]" />
-                        <span className="font-semibold text-[12.5px] text-[#1c1c21]">
-                          节点参数详情
-                        </span>
+                      <div className="text-[11px] text-[#85858d] font-mono">
+                        ID: {selectedNode.id}
                       </div>
                       <button
                         onClick={deleteSelectedNode}
@@ -1703,11 +2196,15 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                     <div className="bg-[#f9f9fb] border border-[#ececf0] rounded-[7px] p-2.5 space-y-1.5 text-[11px] text-[#85858d]">
                       <div className="flex items-center justify-between">
                         <span>拓扑节点数</span>
-                        <span className="font-mono text-[#1c1c21] font-medium">{nodes.length} 个</span>
+                        <span className="font-mono text-[#1c1c21] font-medium">
+                          {nodes.filter((n) => !n.data?.isGhost).length} 个
+                        </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span>拓扑依赖连线</span>
-                        <span className="font-mono text-[#1c1c21] font-medium">{edges.length} 条</span>
+                        <span className="font-mono text-[#1c1c21] font-medium">
+                          {edges.filter((e) => !e.data?.isGhost).length} 条
+                        </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span>最后更新</span>
@@ -1737,7 +2234,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                 )}
 
                 <div className="pt-3 border-t border-[#ececf0] text-[10.5px] text-[#85858d]">
-                  拖拽节点两侧圆点即可在画布连线；亦可通过 AI 助手自动生成。
+                  拖拽节点两侧圆点即可在画布连线；亦可通过 AI 编排助手全流程规划。
                 </div>
               </div>
             )}

@@ -11,5 +11,6 @@ export * from './WorkspacePicker';
 export * from './ImageLightboxModal';
 export * from './TaskAttachmentUploader';
 export * from './TaskPromptArea';
+export * from './AgentMarkdown';
 
 

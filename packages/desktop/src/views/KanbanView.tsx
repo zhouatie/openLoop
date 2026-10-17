@@ -49,6 +49,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { KanbanColumnSortDropdown } from '../components/KanbanColumnSortDropdown';
 import { NodeExecutionTimeline } from '../components/NodeExecutionTimeline';
 import { ImageLightboxModal } from '../components/ImageLightboxModal';
+import { AgentMarkdown } from '../components/AgentMarkdown';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 import {
   ColumnSortRule,
@@ -2466,7 +2467,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       </div>
                     </div>
                   ) : (
-                    sessionState.messages.map((msg) => {
+                    sessionState.messages.map((msg, msgIdx) => {
                       if (msg.role === 'user') {
                         return (
                           <div key={msg.id} className="flex justify-end">
@@ -2584,8 +2585,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                           {/* Assistant 回复正文 */}
                           {msg.content && (
-                            <div className="p-3 rounded-[9px] bg-white border border-[#e3e3e8] text-[#1c1c21] text-[12px] leading-relaxed shadow-sm whitespace-pre-wrap select-text">
-                              {msg.content}
+                            <div className="p-3 rounded-[9px] bg-white border border-[#e3e3e8] shadow-sm select-text">
+                              <AgentMarkdown
+                                content={msg.content}
+                                isStreaming={!!sessionState?.isBusy && msgIdx === sessionState.messages.length - 1}
+                              />
                             </div>
                           )}
                         </div>
