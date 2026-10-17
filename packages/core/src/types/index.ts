@@ -216,6 +216,8 @@ export type AgentProviderType = 'pi' | 'custom-cli';
 
 export type PiThinkingLevel = 'off' | 'low' | 'medium' | 'high';
 
+export type ShortcutSuperKey = 'Control' | 'Meta' | 'Alt';
+
 export interface OpenLoopSettings {
   agentProvider?: AgentProviderType;
   piModel?: string;
@@ -223,6 +225,8 @@ export interface OpenLoopSettings {
   piTools?: string;
   defaultCwd?: string;
   autoSnapshot?: boolean;
+  shortcutSuperKey?: ShortcutSuperKey;
   [key: string]: any;
 }
+
 

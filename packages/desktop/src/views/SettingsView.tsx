@@ -11,9 +11,12 @@ import {
   Folder,
   FolderOpen,
   Download,
+  Keyboard,
 } from 'lucide-react';
 import { api } from '../services/api';
-import { OpenLoopSettings, AgentProviderType, PiThinkingLevel } from '@openloop/core';
+import { OpenLoopSettings, AgentProviderType, PiThinkingLevel, ShortcutSuperKey } from '@openloop/core';
+import { useShortcuts } from '../context/ShortcutContext';
+import { Kbd } from '../components/Kbd';
 
 interface SettingsViewProps {
   activeSubTab?: string;
@@ -27,6 +30,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // 快捷键状态
+  const { superKey, setSuperKey, superKeyLabel } = useShortcuts();
 
   // 表单状态
   const [agentProvider, setAgentProvider] = useState<AgentProviderType>('pi');
@@ -132,6 +138,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         piTools,
         defaultCwd,
         autoSnapshot,
+        shortcutSuperKey: superKey,
       };
 
       if (import.meta.env?.DEV) {
@@ -573,7 +580,96 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* ==================== 分组 5: 配置文件管理 ==================== */}
+        {/* ==================== 分组 5: 全局快捷键与控制 ==================== */}
+        <div>
+          <div className="text-[11.5px] text-[#85858d] mb-1.5 px-0.5 font-normal flex items-center gap-1.5">
+            <Keyboard size={13} className="text-[#85858d]" />
+            <span>全局快捷键与控制</span>
+          </div>
+
+          <div className="bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+            {/* Super 键选择器 */}
+            <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-[#1c1c21]">全局 Super 引导键</div>
+                <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                  配置用于触发页面快速跳转、新建任务与命令面板的修饰键。默认为 Control 键，可按操作习惯切换为 Command 或 Alt
+                </div>
+              </div>
+
+              <div className="inline-flex p-[2px] rounded-[7px] bg-[#e6e6eb] shrink-0 self-center">
+                <button
+                  type="button"
+                  onClick={() => setSuperKey('Control')}
+                  className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all ${
+                    superKey === 'Control'
+                      ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+                      : 'text-[#63636b] hover:text-[#1c1c21]'
+                  }`}
+                >
+                  Control (默认)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSuperKey('Meta')}
+                  className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all ${
+                    superKey === 'Meta'
+                      ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+                      : 'text-[#63636b] hover:text-[#1c1c21]'
+                  }`}
+                >
+                  Command (⌘)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSuperKey('Alt')}
+                  className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all ${
+                    superKey === 'Alt'
+                      ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+                      : 'text-[#63636b] hover:text-[#1c1c21]'
+                  }`}
+                >
+                  Alt / Option (⌥)
+                </button>
+              </div>
+            </div>
+
+            {/* 快捷键实时映射清单 */}
+            <div className="px-3.5 py-3 bg-[#fafafc]">
+              <div className="text-[12px] font-medium text-[#1c1c21] mb-2.5">
+                已激活的全局快捷键清单
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div className="flex items-center justify-between p-2 rounded-[6px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                  <span className="text-[11.5px] text-[#4b4b53]">任务看板</span>
+                  <Kbd keys={['super', '1']} size="xs" />
+                </div>
+                <div className="flex items-center justify-between p-2 rounded-[6px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                  <span className="text-[11.5px] text-[#4b4b53]">流程编排</span>
+                  <Kbd keys={['super', '2']} size="xs" />
+                </div>
+                <div className="flex items-center justify-between p-2 rounded-[6px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                  <span className="text-[11.5px] text-[#4b4b53]">扩展插件</span>
+                  <Kbd keys={['super', '3']} size="xs" />
+                </div>
+                <div className="flex items-center justify-between p-2 rounded-[6px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                  <span className="text-[11.5px] text-[#4b4b53]">系统设置</span>
+                  <Kbd keys={['super', ',']} size="xs" />
+                </div>
+                <div className="flex items-center justify-between p-2 rounded-[6px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                  <span className="text-[11.5px] text-[#4b4b53]">新建任务</span>
+                  <Kbd keys={['super', 'N']} size="xs" />
+                </div>
+                <div className="flex items-center justify-between p-2 rounded-[6px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                  <span className="text-[11.5px] text-[#4b4b53]">命令面板</span>
+                  <Kbd keys={['super', 'K']} size="xs" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ==================== 分组 6: 配置文件管理 ==================== */}
         <div>
           <div className="text-[11.5px] text-[#85858d] mb-1.5 px-0.5 font-normal">
             配置文件与备份

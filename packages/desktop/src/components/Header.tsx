@@ -1,5 +1,6 @@
 import React from 'react';
-import { PanelLeft, ArrowUp, RefreshCw, Plus, Terminal } from 'lucide-react';
+import { PanelLeft, ArrowUp, RefreshCw, Plus, Terminal, Command } from 'lucide-react';
+import { Kbd } from './Kbd';
 
 interface HeaderProps {
   category: string;
@@ -10,6 +11,7 @@ interface HeaderProps {
   isLogsOpen: boolean;
   unreadLogsCount: number;
   onRefresh: () => void;
+  onOpenCommandPalette?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,6 +23,7 @@ export const Header: React.FC<HeaderProps> = ({
   isLogsOpen,
   unreadLogsCount,
   onRefresh,
+  onOpenCommandPalette,
 }) => {
   return (
     <header className="h-[46px] border-b border-[#e3e3e8] bg-white px-4 flex items-center justify-between select-none shrink-0">
@@ -42,13 +45,28 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* 右侧：动作按钮 */}
       <div className="flex items-center gap-2">
+        {/* 命令面板快捷唤起 */}
+        {onOpenCommandPalette && (
+          <button
+            onClick={onOpenCommandPalette}
+            className="flex items-center gap-1.5 h-[26px] px-2 rounded-[7px] border border-[#e3e3e8] bg-[#f9f9fb] hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] transition-all"
+            title="唤起全局命令面板"
+          >
+            <Command size={12} strokeWidth={2} className="text-[#85858d]" />
+            <span className="text-[11.5px]">命令</span>
+            <Kbd keys={['super', 'K']} size="xs" variant="light" className="ml-0.5" />
+          </button>
+        )}
+
         {/* 新建任务 */}
         <button
           onClick={onOpenCreateTask}
-          className="flex items-center gap-1.5 h-[26px] px-2.5 rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95"
+          className="flex items-center gap-1.5 h-[26px] px-2.5 rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-sm"
+          title="新建任务"
         >
           <Plus size={13} strokeWidth={2.4} />
           <span>新建任务</span>
+          <Kbd keys={['super', 'N']} size="xs" variant="dark" className="ml-0.5 opacity-80" />
         </button>
 
         {/* 终端实时日志 */}

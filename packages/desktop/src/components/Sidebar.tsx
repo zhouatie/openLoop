@@ -12,6 +12,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { PluginManifest } from '@openloop/core';
+import { useShortcuts } from '../context/ShortcutContext';
 
 interface SidebarProps {
   plugins: PluginManifest[];
@@ -36,6 +37,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectPlugin,
   isDaemonConnected,
 }) => {
+  const { formatCombo } = useShortcuts();
+
   const corePlugins = plugins.filter(
     (p) => p.id === 'kanban' || p.id === 'workflow-editor'
   );
@@ -80,10 +83,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <Puzzle size={15} strokeWidth={1.8} />
                   );
 
+                const shortcutHint =
+                  plugin.id === 'kanban'
+                    ? formatCombo('1')
+                    : plugin.id === 'workflow-editor'
+                    ? formatCombo('2')
+                    : undefined;
+                const titleText = plugin.sidebarItem?.title || plugin.name;
+
                 return (
                   <button
                     key={plugin.id}
                     onClick={() => onSelectPlugin(plugin.id)}
+                    title={shortcutHint ? `${titleText} (${shortcutHint})` : titleText}
                     className={`w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-[7px] text-[13px] transition-all text-left ${
                       isActive
                         ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.14),0_0_0_0.5px_rgba(0,0,0,0.08)]'
@@ -93,9 +105,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <span className={isActive ? 'text-[#1c1c21]' : 'text-[#85858d]'}>
                       {icon}
                     </span>
-                    <span className="truncate tracking-tight">
-                      {plugin.sidebarItem?.title || plugin.name}
-                    </span>
+                    <span className="truncate tracking-tight">{titleText}</span>
                   </button>
                 );
               })}
@@ -115,10 +125,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <Boxes size={15} strokeWidth={1.8} />
                   );
 
+                const shortcutHint =
+                  plugin.id === 'plugin-manager' ? formatCombo('3') : undefined;
+                const titleText = plugin.sidebarItem?.title || plugin.name;
+
                 return (
                   <button
                     key={plugin.id}
                     onClick={() => onSelectPlugin(plugin.id)}
+                    title={shortcutHint ? `${titleText} (${shortcutHint})` : titleText}
                     className={`w-full flex items-center justify-between px-2.5 h-[30px] rounded-[7px] text-[13px] transition-all text-left ${
                       isActive
                         ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.14),0_0_0_0.5px_rgba(0,0,0,0.08)]'
@@ -129,9 +144,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <span className={isActive ? 'text-[#1c1c21]' : 'text-[#85858d]'}>
                         {icon}
                       </span>
-                      <span className="truncate tracking-tight">
-                        {plugin.sidebarItem?.title || plugin.name}
-                      </span>
+                      <span className="truncate tracking-tight">{titleText}</span>
                     </div>
 
                     {!plugin.isBuiltin && (
@@ -186,6 +199,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ) : (
           <button
             onClick={() => onSelectPlugin('settings-agent')}
+            title={`系统设置 (${formatCombo(',')})`}
             className="w-full flex items-center gap-2.5 px-2.5 h-[30px] rounded-[7px] text-[13px] text-[#4b4b53] hover:bg-[#e9e9ee] hover:text-[#1c1c21] transition-all"
           >
             <Settings size={15} strokeWidth={1.8} className="text-[#85858d]" />

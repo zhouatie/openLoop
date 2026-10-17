@@ -12,5 +12,8 @@ export * from './ImageLightboxModal';
 export * from './TaskAttachmentUploader';
 export * from './TaskPromptArea';
 export * from './AgentMarkdown';
+export * from './Kbd';
+export * from './CommandPalette';
+
 
 

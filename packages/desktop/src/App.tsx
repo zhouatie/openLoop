@@ -3,6 +3,9 @@ import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { LogTerminalDrawer } from './components/LogTerminalDrawer';
 import { CreateTaskModal } from './components/CreateTaskModal';
+import { CommandPalette } from './components/CommandPalette';
+import { ShortcutProvider } from './context/ShortcutContext';
+import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { KanbanView } from './views/KanbanView';
 import { WorkflowListView } from './views/WorkflowListView';
 import { WorkflowEditorView } from './views/WorkflowEditorView';
@@ -13,7 +16,7 @@ import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, TaskA
 import { Puzzle } from 'lucide-react';
 import { BUILTIN_PLUGINS, BUILTIN_VIEW_TITLES } from './constants/builtinPlugins';
 
-export const App: React.FC = () => {
+export const AppContent: React.FC = () => {
   const [activePluginId, setActivePluginId] = useState<string>('kanban');
   const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
   const [plugins, setPlugins] = useState<PluginManifest[]>(BUILTIN_PLUGINS);
@@ -31,7 +34,36 @@ export const App: React.FC = () => {
     }
   });
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
   const [isDaemonConnected, setIsDaemonConnected] = useState<boolean>(api.getConnectionStatus());
+
+  // 绑定全局快捷键（高频事件委托，极致性能与输入保护）
+  useGlobalShortcuts({
+    onNavigateKanban: () => {
+      setActivePluginId('kanban');
+    },
+    onNavigateWorkflows: () => {
+      setActivePluginId('workflow-editor');
+      setEditingWorkflowId(null);
+    },
+    onNavigatePlugins: () => {
+      setActivePluginId('plugin-manager');
+    },
+    onNavigateSettings: () => {
+      setActivePluginId('settings-agent');
+    },
+    onOpenCreateTask: () => {
+      setIsCreateTaskModalOpen(true);
+    },
+    onToggleCommandPalette: () => {
+      setIsCommandPaletteOpen((prev) => !prev);
+    },
+    onEscape: () => {
+      if (isCommandPaletteOpen) {
+        setIsCommandPaletteOpen(false);
+      }
+    },
+  });
 
   const handleWorkspaceFilterChange = (workspace: string) => {
     setSelectedWorkspaceFilter(workspace);
@@ -218,6 +250,7 @@ export const App: React.FC = () => {
           title={pageTitle}
           isDaemonConnected={isDaemonConnected}
           onOpenCreateTask={() => setIsCreateTaskModalOpen(true)}
+          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onToggleLogs={handleToggleLogs}
           isLogsOpen={isLogsOpen}
           unreadLogsCount={unreadLogsCount}
@@ -314,6 +347,29 @@ export const App: React.FC = () => {
             : undefined
         }
       />
+
+      {/* 全局命令面板 (Super+K) */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onNavigate={(id) => {
+          setActivePluginId(id);
+          if (id === 'workflow-editor') {
+            setEditingWorkflowId(null);
+          }
+        }}
+        onOpenCreateTask={() => setIsCreateTaskModalOpen(true)}
+        onToggleLogs={handleToggleLogs}
+        onRefresh={refreshData}
+      />
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <ShortcutProvider>
+      <AppContent />
+    </ShortcutProvider>
   );
 };
