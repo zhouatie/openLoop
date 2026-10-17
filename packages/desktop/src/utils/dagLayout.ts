@@ -7,11 +7,13 @@ export interface LayoutOptions {
   gapY?: number;
   startX?: number;
   startY?: number;
+  direction?: 'TB' | 'LR';
 }
 
 /**
  * 高性能零依赖 DAG 层次拓扑排版算法
- * 使用 Kahn 拓扑分层 + 层级垂直居中布局，耗时 < 1ms，完全不卡顿 UI
+ * 默认使用从上到下 (Top-to-Bottom, TB) 轴对称层次排版，兼具多分支水平居中平衡
+ * 耗时 < 1ms，完全不卡顿 UI
  */
 export function layoutWorkflowDag(
   nodes: Node[],
@@ -20,12 +22,13 @@ export function layoutWorkflowDag(
 ): Node[] {
   if (!nodes || nodes.length === 0) return [];
 
-  const nodeWidth = options.nodeWidth || 240;
-  const nodeHeight = options.nodeHeight || 85;
-  const gapX = options.gapX || 80;
-  const gapY = options.gapY || 40;
-  const startX = options.startX || 60;
-  const startY = options.startY || 120;
+  const direction = options.direction || 'TB';
+  const nodeWidth = options.nodeWidth || 190;
+  const nodeHeight = options.nodeHeight || 68;
+  const gapX = options.gapX || 40;
+  const gapY = options.gapY || 48;
+  const startX = options.startX || 120;
+  const startY = options.startY || 60;
 
   // 1. 构建邻接表与入度统计
   const nodeMap = new Map<string, Node>();
@@ -97,39 +100,73 @@ export function layoutWorkflowDag(
     layers[l].push(node.id);
   }
 
-  // 计算最大列的高度，用于整体垂直基准平衡
-  let maxColHeight = 0;
-  for (const group of layers) {
-    if (group && group.length > 0) {
-      const h = group.length * nodeHeight + (group.length - 1) * gapY;
-      if (h > maxColHeight) maxColHeight = h;
-    }
-  }
-
   // 5. 计算并赋予每个节点最终优雅的 position 坐标
   const resultNodes: Node[] = [];
 
-  for (let l = 0; l < layers.length; l++) {
-    const group = layers[l];
-    if (!group || group.length === 0) continue;
+  if (direction === 'TB') {
+    // 从上往下排版 (Top to Bottom): 拓扑层级决定纵向 Y 坐标，同层并行节点水平居中
+    let maxRowWidth = 0;
+    for (const group of layers) {
+      if (group && group.length > 0) {
+        const w = group.length * nodeWidth + (group.length - 1) * gapX;
+        if (w > maxRowWidth) maxRowWidth = w;
+      }
+    }
 
-    const colX = startX + l * (nodeWidth + gapX);
-    const colTotalHeight = group.length * nodeHeight + (group.length - 1) * gapY;
-    // 居中偏移量
-    const offsetY = startY + (maxColHeight - colTotalHeight) / 2;
+    for (let l = 0; l < layers.length; l++) {
+      const group = layers[l];
+      if (!group || group.length === 0) continue;
 
-    for (let i = 0; i < group.length; i++) {
-      const nodeId = group[i];
-      const origNode = nodeMap.get(nodeId)!;
-      const posY = offsetY + i * (nodeHeight + gapY);
+      const rowY = startY + l * (nodeHeight + gapY);
+      const rowTotalWidth = group.length * nodeWidth + (group.length - 1) * gapX;
+      // 水平中轴对称居中对齐
+      const offsetX = startX + (maxRowWidth - rowTotalWidth) / 2;
 
-      resultNodes.push({
-        ...origNode,
-        position: {
-          x: Math.round(colX),
-          y: Math.round(posY),
-        },
-      });
+      for (let i = 0; i < group.length; i++) {
+        const nodeId = group[i];
+        const origNode = nodeMap.get(nodeId)!;
+        const posX = offsetX + i * (nodeWidth + gapX);
+
+        resultNodes.push({
+          ...origNode,
+          position: {
+            x: Math.round(posX),
+            y: Math.round(rowY),
+          },
+        });
+      }
+    }
+  } else {
+    // 从左往右排版 (Left to Right): 拓扑层级决定横向 X 坐标，同层并行节点垂直居中
+    let maxColHeight = 0;
+    for (const group of layers) {
+      if (group && group.length > 0) {
+        const h = group.length * nodeHeight + (group.length - 1) * gapY;
+        if (h > maxColHeight) maxColHeight = h;
+      }
+    }
+
+    for (let l = 0; l < layers.length; l++) {
+      const group = layers[l];
+      if (!group || group.length === 0) continue;
+
+      const colX = startX + l * (nodeWidth + gapX);
+      const colTotalHeight = group.length * nodeHeight + (group.length - 1) * gapY;
+      const offsetY = startY + (maxColHeight - colTotalHeight) / 2;
+
+      for (let i = 0; i < group.length; i++) {
+        const nodeId = group[i];
+        const origNode = nodeMap.get(nodeId)!;
+        const posY = offsetY + i * (nodeHeight + gapY);
+
+        resultNodes.push({
+          ...origNode,
+          position: {
+            x: Math.round(colX),
+            y: Math.round(posY),
+          },
+        });
+      }
     }
   }
 

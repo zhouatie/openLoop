@@ -158,10 +158,10 @@ export class DesktopApiService {
   async sendWorkflowChatMessage(
     workflowId: string,
     message: string,
-    snapshot?: { nodes?: any[]; edges?: any[]; name?: string }
+    snapshot?: { nodes?: any[]; edges?: any[]; name?: string; focusNodeId?: string }
   ): Promise<{ success: boolean }> {
     if (import.meta.env?.DEV) {
-      console.log(`[UI:WorkflowCopilot] 发送流程编排指令 (${workflowId}):`, message.slice(0, 40));
+      console.log(`[UI:WorkflowCopilot] 发送流程编排指令 (${workflowId}${snapshot?.focusNodeId ? `, 聚焦: ${snapshot.focusNodeId}` : ''}):`, message.slice(0, 40));
     }
     return requestJson<{ success: boolean }>(`${BASE_URL}/api/workflows/${workflowId}/session/chat`, {
       method: 'POST',

@@ -6,24 +6,25 @@ import { createLogger } from '../logger';
 
 const logger = createLogger('WorkflowCopilot');
 
-const COPILOT_SYSTEM_PROMPT = `你是一个专业的自动化流程编排架构师智能体 (Workflow Architect Agent)。
-你的职责是协助用户进行自动化 DAG 工作流从头到尾的规划、生成、诊断、节点修改与连线编排。
+const COPILOT_SYSTEM_PROMPT = `你是一个专业的自动化流程与工作流编排助手 (Workflow Assistant)。
+你的职责是协助用户进行自动化工作流 (DAG Workflow) 的全流程规划、阶段设计、链路拓展、健康体检与依赖编排。
 
-OpenLoop 平台支持的节点类型 (NodeType)：
-1. 'agent': AI Agent 智能体节点。用于代码编写、代码审查、自动化需求实现。配置项：config.prompt (string), config.agentName (string, 可选)。
-2. 'cli': 通用 Shell 命令行脚本节点。用于代码拉取、Lint、测试、构建、依赖安装、Git 提交、部署等。配置项：config.command (string)。
-3. 'midscene': Midscene 视觉自动化 UI 测试节点。用于 Web 端 UI 自动化断言与截屏。配置项：config.testUrl (string)。
+OpenLoop 平台支持的核心节点类型 (NodeType)：
+1. 'agent': AI Agent 智能体节点。负责自动化需求实现、代码编写、深度审查等。配置项：config.prompt (string), config.agentName (string, 可选)。
+2. 'cli': 通用 Shell 命令行脚本节点。负责代码检出、依赖安装、Lint、编译、测试、Git 提交、部署脚本等。配置项：config.command (string)。
+3. 'midscene': Midscene 视觉自动化 UI 测试节点。负责 Web 端无头视觉断言与截屏。配置项：config.testUrl (string)。
 4. 'stitch-image': 截图生成动图 / 视频节点。配置项：config.outputFile (string)。
-5. 'qa-approval': 人工/QA 验收审核节点。在关键步骤暂停等待人工批准。配置项：config.approvalPrompt (string)。
-6. 'hook': 触发器 / Webhook 广播通知节点。用于钉钉、飞书或企业微信 Webhook 消息通知。配置项：config.webhookUrl (string)。
+5. 'qa-approval': 人工/QA 验收审核门禁节点。在关键节点暂停流水线等待人工批准。配置项：config.approvalPrompt (string)。
+6. 'hook': 触发器 / Webhook 广播通知节点。用于钉钉、飞书、企业微信通知或下游系统流转。配置项：config.webhookUrl (string)。
 7. 'custom': 插件扩展节点。
 
-当用户提出编排需求（如从头创建、新增节点、修改节点参数、删除节点、重置流程等）时：
-1. 简要用优雅自然的语言解释你的设计理念、阶段划分与执行链路。
-2. 在回答的末尾，必须输出标准的 \`\`\`workflow-action 代码块，系统将自动解析并在前端画布中完成连线排版与节点渲染！
+核心编排原则：
+1. 【工作流全局视角】：将流水线视为包含多个阶段（如：代码检出 -> 质量门禁 -> Agent 研发/审查 -> 自动化测试 -> 人工核验 -> 部署上线 -> 结果通知）的有机整体。
+2. 【链路上下文感知】：若用户指定了聚焦节点 (focusNode)，你的职责是在流程拓扑中以该节点为锚点进行前后链路扩展（如在其后插入质检验收节点、并自动重定向原有后继连线），使用增量 "patch" 模式，不要将用户局限于单个节点的参数修改。
+3. 【清晰的阶段阐述】：简明扼要地向用户阐明流程规划与流转逻辑，随后在回答末尾输出标准的 \`\`\`workflow-action 代码块，前端将据此在画布中渲染幽灵预演 (Ghost Preview)。
 
 代码块格式规范：
-全量生成/替换工作流：
+全量流程规划 (Replace All)：
 \`\`\`workflow-action
 {
   "action": "replace_all",
@@ -52,7 +53,7 @@ OpenLoop 平台支持的节点类型 (NodeType)：
 }
 \`\`\`
 
-或者局部增量更新：
+增量链路补丁 (Patch)：
 \`\`\`workflow-action
 {
   "action": "patch",
@@ -65,9 +66,9 @@ OpenLoop 平台支持的节点类型 (NodeType)：
 \`\`\`
 
 注意：
-- 节点 id 请使用简洁唯一的语义化英文字符（如 node_pull_code, node_agent_review, node_test_midscene, node_git_commit）。
-- 节点之间的连线请务必保证有向无环（DAG），逻辑从前到后递进。
-- 坐标 (position) 无需手动计算，系统的自动排版引擎会自动将你的拓扑按优雅对齐呈现。`;
+- 节点 id 请使用语义化英文字符（如 node_checkout, node_lint, node_agent_review, node_test_midscene, node_qa_gate, node_deploy）。
+- 保证生成的拓扑有向无环（DAG），逻辑从前到后递进。
+- 坐标无需计算，系统排版引擎将自动进行 DAG 层级优雅对齐。`;
 
 export class WorkflowCopilotManager extends EventEmitter {
   private static instance: WorkflowCopilotManager;
@@ -125,29 +126,58 @@ export class WorkflowCopilotManager extends EventEmitter {
   public async sendMessage(
     workflowId: string,
     userMessage: string,
-    currentSnapshot?: { nodes?: WorkflowNode[]; edges?: WorkflowEdge[]; name?: string }
+    currentSnapshot?: {
+      nodes?: WorkflowNode[];
+      edges?: WorkflowEdge[];
+      name?: string;
+      focusNodeId?: string;
+    }
   ): Promise<void> {
     const sessionKey = `wf_${workflowId}`;
     let rpcSession = this.sessions.get(sessionKey);
     const workflow = this.store.getWorkflow(workflowId);
 
-    logger.info(`[WorkflowCopilot] 收到编排会话消息 (Workflow: ${workflowId}): "${userMessage.slice(0, 50)}"`);
+    logger.info(`[WorkflowCopilot] 收到流水线编排指令 (Workflow: ${workflowId}, Focus: ${currentSnapshot?.focusNodeId || 'none'}): "${userMessage.slice(0, 50)}"`);
 
-    // 构建上下文拓扑摘要
+    // 构建轻量 DAG 拓扑摘要
     let contextTopology = '';
     if (currentSnapshot && currentSnapshot.nodes && currentSnapshot.nodes.length > 0) {
+      const focusNode = currentSnapshot.focusNodeId
+        ? currentSnapshot.nodes.find((n) => n.id === currentSnapshot.focusNodeId)
+        : null;
+
       const nodeSummary = currentSnapshot.nodes
-        .map((n) => `  - [${n.id}] ${n.name} (类型: ${n.type}${n.config?.command ? `, 命令: ${n.config.command}` : ''}${n.config?.prompt ? `, Prompt: ${n.config.prompt.slice(0, 30)}` : ''})`)
+        .map((n) => {
+          const isFocused = n.id === currentSnapshot.focusNodeId ? ' [★用户当前关注锚点]' : '';
+          return `  - [${n.id}] ${n.name} (类型: ${n.type}${n.config?.command ? `, 命令: ${n.config.command}` : ''})${isFocused}`;
+        })
         .join('\n');
+
       const edgeSummary = (currentSnapshot.edges || [])
         .map((e) => `  - ${e.source} -> ${e.target}${e.label ? ` (${e.label})` : ''}`)
         .join('\n');
-      contextTopology = `\n\n[当前画布拓扑上下文]\n工作流名称: ${currentSnapshot.name || workflow?.name || workflowId}\n当前节点数: ${currentSnapshot.nodes.length}\n节点列表:\n${nodeSummary}\n当前连线:\n${edgeSummary || '  (暂无连线)'}`;
+
+      let focusContext = '';
+      if (focusNode) {
+        focusContext = `\n【焦点锚点】用户当前选中了节点 [${focusNode.id}] "${focusNode.name}"。若用户指令涉及“在此后添加/串联/配置验收门禁”，请针对该锚点进行链路扩充（使用 patch），保持原有其他拓扑稳定。`;
+      }
+
+      contextTopology = `\n\n[当前流水线拓扑上下文]\n流水线名称: ${currentSnapshot.name || workflow?.name || workflowId}\n节点总数: ${currentSnapshot.nodes.length}\n阶段节点列表:\n${nodeSummary}\n流转依赖连线:\n${edgeSummary || '  (暂无连线)'}${focusContext}`;
     } else {
-      contextTopology = '\n\n[当前画布拓扑上下文]\n当前画布为空（无节点与连线），请根据用户意图从零编排设计完整流程。';
+      contextTopology = '\n\n[当前流水线拓扑上下文]\n当前画布为空，请根据用户的业务愿景规划完整的自动化 DAG 流水线架构。';
     }
 
     const fullPrompt = `${COPILOT_SYSTEM_PROMPT}\n${contextTopology}\n\n[用户编排需求]\n${userMessage}`;
+
+    // 设立 5 秒超时兜底监控，确保任何网络/RPC 进程受阻时前端绝不挂死
+    let hasResponded = false;
+    const fallbackTimer = setTimeout(() => {
+      if (!hasResponded) {
+        hasResponded = true;
+        logger.warn(`[WorkflowCopilot] RPC 推理超时或未产生流式响应 (5s)，平滑启用智能兜底方案 (Workflow: ${workflowId})`);
+        this.generateFallbackResponse(workflowId, userMessage, currentSnapshot);
+      }
+    }, 5000);
 
     // 如果还没有启动 session，则初始化一个
     if (!rpcSession || !rpcSession.active) {
@@ -158,17 +188,22 @@ export class WorkflowCopilotManager extends EventEmitter {
         taskId: sessionKey,
         taskTitle: `Workflow Copilot: ${workflow?.name || workflowId}`,
         sessionId: piSessionId,
-        agentName: 'Workflow Architect Copilot',
+        agentName: 'Workflow Copilot',
         model: settings.defaultAgentModel || undefined,
         thinking: settings.defaultThinking || 'medium',
         cwd: process.cwd(),
         initialPrompt: fullPrompt,
         onUpdate: (state) => {
+          if (state.messages?.some((m) => m.role === 'assistant' && m.content)) {
+            hasResponded = true;
+            clearTimeout(fallbackTimer);
+          }
           this.handleSessionUpdate(workflowId, state);
         },
         onFinished: (error?: string) => {
-          if (error) {
-            logger.warn(`[WorkflowCopilot] Pi RPC 会话启动受阻或异常，启用智能兜底架构师响应: ${error}`);
+          clearTimeout(fallbackTimer);
+          if (error || !hasResponded) {
+            logger.warn(`[WorkflowCopilot] Pi RPC 会话未完成有效响应，启用智能兜底响应: ${error || '无输出'}`);
             this.generateFallbackResponse(workflowId, userMessage, currentSnapshot);
           } else {
             logger.info(`[WorkflowCopilot] 会话轮次完成 (Workflow: ${workflowId})`);
@@ -183,30 +218,164 @@ export class WorkflowCopilotManager extends EventEmitter {
       try {
         await rpcSession.sendUserMessage(stepMessage);
       } catch (err: any) {
-        logger.warn(`[WorkflowCopilot] 发送消息至活跃 RPC 失败，切换智能架构师响应: ${err.message}`);
+        clearTimeout(fallbackTimer);
+        logger.warn(`[WorkflowCopilot] 发送消息至活跃 RPC 失败，切换兜底响应: ${err.message}`);
         this.generateFallbackResponse(workflowId, userMessage, currentSnapshot);
       }
     }
   }
 
   /**
-   * 智能架构师离线/兜底生成器（确保高鲁棒性与秒级响应）
+   * 智能兜底生成器（确保高鲁棒性与秒级响应）
    */
   private generateFallbackResponse(
     workflowId: string,
     userMessage: string,
-    currentSnapshot?: { nodes?: WorkflowNode[]; edges?: WorkflowEdge[]; name?: string }
+    currentSnapshot?: {
+      nodes?: WorkflowNode[];
+      edges?: WorkflowEdge[];
+      name?: string;
+      focusNodeId?: string;
+    }
   ) {
     const workflow = this.store.getWorkflow(workflowId);
     if (!workflow) return;
     if (!workflow.context) workflow.context = {};
     if (!workflow.context.chatMessages) workflow.context.chatMessages = [];
 
+    // 确保用户的消息也已写入历史
+    const lastMsg = workflow.context.chatMessages[workflow.context.chatMessages.length - 1];
+    if (!lastMsg || lastMsg.role !== 'user' || lastMsg.content !== userMessage) {
+      workflow.context.chatMessages.push({
+        id: `msg_u_${Date.now()}`,
+        role: 'user',
+        content: userMessage,
+        timestamp: Date.now(),
+      });
+    }
+
     const lower = userMessage.toLowerCase();
     let actionPayload: any = null;
     let descriptionText = '';
 
-    if (lower.includes('pr') || lower.includes('审查') || lower.includes('review') || lower.includes('安全')) {
+    // 删除/移除节点意图处理 (如: "去掉最后一个 git", "删除 git 提交", "移除最后一个节点")
+    const isRemoveIntent =
+      lower.includes('去') ||
+      lower.includes('删') ||
+      lower.includes('移除') ||
+      lower.includes('不要') ||
+      lower.includes('减去');
+
+    if (currentSnapshot?.nodes && currentSnapshot.nodes.length > 0 && isRemoveIntent) {
+      const existingNodes = [...currentSnapshot.nodes];
+      let targetNodeId: string | null = null;
+      let targetNodeName = '';
+
+      for (let i = existingNodes.length - 1; i >= 0; i--) {
+        const n = existingNodes[i];
+        const nName = (n.name || '').toLowerCase();
+        const nType = (n.type || '').toLowerCase();
+        const nCmd = ((n.config as any)?.command || '').toLowerCase();
+
+        if (
+          (lower.includes('git') && (nName.includes('git') || nCmd.includes('git'))) ||
+          (lower.includes('qa') && (nName.includes('qa') || nType.includes('qa'))) ||
+          (lower.includes('midscene') && (nName.includes('midscene') || nType.includes('midscene'))) ||
+          (lower.includes('最后') && i === existingNodes.length - 1)
+        ) {
+          targetNodeId = n.id;
+          targetNodeName = n.name;
+          break;
+        }
+      }
+
+      if (!targetNodeId && (lower.includes('最后') || lower.includes('末尾'))) {
+        const lastNode = existingNodes[existingNodes.length - 1];
+        targetNodeId = lastNode.id;
+        targetNodeName = lastNode.name;
+      }
+
+      if (targetNodeId) {
+        const remainingNodes = existingNodes.filter((n) => n.id !== targetNodeId);
+        const remainingEdges = (currentSnapshot.edges || []).filter(
+          (e) => e.source !== targetNodeId && e.target !== targetNodeId
+        );
+
+        descriptionText = `已帮您从当前流水线中移除了【${targetNodeName}】阶段，并同步清理了其相关的流转依赖连线。`;
+        actionPayload = {
+          action: 'replace_all',
+          workflow: {
+            name: currentSnapshot.name || workflow.name,
+            description: `移除节点 [${targetNodeName}] 后的流程拓扑`,
+            nodes: remainingNodes,
+            edges: remainingEdges,
+          },
+        };
+      }
+    }
+
+    const focusNode = currentSnapshot?.focusNodeId && currentSnapshot.nodes
+      ? currentSnapshot.nodes.find((n) => n.id === currentSnapshot.focusNodeId)
+      : null;
+
+    // 链路增量扩展：如果用户关注了某个节点，并且提出了追加/插入/配置后续
+    if (focusNode && (lower.includes('后') || lower.includes('加') || lower.includes('测试') || lower.includes('审批') || lower.includes('通知') || lower.includes('门禁') || lower.includes('接入'))) {
+      const newNodeId = `node_ext_${Date.now().toString().slice(-4)}`;
+      let newNode: WorkflowNode;
+      let stepName = '自动化检查验收';
+
+      if (lower.includes('测试') || lower.includes('midscene') || lower.includes('ui')) {
+        stepName = 'Midscene 视觉断言';
+        newNode = {
+          id: newNodeId,
+          name: `${focusNode.name} -> UI回归测试`,
+          type: 'midscene',
+          config: { testUrl: 'http://localhost:3000' },
+          position: { x: 0, y: 0 },
+        };
+      } else if (lower.includes('审') || lower.includes('qa') || lower.includes('批准')) {
+        stepName = 'QA 人工验收门禁';
+        newNode = {
+          id: newNodeId,
+          name: `${focusNode.name} -> QA验收门禁`,
+          type: 'qa-approval',
+          config: { approvalPrompt: `请核验 [${focusNode.name}] 产出质量与指标是否达标` },
+          position: { x: 0, y: 0 },
+        };
+      } else if (lower.includes('通知') || lower.includes('hook') || lower.includes('飞书') || lower.includes('钉钉')) {
+        stepName = '下游流转通知';
+        newNode = {
+          id: newNodeId,
+          name: `${focusNode.name} -> 阶段完成通知`,
+          type: 'hook',
+          config: { webhookUrl: 'https://open.feishu.cn/open-apis/bot/v2/hook/xxx' },
+          position: { x: 0, y: 0 },
+        };
+      } else {
+        stepName = '质量保障审查';
+        newNode = {
+          id: newNodeId,
+          name: `${focusNode.name} -> 后置检查`,
+          type: 'cli',
+          config: { command: 'pnpm test && git status' },
+          position: { x: 0, y: 0 },
+        };
+      }
+
+      descriptionText = `已在关注节点【${focusNode.name}】后方成功串联【${stepName}】阶段，并自动为您重组流水线上下游链路！`;
+      actionPayload = {
+        action: 'patch',
+        addNodes: [newNode],
+        addEdges: [
+          {
+            id: `e_${focusNode.id}_${newNodeId}`,
+            source: focusNode.id,
+            target: newNodeId,
+            label: '执行成功',
+          },
+        ],
+      };
+    } else if (lower.includes('pr') || lower.includes('审查') || lower.includes('review') || lower.includes('安全')) {
       descriptionText = '为您规划了【自动化 PR 审查与合并】全链路流水线。包含依赖与类型检查、Agent 代码审查与坏味道检测、Midscene 视觉断言回归，以及安全提交流转。';
       actionPayload = {
         action: 'replace_all',
@@ -337,7 +506,7 @@ export class WorkflowCopilotManager extends EventEmitter {
         action: 'replace_all',
         workflow: {
           name: `编排流程: ${userMessage.slice(0, 20)}`,
-          description: `由智能架构师根据需求 "${userMessage}" 自动生成的全链路流程`,
+          description: `由 AI 助手根据需求 "${userMessage}" 自动生成的全流程`,
           nodes: [
             {
               id: 'node_setup',
@@ -397,10 +566,10 @@ export class WorkflowCopilotManager extends EventEmitter {
       isBusy: false,
       isPaused: false,
       messages: workflow.context.chatMessages,
-      agentName: 'Workflow Architect Copilot',
+      agentName: 'Workflow Copilot',
     };
 
-    logger.info(`[WorkflowCopilot] 智能架构师已就绪并分发编排 Action (Workflow: ${workflowId})`);
+    logger.info(`[WorkflowCopilot] 编排助手已就绪并分发 Action (Workflow: ${workflowId})`);
     this.emit('update', { workflowId, state: wfState });
   }
 
