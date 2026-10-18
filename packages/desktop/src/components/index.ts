@@ -18,6 +18,7 @@ export * from './DebugWorkflowModal';
 export * from './QuickRunWorkflowModal';
 export * from './Toast';
 export * from './AgentSessionDrawer';
+export * from './ChatScrollToLatestButton';
 
 
 

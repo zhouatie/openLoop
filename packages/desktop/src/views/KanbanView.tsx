@@ -50,9 +50,11 @@ import { KanbanColumnSortDropdown } from '../components/KanbanColumnSortDropdown
 import { NodeExecutionTimeline } from '../components/NodeExecutionTimeline';
 import { ImageLightboxModal } from '../components/ImageLightboxModal';
 import { AgentMarkdown } from '../components/AgentMarkdown';
+import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
 import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
 import { toast } from '../components/Toast';
 import { resolveNodeMeta } from '../utils/nodeMeta';
+import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 import {
   ColumnSortRule,
   ColumnSortConfigMap,
@@ -320,8 +322,21 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [isPausingSession, setIsPausingSession] = useState(false);
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
-  const chatMessagesEndRef = useRef<HTMLDivElement>(null);
   const chatTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const {
+    containerRef: chatScrollContainerRef,
+    bottomRef: chatMessagesEndRef,
+    isAtBottom: isChatAtBottom,
+    hasNewOutput: hasNewChatOutput,
+    handleScroll: handleChatScroll,
+    handleWheel: handleChatWheel,
+    scrollToBottom: scrollChatToBottom,
+  } = useChatAutoScroll({
+    dataKey: sessionState,
+    isActive: drawerTab === 'session' && !!selectedTask,
+    resetKey: selectedTask?.id,
+  });
 
   // 打开任务抽屉时同步获取最新 Session 状态
   useEffect(() => {
@@ -351,12 +366,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     return () => unsub();
   }, [selectedTask?.id]);
 
-  // 对话更新时自动平滑滚动到底部
-  useEffect(() => {
-    if (drawerTab === 'session') {
-      chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [sessionState?.messages, drawerTab]);
 
   // 侧边栏 Agent 会话图片上传状态
   const [chatAttachments, setChatAttachments] = useState<TaskAttachment[]>([]);
@@ -491,6 +500,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     setChatInput('');
     setChatAttachments([]);
     setIsSendingChat(true);
+    scrollChatToBottom(true);
 
     if (import.meta.env?.DEV) {
       console.log('[UI:AgentChat] 用户向 Agent 发送对话:', {
@@ -2562,8 +2572,14 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   </div>
                 </div>
 
-                {/* 消息滚动流 */}
-                <div className="flex-1 overflow-y-auto pr-1 space-y-3 min-h-0 text-[12px]">
+                {/* 消息滚动流与浮动查看最新指示器 */}
+                <div className="relative flex-1 min-h-0 flex flex-col">
+                  <div
+                    ref={chatScrollContainerRef}
+                    onScroll={handleChatScroll}
+                    onWheel={handleChatWheel}
+                    className="flex-1 overflow-y-auto pr-1 space-y-3 min-h-0 text-[12px]"
+                  >
                   {(!sessionState?.messages || sessionState.messages.length === 0) ? (
                     <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-6 text-[#85858d]">
                       <div className="w-11 h-11 rounded-[10px] bg-[#f4f4f6] border border-[#e3e3e8] flex items-center justify-center mb-2.5">
@@ -2706,6 +2722,14 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   )}
                   <div ref={chatMessagesEndRef} />
                 </div>
+
+                {/* 离开底部后的浮动「查看最新」胶囊按钮 */}
+                <ChatScrollToLatestButton
+                  visible={!isChatAtBottom}
+                  hasNewOutput={hasNewChatOutput}
+                  onClick={() => scrollChatToBottom(true)}
+                />
+              </div>
 
                 {/* 贴底悬浮输入框区 */}
                 <div className="pt-2.5 border-t border-[#ececf0] bg-white shrink-0">

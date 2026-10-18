@@ -81,6 +81,8 @@ import { toast } from '../components/Toast';
 import { DebugWorkflowModal } from '../components/DebugWorkflowModal';
 import { WorkspacePicker } from '../components/WorkspacePicker';
 import { AgentSessionDrawer } from '../components/AgentSessionDrawer';
+import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
+import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 
 // ==========================================
 // 1. 自定义节点外观（极简高质感 + 智能体生成发光 + 幽灵预演态 + 编排调试实时运行态）
@@ -558,7 +560,20 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const [undoSnapshot, setUndoSnapshot] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const {
+    containerRef: copilotScrollContainerRef,
+    bottomRef: chatEndRef,
+    isAtBottom: isCopilotAtBottom,
+    hasNewOutput: hasNewCopilotOutput,
+    handleScroll: handleCopilotScroll,
+    handleWheel: handleCopilotWheel,
+    scrollToBottom: scrollCopilotToBottom,
+  } = useChatAutoScroll({
+    dataKey: copilotState,
+    isActive: isSidebarOpen && sidebarTab === 'copilot',
+    resetKey: workflowId,
+  });
+
   const nodeTypes = useMemo(() => ({ customNode: CustomWorkflowNode }), []);
 
   // 初始化加载工作流节点和连线
@@ -672,12 +687,6 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     return () => unsub();
   }, [workflowId, appliedActionIds]);
 
-  // 滚动到聊天窗口最底
-  useEffect(() => {
-    if (isSidebarOpen && sidebarTab === 'copilot') {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [copilotState?.messages, isSidebarOpen, sidebarTab]);
 
   // React Flow 内部更新
   const onNodesChange = useCallback(
@@ -1172,6 +1181,8 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const handleSendMessage = async (textToSend?: string) => {
     const content = (textToSend || inputMessage).trim();
     if (!content || isSendingMessage) return;
+
+    scrollCopilotToBottom(true);
 
     if (import.meta.env?.DEV) {
       console.log('[Workflow:Dispatch] 发送编排指令:', {
@@ -2684,8 +2695,14 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   )}
                 </div>
 
-                {/* 消息滚动流 */}
-                <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0 text-[12px]">
+                {/* 消息滚动流与浮动查看最新指示器 */}
+                <div className="relative flex-1 min-h-0 flex flex-col">
+                  <div
+                    ref={copilotScrollContainerRef}
+                    onScroll={handleCopilotScroll}
+                    onWheel={handleCopilotWheel}
+                    className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0 text-[12px]"
+                  >
                   {(!copilotState?.messages || copilotState.messages.length === 0) ? (
                     <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-4 text-[#85858d]">
                       <div className="w-10 h-10 rounded-[10px] bg-[#eeedfd] border border-[#c7d2fe] flex items-center justify-center mb-2.5 text-[#4f46e5]">
@@ -2852,6 +2869,14 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   )}
                   <div ref={chatEndRef} />
                 </div>
+
+                {/* 离开底部后的浮动「查看最新」胶囊按钮 */}
+                <ChatScrollToLatestButton
+                  visible={!isCopilotAtBottom}
+                  hasNewOutput={hasNewCopilotOutput}
+                  onClick={() => scrollCopilotToBottom(true)}
+                />
+              </div>
 
                 {/* 推荐快捷指令胶囊条 */}
                 <div className="px-3 py-1.5 bg-[#fafafc] border-t border-[#ececf0] flex items-center gap-1.5 overflow-x-auto text-[10.5px] shrink-0">
