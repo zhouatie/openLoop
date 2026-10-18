@@ -959,6 +959,16 @@ export class SqliteStore {
       );
 
       if (task.nodeRuns) {
+        const activeNodeIds = Object.keys(task.nodeRuns);
+        if (activeNodeIds.length > 0) {
+          const placeholders = activeNodeIds.map(() => '?').join(',');
+          this.db
+            .prepare(`DELETE FROM task_node_runs WHERE task_id = ? AND node_id NOT IN (${placeholders})`)
+            .run(task.id, ...activeNodeIds);
+        } else {
+          this.db.prepare('DELETE FROM task_node_runs WHERE task_id = ?').run(task.id);
+        }
+
         for (const [nodeId, run] of Object.entries(task.nodeRuns)) {
           upsertNodeRun.run(
             task.id,

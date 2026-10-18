@@ -1777,39 +1777,57 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                             {/* 失败/驳回任务：克制优雅的错误状态与微型重试/跳过胶囊 */}
                             {task.status === 'failed' && (
-                              <div className="my-2 p-1.5 rounded-[6px] bg-[#fdf2f2] border border-[#fbd5d5] flex items-center justify-between gap-1.5">
-                                <div className="min-w-0 flex items-center gap-1 text-[10.5px] text-[#d64545] font-medium truncate">
-                                  <AlertCircle size={11} className="shrink-0" />
-                                  <span className="truncate" title={failReason}>
-                                    {failReason}
-                                  </span>
+                              <div className="my-2 space-y-1.5">
+                                <div className="p-1.5 rounded-[6px] bg-[#fdf2f2] border border-[#fbd5d5] flex items-center justify-between gap-1.5">
+                                  <div className="min-w-0 flex items-center gap-1 text-[10.5px] text-[#d64545] font-medium truncate">
+                                    <AlertCircle size={11} className="shrink-0" />
+                                    <span className="truncate" title={failReason}>
+                                      {failReason}
+                                    </span>
+                                  </div>
+                                  <div className="shrink-0 flex items-center gap-1">
+                                    <button
+                                      disabled={skippingTaskId === task.id || runningTaskId === task.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleSkipNode(task.id, lastFailedRun?.nodeId);
+                                      }}
+                                      className="h-[20px] px-1.5 rounded-[4px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50 cursor-pointer"
+                                      title="跳过当前报错节点，继续后续流程或标记完成"
+                                    >
+                                      <SkipForward size={9.5} className="text-[#85858d]" />
+                                      <span>{skippingTaskId === task.id ? '跳过中' : '跳过'}</span>
+                                    </button>
+                                    <button
+                                      disabled={runningTaskId === task.id || skippingTaskId === task.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRunTask(task.id);
+                                      }}
+                                      className="h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50 cursor-pointer"
+                                      title="重新运行整条流水线"
+                                    >
+                                      <RotateCcw size={9.5} />
+                                      <span>重试</span>
+                                    </button>
+                                  </div>
                                 </div>
-                                <div className="shrink-0 flex items-center gap-1">
+
+                                {(task.context?.worktree || nodeRuns.some((r) => r.artifacts && r.artifacts.length > 0)) && (
                                   <button
-                                    disabled={skippingTaskId === task.id || runningTaskId === task.id}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleSkipNode(task.id, lastFailedRun?.nodeId);
+                                      setVisualAcceptanceTask(task);
                                     }}
-                                    className="h-[20px] px-1.5 rounded-[4px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50"
-                                    title="跳过当前报错节点，继续后续流程或标记完成"
+                                    className="w-full h-[24px] rounded-[5px] bg-[#4f46e5]/10 hover:bg-[#4f46e5]/20 text-[#4338ca] text-[11px] font-medium flex items-center justify-center gap-1.5 border border-[#c7d2fe] transition-all cursor-pointer"
                                   >
-                                    <SkipForward size={9.5} className="text-[#85858d]" />
-                                    <span>{skippingTaskId === task.id ? '跳过中' : '跳过'}</span>
+                                    <Play size={10} className="fill-current" />
+                                    <span>查看截帧回放与靶机</span>
+                                    {task.context?.worktree?.webPort && (
+                                      <span className="text-[9.5px] font-mono opacity-80">(:{task.context.worktree.webPort})</span>
+                                    )}
                                   </button>
-                                  <button
-                                    disabled={runningTaskId === task.id || skippingTaskId === task.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleRunTask(task.id);
-                                    }}
-                                    className="h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50"
-                                    title="重新运行整条流水线"
-                                  >
-                                    <RotateCcw size={9.5} />
-                                    <span>重试</span>
-                                  </button>
-                                </div>
+                                )}
                               </div>
                             )}
 
@@ -2494,6 +2512,37 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           className="h-[32px] px-4 rounded-[7px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[12px] font-medium transition-all"
                         >
                           驳回
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedTask.status === 'failed' && (
+                    <div className="space-y-2">
+                      {(selectedTask.context?.worktree || Object.values(selectedTask.nodeRuns || {}).some((r) => r.artifacts && r.artifacts.length > 0)) && (
+                        <button
+                          onClick={() => setVisualAcceptanceTask(selectedTask)}
+                          className="w-full h-[34px] rounded-[7px] bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                        >
+                          <Play size={13} className="fill-current" />
+                          <span>查看截帧回放与靶机现场</span>
+                        </button>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          disabled={skippingTaskId === selectedTask.id}
+                          onClick={() => handleSkipNode(selectedTask.id)}
+                          className="flex-1 h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50 cursor-pointer"
+                        >
+                          <SkipForward size={13} />
+                          <span>跳过报错节点并继续</span>
+                        </button>
+                        <button
+                          disabled={runningTaskId === selectedTask.id}
+                          onClick={() => handleRunTask(selectedTask.id)}
+                          className="h-[32px] px-4 rounded-[7px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[12px] font-medium transition-all cursor-pointer"
+                        >
+                          整单重试
                         </button>
                       </div>
                     </div>
