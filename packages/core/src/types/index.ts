@@ -12,7 +12,8 @@ export type NodeType =
   | 'hook'            // Webhook / 触发器
   | 'qa-approval'     // 人工 QA 审核确认
   | 'worktree-setup'  // 创建 Git Worktree 与独立沙箱靶机
-  | 'worktree-merge'  // 自动合并 Worktree 并清理沙箱现场
+  | 'worktree-merge'  // 自动合并 Worktree 分支
+  | 'worktree-cleanup'// 释放任务后台进程与清理沙箱目录
   | 'env-prepare'      // 环境准备与服务拉起 / 现场就绪检查
   | 'custom';         // 插件扩展节点
 

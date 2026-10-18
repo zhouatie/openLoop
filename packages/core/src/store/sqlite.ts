@@ -471,9 +471,18 @@ export class SqliteStore {
         },
         {
           id: 'node_wt_merge',
-          name: '6. 自动合并与沙箱清理',
+          name: '6. 自动合并代码分支',
           type: 'worktree-merge',
           position: { x: 1500, y: 150 },
+          config: {
+            timeoutSec: 60,
+          },
+        },
+        {
+          id: 'node_wt_cleanup',
+          name: '7. 环境释放与沙箱清理',
+          type: 'worktree-cleanup',
+          position: { x: 1780, y: 150 },
           config: {
             timeoutSec: 60,
           },
@@ -485,6 +494,7 @@ export class SqliteStore {
         { id: 'e_prep_to_qa', source: 'node_env_prep', target: 'node_qa_test' },
         { id: 'e_qa_to_gate', source: 'node_qa_test', target: 'node_qa_gate' },
         { id: 'e_gate_to_merge', source: 'node_qa_gate', target: 'node_wt_merge' },
+        { id: 'e_merge_to_cleanup', source: 'node_wt_merge', target: 'node_wt_cleanup' },
       ],
     };
   }

@@ -172,6 +172,15 @@ const getRunningNodeVisual = (type?: string): RunningNodeVisual => {
         pingColor: 'bg-[#9333ea]',
         icon: Layers,
       };
+    case 'worktree-cleanup':
+      return {
+        label: '环境清理',
+        badgeBg: 'bg-[#f8fafc]',
+        badgeText: 'text-[#475569]',
+        badgeBorder: 'border-[#cbd5e1]',
+        pingColor: 'bg-[#64748b]',
+        icon: Layers,
+      };
     default:
       return {
         label: '自动化工序',

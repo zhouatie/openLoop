@@ -1082,6 +1082,60 @@ export class WorktreeMergeExecutor implements NodeExecutor {
   }
 }
 
+// Git Worktree 隔离沙箱与服务环境清理执行器 (worktree-cleanup 节点)
+// 显式解耦清理动作：负责统一关闭后台靶机进程、释放网络端口、移除临时工作目录与特性分支
+export class WorktreeCleanupExecutor implements NodeExecutor {
+  async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
+    const { task, emitLog, node } = ctx;
+    const repoRoot = findRepoRoot(
+      node.config.cwd ||
+      (task.context?.worktree ? path.dirname(path.dirname(task.context.worktree.worktreeDir)) : undefined)
+    );
+
+    emitLog('system', `[沙箱现场清理] 开始释放任务后台进程与清理 Worktree 隔离环境...`);
+
+    try {
+      const wtManager = WorktreeManager.getInstance();
+
+      // 1. 释放任务后台进程与端口占用
+      TaskProcessManager.getInstance().stopAll(task.id);
+      if (task.context?.worktree?.webPort) {
+        wtManager.killPortIfBusy(task.context.worktree.webPort);
+      }
+      if (task.context?.worktree?.ports) {
+        for (const p of Object.values(task.context.worktree.ports)) {
+          if (typeof p === 'number') {
+            wtManager.killPortIfBusy(p);
+          }
+        }
+      }
+      emitLog('system', `[沙箱现场清理] ✔ 已安全终止所有后台关联进程与网络端口`);
+
+      // 2. 清理临时特性分支与工作目录
+      wtManager.cleanupTaskWorktree(repoRoot, task.id, (msg) => emitLog('system', msg));
+      emitLog('system', `[沙箱现场清理] ✔ 隔离工作目录与临时分支已彻底清空`);
+
+      // 恢复任务工作空间为宿主仓库根目录
+      task.workspace = repoRoot;
+
+      return {
+        status: 'success',
+        exitCode: 0,
+        output: { cleaned: true, timestamp: Date.now() },
+      };
+    } catch (err: any) {
+      const errMsg = `[沙箱现场清理异常] ${err.message}`;
+      executorLogger.error(errMsg, err, { taskId: task.id, nodeId: node.id });
+      emitLog('stderr', errMsg);
+      return {
+        status: 'failed',
+        exitCode: 1,
+        error: errMsg,
+      };
+    }
+  }
+}
+
 export class ExecutorRegistry {
   private executors: Map<string, NodeExecutor> = new Map();
 
@@ -1094,6 +1148,7 @@ export class ExecutorRegistry {
     this.register('qa-approval', new QaApprovalExecutor());
     this.register('worktree-setup', new WorktreeSetupExecutor());
     this.register('worktree-merge', new WorktreeMergeExecutor());
+    this.register('worktree-cleanup', new WorktreeCleanupExecutor());
     this.register('env-prepare', new EnvPrepareExecutor());
   }
 

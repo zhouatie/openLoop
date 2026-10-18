@@ -160,6 +160,13 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
       text: 'text-[#7e22ce]',
       border: 'border-[#e9d5ff]',
     },
+    'worktree-cleanup': {
+      label: '环境清理',
+      icon: <Layers size={12} strokeWidth={2} />,
+      bg: 'bg-[#f8fafc]',
+      text: 'text-[#475569]',
+      border: 'border-[#cbd5e1]',
+    },
     custom: {
       label: '插件扩展',
       icon: <Sparkles size={12} strokeWidth={2} />,
