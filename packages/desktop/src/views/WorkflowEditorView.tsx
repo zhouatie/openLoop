@@ -78,6 +78,8 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { AgentMarkdown } from '../components/AgentMarkdown';
 import { toast } from '../components/Toast';
 import { DebugWorkflowModal } from '../components/DebugWorkflowModal';
+import { WorkspacePicker } from '../components/WorkspacePicker';
+import { AgentSessionDrawer } from '../components/AgentSessionDrawer';
 
 // ==========================================
 // 1. 自定义节点外观（极简高质感 + 智能体生成发光 + 幽灵预演态 + 编排调试实时运行态）
@@ -324,19 +326,37 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
               <span className="text-[#85858d]">执行记录就绪</span>
             )}
           </span>
-          {typeof nodeData.onInspectLogs === 'function' && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                nodeData.onInspectLogs(nodeData.id);
-              }}
-              className="text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
-            >
-              <span>日志</span>
-              <ArrowRight size={9} />
-            </button>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {type === 'agent' && typeof nodeData.onInspectSession === 'function' && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  nodeData.onInspectSession(nodeData.id);
+                }}
+                className="text-[#7c3aed] hover:text-[#6d28d9] hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
+                title="查看 Agent 交互会话与深度思考"
+              >
+                <Bot size={10} />
+                <span>会话</span>
+                <ArrowRight size={9} />
+              </button>
+            )}
+            {typeof nodeData.onInspectLogs === 'function' && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  nodeData.onInspectLogs(nodeData.id);
+                }}
+                className="text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
+                title="查看节点执行日志"
+              >
+                <span>日志</span>
+                <ArrowRight size={9} />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -406,6 +426,12 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   // 流水线基础信息与弹窗状态
   const [workflowName, setWorkflowName] = useState(activeWorkflow?.name || '');
   const [workflowDescription, setWorkflowDescription] = useState(activeWorkflow?.description || '');
+  const [workflowRequireWorkspace, setWorkflowRequireWorkspace] = useState(
+    Boolean(activeWorkflow?.requireWorkspace)
+  );
+  const [workflowDefaultWorkspace, setWorkflowDefaultWorkspace] = useState(
+    activeWorkflow?.defaultWorkspace || ''
+  );
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -425,6 +451,22 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const [isExitDebugModalOpen, setIsExitDebugModalOpen] = useState(false);
   const [isApprovingGate, setIsApprovingGate] = useState(false);
   const dismissedDebugTaskIdsRef = useRef<Set<string>>(new Set());
+
+  // Agent 会话抽屉状态
+  const [isAgentSessionOpen, setIsAgentSessionOpen] = useState(false);
+  const [inspectingSessionTaskId, setInspectingSessionTaskId] = useState<string | null>(null);
+  const [inspectingSessionNodeId, setInspectingSessionNodeId] = useState<string | undefined>(undefined);
+  const [inspectingSessionNodeName, setInspectingSessionNodeName] = useState<string | undefined>(undefined);
+
+  const handleOpenAgentSession = (taskId: string, targetNodeId?: string, targetNodeName?: string) => {
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowEditor] 打开 Agent 会话抽屉:', { taskId, targetNodeId, targetNodeName });
+    }
+    setInspectingSessionTaskId(taskId);
+    setInspectingSessionNodeId(targetNodeId);
+    setInspectingSessionNodeName(targetNodeName);
+    setIsAgentSessionOpen(true);
+  };
 
   // 右侧边栏展开与标签页状态 (默认纯净全景画布，点击节点或手动唤起展开)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -552,9 +594,17 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     if (activeWorkflow) {
       setWorkflowName(activeWorkflow.name || '');
       setWorkflowDescription(activeWorkflow.description || '');
+      setWorkflowRequireWorkspace(Boolean(activeWorkflow.requireWorkspace));
+      setWorkflowDefaultWorkspace(activeWorkflow.defaultWorkspace || '');
       setTitleDraft(activeWorkflow.name || '');
     }
-  }, [activeWorkflow?.id, activeWorkflow?.name, activeWorkflow?.description]);
+  }, [
+    activeWorkflow?.id,
+    activeWorkflow?.name,
+    activeWorkflow?.description,
+    activeWorkflow?.requireWorkspace,
+    activeWorkflow?.defaultWorkspace,
+  ]);
 
   // 拉取 Copilot 会话历史状态
   const loadCopilotSession = useCallback(async () => {
@@ -1331,6 +1381,8 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       ...activeWorkflow,
       name: finalName,
       description: finalDesc,
+      requireWorkspace: workflowRequireWorkspace,
+      defaultWorkspace: workflowDefaultWorkspace.trim() || undefined,
       updatedAt: Date.now(),
       nodes: nodes.map((n) => ({
         id: n.id,
@@ -1470,6 +1522,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         const runningTask = tasks.find(
           (t) =>
             t.workflowId === workflowId &&
+            t.triggerSource === 'debug' &&
             (t.status === 'running' || t.status === 'waiting_approval' || t.status === 'pending')
         );
         if (runningTask && !activeDebugTaskId && !dismissedDebugTaskIdsRef.current.has(runningTask.id)) {
@@ -1556,6 +1609,8 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             executionDuration,
             executionError: run?.error,
             onInspectLogs: (nodeId: string) => onOpenTaskLogs(debugTask.id, nodeId),
+            onInspectSession: (nodeId: string) =>
+              handleOpenAgentSession(debugTask.id, nodeId, (n.data as any)?.name),
           },
         };
       })
@@ -2123,6 +2178,16 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
 
           {/* 右侧操作按钮群 */}
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleOpenAgentSession(debugTask.id, debugTask.currentNodeId)}
+              className="flex items-center gap-1.5 px-2.5 h-[24px] rounded-[5px] bg-[#7c3aed]/35 hover:bg-[#7c3aed]/50 border border-[#7c3aed]/50 text-[11px] font-medium text-white transition-all shadow-2xs cursor-pointer"
+              title="查看 Agent 实时交互会话、深度思考与工具调用"
+            >
+              <Bot size={11} className="text-[#d8d6fb]" />
+              <span>Agent 交互会话</span>
+            </button>
+
             <button
               type="button"
               onClick={() => onOpenTaskLogs(debugTask.id, debugTask.currentNodeId)}
@@ -2950,7 +3015,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleRetryNode(selectedNode.id)}
-                            className="flex-1 h-[24px] rounded-[5px] bg-white hover:bg-[#f1f1f4] border border-[#e3e3e8] text-[10.5px] font-medium text-[#1c1c21] flex items-center justify-center gap-1 transition-all"
+                            className="flex-1 h-[24px] rounded-[5px] bg-white hover:bg-[#f1f1f4] border border-[#e3e3e8] text-[10.5px] font-medium text-[#1c1c21] flex items-center justify-center gap-1 transition-all cursor-pointer"
                             title="单独重试此节点"
                           >
                             <RotateCcw size={10} />
@@ -2959,16 +3024,27 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleSkipNode(selectedNode.id)}
-                            className="flex-1 h-[24px] rounded-[5px] bg-white hover:bg-[#f1f1f4] border border-[#e3e3e8] text-[10.5px] font-medium text-[#4b4b53] flex items-center justify-center gap-1 transition-all"
+                            className="flex-1 h-[24px] rounded-[5px] bg-white hover:bg-[#f1f1f4] border border-[#e3e3e8] text-[10.5px] font-medium text-[#4b4b53] flex items-center justify-center gap-1 transition-all cursor-pointer"
                             title="跳过此节点继续后续流转"
                           >
                             <SkipForward size={10} />
                             <span>跳过节点</span>
                           </button>
+                          {selectedNodeData.type === 'agent' && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAgentSession(debugTask.id, selectedNode.id, selectedNodeData.name)}
+                              className="h-[24px] px-2 rounded-[5px] bg-[#eeedfd] text-[#7c3aed] hover:bg-[#e4dffd] text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
+                              title="查看 Agent 实时交互会话、深度思考与工具调用"
+                            >
+                              <Bot size={11} className="text-[#7c3aed]" />
+                              <span>会话详情</span>
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => onOpenTaskLogs(debugTask.id, selectedNode.id)}
-                            className="h-[24px] px-2 rounded-[5px] bg-[#eeedfd] text-[#4f46e5] text-[10.5px] font-medium flex items-center justify-center gap-1 hover:bg-[#e0e7ff] transition-all"
+                            className="h-[24px] px-2 rounded-[5px] bg-[#eeedfd] text-[#4f46e5] text-[10.5px] font-medium flex items-center justify-center gap-1 hover:bg-[#e0e7ff] transition-all cursor-pointer"
                             title="查看当前节点日志"
                           >
                             <Terminal size={10} />
@@ -3009,10 +3085,11 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                         <div>
                           <label className="block text-[#85858d] mb-1">执行提示词 / Prompt</label>
                           <textarea
-                            rows={3}
+                            rows={6}
                             value={selectedNodeData.config?.prompt || ''}
                             onChange={(e) => updateSelectedNodeConfig('prompt', e.target.value)}
-                            className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2 text-[#1c1c21] outline-none resize-none"
+                            placeholder="描述给 AI Agent 的明确指令与任务约束..."
+                            className="w-full min-h-[130px] bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 rounded-[8px] p-2.5 text-[12px] leading-relaxed text-[#1c1c21] outline-none resize-y transition-all"
                           />
                         </div>
                       </>
@@ -3091,10 +3168,11 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                       <div>
                         <label className="block text-[#85858d] mb-1">审批提示说明</label>
                         <textarea
-                          rows={2}
+                          rows={3}
                           value={selectedNodeData.config?.approvalPrompt || ''}
                           onChange={(e) => updateSelectedNodeConfig('approvalPrompt', e.target.value)}
-                          className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2 text-[#1c1c21] outline-none resize-none"
+                          placeholder="说明人工验收或 QA 审批的标准与重点事项..."
+                          className="w-full min-h-[80px] bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 rounded-[8px] p-2.5 text-[12px] leading-relaxed text-[#1c1c21] outline-none resize-y transition-all"
                         />
                       </div>
                     )}
@@ -3132,10 +3210,11 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                         </button>
                       </div>
                       <textarea
-                        rows={3}
+                        rows={7}
                         value={selectedNodeData.config?.command || ''}
                         onChange={(e) => updateSelectedNodeConfig('command', e.target.value)}
-                        className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2 font-mono text-[11px] text-[#1c1c21] outline-none resize-none"
+                        placeholder="# 在此编写要执行的 Shell / CLI 脚本命令..."
+                        className="w-full min-h-[160px] bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 rounded-[8px] p-2.5 font-mono text-[11px] leading-relaxed text-[#1c1c21] outline-none resize-y transition-all"
                       />
                     </div>
                   </div>
@@ -3335,10 +3414,10 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                     <div>
                       <label className="block text-[#85858d] mb-1 font-medium">流程描述说明</label>
                       <textarea
-                        rows={3}
+                        rows={4}
                         value={workflowDescription}
                         onChange={(e) => setWorkflowDescription(e.target.value)}
-                        className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2.5 text-[#1c1c21] outline-none resize-none focus:bg-white focus:border-[#4f46e5] transition-all placeholder:text-[#85858d]"
+                        className="w-full min-h-[96px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[8px] p-2.5 text-[12px] leading-relaxed text-[#1c1c21] outline-none resize-y focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all placeholder:text-[#85858d]"
                         placeholder="描述此流水线的业务目标与流转规则..."
                       />
                     </div>
@@ -3348,6 +3427,38 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                       <div className="px-2.5 py-1.5 rounded-[6px] bg-[#f4f4f6] font-mono text-[11px] text-[#4b4b53] border border-[#ececf0] flex items-center justify-between">
                         <span>{activeWorkflow.id}</span>
                         <span className="text-[10px] text-[#85858d]">系统唯一</span>
+                      </div>
+                    </div>
+
+                    {/* 工程工作区关联策略 */}
+                    <div className="pt-2 border-t border-[#ececf0] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11.5px] font-medium text-[#1c1c21] flex items-center gap-1.5 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={workflowRequireWorkspace}
+                            onChange={(e) => setWorkflowRequireWorkspace(e.target.checked)}
+                            className="w-3.5 h-3.5 rounded-[4px] border-[#d4d4d8] text-[#4f46e5] focus:ring-[#4f46e5]"
+                          />
+                          <span>必须关联工程工作区</span>
+                        </label>
+                        <span className={`text-[10px] ${workflowRequireWorkspace ? 'text-[#dc2626] font-medium' : 'text-[#85858d]'}`}>
+                          {workflowRequireWorkspace ? '必选本地工程' : '非必填'}
+                        </span>
+                      </div>
+                      <p className="text-[10.5px] text-[#85858d] leading-relaxed">
+                        勾选后，发起任务或编排调试时必须手动指定本地代码工程根目录；未勾选时在独立沙箱执行，不依赖本地工程。
+                      </p>
+
+                      <div className="pt-0.5">
+                        <label className="block text-[#85858d] mb-1 font-medium text-[10.5px]">
+                          默认绑定工作区 (可选)
+                        </label>
+                        <WorkspacePicker
+                          value={workflowDefaultWorkspace}
+                          onChange={setWorkflowDefaultWorkspace}
+                          placeholder="可留空，或预设固定关联的工程目录..."
+                        />
                       </div>
                     </div>
 
@@ -3470,6 +3581,17 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         onClose={() => setIsDebugModalOpen(false)}
         workflow={activeWorkflow}
         onStartDebug={handleStartDebug}
+      />
+
+      {/* Agent 实时交互会话抽屉 */}
+      <AgentSessionDrawer
+        isOpen={isAgentSessionOpen}
+        onClose={() => setIsAgentSessionOpen(false)}
+        taskId={inspectingSessionTaskId}
+        taskTitle={debugTask?.title}
+        nodeId={inspectingSessionNodeId}
+        nodeName={inspectingSessionNodeName}
+        workspace={debugTask?.workspace}
       />
     </div>
   );

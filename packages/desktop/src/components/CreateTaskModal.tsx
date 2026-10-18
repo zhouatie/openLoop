@@ -155,6 +155,19 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
   const currentWf = workflows.find((w) => w.id === workflowId) || workflows[0];
 
+  const isCurrentWfWsRequired = Boolean(
+    currentWf?.requireWorkspace ||
+    currentWf?.nodes?.some((node) => {
+      if (node.type === 'cli') {
+        const cmd = node.config?.command?.toLowerCase() || '';
+        const hasGit = cmd.includes('git commit') || cmd.includes('git push') || cmd.includes('git add');
+        const hasBuild = cmd.includes('pnpm') || cmd.includes('npm run') || cmd.includes('yarn') || cmd.includes('mvn') || cmd.includes('gradle');
+        return (hasGit || hasBuild) && !node.config?.cwd;
+      }
+      return false;
+    })
+  );
+
   // 全量流程按最近更新时间倒序排列
   const allSortedWorkflows = useMemo(() => {
     return [...workflows].sort(
@@ -256,8 +269,13 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     e.preventDefault();
     if (!title.trim() || !workflowId) return;
 
-    setLoading(true);
     const trimmedWorkspace = workspace.trim();
+    if (isCurrentWfWsRequired && !trimmedWorkspace) {
+      alert('所选自动化流程包含本地工程代码操作，必须手动选择工程工作区目录');
+      return;
+    }
+
+    setLoading(true);
     if (import.meta.env?.DEV) {
       console.log('[CreateTaskModal] 提交创建任务:', {
         title: title.trim(),
@@ -385,15 +403,32 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           {/* 关联工程工作区 (单行紧凑控件，默认最新选择，右侧访达与下拉) */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-[11px] font-medium text-[#63636b]">工程工作区</label>
-              <span className="text-[10px] text-[#85858d]">
-                {workspace ? '已关联独立工程' : '可留空使用默认目录'}
+              <label className="text-[11px] font-medium text-[#63636b] flex items-center gap-1.5">
+                <span>工程工作区</span>
+                {isCurrentWfWsRequired ? (
+                  <span className="text-[9.5px] font-medium px-1 py-[0.5px] rounded bg-[#fee2e2] text-[#dc2626] border border-[#fecaca]">
+                    * 必选
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-[#85858d] font-normal">(可选)</span>
+                )}
+              </label>
+              <span className={`text-[10px] ${isCurrentWfWsRequired ? 'text-[#dc2626] font-medium' : 'text-[#85858d]'}`}>
+                {workspace
+                  ? '已关联独立工程'
+                  : isCurrentWfWsRequired
+                  ? '此流程必须手动选择工程根目录'
+                  : '非必选；未关联时在独立沙箱执行'}
               </span>
             </div>
             <WorkspacePicker
               value={workspace}
               onChange={setWorkspace}
-              placeholder="选择工程工作区 (点击下拉或右侧打开访达)..."
+              placeholder={
+                isCurrentWfWsRequired
+                  ? '必须选择该任务执行所需的本地代码工程根目录...'
+                  : '选择工程工作区 (点击下拉或右侧打开访达)...'
+              }
             />
           </div>
 

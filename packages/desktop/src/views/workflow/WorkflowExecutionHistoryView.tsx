@@ -24,11 +24,13 @@ import {
   Copy,
   ChevronLeft,
   SlidersHorizontal,
+  Bot,
 } from 'lucide-react';
 import type { Task, WorkflowDefinition, LogEntry, NodeStatus } from '@openloop/core';
 import { api } from '../../services/api';
 import { toast } from '../../components/Toast';
 import { NodeExecutionTimeline } from '../../components/NodeExecutionTimeline';
+import { AgentSessionDrawer } from '../../components/AgentSessionDrawer';
 import { resolveNodeMeta, formatDurationHuman } from '../../utils/nodeMeta';
 
 export interface WorkflowExecutionHistoryViewProps {
@@ -74,6 +76,20 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
   const [copiedLog, setCopiedLog] = useState(false);
   const [isRerunningId, setIsRerunningId] = useState<string | null>(null);
   const [isCancellingId, setIsCancellingId] = useState<string | null>(null);
+
+  // Agent 交互与历史会话抽屉状态
+  const [isAgentSessionOpen, setIsAgentSessionOpen] = useState(false);
+  const [selectedSessionNodeId, setSelectedSessionNodeId] = useState<string | undefined>(undefined);
+  const [selectedSessionNodeName, setSelectedSessionNodeName] = useState<string | undefined>(undefined);
+
+  const handleOpenAgentSession = (taskId: string, nodeId?: string, nodeName?: string) => {
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowExecutionHistory] 打开 Agent 会话:', { taskId, nodeId, nodeName });
+    }
+    setSelectedSessionNodeId(nodeId);
+    setSelectedSessionNodeName(nodeName);
+    setIsAgentSessionOpen(true);
+  };
 
   // 流水线筛选下拉展开控制
   const [isWfDropdownOpen, setIsWfDropdownOpen] = useState(false);
@@ -178,6 +194,7 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
 
   // 关闭详情抽屉
   const handleCloseDetail = () => {
+    setIsAgentSessionOpen(false);
     setActiveTaskId(null);
     setActiveTaskDetail(null);
     setTaskLogs([]);
@@ -187,13 +204,15 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
   // 快捷键 ESC 关闭详情
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 若上层 Agent 会话抽屉打开，ESC 优先由该抽屉独立消费关闭，不关闭本详情抽屉
+      if (isAgentSessionOpen) return;
       if (e.key === 'Escape' && activeTaskId) {
         handleCloseDetail();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTaskId]);
+  }, [activeTaskId, isAgentSessionOpen]);
 
   // 手动刷新
   const handleManualRefresh = async () => {
@@ -513,6 +532,18 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
   const activeWfInfo = activeTaskDetail
     ? getWorkflowInfo(activeTaskDetail.workflowId)
     : null;
+
+  // 判断当前选中的任务是否包含 Agent 节点
+  const hasAgentNode = useMemo(() => {
+    if (!activeTaskDetail) return false;
+    if (activeTaskDetail.context?.piSessionId) return true;
+    if (activeWfInfo?.workflow?.nodes?.some((n) => n.type === 'agent')) return true;
+    const runs = Object.keys(activeTaskDetail.nodeRuns || {});
+    return runs.some((nodeId) => {
+      const node = activeWfInfo?.workflow?.nodes?.find((n) => n.id === nodeId);
+      return node?.type === 'agent';
+    });
+  }, [activeTaskDetail, activeWfInfo]);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">
@@ -1026,6 +1057,18 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
             </div>
 
             <div className="flex items-center gap-1.5">
+              {hasAgentNode && (
+                <button
+                  type="button"
+                  onClick={() => handleOpenAgentSession(activeTaskDetail.id)}
+                  className="flex items-center gap-1 h-[24px] px-2 rounded-[4px] bg-[#eeedfd] border border-[#d8d6fb] hover:bg-[#e0e7ff] text-[10.5px] font-medium text-[#7c3aed] transition-all cursor-pointer shadow-2xs"
+                  title="查看该任务的 Agent 交互会话、深度思考与工具调用"
+                >
+                  <Bot size={11} className="text-[#7c3aed]" />
+                  <span>Agent 会话</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => handleRerun(activeTaskDetail)}
@@ -1087,6 +1130,7 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                   onOpenTaskLogs={(taskId, nodeId) => {
                     if (nodeId) setLogFilterNode(nodeId);
                   }}
+                  onOpenAgentSession={handleOpenAgentSession}
                 />
               </div>
             </div>
@@ -1163,6 +1207,19 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
             </div>
           </div>
         </div>
+      )}
+
+      {/* Agent 实时交互与历史会话抽屉 */}
+      {activeTaskId && (
+        <AgentSessionDrawer
+          isOpen={isAgentSessionOpen}
+          onClose={() => setIsAgentSessionOpen(false)}
+          taskId={activeTaskId}
+          taskTitle={activeTaskDetail?.title}
+          nodeId={selectedSessionNodeId}
+          nodeName={selectedSessionNodeName}
+          workspace={activeTaskDetail?.workspace}
+        />
       )}
     </div>
   );

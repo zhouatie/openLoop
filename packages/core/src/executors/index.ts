@@ -78,9 +78,28 @@ export class CliCommandExecutor implements NodeExecutor {
     }
 
     const command = interpolateString(rawCommand, variables);
-    const rawCwd = node.config.cwd || ctx.task.workspace || settings.defaultCwd || process.cwd();
-    const cwd = resolveWorkingDir(rawCwd) || process.cwd();
+
+    const isWsRequired = Boolean(node.config?.requireWorkspace);
+    if (isWsRequired && !node.config.cwd && !ctx.task.workspace) {
+      const err = `[工作区未指定] 节点 [${node.name || node.id}] 要求必须指定工程工作区目录，但当前任务未关联任何工作区。已终止执行。`;
+      emitLog('stderr', err);
+      return {
+        status: 'failed',
+        exitCode: 1,
+        error: err,
+      };
+    }
+
+    const resolvedCwd = resolveWorkingDir(node.config.cwd || ctx.task.workspace);
+    const isSandbox = !resolvedCwd;
+    const cwd = resolvedCwd || os.tmpdir();
+
     emitLog('system', `[执行进程] 启动命令: ${command}`);
+    if (isSandbox) {
+      emitLog('system', `[执行沙箱] 任务未关联本地工程代码目录，在安全独立沙箱 (${cwd}) 下执行`);
+    } else {
+      emitLog('system', `[工作区目录] ${cwd}`);
+    }
 
     const timeoutMs = node.config.timeoutSec
       ? Number(node.config.timeoutSec) * 1000
@@ -335,8 +354,20 @@ export class AgentExecutor implements NodeExecutor {
         args.push(`--tools "${String(settings.piTools).trim()}"`);
       }
 
-      const rawCwd = node.config.cwd || task.workspace || settings.defaultCwd || process.cwd();
-      const cwd = resolveWorkingDir(rawCwd) || process.cwd();
+      const isWsRequired = Boolean(node.config?.requireWorkspace);
+      if (isWsRequired && !node.config.cwd && !task.workspace) {
+        const err = `[工作区未指定] Agent 节点 [${node.name || node.id}] 要求必须指定工程工作区目录，但当前任务未关联任何工作区。已终止执行。`;
+        emitLog('stderr', err);
+        return {
+          status: 'failed',
+          exitCode: 1,
+          error: err,
+        };
+      }
+
+      const resolvedCwd = resolveWorkingDir(node.config.cwd || task.workspace);
+      const isSandbox = !resolvedCwd;
+      const cwd = resolvedCwd || os.tmpdir();
 
       executorLogger.info(
         `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId} (工作区 CWD: ${cwd})`,
@@ -344,7 +375,11 @@ export class AgentExecutor implements NodeExecutor {
         { taskId: task.id, nodeId: node.id }
       );
       emitLog('system', `[Pi Agent 会话] Session ID: ${sessionId}`);
-      emitLog('system', `[工作区 CWD] ${cwd}`);
+      if (isSandbox) {
+        emitLog('system', `[执行沙箱] 任务未关联本地代码工作区，在安全独立沙箱 (${cwd}) 下执行`);
+      } else {
+        emitLog('system', `[工作区 CWD] ${cwd}`);
+      }
       emitLog('system', `[终端恢复提示] 如需在终端中交互式接管，可执行: pi --session ${sessionId}`);
 
       return new Promise<ExecutionResult>((resolve) => {

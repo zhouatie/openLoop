@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
+import os from 'os';
 import { SessionChatMessage, ToolExecutionRecord, TaskSessionState, Task, TaskAttachment } from '../types';
 import { createLogger } from '../logger';
 
@@ -73,7 +74,7 @@ export class PiRpcSessionInstance extends EventEmitter {
       args.push('--tools', options.tools.trim());
     }
 
-    const cwd = options.cwd || process.cwd();
+    const cwd = options.cwd || os.tmpdir();
     const env = { ...process.env, ...(options.env || {}) };
 
     logger.info(`启动 Pi RPC 会话进程: pi ${args.join(' ')} (CWD: ${cwd})`, undefined, {
@@ -97,6 +98,11 @@ export class PiRpcSessionInstance extends EventEmitter {
       this.child.stderr.on('data', (chunk) => {
         const text = chunk.toString().trim();
         if (text) {
+          // 过滤 pi CLI 初始分配新 session 时的正常初始化提示，避免在界面终端显示红色 Warning
+          if (text.includes('No project session found with id') && text.includes('creating a new session with that id')) {
+            logger.debug(`[Pi RPC] 首次会话初始化提示已静默: ${text}`);
+            return;
+          }
           this.emitLog('stderr', text);
         }
       });
@@ -272,19 +278,30 @@ export class PiRpcSessionInstance extends EventEmitter {
           }
           this.notifyUpdate();
         }
+        const toolLabel = record.toolName ? `[${record.toolName}]` : '';
+        const argsPreview = record.args ? ` 参数: ${JSON.stringify(record.args).slice(0, 100)}` : '';
+        this.emitLog('stdout', `[Agent 工具调用] 正在执行 ${toolLabel}${argsPreview}`);
         break;
       }
 
       case 'tool_execution_end': {
+        let toolName = '';
         if (this.currentAssistantMessage && this.currentAssistantMessage.tools) {
           const targetTool = this.currentAssistantMessage.tools.find((t) => t.id === record.toolCallId);
           if (targetTool) {
             targetTool.result = record.result;
             targetTool.status = record.isError ? 'error' : 'success';
             targetTool.durationMs = record.durationMs;
+            toolName = targetTool.name;
           }
           this.notifyUpdate();
         }
+        const statusText = record.isError ? '失败' : '完成';
+        const costText = record.durationMs !== undefined ? ` (耗时: ${record.durationMs}ms)` : '';
+        this.emitLog(
+          record.isError ? 'stderr' : 'stdout',
+          `[Agent 工具${statusText}] ${toolName ? `[${toolName}] ` : ''}执行${statusText}${costText}`
+        );
         break;
       }
 
@@ -294,6 +311,11 @@ export class PiRpcSessionInstance extends EventEmitter {
           this.currentAssistantMessage.isThinking = false;
           if (record.message?.content && typeof record.message.content === 'string') {
             this.currentAssistantMessage.content = record.message.content;
+            // 将 Agent 生成的最终结论同步打入终端日志，便于在终端抽屉中闭环查看
+            const summaryText = record.message.content.trim();
+            if (summaryText) {
+              this.emitLog('stdout', `[Agent 输出] ${summaryText.slice(0, 300)}${summaryText.length > 300 ? '...' : ''}`);
+            }
           }
           this.notifyUpdate();
         }

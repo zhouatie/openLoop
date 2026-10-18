@@ -653,28 +653,36 @@ export class SqliteStore {
 
   public getWorkflows(): WorkflowDefinition[] {
     const rows = this.db.prepare('SELECT * FROM workflows ORDER BY created_at DESC').all() as any[];
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      nodes: JSON.parse(r.nodes_json),
-      edges: JSON.parse(r.edges_json),
-      variables: r.variables_json ? JSON.parse(r.variables_json) : undefined,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-    }));
+    return rows.map((r) => {
+      const variables = r.variables_json ? JSON.parse(r.variables_json) : undefined;
+      return {
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        nodes: JSON.parse(r.nodes_json),
+        edges: JSON.parse(r.edges_json),
+        variables,
+        requireWorkspace: variables?.requireWorkspace,
+        defaultWorkspace: variables?.defaultWorkspace,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      };
+    });
   }
 
   public getWorkflow(id: string): WorkflowDefinition | undefined {
     const row = this.db.prepare('SELECT * FROM workflows WHERE id = ?').get(id) as any;
     if (!row) return undefined;
+    const variables = row.variables_json ? JSON.parse(row.variables_json) : undefined;
     return {
       id: row.id,
       name: row.name,
       description: row.description,
       nodes: JSON.parse(row.nodes_json),
       edges: JSON.parse(row.edges_json),
-      variables: row.variables_json ? JSON.parse(row.variables_json) : undefined,
+      variables,
+      requireWorkspace: variables?.requireWorkspace,
+      defaultWorkspace: variables?.defaultWorkspace,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -683,6 +691,13 @@ export class SqliteStore {
   public saveWorkflow(wf: WorkflowDefinition): WorkflowDefinition {
     wf.updatedAt = Date.now();
     if (!wf.createdAt) wf.createdAt = wf.updatedAt;
+
+    const variablesObj = {
+      ...(wf.variables || {}),
+      ...(wf.requireWorkspace !== undefined ? { requireWorkspace: wf.requireWorkspace } : {}),
+      ...(wf.defaultWorkspace !== undefined ? { defaultWorkspace: wf.defaultWorkspace } : {}),
+    };
+    const hasVariables = Object.keys(variablesObj).length > 0;
 
     const stmt = this.db.prepare(`
       INSERT INTO workflows (id, name, description, nodes_json, edges_json, variables_json, created_at, updated_at)
@@ -702,7 +717,7 @@ export class SqliteStore {
       wf.description || '',
       JSON.stringify(wf.nodes || []),
       JSON.stringify(wf.edges || []),
-      wf.variables ? JSON.stringify(wf.variables) : null,
+      hasVariables ? JSON.stringify(variablesObj) : null,
       wf.createdAt,
       wf.updatedAt
     );

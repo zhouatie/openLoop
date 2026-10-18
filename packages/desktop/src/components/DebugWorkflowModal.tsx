@@ -49,30 +49,53 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const descriptionTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // 打开弹窗时初始化表单状态与历史记忆
+  // 评估当前流水线是否必须关联工程工作区
+  const isWorkspaceRequired = Boolean(
+    workflow?.requireWorkspace ||
+    workflow?.nodes?.some((node) => {
+      if (node.type === 'cli') {
+        const cmd = node.config?.command?.toLowerCase() || '';
+        const hasGit = cmd.includes('git commit') || cmd.includes('git push') || cmd.includes('git add');
+        const hasBuild = cmd.includes('pnpm') || cmd.includes('npm run') || cmd.includes('yarn') || cmd.includes('mvn') || cmd.includes('gradle');
+        return (hasGit || hasBuild) && !node.config?.cwd;
+      }
+      return false;
+    })
+  );
+
+  // 打开弹窗时初始化表单状态与焦点
   useEffect(() => {
     if (isOpen && workflow) {
       setTitle(`编排调试: ${workflow.name}`);
       setDescription('');
       setErrorMsg(null);
 
-      try {
-        const lastWs = localStorage.getItem(STORAGE_KEY_LAST_WORKSPACE);
-        if (lastWs) {
-          setWorkspace(lastWs);
+      // 工作区初始化规则：
+      // 1. 若流水线显式绑定了默认工作区，使用默认工作区；
+      // 2. 若流水线声明必须在工程目录执行，优先尝试回填该流水线专属的历史选择；
+      // 3. 若流水线不需要工程根目录（如纯云端编排、API/CLI调用），绝不盲目套用其他项目的路径，默认留空
+      if (workflow.defaultWorkspace) {
+        setWorkspace(workflow.defaultWorkspace);
+      } else if (isWorkspaceRequired) {
+        try {
+          const wfWs = localStorage.getItem(`openloop_ws_wf_${workflow.id}`);
+          setWorkspace(wfWs || '');
+        } catch {
+          setWorkspace('');
         }
-      } catch (err) {
-        console.warn('[DebugWorkflowModal] 读取上次工作区失败:', err);
+      } else {
+        setWorkspace('');
       }
 
+      // 用户打开调试弹窗的主要目的是输入自测场景或 Prompt，优先聚焦说明输入框
       const timer = setTimeout(() => {
-        titleInputRef.current?.focus();
-        titleInputRef.current?.select();
+        descriptionTextareaRef.current?.focus();
       }, 60);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, workflow]);
+  }, [isOpen, workflow, isWorkspaceRequired]);
 
   // 快捷键支持：Cmd/Ctrl + Enter 提交，Escape 取消
   useEffect(() => {
@@ -101,6 +124,12 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
       return;
     }
 
+    // 必填工作区校验：避免未选工作区时误在系统目录或错误上下文下执行
+    if (isWorkspaceRequired && !workspace.trim()) {
+      setErrorMsg('当前流水线包含本地代码工程操作，必须手动选择关联工程工作区目录');
+      return;
+    }
+
     setLoading(true);
     setErrorMsg(null);
 
@@ -111,6 +140,7 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
         title: finalTitle,
         description: description.trim(),
         workspace: workspace.trim() || undefined,
+        isWorkspaceRequired,
         openLogsImmediately,
       });
     }
@@ -119,6 +149,7 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
       if (workspace.trim()) {
         try {
           localStorage.setItem(STORAGE_KEY_LAST_WORKSPACE, workspace.trim());
+          localStorage.setItem(`openloop_ws_wf_${workflow.id}`, workspace.trim());
         } catch {}
       }
 
@@ -296,6 +327,7 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
               </span>
             </label>
             <textarea
+              ref={descriptionTextareaRef}
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -308,18 +340,36 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
           <div className="flex flex-col gap-1.5">
             <label className="text-[11.5px] font-medium text-[#4b4b53] flex items-center justify-between">
               <span className="flex items-center gap-1.5">
-                <FolderGit2 size={12} className="text-[#85858d]" />
+                <FolderGit2
+                  size={12}
+                  className={isWorkspaceRequired ? 'text-[#4f46e5]' : 'text-[#85858d]'}
+                />
                 <span>关联工程工作区目录</span>
-                <span className="text-[10px] text-[#85858d] font-normal">(可选)</span>
+                {isWorkspaceRequired ? (
+                  <span className="text-[10px] font-medium px-1.5 py-[0.5px] rounded bg-[#fee2e2] text-[#dc2626] border border-[#fecaca]">
+                    * 必选
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-[#85858d] font-normal">(可选)</span>
+                )}
               </span>
-              <span className="text-[10px] text-[#85858d]">
-                为空时默认在系统主工作目录执行
+              <span className={`text-[10px] ${isWorkspaceRequired ? 'text-[#dc2626] font-medium' : 'text-[#85858d]'}`}>
+                {isWorkspaceRequired
+                  ? '此流水线包含本地代码操作，必须手动指定工程目录'
+                  : '非必选；留空时将在独立临时沙箱中执行'}
               </span>
             </label>
             <WorkspacePicker
               value={workspace}
-              onChange={setWorkspace}
-              placeholder="选择本地代码工程目录..."
+              onChange={(val) => {
+                setWorkspace(val);
+                if (errorMsg) setErrorMsg(null);
+              }}
+              placeholder={
+                isWorkspaceRequired
+                  ? '必须选择该流水线执行所需的本地代码工程根目录...'
+                  : '可留空（在独立沙箱执行），或选择本地代码目录...'
+              }
             />
           </div>
 

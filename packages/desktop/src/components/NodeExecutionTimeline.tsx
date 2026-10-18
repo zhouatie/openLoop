@@ -38,6 +38,7 @@ interface NodeExecutionTimelineProps {
   workflow?: WorkflowDefinition | null;
   allWorkflows?: WorkflowDefinition[];
   onOpenTaskLogs: (taskId: string, nodeId?: string) => void;
+  onOpenAgentSession?: (taskId: string, nodeId: string, nodeName: string) => void;
   onPreviewArtifact?: (artifact: { name: string; type: string; path: string }) => void;
   onApprove?: (taskId: string, approved: boolean, feedback?: string) => void;
   isApproving?: boolean;
@@ -67,6 +68,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
   workflow,
   allWorkflows,
   onOpenTaskLogs,
+  onOpenAgentSession,
   onPreviewArtifact,
   onApprove,
   isApproving = false,
@@ -504,6 +506,19 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                         >
                           <RotateCcw size={10} />
                           <span>重试</span>
+                        </button>
+                      )}
+
+                      {/* 查看 Agent 交互会话 */}
+                      {item.type === 'agent' && onOpenAgentSession && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenAgentSession(task.id, item.id, item.name)}
+                          className="h-[21px] px-1.5 rounded-[4px] bg-[#eeedfd] hover:bg-[#e0e7ff] text-[#7c3aed] border border-[#d8d6fb] text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-none"
+                          title="查看该 Agent 节点的交互会话、深度思考与工具调用"
+                        >
+                          <Bot size={10} className="text-[#7c3aed]" />
+                          <span>会话</span>
                         </button>
                       )}
 

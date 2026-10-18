@@ -135,6 +135,8 @@ export interface WorkflowDefinition {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   variables?: Record<string, any>;
+  requireWorkspace?: boolean; // 该流水线是否要求必须关联工程工作区根目录
+  defaultWorkspace?: string; // 该流水线绑定的默认工程工作区目录 (可选)
   context?: {
     chatMessages?: SessionChatMessage[];
     [key: string]: any;
