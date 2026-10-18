@@ -247,11 +247,20 @@ export class WebPlaywrightDriver implements QaDriver {
       };
     }
 
-    // 2. 检查是否为通用健康检查
+    // 2. 检查断言类型：反向断言 (Negative Assertion)、健康检查或常规正向断言
     const promptLower = prompt.toLowerCase();
+
+    // 判断是否为反向断言（期望页面不包含、无某错误或消除某异常）
+    const isNegativeAssert =
+      prompt.includes('无') ||
+      prompt.includes('不包含') ||
+      prompt.includes('未出现') ||
+      prompt.includes('不存在') ||
+      prompt.includes('消除');
+
+    // 检查是否为通用健康检查
     const isHealthCheck =
-      promptLower.includes('无报错') ||
-      promptLower.includes('异常') ||
+      /无.*(?:报错|异常|错误|crash)/i.test(prompt) ||
       promptLower.includes('健康') ||
       promptLower.includes('首屏') ||
       promptLower.includes('加载') ||
@@ -261,7 +270,34 @@ export class WebPlaywrightDriver implements QaDriver {
     let thought = '';
     let errorMessage: string | undefined;
 
-    if (isHealthCheck) {
+    // 提取显式期望的目标文本（如引号中的错误信息或特定字符串）
+    const match =
+      prompt.match(/包含[“"「]?([^”"」]+)[”"」]?/i) ||
+      prompt.match(/出现[“"「]?([^”"」]+)[”"」]?/i) ||
+      prompt.match(/存在[“"「]?([^”"」]+)[”"」]?/i) ||
+      prompt.match(/[“"「]([^”"」]+)[”"」]/i);
+    const targetText = match ? match[1].trim() : '';
+
+    if (isNegativeAssert) {
+      // 反向断言场景：页面绝不应出现指定错误文本或运行时崩溃
+      const hasViteOverlay = await this.page.locator('vite-error-overlay').isVisible().catch(() => false);
+      const hasCrash = pageText.includes('Uncaught Error:') || pageText.includes('Internal Server Error');
+
+      if (hasViteOverlay || hasCrash) {
+        passed = false;
+        errorMessage = '页面出现前端运行时崩溃或编译错误覆盖层';
+        thought = errorMessage;
+      } else if (targetText && pageText.includes(targetText)) {
+        passed = false;
+        errorMessage = `页面依然残留异常文本「${targetText}」`;
+        thought = errorMessage;
+      } else {
+        passed = true;
+        thought = targetText
+          ? `页面已成功消除异常「${targetText}」，反向断言通过`
+          : '页面无报错与异常提示，健康断言通过';
+      }
+    } else if (isHealthCheck) {
       const hasViteOverlay = await this.page.locator('vite-error-overlay').isVisible().catch(() => false);
       const hasCrash = pageText.includes('Uncaught Error:') || pageText.includes('Internal Server Error');
 
@@ -273,28 +309,19 @@ export class WebPlaywrightDriver implements QaDriver {
         passed = true;
         thought = '页面渲染正常，未检测到全局崩溃或控制台异常，健康断言通过';
       }
-    } else {
-      // 提取业务断言期望的文本
-      const match =
-        prompt.match(/包含[“"「]?([^”"」]+)[”"」]?/i) ||
-        prompt.match(/出现[“"「]?([^”"」]+)[”"」]?/i) ||
-        prompt.match(/存在[“"「]?([^”"」]+)[”"」]?/i) ||
-        prompt.match(/[“"「]([^”"」]+)[”"」]/i);
-      const expectedText = match ? match[1].trim() : '';
-
-      if (expectedText) {
-        const hasText = pageText.includes(expectedText);
-        passed = hasText;
-        if (passed) {
-          thought = `页面成功包含预期文本「${expectedText}」，断言通过`;
-        } else {
-          errorMessage = `页面未包含预期文本「${expectedText}」`;
-          thought = errorMessage;
-        }
+    } else if (targetText) {
+      // 正向断言：页面必须包含目标文本
+      const hasText = pageText.includes(targetText);
+      passed = hasText;
+      if (passed) {
+        thought = `页面成功包含预期文本「${targetText}」，断言通过`;
       } else {
-        passed = true;
-        thought = '页面状态校验通过';
+        errorMessage = `页面未包含预期文本「${targetText}」`;
+        thought = errorMessage;
       }
+    } else {
+      passed = true;
+      thought = '页面状态校验通过';
     }
 
     const screenshotBuffer = await this.captureScreenshot();
