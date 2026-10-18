@@ -28,30 +28,82 @@ import {
   GitBranch,
   GitCommit,
   X,
+  History,
 } from 'lucide-react';
-import { WorkflowDefinition, NodeType } from '@openloop/core';
+import { WorkflowDefinition, NodeType, Task } from '@openloop/core';
 import { api } from '../services/api';
 import { EditWorkflowModal } from '../components/EditWorkflowModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { DebugWorkflowModal } from '../components/DebugWorkflowModal';
 import { toast } from '../components/Toast';
+import { WorkflowExecutionHistoryView } from './workflow/WorkflowExecutionHistoryView';
 
 const STORAGE_KEY_PINNED_WORKFLOWS = 'openloop_pinned_workflow_ids';
 const STORAGE_KEY_VIEW_MODE = 'openloop_workflow_view_mode';
+const STORAGE_KEY_SUBTAB = 'openloop_workflow_subtab';
 
 interface WorkflowListViewProps {
   workflows: WorkflowDefinition[];
+  tasks?: Task[];
   onSelectWorkflow: (workflowId: string) => void;
   onRefresh: () => void;
   onOpenTaskLogs: (taskId: string, nodeId?: string) => void;
+  initialSubTab?: 'workflows' | 'runs';
+  initialFilteredWorkflowId?: string | null;
+  initialSelectedTaskId?: string | null;
+  onClearSelectedTask?: () => void;
 }
 
 export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   workflows,
+  tasks = [],
   onSelectWorkflow,
   onRefresh,
   onOpenTaskLogs,
+  initialSubTab,
+  initialFilteredWorkflowId,
+  initialSelectedTaskId,
+  onClearSelectedTask,
 }) => {
+  // 子 Tab 切换状态与记忆
+  const [activeSubTab, setActiveSubTab] = useState<'workflows' | 'runs'>(() => {
+    if (initialSubTab) return initialSubTab;
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SUBTAB);
+      if (saved === 'runs' || saved === 'workflows') return saved;
+    } catch {}
+    return 'workflows';
+  });
+
+  const [runsFilterWfId, setRunsFilterWfId] = useState<string | null>(initialFilteredWorkflowId || null);
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
+  useEffect(() => {
+    if (initialFilteredWorkflowId !== undefined) {
+      setRunsFilterWfId(initialFilteredWorkflowId);
+    }
+  }, [initialFilteredWorkflowId]);
+
+  const handleSubTabChange = (tab: 'workflows' | 'runs') => {
+    setActiveSubTab(tab);
+    try {
+      localStorage.setItem(STORAGE_KEY_SUBTAB, tab);
+    } catch {}
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowListView] 切换流程编排子 Tab:', tab);
+    }
+  };
+
+  const handleViewRunsOfWorkflow = (e: React.MouseEvent, wfId: string) => {
+    e.stopPropagation();
+    setRunsFilterWfId(wfId);
+    handleSubTabChange('runs');
+  };
   const [searchTerm, setSearchTerm] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -462,8 +514,8 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     setLoading(true);
     try {
       const id = `wf_${Date.now().toString(36)}`;
-      let nodes = [];
-      let edges = [];
+      let nodes: any[] = [];
+      let edges: any[] = [];
 
       if (templateType === 'feature_dev') {
         nodes = [
@@ -667,6 +719,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
         workflowId: debugTargetWf.id,
         workspace: workspace || undefined,
         autoRun: true,
+        triggerSource: 'debug',
       });
 
       if (import.meta.env?.DEV) {
@@ -812,10 +865,110 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     }
   };
 
+  const hasRunningTasks = useMemo(() => {
+    return tasks.some((t) => t.status === 'running');
+  }, [tasks]);
+
+  const executionTasksCount = useMemo(() => {
+    return tasks.filter((task) => {
+      const hasNodeRuns = task.nodeRuns && Object.keys(task.nodeRuns).length > 0;
+      if (hasNodeRuns) return true;
+      if (
+        task.status === 'running' ||
+        task.status === 'completed' ||
+        task.status === 'failed' ||
+        task.status === 'cancelled'
+      ) {
+        return true;
+      }
+      if (
+        task.triggerSource === 'shortcut' ||
+        task.triggerSource === 'debug' ||
+        task.triggerSource === 'api'
+      ) {
+        return true;
+      }
+      return false;
+    }).length;
+  }, [tasks]);
+
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">
-      {/* 次级工具栏 (Sub-header) - 1:1 对齐任务看板极简规范 */}
-      <div className="px-6 py-2.5 bg-transparent flex items-center justify-between shrink-0">
+      {/* 顶部主子标签栏 (对齐 openLoop 极简设计系统与 QA 模块) */}
+      <div className="px-6 pt-3 pb-1 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-1 bg-[#ececf0] p-0.5 rounded-[7px] border border-[#e3e3e8]/70">
+          <button
+            type="button"
+            onClick={() => handleSubTabChange('workflows')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-[5px] text-[11.5px] font-medium transition-all cursor-pointer ${
+              activeSubTab === 'workflows'
+                ? 'bg-white text-[#1c1c21] shadow-2xs font-semibold'
+                : 'text-[#63636b] hover:text-[#1c1c21]'
+            }`}
+          >
+            <Workflow size={13} className={activeSubTab === 'workflows' ? 'text-[#1c1c21]' : 'text-[#85858d]'} />
+            <span>流水线编排</span>
+            <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded bg-black/5 text-[#63636b]">
+              {workflows.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSubTabChange('runs')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-[5px] text-[11.5px] font-medium transition-all cursor-pointer ${
+              activeSubTab === 'runs'
+                ? 'bg-white text-[#1c1c21] shadow-2xs font-semibold'
+                : 'text-[#63636b] hover:text-[#1c1c21]'
+            }`}
+          >
+            <History size={13} className={activeSubTab === 'runs' ? 'text-[#1c1c21]' : 'text-[#85858d]'} />
+            <span>执行调用记录</span>
+            <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded bg-black/5 text-[#63636b]">
+              {executionTasksCount}
+            </span>
+            {hasRunningTasks && (
+              <span className="relative flex h-2 w-2 ml-0.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeSubTab === 'workflows' && (
+          <div className="flex items-center gap-2">
+            {/* 新建工作流按钮 */}
+            <button
+              type="button"
+              onClick={() => {
+                if (import.meta.env?.DEV) console.log('[WorkflowListView] 点击新建工作流');
+                setIsCreateModalOpen(true);
+              }}
+              className="flex items-center gap-1.5 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs cursor-pointer"
+            >
+              <Plus size={13} strokeWidth={2.4} />
+              <span>新建工作流</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {activeSubTab === 'runs' ? (
+        <WorkflowExecutionHistoryView
+          workflows={workflows}
+          tasks={tasks}
+          onRefresh={onRefresh}
+          onSelectWorkflow={onSelectWorkflow}
+          onOpenTaskLogs={onOpenTaskLogs}
+          selectedTaskId={initialSelectedTaskId}
+          filterWorkflowId={runsFilterWfId}
+          onClearSelectedTask={onClearSelectedTask}
+        />
+      ) : (
+        <>
+          {/* 次级工具栏 (Sub-header) - 1:1 对齐任务看板极简规范 */}
+          <div className="px-6 py-2 bg-transparent flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
           {/* 分类快速筛选 Segmented Control */}
           <div className="flex items-center bg-[#ececf0]/90 p-0.5 rounded-[7px] text-[11.5px] border border-[#e3e3e8]/70">
@@ -1229,6 +1382,17 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                       </button>
                     </div>
 
+                    {/* 执行记录入口 */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleViewRunsOfWorkflow(e, wf.id)}
+                      title="查看此工作流的历史与快捷键执行记录"
+                      className="h-[28px] px-2 rounded-[6px] bg-[#f4f4f7] hover:bg-[#ececf0] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-2xs cursor-pointer"
+                    >
+                      <History size={11} className="text-[#85858d]" />
+                      <span>执行记录</span>
+                    </button>
+
                     {/* 调试运行 */}
                     <button
                       type="button"
@@ -1431,6 +1595,16 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                   >
                     <button
                       type="button"
+                      onClick={(e) => handleViewRunsOfWorkflow(e, wf.id)}
+                      title="查看此工作流的历史与快捷键执行记录"
+                      className="h-[27px] px-2 rounded-[5px] bg-white hover:bg-[#f4f4f7] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-2xs cursor-pointer"
+                    >
+                      <History size={11} className="text-[#85858d]" />
+                      <span>执行记录</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={(e) => handleRunWorkflow(e, wf)}
                       title="启动测试运行与验证任务"
                       className="h-[27px] px-2.5 rounded-[5px] bg-white hover:bg-[#eeedfd] text-[#4b4b53] hover:text-[#4f46e5] border border-[#e3e3e8] hover:border-[#d8d6fb] text-[11.5px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-2xs cursor-pointer"
@@ -1455,6 +1629,8 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* 新建工作流弹窗 */}
       {isCreateModalOpen && (

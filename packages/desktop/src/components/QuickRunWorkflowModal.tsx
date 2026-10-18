@@ -22,6 +22,7 @@ interface QuickRunWorkflowModalProps {
   workflows: WorkflowDefinition[];
   onTaskCreated?: (task: Task) => void;
   onNavigateKanban?: () => void;
+  onNavigateRuns?: (taskId?: string, workflowId?: string) => void;
 }
 
 export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
@@ -30,6 +31,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
   workflows,
   onTaskCreated,
   onNavigateKanban,
+  onNavigateRuns,
 }) => {
   const defaultWfId = workflows.find((w) => w.id.includes('febase'))?.id || workflows[0]?.id || '';
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(defaultWfId);
@@ -136,6 +138,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
         description: prompt.trim(),
         kanbanColumn: 'in_progress',
         autoRun: true,
+        triggerSource: 'shortcut',
       });
 
       setActiveTask(task);
@@ -409,18 +412,32 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
                   </span>
                 </div>
 
-                {activeTask && onNavigateKanban && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onNavigateKanban();
-                      onClose();
-                    }}
-                    className="text-[10px] text-[#4f46e5] hover:underline flex items-center gap-0.5 cursor-pointer"
-                  >
-                    在看板查看 <ExternalLink size={9} />
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {activeTask && onNavigateRuns && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onNavigateRuns(activeTask.id, activeWorkflow?.id);
+                        onClose();
+                      }}
+                      className="text-[10px] text-[#4f46e5] hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
+                    >
+                      在执行记录中查看 <ExternalLink size={9} />
+                    </button>
+                  )}
+                  {activeTask && onNavigateKanban && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onNavigateKanban();
+                        onClose();
+                      }}
+                      className="text-[10px] text-[#63636b] hover:text-[#1c1c21] hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      在看板查看 <ExternalLink size={9} />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* 异常/终止说明 */}

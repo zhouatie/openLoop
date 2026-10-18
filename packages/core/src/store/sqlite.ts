@@ -67,6 +67,7 @@ export class SqliteStore {
         context_json TEXT,
         workspace TEXT,
         attachments_json TEXT,
+        trigger_source TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
@@ -165,6 +166,22 @@ export class SqliteStore {
       this.db.exec('ALTER TABLE tasks ADD COLUMN attachments_json TEXT');
     } catch {
       // 字段已存在，忽略
+    }
+
+    // 增量表结构平滑迁移：为历史已有数据库的 tasks 表补齐 trigger_source 字段与高频索引
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN trigger_source TEXT');
+    } catch {
+      // 字段已存在，忽略
+    }
+
+    try {
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tasks_workflow_created ON tasks(workflow_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_tasks_trigger_source ON tasks(trigger_source);
+      `);
+    } catch {
+      // 忽略
     }
 
     // 如果是首次启动空库，插入初始内置数据
@@ -727,21 +744,25 @@ export class SqliteStore {
       };
     }
 
-    return taskRows.map((tr) => ({
-      id: tr.id,
-      title: tr.title,
-      description: tr.description || undefined,
-      workflowId: tr.workflow_id,
-      status: tr.status,
-      kanbanColumn: tr.kanban_column,
-      currentNodeId: tr.current_node_id || undefined,
-      context: tr.context_json ? JSON.parse(tr.context_json) : {},
-      workspace: tr.workspace || undefined,
-      attachments: tr.attachments_json ? JSON.parse(tr.attachments_json) : undefined,
-      createdAt: tr.created_at,
-      updatedAt: tr.updated_at,
-      nodeRuns: runsByTask.get(tr.id) || {},
-    }));
+    return taskRows.map((tr) => {
+      const parsedContext = tr.context_json ? JSON.parse(tr.context_json) : {};
+      return {
+        id: tr.id,
+        title: tr.title,
+        description: tr.description || undefined,
+        workflowId: tr.workflow_id,
+        status: tr.status,
+        kanbanColumn: tr.kanban_column,
+        currentNodeId: tr.current_node_id || undefined,
+        context: parsedContext,
+        workspace: tr.workspace || undefined,
+        attachments: tr.attachments_json ? JSON.parse(tr.attachments_json) : undefined,
+        triggerSource: tr.trigger_source || parsedContext?.triggerSource || 'kanban',
+        createdAt: tr.created_at,
+        updatedAt: tr.updated_at,
+        nodeRuns: runsByTask.get(tr.id) || {},
+      };
+    });
   }
 
   public getTask(id: string): Task | undefined {
@@ -764,6 +785,8 @@ export class SqliteStore {
       };
     }
 
+    const parsedContext = tr.context_json ? JSON.parse(tr.context_json) : {};
+
     return {
       id: tr.id,
       title: tr.title,
@@ -772,9 +795,10 @@ export class SqliteStore {
       status: tr.status,
       kanbanColumn: tr.kanban_column,
       currentNodeId: tr.current_node_id || undefined,
-      context: tr.context_json ? JSON.parse(tr.context_json) : {},
+      context: parsedContext,
       workspace: tr.workspace || undefined,
       attachments: tr.attachments_json ? JSON.parse(tr.attachments_json) : undefined,
+      triggerSource: tr.trigger_source || parsedContext?.triggerSource || 'kanban',
       createdAt: tr.created_at,
       updatedAt: tr.updated_at,
       nodeRuns,
@@ -786,8 +810,8 @@ export class SqliteStore {
     if (!task.createdAt) task.createdAt = task.updatedAt;
 
     const upsertTask = this.db.prepare(`
-      INSERT INTO tasks (id, title, description, workflow_id, status, kanban_column, current_node_id, context_json, workspace, attachments_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, description, workflow_id, status, kanban_column, current_node_id, context_json, workspace, attachments_json, trigger_source, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         description = excluded.description,
@@ -798,6 +822,7 @@ export class SqliteStore {
         context_json = excluded.context_json,
         workspace = excluded.workspace,
         attachments_json = excluded.attachments_json,
+        trigger_source = excluded.trigger_source,
         updated_at = excluded.updated_at
     `);
 
@@ -827,6 +852,7 @@ export class SqliteStore {
         JSON.stringify(task.context || {}),
         task.workspace || null,
         task.attachments && task.attachments.length > 0 ? JSON.stringify(task.attachments) : null,
+        task.triggerSource || task.context?.triggerSource || 'kanban',
         task.createdAt,
         task.updatedAt
       );

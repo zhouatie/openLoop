@@ -12,6 +12,7 @@ import {
   CornerDownLeft,
   PanelLeft,
   Zap,
+  History,
 } from 'lucide-react';
 import { Kbd } from './Kbd';
 import { useShortcuts } from '../context/ShortcutContext';
@@ -30,6 +31,7 @@ interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
   onNavigate: (pluginId: string) => void;
+  onNavigateWorkflowRuns?: () => void;
   onOpenCreateTask: () => void;
   onOpenQuickRun?: () => void;
   onToggleLogs: () => void;
@@ -41,6 +43,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   isOpen,
   onClose,
   onNavigate,
+  onNavigateWorkflowRuns,
   onOpenCreateTask,
   onOpenQuickRun,
   onToggleLogs,
@@ -76,6 +79,21 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         shortcutKeys: ['super', '2'],
         action: () => {
           onNavigate('workflow-editor');
+          onClose();
+        },
+      },
+      {
+        id: 'nav-workflow-runs',
+        category: '导航',
+        title: '流水线调用记录',
+        description: '查看历史流水线与快捷键调用的执行记录及节点流转日志',
+        icon: <History size={16} strokeWidth={1.8} className="text-[#d97706]" />,
+        action: () => {
+          if (onNavigateWorkflowRuns) {
+            onNavigateWorkflowRuns();
+          } else {
+            onNavigate('workflow-editor');
+          }
           onClose();
         },
       },

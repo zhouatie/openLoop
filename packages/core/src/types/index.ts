@@ -184,6 +184,7 @@ export interface Task {
   status: TaskStatus;
   kanbanColumn: KanbanColumn;
   workspace?: string; // 关联的本地代码工程根目录工作区
+  triggerSource?: 'shortcut' | 'debug' | 'kanban' | 'api' | 'manual'; // 任务/流水线调用触发来源
   createdAt: number;
   updatedAt: number;
   currentNodeId?: string;

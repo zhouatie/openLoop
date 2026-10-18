@@ -1597,6 +1597,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         workflowId: activeWorkflow.id,
         workspace: workspace || undefined,
         autoRun: true,
+        triggerSource: 'debug',
       });
 
       if (import.meta.env?.DEV) {

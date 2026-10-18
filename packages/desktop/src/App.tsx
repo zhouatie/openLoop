@@ -41,6 +41,9 @@ export const AppContent: React.FC = () => {
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isQuickRunModalOpen, setIsQuickRunModalOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [workflowSubTab, setWorkflowSubTab] = useState<'workflows' | 'runs'>('workflows');
+  const [selectedRunTaskId, setSelectedRunTaskId] = useState<string | null>(null);
+  const [filterWorkflowId, setFilterWorkflowId] = useState<string | null>(null);
   const [isDaemonConnected, setIsDaemonConnected] = useState<boolean>(api.getConnectionStatus());
   const [sidebarOrder, setSidebarOrder] = useState<string[]>(() => getStoredSidebarOrder());
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
@@ -223,7 +226,10 @@ export const AppContent: React.FC = () => {
     if (import.meta.env?.DEV) {
       console.log('[App] 创建任务请求:', params);
     }
-    await api.createTask(params);
+    await api.createTask({
+      ...params,
+      triggerSource: 'kanban',
+    });
     refreshData();
   };
 
@@ -318,9 +324,14 @@ export const AppContent: React.FC = () => {
           {activePluginId === 'workflow-editor' && !editingWorkflowId && (
             <WorkflowListView
               workflows={workflows}
+              tasks={tasks}
               onSelectWorkflow={(id) => setEditingWorkflowId(id)}
               onRefresh={refreshData}
               onOpenTaskLogs={handleOpenTaskLogs}
+              initialSubTab={workflowSubTab}
+              initialSelectedTaskId={selectedRunTaskId}
+              initialFilteredWorkflowId={filterWorkflowId}
+              onClearSelectedTask={() => setSelectedRunTaskId(null)}
             />
           )}
 
@@ -424,6 +435,13 @@ export const AppContent: React.FC = () => {
         onNavigateKanban={() => {
           setActivePluginId('kanban');
         }}
+        onNavigateRuns={(taskId?: string, wfId?: string) => {
+          setActivePluginId('workflow-editor');
+          setEditingWorkflowId(null);
+          setWorkflowSubTab('runs');
+          if (taskId) setSelectedRunTaskId(taskId);
+          if (wfId) setFilterWorkflowId(wfId);
+        }}
       />
 
       {/* 全局命令面板 (Super+K) */}
@@ -435,6 +453,11 @@ export const AppContent: React.FC = () => {
           if (id === 'workflow-editor') {
             setEditingWorkflowId(null);
           }
+        }}
+        onNavigateWorkflowRuns={() => {
+          setActivePluginId('workflow-editor');
+          setEditingWorkflowId(null);
+          setWorkflowSubTab('runs');
         }}
         onOpenCreateTask={() => setIsCreateTaskModalOpen(true)}
         onOpenQuickRun={() => setIsQuickRunModalOpen(true)}

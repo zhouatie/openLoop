@@ -505,7 +505,7 @@ export class OpenLoopServer {
 
       if (pathname === '/api/tasks' && method === 'POST') {
         const body = await this.parseJsonBody(req);
-        const { title, workflowId, description, context, autoRun, kanbanColumn, workspace, attachments } = body;
+        const { title, workflowId, description, context, autoRun, kanbanColumn, workspace, attachments, triggerSource } = body;
         
         if (!workflowId) {
           return this.sendJson(res, 400, { error: 'workflowId is required' }, reqMeta);
@@ -524,6 +524,7 @@ export class OpenLoopServer {
           status: 'pending',
           kanbanColumn: validColumn,
           workspace: workspace ? String(workspace).trim() : undefined,
+          triggerSource: triggerSource || (context && context.triggerSource) || 'kanban',
           createdAt: Date.now(),
           updatedAt: Date.now(),
           nodeRuns: {},
@@ -531,8 +532,8 @@ export class OpenLoopServer {
         };
 
         serverLogger.info(
-          `[Tasks:Create] 创建新任务: "${task.title}" (ID: ${task.id}, Workflow: ${workflowId}, Column: ${task.kanbanColumn}, Workspace: ${task.workspace || '未指定'}, AutoRun: ${shouldAutoRun})`,
-          { context: task.context, workspace: task.workspace },
+          `[Tasks:Create] 创建新任务: "${task.title}" (ID: ${task.id}, Workflow: ${workflowId}, Trigger: ${task.triggerSource}, Column: ${task.kanbanColumn}, Workspace: ${task.workspace || '未指定'}, AutoRun: ${shouldAutoRun})`,
+          { context: task.context, workspace: task.workspace, triggerSource: task.triggerSource },
           { taskId: task.id }
         );
 
@@ -566,9 +567,10 @@ export class OpenLoopServer {
         const existing = this.store.getTask(taskId);
         if (!existing) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
         const body = await this.parseJsonBody(req);
-        const { title, description, workflowId, context, kanbanColumn, workspace, attachments } = body;
+        const { title, description, workflowId, context, kanbanColumn, workspace, attachments, triggerSource } = body;
         if (title !== undefined) existing.title = title.trim();
         if (description !== undefined) existing.description = description.trim();
+        if (triggerSource !== undefined) existing.triggerSource = triggerSource;
         if (attachments !== undefined) {
           existing.attachments = Array.isArray(attachments) ? attachments : [];
         }

@@ -156,18 +156,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span className="truncate tracking-tight">{titleText}</span>
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0 ml-1">
-                  {!plugin.isBuiltin && (
+                {!plugin.isBuiltin && (
+                  <div className="flex items-center gap-1.5 shrink-0 ml-1">
                     <span className="text-[10px] text-[#4f46e5] bg-[#eeedfd] px-1.5 py-[1px] rounded font-medium">
                       槽位
                     </span>
-                  )}
-                  {shortcutHint && (
-                    <span className="text-[10.5px] font-mono text-[#a1a1aa] tracking-tighter opacity-70 group-hover:opacity-100">
-                      {shortcutHint}
-                    </span>
-                  )}
-                </div>
+                  </div>
+                )}
               </button>
             );
           })}

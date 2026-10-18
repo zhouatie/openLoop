@@ -197,6 +197,7 @@ export class DesktopApiService {
     kanbanColumn?: KanbanColumn;
     workspace?: string;
     attachments?: TaskAttachment[];
+    triggerSource?: 'shortcut' | 'debug' | 'kanban' | 'api' | 'manual';
   }): Promise<Task> {
     if (import.meta.env?.DEV) {
       console.log('[UI:API] 创建新任务:', params);
@@ -235,6 +236,7 @@ export class DesktopApiService {
       kanbanColumn?: KanbanColumn;
       workspace?: string;
       attachments?: TaskAttachment[];
+      triggerSource?: 'shortcut' | 'debug' | 'kanban' | 'api' | 'manual';
     }
   ): Promise<Task> {
     if (import.meta.env?.DEV) {
