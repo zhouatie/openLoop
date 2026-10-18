@@ -134,13 +134,13 @@ export const QaAutomationView: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 h-full overflow-y-auto bg-[#f4f4f6] p-6 space-y-4 select-none">
-      {/* 顶部工具栏 (符合 openLoop 统一极简风格) */}
-      <div className="flex items-center justify-between pb-3.5 border-b border-[#e3e3e8]">
+    <div className="flex-1 h-full flex flex-col bg-[#f4f4f6] overflow-hidden select-none">
+      {/* 顶部工具栏 (符合 openLoop 统一极简风格，白底、细边框) */}
+      <div className="bg-white border-b border-[#e3e3e8] px-6 py-3.5 flex items-center justify-between shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-[15px] font-semibold text-[#1c1c21]">QA 自动化测试</h2>
-            <span className="text-[11px] font-mono text-[#85858d] bg-white border border-[#e3e3e8] px-2 py-[1px] rounded-[5px] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+            <span className="text-[11px] font-mono text-[#85858d] bg-[#f4f4f6] border border-[#e3e3e8] px-2 py-[1px] rounded-[5px]">
               {activeTab === 'runs' ? `${runs.length} 次任务记录` : `${suites.length} 个用例`}
             </span>
           </div>
@@ -154,7 +154,7 @@ export const QaAutomationView: React.FC = () => {
           <div className="flex items-center gap-1 bg-[#ececf0] p-0.5 rounded-[6px]">
             <button
               onClick={() => setActiveTab('runs')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] text-[11.5px] font-medium transition-all ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] text-[11.5px] font-medium transition-all cursor-pointer ${
                 activeTab === 'runs'
                   ? 'bg-white text-[#1c1c21] shadow-2xs'
                   : 'text-[#71717a] hover:text-[#1c1c21]'
@@ -166,7 +166,7 @@ export const QaAutomationView: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('suites')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] text-[11.5px] font-medium transition-all ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] text-[11.5px] font-medium transition-all cursor-pointer ${
                 activeTab === 'suites'
                   ? 'bg-white text-[#1c1c21] shadow-2xs'
                   : 'text-[#71717a] hover:text-[#1c1c21]'
@@ -182,7 +182,7 @@ export const QaAutomationView: React.FC = () => {
               setEditingSuite(null);
               setIsEditorOpen(true);
             }}
-            className="flex items-center gap-1 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs"
+            className="flex items-center gap-1 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs cursor-pointer"
           >
             <Plus size={12} strokeWidth={2.4} />
             <span>新建用例</span>
@@ -190,35 +190,37 @@ export const QaAutomationView: React.FC = () => {
         </div>
       </div>
 
-      {/* 主视图内容 */}
-      {activeTab === 'runs' ? (
-        <QaRunsListView
-          runs={runs}
-          suites={suites}
-          onSelectRun={(runId) => setSelectedRunId(runId)}
-          onQuickRunSuite={handleQuickRunSuite}
-          onNewSuite={() => {
-            setEditingSuite(null);
-            setIsEditorOpen(true);
-          }}
-          onRefresh={loadData}
-          isLoading={isLoading}
-        />
-      ) : (
-        <QaSuitesListView
-          suites={suites}
-          onNewSuite={() => {
-            setEditingSuite(null);
-            setIsEditorOpen(true);
-          }}
-          onEditSuite={(suite) => {
-            setEditingSuite(suite);
-            setIsEditorOpen(true);
-          }}
-          onDeleteSuite={(suite) => setDeleteTargetSuite(suite)}
-          onRunSuite={handleQuickRunSuite}
-        />
-      )}
+      {/* 主视图内容区域 */}
+      <div className="flex-1 overflow-y-auto px-6 pb-6 pt-3.5">
+        {activeTab === 'runs' ? (
+          <QaRunsListView
+            runs={runs}
+            suites={suites}
+            onSelectRun={(runId) => setSelectedRunId(runId)}
+            onQuickRunSuite={handleQuickRunSuite}
+            onNewSuite={() => {
+              setEditingSuite(null);
+              setIsEditorOpen(true);
+            }}
+            onRefresh={loadData}
+            isLoading={isLoading}
+          />
+        ) : (
+          <QaSuitesListView
+            suites={suites}
+            onNewSuite={() => {
+              setEditingSuite(null);
+              setIsEditorOpen(true);
+            }}
+            onEditSuite={(suite) => {
+              setEditingSuite(suite);
+              setIsEditorOpen(true);
+            }}
+            onDeleteSuite={(suite) => setDeleteTargetSuite(suite)}
+            onRunSuite={handleQuickRunSuite}
+          />
+        )}
+      </div>
 
       {/* 新建/编辑用例 Modal */}
       {isEditorOpen && (
@@ -250,12 +252,13 @@ export const QaAutomationView: React.FC = () => {
       <ConfirmModal
         isOpen={Boolean(deleteTargetSuite)}
         title="删除测试用例"
-        message={`确定要删除测试用例「${deleteTargetSuite?.name}」吗？历史运行记录仍会完整保留。`}
-        confirmText={isDeleting ? '正在删除...' : '确定删除'}
+        description={`确定要删除测试用例「${deleteTargetSuite?.name}」吗？历史运行记录仍会完整保留。`}
+        confirmText="确定删除"
         cancelText="取消"
-        danger
+        variant="danger"
+        loading={isDeleting}
         onConfirm={handleConfirmDelete}
-        onCancel={() => setDeleteTargetSuite(null)}
+        onClose={() => setDeleteTargetSuite(null)}
       />
     </div>
   );

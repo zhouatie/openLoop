@@ -42,7 +42,7 @@ export const QaSuitesListView: React.FC<QaSuitesListViewProps> = ({
   }, [suites, searchQuery]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 select-none">
       {/* 搜索与新建栏 */}
       <div className="flex items-center justify-between gap-3">
         <div className="relative w-72">
@@ -58,116 +58,141 @@ export const QaSuitesListView: React.FC<QaSuitesListViewProps> = ({
 
         <button
           onClick={onNewSuite}
-          className="flex items-center gap-1.5 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs"
+          className="flex items-center gap-1.5 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs cursor-pointer"
         >
           <Plus size={12} strokeWidth={2.4} />
           <span>新建测试用例</span>
         </button>
       </div>
 
-      {/* 用例列表 */}
+      {/* 用例列表 (同款规范表格) */}
       {filtered.length === 0 ? (
-        <div className="bg-white border border-[#e3e3e8] rounded-[10px] p-12 text-center shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <Target size={28} className="mx-auto text-[#b9b9c2] mb-2" />
+        <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-16 text-center shadow-sm select-none">
+          <Target size={30} className="mx-auto text-[#b9b9c2] mb-2.5 stroke-[1.5]" />
           <div className="text-[13px] font-medium text-[#1c1c21]">暂无测试用例</div>
           <p className="text-[11.5px] text-[#85858d] mt-1">
             点击右上角“新建测试用例”配置 Midscene 视觉自动化指令
           </p>
         </div>
       ) : (
-        <div className="bg-white border border-[#e3e3e8] rounded-[10px] divide-y divide-[#ececf0] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          {filtered.map((suite) => {
-            const isPass = suite.lastRunStatus === 'passed';
-            const isFail = suite.lastRunStatus === 'failed';
+        <div className="bg-white border border-[#e3e3e8] rounded-[8px] shadow-sm overflow-hidden flex flex-col">
+          {/* 表头 */}
+          <div className="h-[34px] bg-[#fafafc] border-b border-[#e3e3e8] px-4 flex items-center text-[11px] font-medium text-[#85858d] select-none">
+            <div className="w-[220px] shrink-0">用例名称</div>
+            <div className="flex-1 min-w-0 px-3">目标地址与说明</div>
+            <div className="w-[80px] shrink-0 text-center">步骤数</div>
+            <div className="w-[85px] shrink-0 text-center">最新状态</div>
+            <div className="w-[80px] shrink-0 text-right">最近耗时</div>
+            <div className="w-[100px] shrink-0 text-center">操作</div>
+          </div>
 
-            return (
-              <div
-                key={suite.id}
-                className="px-4 py-3 min-h-[58px] flex items-center justify-between hover:bg-[#f9f9fb] transition-colors group select-none"
-              >
-                <div className="flex items-center gap-3.5 min-w-0 flex-1 pr-4">
-                  <div className="w-8 h-8 rounded-[7px] bg-[#f4f4f7] border border-[#ececf0] flex items-center justify-center text-[#1c1c21] group-hover:border-[#b9b9c2] transition-colors shrink-0">
-                    <Target size={15} strokeWidth={2} />
+          {/* 表格行 */}
+          <div className="divide-y divide-[#f1f1f4]">
+            {filtered.map((suite) => {
+              const isPass = suite.lastRunStatus === 'passed';
+              const isFail = suite.lastRunStatus === 'failed';
+
+              return (
+                <div
+                  key={suite.id}
+                  onClick={() => onEditSuite(suite)}
+                  className="group px-4 py-2.5 flex items-center text-[12px] transition-colors cursor-pointer hover:bg-[#fafafc]"
+                >
+                  {/* 用例名称 */}
+                  <div className="w-[220px] shrink-0 flex items-center gap-2 pr-2">
+                    <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] group-hover:bg-white flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60 transition-colors">
+                      <Target size={11} strokeWidth={2} />
+                    </div>
+                    <span
+                      className="font-medium text-[#1c1c21] truncate hover:text-[#4f46e5] transition-colors"
+                      title={suite.name}
+                    >
+                      {suite.name}
+                    </span>
                   </div>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[13px] font-semibold text-[#1c1c21] truncate">
-                        {suite.name}
-                      </span>
-
-                      <span
-                        className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold ${
-                          isPass
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : isFail
-                            ? 'bg-red-50 text-red-700 border border-red-200'
-                            : 'bg-[#f4f4f6] text-[#71717a] border border-[#e3e3e8]'
-                        }`}
-                      >
-                        {isPass ? (
-                          <CheckCircle2 size={11} />
-                        ) : isFail ? (
-                          <XCircle size={11} />
-                        ) : (
-                          <Clock size={11} />
-                        )}
-                        <span>{isPass ? 'PASSED' : isFail ? 'FAILED' : 'UNTESTED'}</span>
-                      </span>
-
-                      <span className="text-[10.5px] font-mono text-[#85858d] bg-[#f4f4f7] px-1.5 py-0.2 rounded border border-[#ececf0]">
-                        {suite.steps.length} 步骤
-                      </span>
+                  {/* 目标地址与说明 */}
+                  <div className="flex-1 min-w-0 px-3 flex items-center gap-2 overflow-hidden font-sans">
+                    <div className="flex items-center gap-1 font-mono text-[11px] text-[#63636b] truncate shrink-0 max-w-[200px]" title={suite.targetUrl}>
+                      <Globe size={11} className="text-[#a1a1aa] shrink-0" />
+                      <span className="truncate">{suite.targetUrl}</span>
                     </div>
+                    {suite.description && <span className="text-[#d4d4d8] shrink-0">·</span>}
+                    {suite.description && (
+                      <span className="text-[11.5px] text-[#85858d] truncate" title={suite.description}>
+                        {suite.description}
+                      </span>
+                    )}
+                  </div>
 
-                    <div className="flex items-center gap-3.5 text-[11px] text-[#85858d]">
-                      {suite.description && (
-                        <span className="truncate max-w-sm text-[#71717a]">{suite.description}</span>
-                      )}
+                  {/* 步骤数 */}
+                  <div className="w-[80px] shrink-0 text-center">
+                    <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded shrink-0">
+                      {suite.steps.length} 步骤
+                    </span>
+                  </div>
 
-                      <div className="flex items-center gap-1 font-mono text-[11px] text-[#52525b] truncate max-w-xs">
-                        <Globe size={11} className="text-[#a1a1aa] shrink-0" />
-                        <span className="truncate">{suite.targetUrl}</span>
-                      </div>
+                  {/* 最新状态 */}
+                  <div className="w-[85px] shrink-0 text-center">
+                    {isPass ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
+                        <CheckCircle2 size={10} strokeWidth={2.2} />
+                        <span>PASSED</span>
+                      </span>
+                    ) : isFail ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10px] font-medium border border-[#fecaca]/60">
+                        <XCircle size={10} strokeWidth={2.2} />
+                        <span>FAILED</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#71717a] text-[10px] font-medium border border-[#e3e3e8]">
+                        <Clock size={10} />
+                        <span>UNTESTED</span>
+                      </span>
+                    )}
+                  </div>
 
-                      {suite.lastRunDurationMs && (
-                        <span className="font-mono text-[10.5px]">
-                          耗时: {(suite.lastRunDurationMs / 1000).toFixed(2)}s
-                        </span>
-                      )}
-                    </div>
+                  {/* 最近耗时 */}
+                  <div className="w-[80px] shrink-0 text-right text-[11px] font-mono text-[#71717a]">
+                    {suite.lastRunDurationMs ? `${(suite.lastRunDurationMs / 1000).toFixed(2)}s` : '-'}
+                  </div>
+
+                  {/* 操作区 */}
+                  <div
+                    className="w-[100px] shrink-0 flex items-center justify-center gap-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onRunSuite(suite)}
+                      className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#4f46e5] hover:bg-[#eeedfd] flex items-center justify-center transition-all cursor-pointer"
+                      title="立即执行此用例"
+                    >
+                      <Play size={11} className="fill-current text-[#4f46e5]" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onEditSuite(suite)}
+                      className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-all cursor-pointer"
+                      title="编辑用例配置"
+                    >
+                      <Edit3 size={11.5} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onDeleteSuite(suite)}
+                      className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#dc2626] hover:bg-[#fef2f2] flex items-center justify-center transition-all cursor-pointer"
+                      title="删除此用例"
+                    >
+                      <Trash2 size={11.5} />
+                    </button>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    onClick={() => onRunSuite(suite)}
-                    className="h-[26px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 shadow-xs transition-all active:scale-95"
-                    title="立即执行此用例"
-                  >
-                    <Play size={11} />
-                    <span>执行</span>
-                  </button>
-
-                  <button
-                    onClick={() => onEditSuite(suite)}
-                    className="w-6 h-[26px] rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors shadow-2xs"
-                    title="编辑用例"
-                  >
-                    <Edit3 size={11} />
-                  </button>
-
-                  <button
-                    onClick={() => onDeleteSuite(suite)}
-                    className="w-6 h-[26px] rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-red-50 text-[#71717a] hover:text-red-600 flex items-center justify-center transition-colors shadow-2xs"
-                    title="删除用例"
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
