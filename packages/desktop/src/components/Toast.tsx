@@ -141,30 +141,32 @@ const ToastCard: React.FC<{
     };
   }, [isHovered, item.isLeaving, handleStartTimer, handlePauseTimer]);
 
+  const hasDetails = Boolean(item.description || item.action);
+
   const renderIcon = () => {
     switch (item.type) {
       case 'success':
         return (
-          <div className="w-5 h-5 rounded-full bg-[#e4f6ec] text-[#189a58] flex items-center justify-center shrink-0 mt-0.5">
+          <div className="w-5 h-5 rounded-full bg-[#e4f6ec] text-[#189a58] flex items-center justify-center shrink-0">
             <CheckCircle2 size={13} strokeWidth={2.4} />
           </div>
         );
       case 'error':
         return (
-          <div className="w-5 h-5 rounded-full bg-[#fbe9e9] text-[#d64545] flex items-center justify-center shrink-0 mt-0.5">
+          <div className="w-5 h-5 rounded-full bg-[#fbe9e9] text-[#d64545] flex items-center justify-center shrink-0">
             <AlertCircle size={13} strokeWidth={2.4} />
           </div>
         );
       case 'warning':
         return (
-          <div className="w-5 h-5 rounded-full bg-[#fbf0df] text-[#b45309] flex items-center justify-center shrink-0 mt-0.5">
+          <div className="w-5 h-5 rounded-full bg-[#fbf0df] text-[#b45309] flex items-center justify-center shrink-0">
             <AlertTriangle size={13} strokeWidth={2.4} />
           </div>
         );
       case 'info':
       default:
         return (
-          <div className="w-5 h-5 rounded-full bg-[#f1f1f4] text-[#1c1c21] flex items-center justify-center shrink-0 mt-0.5">
+          <div className="w-5 h-5 rounded-full bg-[#f1f1f4] text-[#1c1c21] flex items-center justify-center shrink-0">
             <Info size={13} strokeWidth={2.4} />
           </div>
         );
@@ -175,14 +177,16 @@ const ToastCard: React.FC<{
     <div
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={`pointer-events-auto flex items-start gap-2.5 px-3.5 py-2.5 rounded-[10px] bg-white/95 backdrop-blur-md border border-[#e3e3e8] shadow-[0_12px_32px_rgba(20,22,30,0.12),0_2px_8px_rgba(20,22,30,0.04)] min-w-[300px] max-w-[460px] text-left transition-all ${
+      className={`pointer-events-auto flex ${
+        hasDetails ? 'items-start' : 'items-center'
+      } gap-2.5 px-3.5 py-2.5 rounded-[10px] bg-white/95 backdrop-blur-md border border-[#e3e3e8] shadow-[0_12px_32px_rgba(20,22,30,0.12),0_2px_8px_rgba(20,22,30,0.04)] min-w-[300px] max-w-[460px] text-left transition-all ${
         item.isLeaving ? 'openloop-toast-leave' : 'openloop-toast-enter'
       }`}
     >
       {renderIcon()}
 
       <div className="flex-1 min-w-0 pr-1">
-        <div className="text-[12.5px] font-medium text-[#1c1c21] leading-snug break-words">
+        <div className="text-[12.5px] font-medium text-[#1c1c21] leading-5 break-words">
           {item.title}
         </div>
         {item.description && (
@@ -209,7 +213,7 @@ const ToastCard: React.FC<{
       <button
         type="button"
         onClick={() => onDismiss(item.id)}
-        className="w-5 h-5 rounded-[4px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-colors -mr-1 -mt-0.5 shrink-0"
+        className="w-5 h-5 rounded-[4px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-colors -mr-1 shrink-0"
         title="关闭通知"
       >
         <X size={13} />

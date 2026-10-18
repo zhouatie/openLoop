@@ -47,6 +47,9 @@ export interface NodeConfig {
   // 节点超时与重试配置
   timeoutSec?: number;
   retryCount?: number;
+
+  // 工作区约束
+  requireWorkspace?: boolean;
   
   // 自定义扩展属性
   customData?: Record<string, any>;

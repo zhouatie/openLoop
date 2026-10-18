@@ -2,10 +2,12 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
 import os from 'os';
 import http from 'http';
+import fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 
 let mainWindow: BrowserWindow | null = null;
 let coreProcess: ChildProcess | null = null;
+let embeddedServer: any = null;
 
 // 探测指定 URL / 端口是否存活
 function checkUrlAlive(urlStr: string): Promise<boolean> {
@@ -41,19 +43,120 @@ async function ensureCoreServer() {
     return;
   }
 
-  try {
-    const coreCliPath = path.resolve(__dirname, '../../core/dist/server-cli.js');
-    console.log('[Desktop Main] Spawning standalone Core Server process:', coreCliPath);
-    coreProcess = spawn('node', [coreCliPath], {
-      env: { ...process.env, PORT: '19888' },
-      stdio: 'inherit',
-    });
-    coreProcess.on('error', (err) => {
-      console.warn('[Desktop Main] Core Server process notice:', err.message);
-    });
-  } catch (err: any) {
-    console.warn('[Desktop Main] Server start notice:', err.message);
+  // 1. 开发环境下，若本地外部环境存在且 core cli 存在，使用系统 node 启动外部独立进程
+  if (!app.isPackaged) {
+    try {
+      const devCoreCli = path.resolve(__dirname, '../../core/dist/server-cli.js');
+      if (fs.existsSync(devCoreCli)) {
+        console.log('[Desktop Main] Spawning standalone Core Server process (dev mode):', devCoreCli);
+        coreProcess = spawn('node', [devCoreCli], {
+          env: { ...process.env, PORT: '19888' },
+          stdio: 'inherit',
+        });
+        coreProcess.on('error', (err) => {
+          console.warn('[Desktop Main] Core Server process notice:', err.message);
+        });
+        return;
+      }
+    } catch (err: any) {
+      console.warn('[Desktop Main] Dev core spawn notice:', err.message);
+    }
   }
+
+  // 2. 生产打包环境或自包含模式：在主进程启动内嵌的 Core Server 服务
+  try {
+    console.log('[Desktop Main] Starting embedded OpenLoop Core Server...');
+    let OpenLoopServerClass: any = null;
+    const moduleCandidates = [
+      path.resolve(__dirname, '../../core/dist/server/index.js'),
+      path.join(app.getAppPath(), 'packages/core/dist/server/index.js'),
+    ];
+    for (const modPath of moduleCandidates) {
+      if (fs.existsSync(modPath)) {
+        OpenLoopServerClass = require(modPath).OpenLoopServer;
+        break;
+      }
+    }
+    if (!OpenLoopServerClass) {
+      try {
+        OpenLoopServerClass = require('@openloop/core').OpenLoopServer;
+      } catch {}
+    }
+
+    if (OpenLoopServerClass) {
+      embeddedServer = new OpenLoopServerClass({ port: 19888, host: '127.0.0.1' });
+      await embeddedServer.start();
+      console.log('[Desktop Main] Embedded OpenLoop Core Server started successfully on port 19888.');
+      return;
+    }
+  } catch (err: any) {
+    console.warn('[Desktop Main] Failed to start embedded Core Server, trying process fallback:', err.message);
+  }
+
+  // 3. 回退子进程方式：使用 Electron 自身作为 Node.js 运行时启动 server-cli.js
+  try {
+    const cliCandidates = [
+      path.resolve(__dirname, '../../core/dist/server-cli.js'),
+      path.join(app.getAppPath(), 'packages/core/dist/server-cli.js'),
+    ];
+    const targetCli = cliCandidates.find((p) => fs.existsSync(p));
+    if (targetCli) {
+      console.log('[Desktop Main] Spawning Core Server via Electron runtime:', targetCli);
+      coreProcess = spawn(process.execPath, [targetCli], {
+        env: { ...process.env, PORT: '19888', ELECTRON_RUN_AS_NODE: '1' },
+        stdio: 'inherit',
+      });
+      coreProcess.on('error', (err) => {
+        console.warn('[Desktop Main] Core process fallback error:', err.message);
+      });
+    }
+  } catch (err: any) {
+    console.error('[Desktop Main] All Core Server launch strategies failed:', err.message);
+  }
+}
+
+// 优雅清理释放后台核心服务
+async function cleanupServer() {
+  if (coreProcess) {
+    try {
+      coreProcess.kill();
+    } catch {}
+    coreProcess = null;
+  }
+  if (embeddedServer) {
+    try {
+      await embeddedServer.stop();
+    } catch {}
+    embeddedServer = null;
+  }
+}
+
+function resolveRendererHtmlPath(): string {
+  const candidates = [
+    path.join(__dirname, '../dist/index.html'),
+    path.join(__dirname, '../../packages/desktop/dist/index.html'),
+    path.join(app.getAppPath(), 'packages/desktop/dist/index.html'),
+    path.join(app.getAppPath(), 'dist/index.html'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return path.join(__dirname, '../dist/index.html');
+}
+
+function resolvePreloadPath(): string {
+  const candidates = [
+    path.join(__dirname, 'preload.js'),
+    path.join(app.getAppPath(), 'packages/desktop/dist-electron/preload.js'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return path.join(__dirname, 'preload.js');
 }
 
 async function createWindow() {
@@ -65,7 +168,7 @@ async function createWindow() {
     backgroundColor: '#0b0f17',
     titleBarStyle: 'hiddenInset',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: resolvePreloadPath(),
       nodeIntegration: false,
       contextIsolation: true,
     },
@@ -78,7 +181,7 @@ async function createWindow() {
     console.log(`[Desktop Main] Connected to Frontend Dev Server: ${devServerUrl}`);
     mainWindow.loadURL(devServerUrl);
   } else {
-    const distHtml = path.join(__dirname, '../dist/index.html');
+    const distHtml = resolveRendererHtmlPath();
     console.log(`[Desktop Main] Loading local bundle: ${distHtml}`);
     mainWindow.loadFile(distHtml);
   }
@@ -126,19 +229,13 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('window-all-closed', () => {
+app.on('window-all-closed', async () => {
   if (process.platform !== 'darwin') {
-    if (coreProcess) {
-      coreProcess.kill();
-      coreProcess = null;
-    }
+    await cleanupServer();
     app.quit();
   }
 });
 
-app.on('will-quit', () => {
-  if (coreProcess) {
-    coreProcess.kill();
-    coreProcess = null;
-  }
+app.on('will-quit', async () => {
+  await cleanupServer();
 });
