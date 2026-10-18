@@ -727,20 +727,60 @@ export class MidsceneExecutor implements NodeExecutor {
         }
       }
 
-      const steps: QaStep[] = instructions.map((inst, idx) => ({
-        id: `step_${idx + 1}`,
-        type: inst.includes('校验') || inst.includes('检查') ? 'assert' : 'action',
-        prompt: inst,
-      }));
+      const steps: QaStep[] = [];
+      let stepCounter = 1;
 
+      const actionKeywords = ['点击', '切换', '输入', '选择', '跳转', '打开', '进入', '滚动', '滑动'];
+      const assertKeywords = ['检查', '校验', '验证', '确认', '是否', '包含', '断言', '正常渲染', '无报错'];
+
+      for (const rawInst of instructions) {
+        const inst = rawInst.trim();
+        if (!inst) continue;
+
+        // 如果单行同时包含动作词与断言词，且包含标点符号，智能拆分为两步连续执行
+        const hasAction = actionKeywords.some((k) => inst.includes(k));
+        const hasAssert = assertKeywords.some((k) => inst.includes(k));
+
+        if (hasAction && hasAssert && /[,，;；\n]+/.test(inst)) {
+          const splitParts = inst.split(/[,，;；\n]+/).map((s) => s.trim()).filter(Boolean);
+          if (splitParts.length >= 2) {
+            for (const part of splitParts) {
+              const partHasAction = actionKeywords.some((k) => part.includes(k));
+              const partHasAssert = assertKeywords.some((k) => part.includes(k));
+              steps.push({
+                id: `step_${stepCounter++}`,
+                type: partHasAction && !partHasAssert ? 'action' : partHasAssert ? 'assert' : 'action',
+                prompt: part,
+              });
+            }
+            continue;
+          }
+        }
+
+        const isAssert = !hasAction && hasAssert;
+        steps.push({
+          id: `step_${stepCounter++}`,
+          type: isAssert ? 'assert' : 'action',
+          prompt: inst,
+        });
+      }
+
+      const suiteId = node.config.suiteId || `suite_task_${task.id}`;
       const suite: QaSuite = {
-        id: node.config.suiteId || `suite_node_${node.id}`,
-        name: `${node.name} (流水线任务 ${task.title})`,
+        id: suiteId,
+        name: `任务验收: ${task.title.slice(0, 30)}`,
         targetUrl: testUrl,
         steps,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
+
+      // 自动沉淀用例至用例库，让用户在用例库中可查可复测
+      if (ctx.store) {
+        try {
+          ctx.store.saveQaSuite(suite);
+        } catch {}
+      }
 
       const runner = new MidsceneRunner({
         artifactBaseDir: path.join(dataDir, 'artifacts'),

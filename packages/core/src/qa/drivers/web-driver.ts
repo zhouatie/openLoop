@@ -152,22 +152,34 @@ export class WebPlaywrightDriver implements QaDriver {
       thought = `执行视口平滑向下滚动 300px`;
       await new Promise((r) => setTimeout(r, 400));
     } else {
-      // 提取目标交互元素文本（优先匹配引号、书名号或显式文本）
-      const match =
-        prompt.match(/[“"「]([^”"」]+)[”"」]/i) ||
-        prompt.match(/点击(?:按钮|菜单|链接|Tab|标签)?\s*([^\s,，]+)/i) ||
-        prompt.match(/click\s+['"]([^'"]+)['"]/i) ||
-        prompt.match(/click\s+(\S+)/i);
-      const targetText = match ? match[1].trim() : '';
+      // 提取目标交互元素文本（优先匹配引号、书名号，严防误点无意义单字或助词）
+      const quoteMatch = prompt.match(/[“"「]([^”"」]+)[”"」]/i);
+      let targetText = quoteMatch ? quoteMatch[1].trim() : '';
+
+      if (!targetText) {
+        const actionMatch =
+          prompt.match(/(?:点击|切换|进入|打开)(?:按钮|菜单|链接|Tab|标签|至)?\s*([^\s,，]+)/i) ||
+          prompt.match(/click\s+['"]([^'"]+)['"]/i) ||
+          prompt.match(/click\s+(\S+)/i);
+        if (actionMatch) {
+          const candidate = actionMatch[1].trim();
+          const stopWords = ['子', '某个', '对应', '相关', '一个', '当前', '对应项'];
+          if (!stopWords.includes(candidate) && candidate.length >= 2) {
+            targetText = candidate;
+          }
+        }
+      }
 
       let clicked = false;
       if (targetText) {
         const locators = [
+          this.page.getByRole('button', { name: targetText, exact: true }).first(),
           this.page.locator(`button:has-text("${targetText}")`).first(),
           this.page.locator(`[role="button"]:has-text("${targetText}")`).first(),
-          this.page.getByText(targetText, { exact: false }).first(),
+          this.page.getByRole('tab', { name: targetText, exact: false }).first(),
+          this.page.getByText(targetText, { exact: true }).first(),
           this.page.locator(`a:has-text("${targetText}")`).first(),
-          this.page.locator(`:text("${targetText}")`).first(),
+          this.page.getByText(targetText, { exact: false }).first(),
         ];
 
         for (const loc of locators) {

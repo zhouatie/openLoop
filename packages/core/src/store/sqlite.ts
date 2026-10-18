@@ -411,7 +411,7 @@ export class SqliteStore {
           position: { x: 100, y: 150 },
           config: {
             allocatePorts: ['webPort'],
-            sharedPaths: ['node_modules'],
+            sharedPaths: ['node_modules', 'packages/*/node_modules'],
             timeoutSec: 120,
           },
         },

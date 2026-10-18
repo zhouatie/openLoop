@@ -227,21 +227,64 @@ export class WorktreeManager {
 
   /**
    * 通用建立宿主与沙箱 worktree 的共享路径软链
-   * 自动按相对路径建立软链，彻底解耦具体项目目录层级
+   * 彻底解耦项目结构：支持精确相对路径与通配模式（如 node_modules, packages/*\/node_modules, **\/node_modules）
    */
-  private symlinkSharedPaths(repoRoot: string, worktreeDir: string, relativePaths: string[]) {
-    for (const rel of relativePaths) {
+  private symlinkSharedPaths(repoRoot: string, worktreeDir: string, relativePatterns: string[]) {
+    const matchedRelPaths = new Set<string>();
+
+    for (const pattern of relativePatterns) {
+      if (pattern.includes('*')) {
+        this.resolveGlobPaths(repoRoot, pattern, matchedRelPaths);
+      } else {
+        matchedRelPaths.add(pattern);
+      }
+    }
+
+    for (const rel of matchedRelPaths) {
       const src = path.join(repoRoot, rel);
       const dest = path.join(worktreeDir, rel);
       if (fs.existsSync(src) && !fs.existsSync(dest)) {
         try {
           fs.mkdirSync(path.dirname(dest), { recursive: true });
           fs.symlinkSync(src, dest, 'dir');
+          logger.info(`[Worktree:Symlink] 共享依赖软链就绪: ${rel}`);
         } catch (err: any) {
           logger.warn(`[Worktree:Symlink] 软链创建告警: ${dest} -> ${err.message}`);
         }
       }
     }
+  }
+
+  private resolveGlobPaths(baseDir: string, pattern: string, results: Set<string>) {
+    const parts = pattern.split(/[\\/]/).filter(Boolean);
+    const search = (dir: string, depth: number) => {
+      if (depth >= parts.length || !fs.existsSync(dir)) return;
+      const part = parts[depth];
+
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          if (entry.name === '.git' || entry.name === '.worktrees') continue;
+
+          if (part === '**') {
+            search(path.join(dir, entry.name), depth);
+            search(path.join(dir, entry.name), depth + 1);
+            if (depth + 1 < parts.length && entry.name === parts[parts.length - 1]) {
+              results.add(path.relative(baseDir, path.join(dir, entry.name)));
+            }
+          } else if (part === '*' || part === entry.name) {
+            if (depth === parts.length - 1) {
+              results.add(path.relative(baseDir, path.join(dir, entry.name)));
+            } else {
+              search(path.join(dir, entry.name), depth + 1);
+            }
+          }
+        }
+      } catch {}
+    };
+
+    search(baseDir, 0);
   }
 
   /**
