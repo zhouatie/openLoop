@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { WorkflowDefinition, Task, LogEntry } from '@openloop/core';
 import { api } from '../services/api';
+import { VisualAcceptanceModal } from './qa/VisualAcceptanceModal';
 
 interface QuickRunWorkflowModalProps {
   isOpen: boolean;
@@ -40,7 +41,8 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [logs, setLogs] = useState<Array<{ stream: string; message: string; nodeId?: string }>>([]);
   const [runError, setRunError] = useState<string | null>(null);
-  const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'success' | 'terminated' | 'failed'>('idle');
+  const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'waiting_approval' | 'success' | 'terminated' | 'failed'>('idle');
+  const [isAcceptanceOpen, setIsAcceptanceOpen] = useState<boolean>(false);
 
   // 下拉选择器与搜索状态
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
@@ -156,6 +158,9 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
           if (updatedTask.status === 'completed') {
             setIsRunning(false);
             setRunStatus('success');
+          } else if (updatedTask.status === 'waiting_approval') {
+            setIsRunning(false);
+            setRunStatus('waiting_approval');
           } else if (updatedTask.status === 'failed' || updatedTask.status === 'cancelled') {
             setIsRunning(false);
             const runs = Object.values(updatedTask.nodeRuns || {});
@@ -199,6 +204,9 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
             setIsRunning(false);
             setRunStatus('success');
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+          } else if (current.status === 'waiting_approval') {
+            setIsRunning(false);
+            setRunStatus('waiting_approval');
           } else if (current.status === 'failed' || current.status === 'cancelled') {
             setIsRunning(false);
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
@@ -390,6 +398,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
               <div className="flex items-center justify-between text-[11px]">
                 <div className="flex items-center gap-1.5 font-medium">
                   {runStatus === 'running' && <Loader2 size={12} className="text-[#4f46e5] animate-spin" />}
+                  {runStatus === 'waiting_approval' && <span className="w-2 h-2 rounded-full bg-[#f59e0b] animate-ping" />}
                   {runStatus === 'success' && <CheckCircle2 size={12} className="text-[#10b981]" />}
                   {runStatus === 'terminated' && <AlertCircle size={12} className="text-[#b45309]" />}
                   {runStatus === 'failed' && <AlertCircle size={12} className="text-[#dc2626]" />}
@@ -398,6 +407,8 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
                     className={
                       runStatus === 'success'
                         ? 'text-[#10b981]'
+                        : runStatus === 'waiting_approval'
+                        ? 'text-[#b45309] font-medium'
                         : runStatus === 'terminated'
                         ? 'text-[#b45309]'
                         : runStatus === 'failed'
@@ -406,6 +417,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
                     }
                   >
                     {runStatus === 'running' && '正在执行流水线...'}
+                    {runStatus === 'waiting_approval' && '测试完成，等待视觉验收与合并'}
                     {runStatus === 'success' && '流水线执行成功'}
                     {runStatus === 'terminated' && '任务中止：信息不充足'}
                     {runStatus === 'failed' && '执行未通过'}
@@ -450,6 +462,28 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
                   }`}
                 >
                   {runError}
+                </div>
+              )}
+
+              {/* 等待人工验收提示与一键回放验收入口 */}
+              {runStatus === 'waiting_approval' && activeTask && (
+                <div className="p-2.5 rounded-[6px] bg-[#f5f3ff] border border-[#ddd6fe] space-y-2">
+                  <div className="flex items-center justify-between text-[11px] text-[#5b21b6]">
+                    <span className="font-semibold">QA 自动化已捕获操作截帧</span>
+                    {activeTask.context?.worktree && (
+                      <span className="font-mono text-[10px] bg-white px-1.5 py-0.5 rounded border border-[#c4b5fd]">
+                        靶机端口 :{activeTask.context.worktree.webPort}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsAcceptanceOpen(true)}
+                    className="w-full h-[30px] rounded-[5px] bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95"
+                  >
+                    <Play size={12} className="fill-white" />
+                    <span>查看截帧回放并验收合并</span>
+                  </button>
                 </div>
               )}
 
@@ -529,6 +563,23 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
             )}
           </div>
         </div>
+        {/* 视觉验收与时间轴截帧回放弹窗 */}
+        {isAcceptanceOpen && activeTask && (
+          <VisualAcceptanceModal
+            task={activeTask}
+            onClose={() => setIsAcceptanceOpen(false)}
+            onApproved={() => {
+              setIsAcceptanceOpen(false);
+              setRunStatus('running');
+              setIsRunning(true);
+            }}
+            onRejected={() => {
+              setIsAcceptanceOpen(false);
+              setRunStatus('failed');
+              setRunError('人工审核已驳回，临时沙箱环境已释放');
+            }}
+          />
+        )}
       </div>
     </div>
   );

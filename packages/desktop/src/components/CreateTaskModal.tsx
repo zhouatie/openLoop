@@ -34,6 +34,7 @@ interface CreateTaskModalProps {
     title: string;
     workflowId: string;
     description: string;
+    acceptanceCriteria?: string;
     autoRun: boolean;
     kanbanColumn?: KanbanColumn;
     workspace?: string;
@@ -51,6 +52,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [acceptanceCriteria, setAcceptanceCriteria] = useState('');
+  const [isCriteriaOpen, setIsCriteriaOpen] = useState(false);
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [workflowId, setWorkflowId] = useState(workflows[0]?.id || '');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>(defaultColumn);
@@ -290,6 +293,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         title: title.trim(),
         workflowId,
         description: description.trim(),
+        acceptanceCriteria: acceptanceCriteria.trim() || undefined,
         autoRun,
         kanbanColumn,
         workspace: trimmedWorkspace || undefined,
@@ -560,6 +564,42 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               disabled={loading}
               rows={2}
             />
+          </div>
+
+          {/* 验收预期 / UI 自动化测试用例 (可选折叠区域) */}
+          <div className="border border-[#e3e3e8] rounded-[6px] bg-[#fafafc] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setIsCriteriaOpen(!isCriteriaOpen)}
+              className="w-full px-3 py-1.5 flex items-center justify-between text-[11px] font-medium text-[#63636b] hover:text-[#1c1c21] transition-colors cursor-pointer select-none"
+            >
+              <div className="flex items-center gap-1.5">
+                <Target size={12} className="text-[#63636b]" />
+                <span>验收预期 / UI 自动化用例 (可选)</span>
+                {acceptanceCriteria.trim() && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#1c1c21]" />
+                )}
+              </div>
+              <ChevronDown
+                size={12}
+                className={`transition-transform duration-150 ${isCriteriaOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {isCriteriaOpen && (
+              <div className="p-2.5 pt-0 border-t border-[#f1f1f4] bg-white animate-in fade-in duration-100">
+                <p className="text-[10px] text-[#85858d] mb-1.5 leading-relaxed">
+                  每行一步操作或校验指令。若留空，Agent 完成后会自动输出用例并驱动浏览器执行。
+                </p>
+                <textarea
+                  value={acceptanceCriteria}
+                  onChange={(e) => setAcceptanceCriteria(e.target.value)}
+                  placeholder="例如：&#10;点击左侧菜单「QA 自动化」&#10;检查顶部子 Tab 与用例列表正常渲染&#10;校验页面无报错与异常提示"
+                  rows={3}
+                  className="w-full bg-[#f4f4f6] focus:bg-white border border-transparent focus:border-[#e3e3e8] rounded-[5px] p-2 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none font-mono resize-none transition-all leading-relaxed"
+                />
+              </div>
+            )}
           </div>
 
           {/* 紧凑单行：初始泳道分段切换 (Segmented Control) 与 立即调度 Switch */}

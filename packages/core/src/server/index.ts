@@ -12,6 +12,7 @@ import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
+import { WorktreeManager } from '../worktree/worktree-manager';
 
 const serverLogger = createLogger('Server');
 
@@ -515,6 +516,19 @@ export class OpenLoopServer {
         // 若未显式传入 autoRun：当目标泳道为 inbox 时默认为 false，其余默认为 true
         const shouldAutoRun = autoRun !== undefined ? !!autoRun : (validColumn !== 'inbox');
 
+        const taskContext = { ...(context || {}) };
+        if (body.qaInstructions && Array.isArray(body.qaInstructions)) {
+          taskContext.qaInstructions = body.qaInstructions.map((s: any) => String(s).trim()).filter(Boolean);
+        } else if (body.acceptanceCriteria && typeof body.acceptanceCriteria === 'string') {
+          const steps = body.acceptanceCriteria
+            .split('\n')
+            .map((s: string) => s.replace(/^[-*•\d.]+\s*/, '').trim())
+            .filter(Boolean);
+          if (steps.length > 0) {
+            taskContext.qaInstructions = steps;
+          }
+        }
+
         const task: Task = {
           id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           title: title || `自动化任务 #${Date.now()}`,
@@ -528,7 +542,7 @@ export class OpenLoopServer {
           createdAt: Date.now(),
           updatedAt: Date.now(),
           nodeRuns: {},
-          context: context || {},
+          context: taskContext,
         };
 
         serverLogger.info(
@@ -595,7 +609,63 @@ export class OpenLoopServer {
 
       if (taskDetailMatch && method === 'DELETE') {
         const taskId = taskDetailMatch[1];
-        serverLogger.info(`[Tasks:Delete] 删除任务: ${taskId}`, undefined, { taskId });
+        serverLogger.info(`[Tasks:Delete] 接收到任务全链路删除请求: ${taskId}`, undefined, { taskId });
+        const existingTask = this.store.getTask(taskId);
+
+        // 1. 中止可能正在执行的 DAG 引擎与子进程
+        try {
+          this.engine.cancelTask(taskId).catch(() => {});
+        } catch {}
+
+        // 2. 释放并关闭关联的 Pi RPC 会话
+        try {
+          PiRpcSessionManager.getInstance().removeSession(taskId);
+        } catch {}
+
+        // 3. 安全清理 Worktree 物理目录、临时分支与沙箱靶机进程
+        try {
+          let repoRoot = process.cwd();
+          if (existingTask?.workspace) {
+            repoRoot = existingTask.workspace.includes('.worktrees')
+              ? path.dirname(path.dirname(existingTask.workspace))
+              : existingTask.workspace;
+          }
+          await WorktreeManager.getInstance().cleanupTaskWorktree(repoRoot, taskId);
+        } catch (wtErr: any) {
+          serverLogger.warn(`[Tasks:Delete] 清理 Worktree 告警: ${wtErr.message}`);
+        }
+
+        // 4. 清理磁盘上该任务关联的 QA 快照、动图与 artifacts 产物目录
+        try {
+          const dataDir = path.join(os.homedir(), '.openloop', 'artifacts');
+          const runIdsToClean: string[] = [];
+          if (existingTask?.context?.qaRunId) runIdsToClean.push(existingTask.context.qaRunId);
+          if (existingTask?.attachments) {
+            for (const att of existingTask.attachments) {
+              const m = att.path?.match(/artifacts\/([^/\\]+)/);
+              if (m && !runIdsToClean.includes(m[1])) {
+                runIdsToClean.push(m[1]);
+              }
+            }
+          }
+          const taskQaRuns = this.store.getQaRuns(undefined, taskId);
+          for (const qr of taskQaRuns) {
+            if (!runIdsToClean.includes(qr.id)) {
+              runIdsToClean.push(qr.id);
+            }
+          }
+          for (const rId of runIdsToClean) {
+            const rDir = path.join(dataDir, rId);
+            if (fs.existsSync(rDir)) {
+              fs.rmSync(rDir, { recursive: true, force: true });
+              serverLogger.info(`[Tasks:Delete] 成功清理磁盘产物目录: ${rDir}`);
+            }
+          }
+        } catch (cleanErr: any) {
+          serverLogger.warn(`[Tasks:Delete] 清理磁盘产物告警: ${cleanErr.message}`);
+        }
+
+        // 5. 级联删除数据库记录 (tasks, logs, qa_runs)
         const deleted = this.store.deleteTask(taskId);
         if (deleted) {
           this.broadcast({ type: 'task:update', data: { id: taskId, deleted: true } });
@@ -687,26 +757,93 @@ export class OpenLoopServer {
           }
         }
 
-        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
-        if (rpcSession && rpcSession.active) {
-          rpcSession.sendUserMessage(finalMessage, safeAttachments).catch((err) => {
-            serverLogger.error(`发送用户消息失败: ${err.message}`, undefined, { taskId });
-          });
-          return this.sendJson(res, 200, { success: true, message: 'Message sent to active session' }, reqMeta);
+        // 自动装配最新的 QA 自动化测试产物信息，使 Agent 在收到用户消息时能自主感知和读取视觉测试截帧
+        let enrichedMessage = finalMessage;
+        const qaRunId = task.context?.qaRunId;
+        if (qaRunId) {
+          const runDir = path.join(os.homedir(), '.openloop', 'artifacts', qaRunId);
+          const timelinePath = path.join(runDir, 'timeline.json');
+          const imageFiles = fs.existsSync(runDir)
+            ? fs.readdirSync(runDir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).map((f) => path.join(runDir, f))
+            : [];
+
+          if (imageFiles.length > 0) {
+            enrichedMessage += `\n\n[系统自动附加：最新 UI 自动化测试产物]\n- 自动化测试 Run ID: ${qaRunId}\n- 时间轴数据路径: ${timelinePath}\n- 本次生成的真实操作截图路径:\n${imageFiles.map((p) => `  * ${p}`).join('\n')}\n提示：你可以直接使用 read 工具查看上述图片截帧或 timeline.json，确认当前界面的真实渲染效果，进行精准代码修复。`;
+          }
         }
 
-        // 若任务未启动或当前非活跃，暂存用户输入并提示
+        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        if (rpcSession && rpcSession.active) {
+          rpcSession.sendUserMessage(enrichedMessage, safeAttachments).catch((err) => {
+            serverLogger.error(`发送用户消息失败: ${err.message}`, undefined, { taskId });
+          });
+          return this.sendJson(res, 200, { success: true, message: 'Message sent to active session', active: true }, reqMeta);
+        }
+
+        // 若当前无活跃会话，立即自动拉起/唤醒 Agent RPC 会话，响应用户追加指令
+        const sessionId = task.context?.piSessionId || `session_${task.id}`;
+        const cwd = task.context?.worktree?.worktreeDir || task.workspace || process.cwd();
+        const settings = this.store.getSettings();
+
+        serverLogger.info(`[AgentChat:AutoWakeup] 唤醒并启动 Agent 会话: ${sessionId} (CWD: ${cwd})`, undefined, { taskId });
+
+        // 记录用户消息到任务上下文，供刷新与持久化
         if (!task.context) task.context = {};
         if (!task.context.chatMessages) task.context.chatMessages = [];
-        task.context.chatMessages.push({
+        const userMsg = {
           id: `msg_u_${Date.now()}`,
-          role: 'user',
+          role: 'user' as const,
           content: finalMessage,
           attachments: safeAttachments.length > 0 ? safeAttachments : undefined,
           timestamp: Date.now(),
+        };
+        const hasRecentSame = task.context.chatMessages.some(
+          (m: any) => m.content === userMsg.content && Math.abs(m.timestamp - userMsg.timestamp) < 3000
+        );
+        if (!hasRecentSame) {
+          task.context.chatMessages.push(userMsg);
+          this.store.saveTask(task);
+        }
+
+        // 启动 Pi RPC 进程并实时绑定广播
+        PiRpcSessionManager.getInstance().createSession({
+          taskId: task.id,
+          taskTitle: task.title,
+          taskDescription: task.description,
+          sessionId,
+          agentName: 'OpenLoop Agent',
+          model: settings.piModel,
+          thinking: settings.piThinking,
+          tools: settings.piTools,
+          cwd,
+          initialPrompt: enrichedMessage,
+          onLog: (stream, message) => {
+            const logEntry = {
+              id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              taskId: task.id,
+              nodeId: task.currentNodeId || 'agent_chat',
+              timestamp: Date.now(),
+              stream,
+              message,
+            };
+            this.store.addLog(logEntry);
+            this.broadcast({ type: 'log', data: logEntry });
+          },
+          onUpdate: (state) => {
+            const currentTask = this.store.getTask(taskId);
+            if (currentTask) {
+              if (!currentTask.context) currentTask.context = {};
+              currentTask.context.chatMessages = state.messages;
+              this.store.saveTask(currentTask);
+            }
+            this.broadcast({ type: 'agent:chat_update', data: state });
+          },
+          onFinished: (error) => {
+            serverLogger.info(`[AgentChat] 对话处理轮次完成: ${error || '成功'}`, undefined, { taskId });
+          },
         });
-        this.store.saveTask(task);
-        return this.sendJson(res, 200, { success: true, message: 'Message saved to history', active: false }, reqMeta);
+
+        return this.sendJson(res, 200, { success: true, message: 'Agent session resumed and running', active: true }, reqMeta);
       }
 
       // Task session pause: /api/tasks/:id/session/pause
@@ -867,7 +1004,7 @@ export class OpenLoopServer {
         const suiteId = parsedUrl.searchParams.get('suiteId') || undefined;
         const limitStr = parsedUrl.searchParams.get('limit');
         const limit = limitStr ? parseInt(limitStr, 10) : 30;
-        const runs = this.store.getQaRuns(suiteId, limit);
+        const runs = this.store.getQaRuns(suiteId, undefined, limit);
         return this.sendJson(res, 200, runs, reqMeta);
       }
 

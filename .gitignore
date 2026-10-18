@@ -19,3 +19,5 @@ build/icons/*.iconset/
 
 # openLoop runtime data
 .openloop/
+.worktrees/
+.openloop-test-store/

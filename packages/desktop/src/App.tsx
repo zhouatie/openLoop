@@ -218,6 +218,7 @@ export const AppContent: React.FC = () => {
     title: string;
     workflowId: string;
     description: string;
+    acceptanceCriteria?: string;
     autoRun: boolean;
     kanbanColumn?: KanbanColumn;
     workspace?: string;

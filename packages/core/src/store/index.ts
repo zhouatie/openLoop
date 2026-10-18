@@ -107,8 +107,8 @@ export class Store {
     return this.sqlite.deleteQaSuite(id);
   }
 
-  public getQaRuns(suiteId?: string, limit?: number): QaRunRecord[] {
-    return this.sqlite.getQaRuns(suiteId, limit);
+  public getQaRuns(suiteId?: string, taskId?: string, limit?: number): QaRunRecord[] {
+    return this.sqlite.getQaRuns(suiteId, taskId, limit);
   }
 
   public getQaRunById(id: string): QaRunRecord | null {

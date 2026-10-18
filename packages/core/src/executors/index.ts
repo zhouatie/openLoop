@@ -6,6 +6,7 @@ import { WorkflowNode, Task, LogEntry, NodeRun, TaskSessionState, QaSuite, QaSte
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { MidsceneRunner } from '../qa/midscene-runner';
+import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 
 const executorLogger = createLogger('Executor');
 
@@ -20,6 +21,23 @@ function resolveWorkingDir(rawPath?: string): string | undefined {
   return trimmed;
 }
 
+function findRepoRoot(startDir?: string): string {
+  let cur = startDir ? path.resolve(startDir) : process.cwd();
+  // 必须剥离 .worktrees，防止任务重试时在 worktree 内部再次嵌套创建
+  const wtMarker = `${path.sep}.worktrees`;
+  const wtIndex = cur.indexOf(wtMarker);
+  if (wtIndex !== -1) {
+    cur = cur.slice(0, wtIndex);
+  }
+  while (cur !== path.dirname(cur)) {
+    if (fs.existsSync(path.join(cur, 'pnpm-workspace.yaml')) || fs.existsSync(path.join(cur, '.git'))) {
+      return cur;
+    }
+    cur = path.dirname(cur);
+  }
+  return process.cwd();
+}
+
 export interface ExecutionContext {
   task: Task;
   node: WorkflowNode;
@@ -29,6 +47,7 @@ export interface ExecutionContext {
   registerChildProcess?: (child: ChildProcess) => void;
   abortSignal?: AbortSignal;
   onSessionUpdate?: (state: TaskSessionState) => void;
+  store?: any;
 }
 
 export interface ExecutionResult {
@@ -330,6 +349,8 @@ export class AgentExecutor implements NodeExecutor {
         prompt = `任务需求: ${task.title}\n详细说明: ${task.description || '无详细说明'}\n\n执行要求:\n${prompt}`;
       }
 
+      prompt += `\n\n【自动化验收用例建议规范】\n如果你修改了前端页面、交互控件、路由或视觉样式，请在最终总结末尾附上推荐的浏览器自动化操作与断言步骤（系统流水线将驱动多模态视觉引擎执行测试与截帧验收）：\n\`\`\`qa-plan\n- 点击左侧菜单「目标菜单名」\n- 检查关键组件渲染与交互状态\n- 校验页面无报错与异常提示\n\`\`\``;
+
       // 若任务附带图片附件，注入本地物理文件路径提示，使 Agent 能够直接通过文件工具进行多模态视觉感知
       if (task.attachments && task.attachments.length > 0) {
         const attList = task.attachments
@@ -425,6 +446,26 @@ export class AgentExecutor implements NodeExecutor {
                 error: finalError,
               });
             } else {
+              // 自动从 Agent 最终回复中提取规划的 QA 自动化用例
+              try {
+                const state = session.getState();
+                const lastAssistantMsg = [...state.messages].reverse().find((m) => m.role === 'assistant');
+                if (lastAssistantMsg && lastAssistantMsg.content) {
+                  const match = lastAssistantMsg.content.match(/```qa-plan\s*([\s\S]*?)\s*```/i);
+                  if (match && match[1]) {
+                    const steps = match[1]
+                      .split('\n')
+                      .map((l) => l.replace(/^[-*•\d.]+\s*/, '').trim())
+                      .filter(Boolean);
+                    if (steps.length > 0) {
+                      if (!task.context) task.context = {};
+                      task.context.qaInstructions = steps;
+                      emitLog('system', `[智能 QA 规划] 捕获到 Agent 输出的专属验收用例 (${steps.length} 步):\n${steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`);
+                    }
+                  }
+                }
+              } catch {}
+
               finish({
                 status: 'success',
                 exitCode: 0,
@@ -432,6 +473,7 @@ export class AgentExecutor implements NodeExecutor {
                   agentProvider: 'pi',
                   piSessionId: sessionId,
                   resumeCommand: `pi --session ${sessionId}`,
+                  qaInstructions: task.context?.qaInstructions,
                 },
               });
             }
@@ -499,17 +541,135 @@ export class HookExecutor implements NodeExecutor {
   }
 }
 
-// 真实 Midscene 智能测试执行器（支持内置 Runner 与外部 CLI 执行）
+// 现场准备与服务就绪检查执行器 (env-prepare 节点)
+// 通用声明式设计：通过流水线编排驱动任意开发语言/服务后台拉起与健康检查
+export class EnvPrepareExecutor implements NodeExecutor {
+  async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
+    const { node, emitLog, task, variables } = ctx;
+    const platform = (node.config.platform || node.config.targetPlatform || 'web') as 'web' | 'android' | 'ios' | 'desktop';
+    const warmupTimeoutMs = node.config.warmupTimeoutMs || 30000;
+
+    emitLog('system', `[现场就绪准备] 开始准备目标测试现场 (平台: ${platform.toUpperCase()})`);
+
+    const ports = task.context?.worktree?.ports || {
+      webPort: task.context?.worktree?.webPort || 5173,
+      corePort: task.context?.worktree?.corePort || 19888,
+    };
+
+    // 1. 若编排节点配置了后台服务拉起命令 (例如 npm run dev / pnpm dev / go run / python app.py)
+    const rawCommand = node.config.command;
+    if (rawCommand && rawCommand.trim()) {
+      const resolvedCwd = resolveWorkingDir(node.config.cwd || task.workspace || process.cwd());
+      const cmd = interpolateString(rawCommand, {
+        task,
+        ports,
+        ...variables,
+      });
+
+      emitLog('system', `[服务启动] 执行服务拉起命令: ${cmd} (目录: ${resolvedCwd})`);
+
+      const isUnix = process.platform !== 'win32';
+      const child = spawn(cmd, {
+        cwd: resolvedCwd,
+        shell: true,
+        detached: isUnix,
+        env: {
+          ...process.env,
+          ...node.config.env,
+          ...(ports.webPort ? { PORT: String(ports.webPort), WEB_PORT: String(ports.webPort) } : {}),
+        },
+        stdio: 'pipe',
+      });
+
+      // 注册到通用任务进程组管理器中，任务合并/驳回/取消时统一自动回收
+      TaskProcessManager.getInstance().register(task.id, child, {
+        name: node.name || 'ephemeral-service',
+        port: ports.webPort,
+      });
+
+      child.stdout?.on('data', (d) => emitLog('stdout', d.toString().trimEnd()));
+      child.stderr?.on('data', (d) => emitLog('stderr', d.toString().trimEnd()));
+    }
+
+    // 2. 目标服务健康检查与探活 (healthUrl)
+    const rawHealthUrl =
+      node.config.healthUrl ||
+      variables.healthUrl ||
+      (task.context?.worktree ? task.context.worktree.targetUrl : undefined);
+
+    if (rawHealthUrl) {
+      const healthUrl = interpolateString(rawHealthUrl, { task, ports, ...variables });
+      emitLog('system', `[健康探针] 等待目标服务就绪: ${healthUrl}...`);
+
+      const isReady = await WorktreeManager.getInstance().waitForHttpReady(healthUrl, warmupTimeoutMs);
+      if (!isReady) {
+        const errMsg = `目标服务探活超时 (${healthUrl})，未在 ${warmupTimeoutMs / 1000}s 内就绪`;
+        emitLog('stderr', `[健康探针 Error] ${errMsg}`);
+        return {
+          status: 'failed',
+          exitCode: 1,
+          error: errMsg,
+        };
+      }
+      emitLog('system', `[健康探针] ✔ 目标服务已就绪 (${healthUrl})`);
+    }
+
+    // 3. Android 移动端通用设备探活
+    if (platform === 'android') {
+      emitLog('system', `[Android 准备] 检测 ADB 设备连接状态...`);
+      try {
+        const { execSync } = require('node:child_process');
+        const output = execSync('adb devices', { encoding: 'utf-8' });
+        const hasDevice = output.split('\n').some((l: string) => l.includes('\tdevice'));
+        if (!hasDevice) {
+          emitLog('stderr', `[Android 准备] 未检测到在线的 Android 设备，请确保模拟器或真机已连接`);
+          return {
+            status: 'failed',
+            exitCode: 1,
+            error: '未检测到在线的 Android 设备',
+          };
+        }
+        emitLog('system', `[Android 准备] Android 设备已就绪`);
+      } catch (err: any) {
+        emitLog('stderr', `[Android 准备] 执行 adb 检查失败: ${err.message}`);
+        return {
+          status: 'failed',
+          exitCode: 1,
+          error: err.message,
+        };
+      }
+    }
+
+    emitLog('system', `[现场就绪准备] 目标测试现场已就绪，流程继续`);
+    return {
+      status: 'success',
+      exitCode: 0,
+      output: {
+        platform,
+        ready: true,
+        timestamp: Date.now(),
+      },
+    };
+  }
+}
+
+// 真实 Midscene 智能测试执行器（纯粹的测试动作与断言执行器，不耦合服务启停与隐式推测）
 export class MidsceneExecutor implements NodeExecutor {
   private cliExecutor = new CliCommandExecutor();
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, emitLog, variables, task } = ctx;
-    const rawTestUrl = node.config.testUrl || 'http://localhost:3000';
-    const testUrl = interpolateString(rawTestUrl, variables);
+    const platform = (node.config.platform || 'web') as 'web' | 'android' | 'ios' | 'desktop';
 
-    executorLogger.info(`[Midscene] 准备执行 UI 自动化测试, Target: ${testUrl}`, undefined, { taskId: task.id, nodeId: node.id });
-    emitLog('system', `[Midscene UI 测试] 启动自动化测试, 目标地址: ${testUrl}`);
+    const rawTestUrl =
+      node.config.testUrl ||
+      variables.testUrl ||
+      (task.context?.worktree ? task.context.worktree.targetUrl : undefined) ||
+      'http://127.0.0.1:5173';
+    const testUrl = interpolateString(rawTestUrl, { ...variables, task });
+
+    executorLogger.info(`[Midscene] 准备执行自动化测试 (平台: ${platform.toUpperCase()}), Target: ${testUrl}`, undefined, { taskId: task.id, nodeId: node.id });
+    emitLog('system', `[Midscene UI 测试] 启动自动化测试 (平台: ${platform.toUpperCase()}), 目标: ${testUrl}`);
 
     // 分支 1: 如果显式配置了自定义 CLI 命令行，则保持兼容优先执行 CLI
     if (node.config.command && node.config.command.trim()) {
@@ -544,13 +704,28 @@ export class MidsceneExecutor implements NodeExecutor {
     // 分支 2: 使用内置 MidsceneRunner 驱动测试，带每步回调与产物收集
     try {
       const dataDir = path.join(os.homedir(), '.openloop');
-      const instructions = node.config.instructions && node.config.instructions.length > 0
-        ? node.config.instructions
-        : [
-            '等待页面完全加载，检查首屏关键元素',
-            '点击核心导航或登录入口',
-            '视觉校验页面状态机进入就绪态，无报错遮罩',
+
+      // 1. 优先读取任务定制验收用例（用户在任务创建时输入，或 Agent 编码完成后智能规划输出）
+      let instructions: string[] = [];
+      if (Array.isArray(task.context?.qaInstructions) && task.context.qaInstructions.length > 0) {
+        instructions = [...task.context.qaInstructions];
+        emitLog('system', `[Midscene UI 测试] 载入定制验收用例 (${instructions.length} 步)`);
+      } else if (node.config.instructions && node.config.instructions.length > 0) {
+        instructions = [...node.config.instructions];
+      } else {
+        // 平台通用默认健康探针，彻底解耦特定业务菜单，适用于任意 Web 或移动端应用
+        if (platform === 'web') {
+          instructions = [
+            '等待页面完全加载，检查首屏主视觉元素',
+            '校验当前页面正常渲染，无报错与异常提示',
           ];
+        } else {
+          instructions = [
+            '等待应用界面完全加载并处于就绪状态',
+            '校验移动端界面正常渲染，无异常崩溃提示',
+          ];
+        }
+      }
 
       const steps: QaStep[] = instructions.map((inst, idx) => ({
         id: `step_${idx + 1}`,
@@ -570,6 +745,7 @@ export class MidsceneExecutor implements NodeExecutor {
       const runner = new MidsceneRunner({
         artifactBaseDir: path.join(dataDir, 'artifacts'),
         serverBaseUrl: 'http://127.0.0.1:19888',
+        platform,
         onStepStart: (index, step) => {
           emitLog('stdout', `[Midscene 步骤 ${index + 1}/${steps.length}] 执行: [${step.type}] ${step.prompt}`);
         },
@@ -603,9 +779,23 @@ export class MidsceneExecutor implements NodeExecutor {
         }
       }
 
-      // 将关键截图产物写入 task.attachments
+      // 将关键截图产物写入 task.attachments 并更新 task.context
       if (!task.attachments) {
         task.attachments = [];
+      }
+      if (!task.context) {
+        task.context = {};
+      }
+      task.context.qaRunId = runRecord.id;
+      if (task.context.worktree) {
+        task.context.worktree.qaRunId = runRecord.id;
+      }
+      if (ctx.store?.saveQaRun) {
+        try {
+          ctx.store.saveQaRun(runRecord);
+        } catch (e: any) {
+          executorLogger.warn(`[Midscene] 持久化 QaRun 记录告警: ${e.message}`);
+        }
       }
       for (const art of artifacts.filter((a) => a.type === 'image')) {
         task.attachments.push({
@@ -710,27 +900,145 @@ export class StitchImageExecutor implements NodeExecutor {
 // QA 人工审核与验证挂起执行器（状态机断点机制，等待人工批准或驳回）
 export class QaApprovalExecutor implements NodeExecutor {
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
-    const { node, emitLog } = ctx;
+    const { node, emitLog, task } = ctx;
+    
+    // 如果任务关联了 Worktree 独立沙箱，自动提取当前代码改动统计
+    if (task.context?.worktree?.worktreeDir) {
+      try {
+        const wtManager = WorktreeManager.getInstance();
+        const diffInfo = wtManager.getWorktreeDiff(task.context.worktree.worktreeDir);
+        task.context.worktree.changedFiles = diffInfo.changedFiles;
+        task.context.worktree.diffSummary = diffInfo.diffSummary;
+        
+        emitLog('system', `[Worktree 沙箱状态] 分支: ${task.context.worktree.branchName}, 靶机: ${task.context.worktree.targetUrl}`);
+        emitLog('system', `[代码变更统计] ${diffInfo.diffSummary || (diffInfo.changedFiles.length + ' 个文件修改')}`);
+        if (diffInfo.changedFiles.length > 0) {
+          diffInfo.changedFiles.slice(0, 5).forEach((f) => emitLog('system', `  • ${f}`));
+          if (diffInfo.changedFiles.length > 5) {
+            emitLog('system', `  ... 以及更多 ${diffInfo.changedFiles.length - 5} 个文件`);
+          }
+        }
+      } catch (err: any) {
+        executorLogger.warn(`[QA-Approval] 获取 Worktree Diff 告警: ${err.message}`);
+      }
+    }
+
     executorLogger.warn(
       `[QA-Approval] 任务断点拦截，等待人工确认. 提示: "${node.config.approvalPrompt || '等待 QA 人工确认'}"`,
       { checklist: node.config.checklist },
       { taskId: ctx.task.id, nodeId: node.id }
     );
     emitLog('system', `=====================================================`);
-    emitLog('system', `[QA 验收拦截] 工作流进入人工/测试用例验收阶段`);
-    emitLog('system', `[提示]: ${node.config.approvalPrompt || '等待 QA 人工确认测试产物'}`);
+    emitLog('system', `[QA 视觉验收门禁] 工作流已暂停，等待用户审核回放与确认`);
+    emitLog('system', `[提示]: ${node.config.approvalPrompt || '请查看自动化测试截帧回放与页面效果，确认无误后点击验收通过'}`);
     if (node.config.checklist && node.config.checklist.length > 0) {
       emitLog('system', `[核查清单]:`);
       node.config.checklist.forEach((item, idx) => {
         emitLog('system', `  ${idx + 1}. [ ] ${item}`);
       });
     }
-    emitLog('system', `任务已挂起，可通过桌面端看板点击【验收通过】或命令行 openloop task approve 恢复。`);
+    emitLog('system', `任务已挂起，可通过桌面端看板点击【验收通过并合并】或【驳回】。`);
     emitLog('system', `=====================================================`);
 
     return {
       status: 'waiting_approval',
     };
+  }
+}
+
+// Git Worktree 隔离沙箱环境初始化执行器（通用沙箱隔离与环境参数注入）
+export class WorktreeSetupExecutor implements NodeExecutor {
+  async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
+    const { task, emitLog, node } = ctx;
+    const repoRoot = findRepoRoot(node.config.cwd || task.workspace);
+    emitLog('system', `[Worktree 初始化] 准备在宿主仓库 (${repoRoot}) 下建立隔离特性分支与开发目录...`);
+
+    try {
+      const wtManager = WorktreeManager.getInstance();
+      const sharedPaths = node.config.sharedPaths || ['node_modules'];
+      const portKeys = node.config.allocatePorts || ['webPort', 'corePort'];
+
+      const wtInfo = await wtManager.createWorktree(repoRoot, task.id, task.title, {
+        sharedPaths,
+        portKeys,
+      });
+
+      // 将任务物理工作空间无缝切换为隔离的 worktree 目录
+      task.workspace = wtInfo.worktreeDir;
+      if (!task.context) task.context = {};
+      task.context.worktree = wtInfo;
+      ctx.variables.worktree = wtInfo;
+      ctx.variables.ports = wtInfo.ports;
+      ctx.variables.testUrl = wtInfo.targetUrl;
+
+      emitLog('system', `[Worktree 就绪] 特性分支: ${wtInfo.branchName}, 物理目录: ${wtInfo.worktreeDir}`);
+      emitLog('system', `[环境分配] 动态端口: ${JSON.stringify(wtInfo.ports || {})}, 目标地址: ${wtInfo.targetUrl}`);
+
+      return {
+        status: 'success',
+        exitCode: 0,
+        output: wtInfo,
+      };
+    } catch (err: any) {
+      const errMsg = `[Worktree 初始化失败] ${err.message}`;
+      executorLogger.error(errMsg, err, { taskId: task.id, nodeId: node.id });
+      emitLog('stderr', errMsg);
+      return {
+        status: 'failed',
+        exitCode: 1,
+        error: errMsg,
+      };
+    }
+  }
+}
+
+// Git Worktree 自动合并与环境清理执行器
+export class WorktreeMergeExecutor implements NodeExecutor {
+  async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
+    const { task, emitLog, node } = ctx;
+    const repoRoot = findRepoRoot(
+      node.config.cwd ||
+      (task.context?.worktree ? path.dirname(path.dirname(task.context.worktree.worktreeDir)) : undefined)
+    );
+
+    emitLog('system', `[Worktree 自动合并] 开始将已验收特性分支合并至本地开发分支...`);
+
+    try {
+      const wtManager = WorktreeManager.getInstance();
+      const res = await wtManager.approveAndMerge(
+        repoRoot,
+        task.id,
+        task.title,
+        (msg) => emitLog('system', msg)
+      );
+
+      if (res.success) {
+        emitLog('system', `[Worktree 自动合并] ✔ ${res.message}`);
+        // 恢复任务工作区路径
+        task.workspace = repoRoot;
+        return {
+          status: 'success',
+          exitCode: 0,
+          output: { merged: true, message: res.message },
+        };
+      } else {
+        emitLog('stderr', `[Worktree 自动合并失败] ${res.message}`);
+        return {
+          status: 'failed',
+          exitCode: 1,
+          error: res.message,
+        };
+      }
+    } catch (err: any) {
+      const errMsg = `[Worktree 合并异常] ${err.message}`;
+      executorLogger.error(errMsg, err, { taskId: task.id, nodeId: node.id });
+      emitLog('stderr', errMsg);
+      return {
+        status: 'failed',
+        exitCode: 1,
+        error: errMsg,
+      };
+    }
   }
 }
 
@@ -744,6 +1052,9 @@ export class ExecutorRegistry {
     this.register('midscene', new MidsceneExecutor());
     this.register('stitch-image', new StitchImageExecutor());
     this.register('qa-approval', new QaApprovalExecutor());
+    this.register('worktree-setup', new WorktreeSetupExecutor());
+    this.register('worktree-merge', new WorktreeMergeExecutor());
+    this.register('env-prepare', new EnvPrepareExecutor());
   }
 
   register(type: string, executor: NodeExecutor) {

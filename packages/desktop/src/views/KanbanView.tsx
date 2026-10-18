@@ -50,6 +50,7 @@ import { KanbanColumnSortDropdown } from '../components/KanbanColumnSortDropdown
 import { NodeExecutionTimeline } from '../components/NodeExecutionTimeline';
 import { ImageLightboxModal } from '../components/ImageLightboxModal';
 import { AgentMarkdown } from '../components/AgentMarkdown';
+import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
 import { toast } from '../components/Toast';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 import {
@@ -144,6 +145,33 @@ const getRunningNodeVisual = (type?: string): RunningNodeVisual => {
         pingColor: 'bg-[#ea580c]',
         icon: Check,
       };
+    case 'env-prepare':
+      return {
+        label: '现场准备',
+        badgeBg: 'bg-[#ecfdf5]',
+        badgeText: 'text-[#047857]',
+        badgeBorder: 'border-[#a7f3d0]',
+        pingColor: 'bg-[#10b981]',
+        icon: Cpu,
+      };
+    case 'worktree-setup':
+      return {
+        label: '沙箱隔离',
+        badgeBg: 'bg-[#f0fdf4]',
+        badgeText: 'text-[#15803d]',
+        badgeBorder: 'border-[#bbf7d0]',
+        pingColor: 'bg-[#16a34a]',
+        icon: Layers,
+      };
+    case 'worktree-merge':
+      return {
+        label: '分支合并',
+        badgeBg: 'bg-[#faf5ff]',
+        badgeText: 'text-[#7e22ce]',
+        badgeBorder: 'border-[#e9d5ff]',
+        pingColor: 'bg-[#9333ea]',
+        icon: Layers,
+      };
     default:
       return {
         label: '自动化工序',
@@ -198,6 +226,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [copiedSession, setCopiedSession] = useState(false);
+  const [visualAcceptanceTask, setVisualAcceptanceTask] = useState<Task | null>(null);
 
   // 项目工程级别筛选
   const [internalWorkspaceFilter, setInternalWorkspaceFilter] = useState<string>('all');
@@ -1847,7 +1876,24 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                       {currentNodeMeta?.name || currentNode?.name || 'QA 验收门禁'} · 待确认
                                     </span>
                                   </span>
+                                  {task.context?.worktree && (
+                                    <span className="text-[9.5px] font-mono bg-[#eff6ff] text-[#2563eb] px-1 rounded border border-[#bfdbfe]">
+                                      靶机 :{task.context.worktree.webPort}
+                                    </span>
+                                  )}
                                 </div>
+
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setVisualAcceptanceTask(task);
+                                  }}
+                                  className="w-full h-[24px] rounded-[5px] bg-[#4f46e5]/10 hover:bg-[#4f46e5]/20 text-[#4338ca] text-[11px] font-medium flex items-center justify-center gap-1.5 border border-[#c7d2fe] transition-all cursor-pointer"
+                                >
+                                  <Play size={10} className="fill-current" />
+                                  <span>查看截帧回放与验收</span>
+                                </button>
+
                                 <div className="flex items-center gap-1.5">
                                   <button
                                     disabled={approvingId === task.id}
@@ -1883,7 +1929,20 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                       key={idx}
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        setPreviewArtifact(art);
+                                        const isImage = /\.(png|jpe?g|webp|svg)$/i.test(art.name);
+                                        if (isImage) {
+                                          setActiveDetailImage({
+                                            id: `art_${idx}`,
+                                            name: art.name,
+                                            mimeType: 'image/png',
+                                            path: art.path,
+                                            url: art.path,
+                                            size: 1024,
+                                            createdAt: Date.now(),
+                                          });
+                                        } else {
+                                          setPreviewArtifact(art);
+                                        }
                                       }}
                                       className="flex items-center gap-1 px-1.5 h-[20px] rounded-[4px] bg-[#f1f1f4] border border-[#e3e3e8] text-[10.5px] text-[#4b4b53] hover:bg-[#e9e9ee]"
                                     >
@@ -1972,16 +2031,19 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
               </button>
             </div>
 
-            <div className="my-4 p-5 border border-dashed border-[#e3e3e8] rounded-[8px] bg-[#f9f9fb] flex flex-col items-center justify-center text-center">
-              <div className="w-16 h-16 rounded-[10px] bg-white border border-[#e3e3e8] flex items-center justify-center mb-2.5 shadow-sm">
-                <Sparkles className="text-[#4f46e5] w-7 h-7" />
+            {/\.(png|jpe?g|webp|svg)$/i.test(previewArtifact.name) ? (
+              <div className="my-3 flex items-center justify-center bg-[#09090b] rounded-[8px] overflow-hidden max-h-[380px] p-2 border border-[#27272a]">
+                <img
+                  src={api.getArtifactUrl(previewArtifact.path)}
+                  alt={previewArtifact.name}
+                  className="max-h-[360px] max-w-full object-contain"
+                />
               </div>
-              <p className="text-[12.5px] font-medium text-[#1c1c21]">Midscene 自动化 UI 测试已合成</p>
-              <p className="text-[11px] text-[#85858d] font-mono mt-0.5">{previewArtifact.path}</p>
-              <div className="mt-3 px-2.5 py-0.5 rounded bg-[#e4f6ec] text-[#189a58] text-[11px] font-medium">
-                包含步骤截图及交互操作动画帧
+            ) : (
+              <div className="my-4 p-4 border border-[#e3e3e8] rounded-[8px] bg-[#f9f9fb] font-mono text-[11px] text-[#4b4b53] break-all">
+                {previewArtifact.path}
               </div>
-            </div>
+            )}
 
             <div className="flex justify-end">
               <button
@@ -2390,22 +2452,31 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   )}
 
                   {selectedTask.status === 'waiting_approval' && (
-                    <div className="flex gap-2">
+                    <div className="space-y-2">
                       <button
-                        disabled={approvingId === selectedTask.id}
-                        onClick={() => handleApprove(selectedTask.id, true)}
-                        className="flex-1 h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                        onClick={() => setVisualAcceptanceTask(selectedTask)}
+                        className="w-full h-[34px] rounded-[7px] bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer"
                       >
-                        <Check size={13} strokeWidth={2.4} />
-                        <span>验收通过</span>
+                        <Play size={13} className="fill-current" />
+                        <span>打开截帧回放与验收面板</span>
                       </button>
-                      <button
-                        disabled={approvingId === selectedTask.id}
-                        onClick={() => handleApprove(selectedTask.id, false)}
-                        className="h-[32px] px-4 rounded-[7px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[12px] font-medium transition-all"
-                      >
-                        驳回
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          disabled={approvingId === selectedTask.id}
+                          onClick={() => handleApprove(selectedTask.id, true)}
+                          className="flex-1 h-[32px] rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                        >
+                          <Check size={13} strokeWidth={2.4} />
+                          <span>验收通过并合并</span>
+                        </button>
+                        <button
+                          disabled={approvingId === selectedTask.id}
+                          onClick={() => handleApprove(selectedTask.id, false)}
+                          className="h-[32px] px-4 rounded-[7px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[12px] font-medium transition-all"
+                        >
+                          驳回
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -2810,6 +2881,18 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           <ImageIcon size={10.5} />
                           <span>图片</span>
                         </button>
+                        {selectedTask.context?.qaRunId && (
+                          <button
+                            type="button"
+                            onClick={() => handleRetryNode(selectedTask.id, 'node_qa_test')}
+                            disabled={retryingNodeKey?.startsWith(selectedTask.id)}
+                            className="h-[22px] px-2 rounded-[5px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[10.5px] font-medium flex items-center gap-1 transition-all"
+                            title="修改代码后直接重新跑 QA 自动化测试与截帧"
+                          >
+                            <RotateCcw size={10} className={retryingNodeKey?.startsWith(selectedTask.id) ? 'animate-spin' : ''} />
+                            <span>重测 QA</span>
+                          </button>
+                        )}
                         {chatAttachments.length > 0 && (
                           <span className="text-[10px] font-mono text-[#85858d]">
                             已选 {chatAttachments.length} 张
@@ -2876,6 +2959,24 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
           if (!isDeleting) setTaskToDelete(null);
         }}
       />
+
+      {/* 视觉验收与时间轴截帧回放弹窗 */}
+      {visualAcceptanceTask && (
+        <VisualAcceptanceModal
+          task={visualAcceptanceTask}
+          onClose={() => setVisualAcceptanceTask(null)}
+          onApproved={async () => {
+            await onRefresh();
+            setVisualAcceptanceTask(null);
+            setSelectedTask(null);
+          }}
+          onRejected={async () => {
+            await onRefresh();
+            setVisualAcceptanceTask(null);
+            setSelectedTask(null);
+          }}
+        />
+      )}
     </div>
   );
 };

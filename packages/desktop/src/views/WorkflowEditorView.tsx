@@ -139,6 +139,27 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
       text: 'text-[#4b4b53]',
       border: 'border-[#e3e3e8]',
     },
+    'env-prepare': {
+      label: '现场准备',
+      icon: <Cpu size={12} strokeWidth={2} />,
+      bg: 'bg-[#ecfdf5]',
+      text: 'text-[#047857]',
+      border: 'border-[#a7f3d0]',
+    },
+    'worktree-setup': {
+      label: '沙箱隔离',
+      icon: <Layers size={12} strokeWidth={2} />,
+      bg: 'bg-[#f0fdf4]',
+      text: 'text-[#15803d]',
+      border: 'border-[#bbf7d0]',
+    },
+    'worktree-merge': {
+      label: '分支合并',
+      icon: <Layers size={12} strokeWidth={2} />,
+      bg: 'bg-[#faf5ff]',
+      text: 'text-[#7e22ce]',
+      border: 'border-[#e9d5ff]',
+    },
     custom: {
       label: '插件扩展',
       icon: <Sparkles size={12} strokeWidth={2} />,

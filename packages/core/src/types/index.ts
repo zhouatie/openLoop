@@ -11,6 +11,9 @@ export type NodeType =
   | 'stitch-image'    // 拼接截图与生成动图
   | 'hook'            // Webhook / 触发器
   | 'qa-approval'     // 人工 QA 审核确认
+  | 'worktree-setup'  // 创建 Git Worktree 与独立沙箱靶机
+  | 'worktree-merge'  // 自动合并 Worktree 并清理沙箱现场
+  | 'env-prepare'      // 环境准备与服务拉起 / 现场就绪检查
   | 'custom';         // 插件扩展节点
 
 export interface NodeConfig {
@@ -25,8 +28,21 @@ export interface NodeConfig {
   prompt?: string;
   inputFiles?: string[];
   
-  // Midscene 专用
+  // 环境准备 (env-prepare) 与服务拉起专用
+  healthUrl?: string;
+  targetPlatform?: 'web' | 'android' | 'ios' | 'desktop';
+  warmupTimeoutMs?: number;
+  background?: boolean; // 是否作为任务关联的后台守护服务常驻
+
+  // 沙箱隔离 (worktree-setup) 专用
+  sharedPaths?: string[];   // 需要软链共享的相对路径列表，默认 ['node_modules']
+  allocatePorts?: string[]; // 需要动态分配并注入的端口变量名，例如 ['webPort', 'corePort']
+
+  // Midscene 自动化测试专用
+  platform?: 'web' | 'android' | 'ios' | 'desktop';
   testUrl?: string;
+  appPackage?: string;
+  initialRoute?: string;
   suiteId?: string;
   instructions?: string[];
   screenshotPath?: string;
@@ -235,6 +251,19 @@ export interface OpenLoopSettings {
   autoSnapshot?: boolean;
   shortcutSuperKey?: ShortcutSuperKey;
   [key: string]: any;
+}
+
+export interface WorktreeContextInfo {
+  worktreeDir: string;
+  branchName: string;
+  baseBranch?: string;
+  ports?: Record<string, number>; // 通用动态端口字典，如 { webPort: 5175, corePort: 19891 }
+  corePort?: number; // 兼容字段
+  webPort?: number;  // 兼容字段
+  targetUrl: string;
+  changedFiles?: string[];
+  diffSummary?: string;
+  qaRunId?: string;
 }
 
 export type QaStepType = 'action' | 'assert' | 'waitFor' | 'query';

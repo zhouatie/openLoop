@@ -1,10 +1,12 @@
 import { EventEmitter } from 'events';
+import path from 'path';
 import { ChildProcess } from 'child_process';
 import { Store } from '../store';
 import { Task, WorkflowDefinition, WorkflowNode, WorkflowEdge, LogEntry, KanbanColumn, TaskSessionState } from '../types';
 import { ExecutorRegistry, ExecutionContext } from '../executors';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
+import { WorktreeManager } from '../worktree/worktree-manager';
 
 const dagLogger = createLogger('Engine:DAG');
 
@@ -95,8 +97,15 @@ export class DagEngine extends EventEmitter {
     }
 
     if (this.runningTasks.has(taskId)) {
-      dagLogger.warn(`任务 ${taskId} 已经在运行中，忽略重复启动请求`, undefined, { taskId });
-      return;
+      if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'completed') {
+        dagLogger.info(`任务 ${taskId} 处于终态 (${task.status})，清理残留运行锁并重新执行`, undefined, { taskId });
+        this.runningTasks.delete(taskId);
+        this.abortControllers.delete(taskId);
+        this.activeProcesses.delete(taskId);
+      } else {
+        dagLogger.warn(`任务 ${taskId} 已经在运行中，忽略重复启动请求`, undefined, { taskId });
+        return;
+      }
     }
 
     this.runningTasks.add(taskId);
@@ -245,6 +254,7 @@ export class DagEngine extends EventEmitter {
         this.store.saveTask(task);
         this.emit('agent:chat_update', state);
       },
+      store: this.store,
     };
 
     let result;
@@ -298,6 +308,9 @@ export class DagEngine extends EventEmitter {
         { taskId: task.id, nodeId: node.id }
       );
       this.log(task.id, node.id, 'stderr', `节点 [${node.name}] 执行失败，终止工作流`);
+      this.runningTasks.delete(task.id);
+      this.abortControllers.delete(task.id);
+      this.activeProcesses.delete(task.id);
       task.status = 'failed';
       task.kanbanColumn = 'backlog'; // 执行失败，退回待处理泳道，保持活跃泳道语义纯净
       this.store.saveTask(task);
@@ -456,6 +469,9 @@ export class DagEngine extends EventEmitter {
       const hasFailed = runs.some((r) => r.status === 'failed');
       const hasWaiting = runs.some((r) => r.status === 'waiting_approval');
       if (hasFailed) {
+        this.runningTasks.delete(task.id);
+        this.abortControllers.delete(task.id);
+        this.activeProcesses.delete(task.id);
         task.status = 'failed';
         task.kanbanColumn = 'backlog';
       } else if (hasWaiting) {
@@ -541,7 +557,7 @@ export class DagEngine extends EventEmitter {
 
       if (anyActiveSuccess) {
         const currentTargetStatus = task.nodeRuns[targetNode.id]?.status;
-        if (!currentTargetStatus || currentTargetStatus === 'failed') {
+        if (!currentTargetStatus || currentTargetStatus === 'failed' || currentTargetStatus === 'pending') {
           dagLogger.info(
             `下游节点 [${targetNode.name}] 条件满足且前置依赖已就绪，启动调度`,
             undefined,
@@ -605,10 +621,26 @@ export class DagEngine extends EventEmitter {
         { taskId, nodeId: currentNodeId }
       );
       this.log(task.id, currentNodeId, 'stderr', `[QA 审核驳回]: ${feedback || '未通过验收指标'}`);
+      
+      // 如果存在 Worktree 靶机，安全停止临时端口服务释放资源
+      if (task.context?.worktree?.worktreeDir) {
+        try {
+          const repoRoot = path.dirname(path.dirname(task.context.worktree.worktreeDir));
+          WorktreeManager.getInstance().rejectAndCleanup(repoRoot, task.id, true, (msg) => {
+            this.log(task.id, currentNodeId, 'system', msg);
+          });
+        } catch (e: any) {
+          dagLogger.warn(`[Worktree:Cleanup Warning] ${e.message}`);
+        }
+      }
+
       if (nodeRun) {
         nodeRun.status = 'failed';
         nodeRun.finishedAt = Date.now();
       }
+      this.runningTasks.delete(taskId);
+      this.abortControllers.delete(taskId);
+      this.activeProcesses.delete(taskId);
       task.status = 'failed';
       task.kanbanColumn = 'backlog'; // QA 驳回，打回待处理队列
       this.store.saveTask(task);
@@ -767,6 +799,27 @@ export class DagEngine extends EventEmitter {
       task.nodeRuns[nodeId].status = 'pending';
       delete task.nodeRuns[nodeId].error;
       delete task.nodeRuns[nodeId].exitCode;
+      delete task.nodeRuns[nodeId].finishedAt;
+    }
+
+    // 递归获取以重试节点为起点的所有下游可达后继节点并级联重置
+    const downstreamIds = new Set<string>();
+    const queue = [nodeId];
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      const outgoing = workflow.edges.filter((e) => e.source === curr);
+      for (const e of outgoing) {
+        if (!downstreamIds.has(e.target)) {
+          downstreamIds.add(e.target);
+          queue.push(e.target);
+        }
+      }
+    }
+
+    for (const dId of downstreamIds) {
+      if (task.nodeRuns[dId]) {
+        delete task.nodeRuns[dId];
+      }
     }
 
     if (!this.runningTasks.has(taskId)) {

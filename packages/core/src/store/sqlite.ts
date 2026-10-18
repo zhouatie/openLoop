@@ -204,6 +204,8 @@ export class SqliteStore {
       if (!hasFebaseDeployWf) {
         this.saveWorkflow(this.getFebaseDeployWorkflowDefinition());
       }
+      // 检查并增量补齐内置 Worktree 隔离开发与视觉 QA 自动验收流水线
+      this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
     }
 
     // 系统启动自愈：清理因服务崩溃/重启而残留为 running 状态的孤立任务
@@ -394,6 +396,99 @@ export class SqliteStore {
     };
   }
 
+  private getWorktreeDevQaMergeWorkflowDefinition(): WorkflowDefinition {
+    return {
+      id: 'wf_worktree_auto_dev_qa_merge',
+      name: 'Worktree 隔离开发与视觉 QA 自动验收流水线',
+      description: '端到端全闭环研发流水线：根据需求创建 Git Worktree 与独立端口靶机，Agent 隔离编写代码，Playwright 真实浏览器 UI 自动化截帧，查看连贯截图回放验收通过后自动合并到开发分支并清理沙箱',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      nodes: [
+        {
+          id: 'node_wt_setup',
+          name: '1. Worktree 隔离沙箱就绪',
+          type: 'worktree-setup',
+          position: { x: 100, y: 150 },
+          config: {
+            allocatePorts: ['webPort'],
+            sharedPaths: ['node_modules'],
+            timeoutSec: 120,
+          },
+        },
+        {
+          id: 'node_agent_coder',
+          name: '2. AI Agent 隔离编码实现',
+          type: 'agent',
+          position: { x: 380, y: 150 },
+          config: {
+            agentName: 'Pi Coding Agent',
+            prompt: '请在当前 Worktree 隔离工作区中完成任务代码修改与验证：\n任务需求：{{task.title}}\n详细说明：{{task.description}}\n执行规范：保持代码极简整洁，修改完毕后确保基础编译通过。',
+            timeoutSec: 600,
+          },
+        },
+        {
+          id: 'node_env_prep',
+          name: '3. 测试现场准备与服务就绪',
+          type: 'env-prepare',
+          position: { x: 660, y: 150 },
+          config: {
+            command: 'pnpm --filter @openloop/desktop dev --port {{ports.webPort}} --strictPort --host 0.0.0.0',
+            healthUrl: 'http://127.0.0.1:{{ports.webPort}}',
+            targetPlatform: 'web',
+            warmupTimeoutMs: 30000,
+            background: true,
+            timeoutSec: 120,
+          },
+        },
+        {
+          id: 'node_qa_test',
+          name: '4. 自动化测试执行与视觉截帧',
+          type: 'midscene',
+          position: { x: 940, y: 150 },
+          config: {
+            platform: 'web',
+            instructions: [
+              '等待页面完全加载，检查首屏主视觉元素',
+              '定位核心交互按钮并触发点击',
+              '校验页面无报错与异常提示',
+            ],
+            timeoutSec: 180,
+          },
+        },
+        {
+          id: 'node_qa_gate',
+          name: '5. 视觉操作回放与验收门禁',
+          type: 'qa-approval',
+          position: { x: 1220, y: 150 },
+          config: {
+            approvalPrompt: '请查看 UI 自动化截帧序列回放与变更统计，确认效果无误后点击【验收通过并合并】',
+            checklist: [
+              'AI 真实浏览器操作流程完整且无报错',
+              '截帧回放中界面交互符合预期',
+              '变更代码 Diff 准确且无冗余文件',
+            ],
+          },
+        },
+        {
+          id: 'node_wt_merge',
+          name: '6. 自动合并与沙箱清理',
+          type: 'worktree-merge',
+          position: { x: 1500, y: 150 },
+          config: {
+            timeoutSec: 60,
+          },
+        },
+      ],
+      edges: [
+        { id: 'e_wt_to_agent', source: 'node_wt_setup', target: 'node_agent_coder' },
+        { id: 'e_agent_to_prep', source: 'node_agent_coder', target: 'node_env_prep' },
+        { id: 'e_prep_to_qa', source: 'node_env_prep', target: 'node_qa_test' },
+        { id: 'e_qa_to_gate', source: 'node_qa_test', target: 'node_qa_gate' },
+        { id: 'e_gate_to_merge', source: 'node_qa_gate', target: 'node_wt_merge' },
+      ],
+    };
+  }
+
   private getGeneralDevWorkflowDefinition(): WorkflowDefinition {
     return {
       id: 'wf_agent_feature_dev',
@@ -534,26 +629,7 @@ export class SqliteStore {
     this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
     this.saveWorkflow(this.getAppDeployWorkflowDefinition());
     this.saveWorkflow(this.getFebaseDeployWorkflowDefinition());
-
-    // 预置默认 QA 自动化测试用例
-    const sampleSuite: QaSuite = {
-      id: 'suite_web_login_flow',
-      name: '用户登录与主页视觉验收测试',
-      description: '基于 Midscene 多模态 AI 校验登录表单填写、登录交互及进入主控制台界面的视觉完整性',
-      targetUrl: 'http://localhost:3000',
-      viewport: { width: 1280, height: 800 },
-      steps: [
-        { id: 'step_1', type: 'action', prompt: '等待页面加载完成，点击右上角「登录」按钮' },
-        { id: 'step_2', type: 'action', prompt: '在用户名输入框填写 demo_user，密码填写 123456' },
-        { id: 'step_3', type: 'action', prompt: '点击「立即登录」按钮' },
-        { id: 'step_4', type: 'assert', prompt: '页面出现「登录成功」提示，并展示个人中心仪表盘' },
-      ],
-      tags: ['Smoke', 'Auth', 'UI-Visual'],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      lastRunStatus: 'untested',
-    };
-    this.saveQaSuite(sampleSuite);
+    this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
 
     // 预置插件
     const builtinPlugins: PluginManifest[] = [
@@ -902,8 +978,13 @@ export class SqliteStore {
   }
 
   public deleteTask(taskId: string): boolean {
-    const info = this.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
-    return info.changes > 0;
+    const tx = this.db.transaction((id: string) => {
+      this.db.prepare('DELETE FROM logs WHERE task_id = ?').run(id);
+      this.db.prepare('DELETE FROM qa_runs WHERE task_id = ?').run(id);
+      const info = this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+      return info.changes > 0;
+    });
+    return tx(taskId);
   }
 
   // ================= Logs API =================
@@ -1126,10 +1207,14 @@ export class SqliteStore {
 
   // ================= QA Execution Runs API =================
 
-  public getQaRuns(suiteId?: string, limit: number = 30): QaRunRecord[] {
+  public getQaRuns(suiteId?: string, taskId?: string, limit: number = 30): QaRunRecord[] {
     let rows: any[];
-    if (suiteId) {
+    if (suiteId && taskId) {
+      rows = this.db.prepare('SELECT * FROM qa_runs WHERE suite_id = ? AND task_id = ? ORDER BY created_at DESC LIMIT ?').all(suiteId, taskId, limit);
+    } else if (suiteId) {
       rows = this.db.prepare('SELECT * FROM qa_runs WHERE suite_id = ? ORDER BY created_at DESC LIMIT ?').all(suiteId, limit);
+    } else if (taskId) {
+      rows = this.db.prepare('SELECT * FROM qa_runs WHERE task_id = ? ORDER BY created_at DESC LIMIT ?').all(taskId, limit);
     } else {
       rows = this.db.prepare('SELECT * FROM qa_runs ORDER BY created_at DESC LIMIT ?').all(limit);
     }

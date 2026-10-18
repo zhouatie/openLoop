@@ -7,4 +7,6 @@ export * from './agent/workflow-copilot';
 export * from './server';
 export * from './logger';
 export * from './qa/midscene-runner';
+export * from './qa/qa-driver';
+export * from './qa/qa-driver-factory';
 

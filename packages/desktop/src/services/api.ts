@@ -3,12 +3,18 @@ import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, O
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
     const { protocol, hostname, port } = window.location;
-    // Vite 本地开发模式默认运行在 5173，指向 Core 调度服务默认端口 19888
-    if (port === '5173') {
-      const host = hostname || '127.0.0.1';
+    const portNum = port ? parseInt(port, 10) : 0;
+    // Vite 本地开发模式或独立靶机沙箱端口 (5170 - 5200)
+    // 均指向 Core 调度服务（主环境 19888，或由沙箱注入的 VITE_CORE_PORT）
+    if (import.meta.env.DEV || (portNum >= 5170 && portNum <= 5200)) {
+      const corePort = import.meta.env.VITE_CORE_PORT || '19888';
+      let host = hostname || '127.0.0.1';
+      if (host === '0.0.0.0' || host === 'localhost') {
+        host = '127.0.0.1';
+      }
       return {
-        httpUrl: `http://${host}:19888`,
-        wsUrl: `ws://${host}:19888`,
+        httpUrl: `http://${host}:${corePort}`,
+        wsUrl: `ws://${host}:${corePort}`,
       };
     }
     // 生产部署模式或 Core 静态托管模式：动态复用当前主机与端口
@@ -192,6 +198,8 @@ export class DesktopApiService {
     title: string;
     workflowId: string;
     description?: string;
+    acceptanceCriteria?: string;
+    qaInstructions?: string[];
     context?: Record<string, any>;
     autoRun?: boolean;
     kanbanColumn?: KanbanColumn;
@@ -311,6 +319,9 @@ export class DesktopApiService {
     if (!pathOrUrl) return '';
     if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://') || pathOrUrl.startsWith('blob:')) {
       return pathOrUrl;
+    }
+    if (pathOrUrl.includes('artifacts/')) {
+      return this.getArtifactUrl(pathOrUrl);
     }
     if (pathOrUrl.startsWith('/api/')) {
       return `${BASE_URL}${pathOrUrl}`;
@@ -570,7 +581,13 @@ export class DesktopApiService {
     if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://') || pathOrUrl.startsWith('blob:')) {
       return pathOrUrl;
     }
-    const clean = pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
+    // 智能提取 /artifacts/ 相对路径，兼顾绝对磁盘路径与相对静态资源路径
+    let clean = pathOrUrl;
+    const artIdx = clean.indexOf('artifacts/');
+    if (artIdx !== -1) {
+      clean = clean.slice(artIdx);
+    }
+    clean = clean.startsWith('/') ? clean : `/${clean}`;
     return `${BASE_URL}${clean}`;
   }
 }

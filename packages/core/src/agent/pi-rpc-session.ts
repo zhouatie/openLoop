@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import os from 'os';
+import path from 'path';
 import { SessionChatMessage, ToolExecutionRecord, TaskSessionState, Task, TaskAttachment } from '../types';
 import { createLogger } from '../logger';
 
@@ -75,7 +76,18 @@ export class PiRpcSessionInstance extends EventEmitter {
     }
 
     const cwd = options.cwd || os.tmpdir();
-    const env = { ...process.env, ...(options.env || {}) };
+    const nodeBinDir = path.dirname(process.execPath);
+    const extraPath = [
+      nodeBinDir,
+      path.join(os.homedir(), '.local', 'bin'),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+    ].join(':');
+    const env = {
+      ...process.env,
+      PATH: `${extraPath}:${process.env.PATH || ''}`,
+      ...(options.env || {}),
+    };
 
     logger.info(`启动 Pi RPC 会话进程: pi ${args.join(' ')} (CWD: ${cwd})`, undefined, {
       taskId: this.taskId,
