@@ -29,6 +29,7 @@ import {
   GitCommit,
   X,
   History,
+  MoreHorizontal,
 } from 'lucide-react';
 import { WorkflowDefinition, NodeType, Task } from '@openloop/core';
 import { api } from '../services/api';
@@ -131,6 +132,10 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   const [isSortOpen, setIsSortOpen] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
+  // 更多操作下拉菜单状态
+  const [activeMenuWfId, setActiveMenuWfId] = useState<string | null>(null);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
+
   // 视图模式与分类过滤状态
   const [viewMode, setViewMode] = useState<'list' | 'grid'>(() => {
     try {
@@ -186,6 +191,20 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [isSortOpen]);
+
+  // 点击外部关闭行级操作下拉菜单
+  useEffect(() => {
+    if (!activeMenuWfId) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
+        setActiveMenuWfId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [activeMenuWfId]);
 
   // 格式化友好时间显示
   const formatFriendlyTime = (timestamp: number) => {
@@ -336,20 +355,20 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       if (isDeploy) {
         return {
           label: '部署',
-          icon: <Rocket size={11} className="text-[#0284c7]" />,
-          badgeBg: 'bg-[#eff6ff]',
-          badgeText: 'text-[#1d4ed8]',
-          badgeBorder: 'border-[#bfdbfe]',
+          icon: <Rocket size={11} className="text-[#52525b]" />,
+          badgeBg: 'bg-[#f4f4f5]',
+          badgeText: 'text-[#52525b]',
+          badgeBorder: 'border-transparent',
         };
       }
       const isBuild = name.includes('构建') || cmd.includes('build');
       if (isBuild) {
         return {
           label: '构建',
-          icon: <Boxes size={11} className="text-[#0284c7]" />,
-          badgeBg: 'bg-[#f0f9ff]',
-          badgeText: 'text-[#0369a1]',
-          badgeBorder: 'border-[#bae6fd]',
+          icon: <Boxes size={11} className="text-[#52525b]" />,
+          badgeBg: 'bg-[#f4f4f5]',
+          badgeText: 'text-[#52525b]',
+          badgeBorder: 'border-transparent',
         };
       }
     }
@@ -357,107 +376,88 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       case 'agent':
         return {
           label: 'Agent',
-          icon: <Bot size={11} className="text-[#4f46e5]" />,
-          badgeBg: 'bg-[#f5f3ff]',
-          badgeText: 'text-[#4f46e5]',
-          badgeBorder: 'border-[#ede9fe]',
+          icon: <Bot size={11} className="text-[#52525b]" />,
+          badgeBg: 'bg-[#f4f4f5]',
+          badgeText: 'text-[#52525b]',
+          badgeBorder: 'border-transparent',
         };
       case 'midscene':
         return {
           label: 'Midscene',
-          icon: <Target size={11} className="text-[#16a34a]" />,
-          badgeBg: 'bg-[#f0fdf4]',
-          badgeText: 'text-[#16a34a]',
-          badgeBorder: 'border-[#dcfce7]',
+          icon: <Target size={11} className="text-[#52525b]" />,
+          badgeBg: 'bg-[#f4f4f5]',
+          badgeText: 'text-[#52525b]',
+          badgeBorder: 'border-transparent',
         };
       case 'stitch-image':
         return {
           label: '动图',
-          icon: <FileVideo size={11} className="text-[#0284c7]" />,
-          badgeBg: 'bg-[#f0f9ff]',
-          badgeText: 'text-[#1d4ed8]',
-          badgeBorder: 'border-[#e0f2fe]',
+          icon: <FileVideo size={11} className="text-[#52525b]" />,
+          badgeBg: 'bg-[#f4f4f5]',
+          badgeText: 'text-[#52525b]',
+          badgeBorder: 'border-transparent',
         };
       case 'hook':
         return {
           label: 'Hook',
-          icon: <Zap size={11} className="text-[#d97706]" />,
-          badgeBg: 'bg-[#fffbeb]',
-          badgeText: 'text-[#d97706]',
-          badgeBorder: 'border-[#fef3c7]',
+          icon: <Zap size={11} className="text-[#52525b]" />,
+          badgeBg: 'bg-[#f4f4f5]',
+          badgeText: 'text-[#52525b]',
+          badgeBorder: 'border-transparent',
         };
       case 'qa-approval':
         return {
           label: 'QA门禁',
-          icon: <CheckSquare size={11} className="text-[#ea580c]" />,
-          badgeBg: 'bg-[#fff7ed]',
-          badgeText: 'text-[#ea580c]',
-          badgeBorder: 'border-[#ffedd5]',
+          icon: <CheckSquare size={11} className="text-[#52525b]" />,
+          badgeBg: 'bg-[#f4f4f5]',
+          badgeText: 'text-[#52525b]',
+          badgeBorder: 'border-transparent',
         };
       case 'cli':
         return {
           label: 'CLI脚本',
-          icon: <Terminal size={11} className="text-[#4b4b53]" />,
-          badgeBg: 'bg-[#f4f4f7]',
-          badgeText: 'text-[#4b4b53]',
-          badgeBorder: 'border-[#e3e3e8]',
+          icon: <Terminal size={11} className="text-[#52525b]" />,
+          badgeBg: 'bg-[#f4f4f5]',
+          badgeText: 'text-[#52525b]',
+          badgeBorder: 'border-transparent',
         };
       default:
         return {
           label: '扩展',
-          icon: <Boxes size={11} className="text-[#85858d]" />,
-          badgeBg: 'bg-[#f4f4f7]',
-          badgeText: 'text-[#63636b]',
-          badgeBorder: 'border-[#e3e3e8]',
+          icon: <Boxes size={11} className="text-[#52525b]" />,
+          badgeBg: 'bg-[#f4f4f5]',
+          badgeText: 'text-[#52525b]',
+          badgeBorder: 'border-transparent',
         };
     }
   };
 
-  // 工作流视觉主题配置 (内敛微色阶，消除大色块突兀感)
+  // 工作流视觉主题配置 (高质感中性极简，彻底消除五彩大色块带来的花里胡哨感)
   const getWorkflowVisual = (wf: WorkflowDefinition) => {
     const nodeTypes = new Set(wf.nodes.map((n) => n.type));
+    let icon = <Workflow size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
+    let tag = '通用编排';
+
     if (nodeTypes.has('agent')) {
-      return {
-        icon: <Bot size={17} strokeWidth={2.2} className="text-[#4f46e5]" />,
-        bg: 'bg-[#f5f3ff]',
-        border: 'border-[#ede9fe]',
-        glow: 'group-hover:border-[#4f46e5]/40',
-        tag: 'AI 智能体',
-      };
+      icon = <Bot size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
+      tag = 'AI Agent';
+    } else if (nodeTypes.has('midscene')) {
+      icon = <Target size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
+      tag = '视觉测试';
+    } else if (wf.name.includes('部署') || wf.id.includes('deploy')) {
+      icon = <Rocket size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
+      tag = '持续交付';
+    } else if (nodeTypes.has('qa-approval')) {
+      icon = <CheckSquare size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
+      tag = '质量门禁';
     }
-    if (nodeTypes.has('midscene')) {
-      return {
-        icon: <Target size={17} strokeWidth={2.2} className="text-[#16a34a]" />,
-        bg: 'bg-[#f0fdf4]',
-        border: 'border-[#dcfce7]',
-        glow: 'group-hover:border-[#16a34a]/40',
-        tag: '视觉自动化',
-      };
-    }
-    if (wf.name.includes('部署') || wf.id.includes('deploy')) {
-      return {
-        icon: <Rocket size={17} strokeWidth={2.2} className="text-[#0284c7]" />,
-        bg: 'bg-[#f0f9ff]',
-        border: 'border-[#e0f2fe]',
-        glow: 'group-hover:border-[#0284c7]/40',
-        tag: '持续交付',
-      };
-    }
-    if (nodeTypes.has('qa-approval')) {
-      return {
-        icon: <CheckSquare size={17} strokeWidth={2.2} className="text-[#ea580c]" />,
-        bg: 'bg-[#fff7ed]',
-        border: 'border-[#ffedd5]',
-        glow: 'group-hover:border-[#ea580c]/40',
-        tag: '门禁验收',
-      };
-    }
+
     return {
-      icon: <Workflow size={17} strokeWidth={2.2} className="text-[#1c1c21]" />,
-      bg: 'bg-[#f4f4f7]',
-      border: 'border-[#ececf0]',
-      glow: 'group-hover:border-[#b9b9c2]',
-      tag: '基础流水线',
+      icon,
+      bg: 'bg-[#f4f4f5] group-hover:bg-[#ebebee]',
+      border: 'border-[#e4e4e7]',
+      glow: 'group-hover:border-[#d4d4d8]',
+      tag,
     };
   };
 
@@ -1160,22 +1160,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
               <LayoutGrid size={13} />
             </button>
           </div>
-
-          {/* 竖分割线 */}
-          <div className="w-[1px] h-4 bg-[#dcdce0] mx-0.5" />
-
-          {/* 新建工作流按钮 */}
-          <button
-            type="button"
-            onClick={() => {
-              if (import.meta.env?.DEV) console.log('[WorkflowListView] 点击新建工作流');
-              setIsCreateModalOpen(true);
-            }}
-            className="flex items-center gap-1.5 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs cursor-pointer"
-          >
-            <Plus size={13} strokeWidth={2.4} />
-            <span>新建工作流</span>
-          </button>
         </div>
       </div>
 
@@ -1215,209 +1199,212 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
             )}
           </div>
         ) : viewMode === 'list' ? (
-          /* 极致优雅列表视图 */
-          <div className="bg-white border border-[#e3e3e8] rounded-[12px] divide-y divide-[#ececf0] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-            {filteredWorkflows.map((wf) => {
-              const isPinned = pinnedIds.includes(wf.id);
-              const friendlyTime = formatFriendlyTime(wf.updatedAt || wf.createdAt);
-              const visual = getWorkflowVisual(wf);
-              const pipelineSteps = getPipelineSteps(wf.nodes, wf.edges);
+          /* 极致优雅表格视图 (1:1 借鉴执行调用记录规范，表头对齐、秩序井然) */
+          <div className="bg-white border border-[#e3e3e8] rounded-[8px] shadow-sm overflow-hidden flex flex-col">
+            {/* 表头 */}
+            <div className="h-[34px] bg-[#fafafc] border-b border-[#e3e3e8] px-4 flex items-center text-[11px] font-medium text-[#85858d] select-none">
+              <div className="w-[220px] shrink-0">流水线名称</div>
+              <div className="w-[85px] shrink-0">类型</div>
+              <div className="flex-1 min-w-0 px-3">环节构成</div>
+              <div className="w-[80px] shrink-0 text-center">节点规模</div>
+              <div className="w-[95px] shrink-0 text-right">更新时间</div>
+              <div className="w-[110px] shrink-0 text-center">操作</div>
+            </div>
 
-              return (
-                <div
-                  key={wf.id}
-                  onClick={() => {
-                    if (import.meta.env?.DEV) {
-                      console.log('[WorkflowListView] 进入流程画布:', wf.id);
-                    }
-                    onSelectWorkflow(wf.id);
-                  }}
-                  className={`px-4 py-3 flex items-center justify-between gap-4 transition-all duration-150 cursor-pointer group ${
-                    isPinned ? 'bg-[#fafaff] hover:bg-[#f4f4fc]' : 'hover:bg-[#fafafc]'
-                  }`}
-                >
-                  {/* 左侧：工作流图标 + 标题 + 置顶徽章 + ID + 描述 */}
-                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    <div
-                      className={`w-9 h-9 rounded-[8px] border flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 shadow-2xs ${visual.bg} ${visual.border}`}
-                    >
-                      {visual.icon}
+            {/* 列表行 */}
+            <div className="divide-y divide-[#f1f1f4]">
+              {filteredWorkflows.map((wf) => {
+                const isPinned = pinnedIds.includes(wf.id);
+                const friendlyTime = formatFriendlyTime(wf.updatedAt || wf.createdAt);
+                const visual = getWorkflowVisual(wf);
+                const pipelineSteps = getPipelineSteps(wf.nodes, wf.edges);
+
+                return (
+                  <div
+                    key={wf.id}
+                    onClick={() => {
+                      if (import.meta.env?.DEV) {
+                        console.log('[WorkflowListView] 进入流程画布:', wf.id);
+                      }
+                      onSelectWorkflow(wf.id);
+                    }}
+                    className="group px-4 py-2.5 flex items-center text-[12px] transition-colors cursor-pointer hover:bg-[#fafafc]"
+                  >
+                    {/* 流水线名称 */}
+                    <div className="w-[220px] shrink-0 flex items-center gap-2 pr-2">
+                      <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] group-hover:bg-white flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60 transition-colors">
+                        <Workflow size={11} />
+                      </div>
+                      {isPinned && (
+                        <span title="已置顶" className="shrink-0 flex items-center">
+                          <Pin
+                            size={10}
+                            className="text-[#3b82f6] fill-current rotate-45"
+                          />
+                        </span>
+                      )}
+                      <span
+                        className="font-medium text-[#1c1c21] truncate hover:text-[#4f46e5] transition-colors"
+                        title={wf.name}
+                      >
+                        {wf.name}
+                      </span>
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 min-w-0">
+                    {/* 类型 */}
+                    <div className="w-[85px] shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#63636b] text-[10.5px] font-medium border border-[#e3e3e8]/50">
+                        {visual.tag}
+                      </span>
+                    </div>
+
+                    {/* 环节构成 */}
+                    <div className="flex-1 min-w-0 px-3 flex items-center gap-1 overflow-hidden font-sans">
+                      {pipelineSteps.slice(0, 4).map((step, idx) => {
+                        const meta = getNodeMeta(step.type, step);
+                        return (
+                          <React.Fragment key={step.id}>
+                            {idx > 0 && <span className="text-[#d4d4d8] text-[9.5px]">→</span>}
+                            <span
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#52525b] text-[10.5px] font-medium shrink-0"
+                              title={`${step.name} (${meta.label})`}
+                            >
+                              {meta.label}
+                            </span>
+                          </React.Fragment>
+                        );
+                      })}
+                      {pipelineSteps.length > 4 && (
                         <span
-                          className="text-[13.5px] font-semibold text-[#1c1c21] group-hover:text-[#4f46e5] transition-colors truncate leading-tight"
-                          title={wf.name}
+                          className="text-[9.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1 py-0.5 rounded shrink-0"
+                          title={`剩余 ${pipelineSteps.length - 4} 个环节`}
                         >
-                          {wf.name}
+                          +{pipelineSteps.length - 4}
                         </span>
+                      )}
+                    </div>
 
-                        {isPinned && (
-                          <span className="inline-flex items-center gap-0.5 text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded-[4px] shrink-0">
-                            <Pin size={8.5} className="rotate-45 fill-current" />
-                            已置顶
-                          </span>
-                        )}
-                      </div>
+                    {/* 节点规模 */}
+                    <div className="w-[80px] shrink-0 text-center">
+                      <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded shrink-0">
+                        {wf.nodes.length} 节点
+                      </span>
+                    </div>
 
-                      <div className="flex items-center gap-2 mt-1 min-w-0 text-[#85858d] text-[11.5px]">
+                    {/* 更新时间 */}
+                    <div
+                      className="w-[95px] shrink-0 text-right text-[11px] text-[#85858d]"
+                      title={new Date(wf.updatedAt || wf.createdAt).toLocaleString()}
+                    >
+                      {friendlyTime}
+                    </div>
+
+                    {/* 操作区 */}
+                    <div
+                      className="w-[110px] shrink-0 flex items-center justify-center gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {/* 调试运行 */}
+                      <button
+                        type="button"
+                        onClick={(e) => handleRunWorkflow(e, wf)}
+                        title="启动测试运行"
+                        className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#4f46e5] hover:bg-[#eeedfd] flex items-center justify-center transition-all cursor-pointer"
+                      >
+                        <Play size={11} className="fill-current text-[#4f46e5]" />
+                      </button>
+
+                      {/* 执行记录 */}
+                      <button
+                        type="button"
+                        onClick={(e) => handleViewRunsOfWorkflow(e, wf.id)}
+                        title="查看流水线执行记录"
+                        className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-all cursor-pointer"
+                      >
+                        <History size={12} />
+                      </button>
+
+                      {/* 更多管理操作下拉菜单 */}
+                      <div className="relative" ref={activeMenuWfId === wf.id ? actionMenuRef : null}>
                         <button
                           type="button"
-                          onClick={(e) => handleCopyId(e, wf.id)}
-                          className="text-[10px] font-mono text-[#85858d] hover:text-[#1c1c21] bg-[#f4f4f7] hover:bg-[#eeedfd] px-1.5 py-[0.5px] rounded border border-[#ececf0] hover:border-[#d8d6fb] transition-colors shrink-0 flex items-center gap-1 cursor-pointer"
-                          title="点击复制流程 ID"
-                        >
-                          <span>{wf.id}</span>
-                          {copiedId === wf.id ? (
-                            <Check size={8.5} className="text-[#16a34a]" />
-                          ) : (
-                            <Copy size={8} className="opacity-0 group-hover:opacity-60" />
-                          )}
-                        </button>
-                        <span className="text-[#c7c7cf] shrink-0">·</span>
-                        <p className="truncate leading-normal">
-                          {wf.description || '暂无流程描述'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 中部：标准节点流程串联胶囊 (简明极简，绝不截断) */}
-                  <div className="hidden xl:flex items-center gap-1 px-2.5 py-1 rounded-[6px] bg-[#f8f8fa] border border-[#ececf0] shrink-0">
-                    {pipelineSteps.slice(0, 3).map((step, idx) => {
-                      const meta = getNodeMeta(step.type, step);
-                      return (
-                        <React.Fragment key={step.id}>
-                          {idx > 0 && <span className="text-[#c7c7cf] text-[9.5px]">→</span>}
-                          <div
-                            className={`flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] border text-[10px] font-medium shrink-0 ${meta.badgeBg} ${meta.badgeBorder} ${meta.badgeText}`}
-                            title={`${step.name} (${meta.label})`}
-                          >
-                            {meta.icon}
-                            <span>{meta.label}</span>
-                          </div>
-                        </React.Fragment>
-                      );
-                    })}
-                    {pipelineSteps.length > 3 && (
-                      <span
-                        className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#e3e3e8] px-1.5 py-0.5 rounded shrink-0"
-                        title={`共 ${pipelineSteps.length} 个环节`}
-                      >
-                        +{pipelineSteps.length - 3}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* 右侧：统计指标与操作按钮 */}
-                  <div
-                    className="flex items-center gap-2.5 shrink-0"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {/* 指标与时间 */}
-                    <div className="flex flex-col items-end text-right min-w-[75px]">
-                      <span className="text-[11px] font-medium text-[#4b4b53] font-mono">
-                        {wf.nodes.length} 节点 · {wf.edges.length} 连线
-                      </span>
-                      <span className="text-[10px] text-[#85858d] flex items-center gap-1 mt-0.5">
-                        <Clock size={9.5} />
-                        {friendlyTime}
-                      </span>
-                    </div>
-
-                    {/* 竖分割线 */}
-                    <div className="w-[1px] h-5 bg-[#ececf0]" />
-
-                    {/* 快捷悬浮动作组 */}
-                    <div className="flex items-center gap-0.5">
-                      <button
-                        type="button"
-                        onClick={(e) => handleTogglePin(e, wf)}
-                        title={isPinned ? '取消置顶' : '固定在顶部'}
-                        className={`w-[26px] h-[26px] rounded-[5px] flex items-center justify-center transition-all cursor-pointer ${
-                          isPinned
-                            ? 'text-[#4f46e5] hover:bg-[#eeedfd]'
-                            : 'text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] opacity-0 group-hover:opacity-100'
-                        }`}
-                      >
-                        <Pin
-                          size={11.5}
-                          className={`transition-transform duration-200 ${
-                            isPinned ? 'rotate-45 fill-current' : 'hover:-rotate-12'
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuWfId(activeMenuWfId === wf.id ? null : wf.id);
+                          }}
+                          title="更多操作"
+                          className={`w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-all cursor-pointer ${
+                            activeMenuWfId === wf.id ? 'bg-[#ececf0] text-[#1c1c21]' : ''
                           }`}
-                        />
-                      </button>
+                        >
+                          <MoreHorizontal size={12} />
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setEditTargetWf(wf)}
-                        title="编辑流程信息"
-                        className="w-[26px] h-[26px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-[#e3e3e8] cursor-pointer"
-                      >
-                        <Edit3 size={11} />
-                      </button>
+                        {activeMenuWfId === wf.id && (
+                          <div
+                            className="absolute right-0 top-[28px] z-50 w-[120px] bg-white border border-[#e3e3e8] rounded-[6px] shadow-[0_8px_20px_rgba(0,0,0,0.08)] py-1 text-[11.5px] animate-in fade-in zoom-in-95 duration-100"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                handleTogglePin(e, wf);
+                                setActiveMenuWfId(null);
+                              }}
+                              className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[#52525b] hover:text-[#1c1c21] hover:bg-[#f4f4f5] text-left transition-colors cursor-pointer"
+                            >
+                              <Pin size={11.5} className={isPinned ? 'rotate-45 text-[#3b82f6] fill-current' : ''} />
+                              <span>{isPinned ? '取消置顶' : '固定置顶'}</span>
+                            </button>
 
-                      <button
-                        type="button"
-                        onClick={(e) => handleDuplicateWorkflow(e, wf)}
-                        title="复制为新流程"
-                        disabled={duplicatingId === wf.id}
-                        className="w-[26px] h-[26px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] opacity-0 group-hover:opacity-100 transition-all border border-transparent hover:border-[#e3e3e8] disabled:opacity-50 cursor-pointer"
-                      >
-                        {duplicatingId === wf.id ? (
-                          <Loader2 size={11} className="animate-spin text-[#4f46e5]" />
-                        ) : (
-                          <Copy size={11} />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                handleDuplicateWorkflow(e, wf);
+                                setActiveMenuWfId(null);
+                              }}
+                              disabled={duplicatingId === wf.id}
+                              className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[#52525b] hover:text-[#18181b] hover:bg-[#f4f4f5] text-left transition-colors cursor-pointer"
+                            >
+                              {duplicatingId === wf.id ? (
+                                <Loader2 size={11.5} className="animate-spin text-[#4f46e5]" />
+                              ) : (
+                                <Copy size={11.5} />
+                              )}
+                              <span>克隆流程</span>
+                            </button>
+
+                            <div className="h-[1px] bg-[#f4f4f5] my-1" />
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeleteTargetWf(wf);
+                                setActiveMenuWfId(null);
+                              }}
+                              className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[#dc2626] hover:bg-[#fef2f2] text-left transition-colors cursor-pointer"
+                            >
+                              <Trash2 size={11.5} />
+                              <span>删除流程</span>
+                            </button>
+                          </div>
                         )}
-                      </button>
+                      </div>
 
+                      {/* 进入画布 */}
                       <button
                         type="button"
-                        onClick={() => setDeleteTargetWf(wf)}
-                        title="删除流程"
-                        className="w-[26px] h-[26px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:bg-[#fff1f2] hover:text-[#e11d48] hover:border-[#ffe4e6] opacity-0 group-hover:opacity-100 transition-all border border-transparent cursor-pointer"
+                        onClick={() => onSelectWorkflow(wf.id)}
+                        title="进入流程画布编辑"
+                        className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#4f46e5] hover:bg-[#eeedfd] flex items-center justify-center transition-all cursor-pointer"
                       >
-                        <Trash2 size={11} />
+                        <ChevronRight size={13} />
                       </button>
                     </div>
-
-                    {/* 执行记录入口 */}
-                    <button
-                      type="button"
-                      onClick={(e) => handleViewRunsOfWorkflow(e, wf.id)}
-                      title="查看此工作流的历史与快捷键执行记录"
-                      className="h-[28px] px-2 rounded-[6px] bg-[#f4f4f7] hover:bg-[#ececf0] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-2xs cursor-pointer"
-                    >
-                      <History size={11} className="text-[#85858d]" />
-                      <span>执行记录</span>
-                    </button>
-
-                    {/* 调试运行 */}
-                    <button
-                      type="button"
-                      onClick={(e) => handleRunWorkflow(e, wf)}
-                      title="启动测试运行与验证任务"
-                      className="h-[28px] px-2.5 rounded-[6px] bg-[#f4f4f7] hover:bg-[#eeedfd] text-[#4b4b53] hover:text-[#4f46e5] border border-[#e3e3e8] hover:border-[#d8d6fb] text-[11.5px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-2xs cursor-pointer"
-                    >
-                      <Play size={10} strokeWidth={2.4} className="fill-current text-[#4f46e5]" />
-                      <span>调试运行</span>
-                    </button>
-
-                    {/* 编辑画布 */}
-                    <button
-                      type="button"
-                      onClick={() => onSelectWorkflow(wf.id)}
-                      title="进入 DAG 可视化连线画布"
-                      className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-xs cursor-pointer"
-                    >
-                      <span>编辑画布</span>
-                      <ChevronRight size={11} className="text-white/70" />
-                    </button>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         ) : (
           /* 卡片网格视图 */
@@ -1448,14 +1435,13 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div
-                          className={`w-9 h-9 rounded-[8px] border flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 shadow-2xs ${visual.bg} ${visual.border}`}
+                          className={`w-8 h-8 rounded-[6px] border flex items-center justify-center shrink-0 transition-colors ${visual.bg} ${visual.border}`}
                         >
                           {visual.icon}
                         </div>
                         {isPinned && (
-                          <span className="inline-flex items-center gap-0.5 text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded-[4px] shrink-0">
-                            <Pin size={8} className="rotate-45 fill-current" />
-                            置顶
+                          <span title="已置顶" className="shrink-0 flex items-center">
+                            <Pin size={11} className="text-[#3b82f6] fill-current rotate-45" />
                           </span>
                         )}
                       </div>
@@ -1471,8 +1457,8 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                           title={isPinned ? '取消置顶' : '固定在顶部'}
                           className={`w-[24px] h-[24px] rounded-[5px] flex items-center justify-center transition-all cursor-pointer ${
                             isPinned
-                              ? 'text-[#4f46e5] hover:bg-[#eeedfd]'
-                              : 'text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] opacity-0 group-hover:opacity-100'
+                              ? 'text-[#3b82f6] hover:bg-[#eff6ff]'
+                              : 'text-[#71717a] hover:bg-[#f4f4f5] hover:text-[#18181b] opacity-0 group-hover:opacity-100'
                           }`}
                         >
                           <Pin
@@ -1487,7 +1473,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                           type="button"
                           onClick={() => setEditTargetWf(wf)}
                           title="编辑流程信息"
-                          className="w-[24px] h-[24px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                          className="w-[24px] h-[24px] rounded-[5px] flex items-center justify-center text-[#71717a] hover:bg-[#f4f4f5] hover:text-[#18181b] opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
                         >
                           <Edit3 size={11} />
                         </button>
@@ -1497,7 +1483,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                           onClick={(e) => handleDuplicateWorkflow(e, wf)}
                           title="复制流程"
                           disabled={duplicatingId === wf.id}
-                          className="w-[24px] h-[24px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50 cursor-pointer"
+                          className="w-[24px] h-[24px] rounded-[5px] flex items-center justify-center text-[#71717a] hover:bg-[#f4f4f5] hover:text-[#18181b] opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50 cursor-pointer"
                         >
                           {duplicatingId === wf.id ? (
                             <Loader2 size={11} className="animate-spin text-[#4f46e5]" />
@@ -1510,7 +1496,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                           type="button"
                           onClick={() => setDeleteTargetWf(wf)}
                           title="删除流程"
-                          className="w-[24px] h-[24px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:bg-[#fff1f2] hover:text-[#e11d48] opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                          className="w-[24px] h-[24px] rounded-[5px] flex items-center justify-center text-[#71717a] hover:bg-[#fef2f2] hover:text-[#dc2626] opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
                         >
                           <Trash2 size={11} />
                         </button>
@@ -1519,66 +1505,46 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
                     {/* 流程名称 (全宽展示，绝不狭窄截断) */}
                     <h3
-                      className="font-semibold text-[13.5px] text-[#1c1c21] group-hover:text-[#4f46e5] transition-colors truncate leading-snug mt-3"
+                      className="font-medium text-[13px] text-[#18181b] group-hover:text-black transition-colors truncate leading-snug mt-2.5"
                       title={wf.name}
                     >
                       {wf.name}
                     </h3>
 
-                    {/* ID 与时间元数据行 */}
-                    <div className="flex items-center gap-2 mt-1.5 text-[11px] text-[#85858d]">
-                      <button
-                        type="button"
-                        onClick={(e) => handleCopyId(e, wf.id)}
-                        className="text-[10px] font-mono text-[#85858d] hover:text-[#1c1c21] bg-[#f4f4f7] hover:bg-[#eeedfd] px-1.5 py-[0.5px] rounded border border-[#ececf0] hover:border-[#d8d6fb] transition-colors shrink-0 flex items-center gap-1 cursor-pointer"
-                        title="点击复制 ID"
-                      >
-                        <span>{wf.id}</span>
-                        {copiedId === wf.id ? (
-                          <Check size={8} className="text-[#16a34a]" />
-                        ) : (
-                          <Copy size={7.5} className="opacity-0 group-hover:opacity-60" />
-                        )}
-                      </button>
-                      <span className="text-[#c7c7cf]">·</span>
-                      <span className="flex items-center gap-1 whitespace-nowrap">
-                        <Clock size={9.5} />
+                    {/* 元数据行 */}
+                    <div className="flex items-center gap-1.5 mt-1 text-[11px] text-[#71717a] font-sans">
+                      <span>{wf.nodes.length} 节点</span>
+                      <span className="text-[#d4d4d8]">·</span>
+                      <span className="flex items-center gap-1 whitespace-nowrap" title={new Date(wf.updatedAt || wf.createdAt).toLocaleString()}>
                         {friendlyTime}
                       </span>
                     </div>
 
                     {/* 流程描述 */}
-                    <p className="text-[12px] text-[#63636b] line-clamp-2 leading-relaxed min-h-[34px] mt-2.5">
+                    <p className="text-[12px] text-[#71717a] line-clamp-2 leading-relaxed min-h-[34px] mt-2">
                       {wf.description || '暂无流程描述，点击进入画布编辑'}
                     </p>
 
-                    {/* DAG 流水线环节预览栏 (简明极简标签，绝不截断) */}
-                    <div className="mt-3 p-2 rounded-[8px] bg-[#f8f8fa] border border-[#ececf0]">
-                      <div className="flex items-center justify-between mb-1.5 text-[10px] text-[#85858d]">
-                        <span className="font-medium flex items-center gap-1">
-                          <GitBranch size={10} /> 环节构成 ({wf.nodes.length})
-                        </span>
-                        <span className="font-mono">{wf.edges.length} 连线</span>
-                      </div>
-                      <div className="flex items-center gap-1 overflow-hidden">
+                    {/* DAG 流水线环节预览栏 (极简中性胶囊) */}
+                    <div className="mt-3 p-2 rounded-[6px] bg-[#f9f9fb] border border-[#f0f0f3]">
+                      <div className="flex items-center gap-1 overflow-hidden font-sans">
                         {pipelineSteps.slice(0, 3).map((step, idx) => {
                           const meta = getNodeMeta(step.type, step);
                           return (
                             <React.Fragment key={step.id}>
-                              {idx > 0 && <span className="text-[#c7c7cf] text-[9px]">→</span>}
-                              <div
-                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] border text-[9.5px] font-medium shrink-0 ${meta.badgeBg} ${meta.badgeBorder} ${meta.badgeText}`}
+                              {idx > 0 && <span className="text-[#d4d4d8] text-[9px]">→</span>}
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f5] text-[#52525b] text-[10px] font-medium shrink-0"
                                 title={`${step.name} (${meta.label})`}
                               >
-                                {meta.icon}
-                                <span>{meta.label}</span>
-                              </div>
+                                {meta.label}
+                              </span>
                             </React.Fragment>
                           );
                         })}
                         {pipelineSteps.length > 3 && (
                           <span
-                            className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#e3e3e8] px-1 py-0.5 rounded shrink-0"
+                            className="text-[9.5px] font-mono text-[#a1a1aa] bg-[#f4f4f5] px-1 py-0.5 rounded shrink-0"
                             title={`剩余 ${pipelineSteps.length - 3} 个环节`}
                           >
                             +{pipelineSteps.length - 3}
@@ -1590,37 +1556,37 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
                   {/* 卡片底栏操作 */}
                   <div
-                    className="border-t border-[#f4f4f7] pt-3 mt-3 flex items-center justify-end gap-2"
+                    className="border-t border-[#f4f4f7] pt-2.5 mt-2.5 flex items-center justify-end gap-1.5"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
                       type="button"
                       onClick={(e) => handleViewRunsOfWorkflow(e, wf.id)}
                       title="查看此工作流的历史与快捷键执行记录"
-                      className="h-[27px] px-2 rounded-[5px] bg-white hover:bg-[#f4f4f7] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-2xs cursor-pointer"
+                      className="h-[25px] px-2 rounded-[4px] bg-[#f4f4f5] hover:bg-[#ebebee] text-[#52525b] hover:text-[#18181b] text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
                     >
-                      <History size={11} className="text-[#85858d]" />
-                      <span>执行记录</span>
+                      <History size={11} className="text-[#71717a]" />
+                      <span>记录</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={(e) => handleRunWorkflow(e, wf)}
                       title="启动测试运行与验证任务"
-                      className="h-[27px] px-2.5 rounded-[5px] bg-white hover:bg-[#eeedfd] text-[#4b4b53] hover:text-[#4f46e5] border border-[#e3e3e8] hover:border-[#d8d6fb] text-[11.5px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-2xs cursor-pointer"
+                      className="h-[25px] px-2 rounded-[4px] bg-[#f4f4f5] hover:bg-[#ebebee] text-[#18181b] text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
                     >
-                      <Play size={10} strokeWidth={2.4} className="fill-current text-[#4f46e5]" />
-                      <span>调试运行</span>
+                      <Play size={10} className="fill-current text-[#4f46e5]" />
+                      <span>调试</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => onSelectWorkflow(wf.id)}
                       title="进入 DAG 可视化连线画布"
-                      className="h-[27px] px-3 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-xs cursor-pointer"
+                      className="h-[25px] px-2.5 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-xs cursor-pointer"
                     >
-                      <span>编辑画布</span>
-                      <ChevronRight size={11} className="text-white/70" />
+                      <span>编辑</span>
+                      <ChevronRight size={10} className="text-white/70" />
                     </button>
                   </div>
                 </div>
