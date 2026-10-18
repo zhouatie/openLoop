@@ -1990,6 +1990,16 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </div>
                             )}
 
+                            {task.context?.worktree?.conflictResolution && (
+                              <div className="mb-1.5 flex items-center justify-between text-[10px] text-[#059669] bg-[#ecfdf5] px-2 py-[2.5px] rounded-[5px] border border-[#a7f3d0]">
+                                <span className="flex items-center gap-1 font-medium truncate">
+                                  <Sparkles size={9.5} className="text-[#059669]" />
+                                  <span>Agent 冲突自愈 ({task.context.worktree.conflictResolution.conflictFiles.length} 个文件)</span>
+                                </span>
+                                <span className="text-[9px] font-mono text-[#059669] opacity-80">已自动消解</span>
+                              </div>
+                            )}
+
                             {task.context?.piSessionId && (
                               <div
                                 onClick={(e) => {

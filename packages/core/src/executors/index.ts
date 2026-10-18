@@ -1062,6 +1062,77 @@ export class WorktreeMergeExecutor implements NodeExecutor {
           output: { merged: true, message: res.message },
         };
       } else {
+        // 判断是否为合并冲突异常
+        const isConflict =
+          res.message.includes('冲突') ||
+          res.message.includes('CONFLICT') ||
+          res.message.includes('conflict') ||
+          res.message.includes('Automatic merge failed') ||
+          res.message.includes('Merge with strategy ort failed');
+
+        if (isConflict) {
+          emitLog('system', `[Worktree 自动合并] 检测到代码合并冲突，启动沙箱内 Agent 冲突自愈机制...`);
+          const resolveResult = await wtManager.resolveConflictWithAgent(
+            repoRoot,
+            task.id,
+            task.title,
+            task.context?.piSessionId,
+            (msg) => emitLog('system', msg),
+            ctx.onSessionUpdate
+          );
+
+          if (resolveResult.resolved) {
+            emitLog('system', `[Worktree 自动合并] ✔ 冲突已由 Agent 自动消解，已提交至沙箱分支！`);
+            emitLog('system', `[Worktree 自动合并] 正在重新尝试将自愈后的分支合并至本地开发分支...`);
+
+            // 再次在宿主尝试合并（此时沙箱分支已完全包含宿主基线分支的最新变更，为 Fast-Forward 或无冲突）
+            const retryRes = await wtManager.approveAndMerge(
+              repoRoot,
+              task.id,
+              task.title,
+              (msg) => emitLog('system', msg)
+            );
+
+            if (retryRes.success) {
+              emitLog('system', `[Worktree 自动合并] ✔ 自愈后代码成功合并至本地开发分支！`);
+              task.workspace = repoRoot;
+              if (!task.context) task.context = {};
+              if (!task.context.worktree) {
+                task.context.worktree = {
+                  worktreeDir: path.join(repoRoot, '.worktrees', `task-${task.id}`),
+                  branchName: `feat/task-${task.id}`,
+                  targetUrl: '',
+                };
+              }
+              task.context.worktree.conflictResolution = {
+                baseBranch: 'main',
+                conflictFiles: resolveResult.conflictFiles,
+                resolvedAt: Date.now(),
+                summary: resolveResult.summary,
+              };
+
+              return {
+                status: 'success',
+                exitCode: 0,
+                output: {
+                  merged: true,
+                  conflictResolved: true,
+                  conflictFiles: resolveResult.conflictFiles,
+                  message: '代码冲突已在沙箱中由 Agent 自动消解并成功合并',
+                },
+              };
+            }
+          }
+
+          // 若自动协调后仍然有错误
+          emitLog('stderr', `[Worktree 自动合并] 代码冲突自愈未完成: ${resolveResult.error || res.message}`);
+          return {
+            status: 'failed',
+            exitCode: 1,
+            error: resolveResult.error || res.message,
+          };
+        }
+
         emitLog('stderr', `[Worktree 自动合并失败] ${res.message}`);
         return {
           status: 'failed',

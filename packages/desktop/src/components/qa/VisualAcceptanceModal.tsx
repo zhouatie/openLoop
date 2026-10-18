@@ -349,6 +349,17 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                 </span>
               )}
 
+              {/* 冲突自愈微徽标 */}
+              {worktree?.conflictResolution && (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0] shrink-0"
+                  title={`已由 Agent 自动消解冲突文件:\n${worktree.conflictResolution.conflictFiles.join('\n')}`}
+                >
+                  <Sparkles size={10} className="text-[#059669]" />
+                  <span>冲突已自愈 ({worktree.conflictResolution.conflictFiles.length})</span>
+                </span>
+              )}
+
               {/* 状态微徽章 */}
               {isPassed ? (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60 shrink-0">

@@ -265,6 +265,12 @@ export interface WorktreeContextInfo {
   changedFiles?: string[];
   diffSummary?: string;
   qaRunId?: string;
+  conflictResolution?: {
+    baseBranch: string;
+    conflictFiles: string[];
+    resolvedAt: number;
+    summary?: string;
+  };
 }
 
 export type QaStepType = 'action' | 'assert' | 'waitFor' | 'query';

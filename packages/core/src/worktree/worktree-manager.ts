@@ -5,6 +5,7 @@ import http from 'http';
 import { spawn, execSync, ChildProcess } from 'child_process';
 import { WorktreeContextInfo } from '../types';
 import { createLogger } from '../logger';
+import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 
 const logger = createLogger('WorktreeManager');
 
@@ -413,33 +414,236 @@ export class WorktreeManager {
         onLog?.(`[合并与清理 Warning] 沙箱提交提示: ${err.message}`);
       }
 
-      // 3. 在宿主主分支执行合并
-      onLog?.(`[合并与清理] 正在将 ${branchName} 合并至本地宿主当前分支...`);
+      // 3. 检查宿主工作区是否有未提交修改，若有则自动 stash 暂存保护，避免阻塞自动化合并
+      let hasStashed = false;
       try {
-        execSync(`git merge "${branchName}" --no-ff -m "Merge branch '${branchName}' (Task: ${taskId})"`, {
-          cwd: repoRoot,
-          stdio: 'pipe',
-        });
-        onLog?.(`[合并与清理] ✔ 分支合并成功！`);
-      } catch (mergeErr: any) {
-        onLog?.(`[合并与清理 告警] 分支合并产生冲突，保留 Worktree 供排查: ${mergeErr.message}`);
-        return {
-          success: false,
-          message: `代码合并发生冲突，请手动检查: ${mergeErr.message}`,
-        };
+        const dirty = execSync('git status --porcelain', { cwd: repoRoot, encoding: 'utf-8' }).trim();
+        if (dirty) {
+          onLog?.(`[合并保护] 检测到宿主本地存在未提交改动，自动暂存 (git stash) 以免中断合并...`);
+          execSync(`git stash push -u -m "openloop-auto-stash-${taskId}"`, { cwd: repoRoot, stdio: 'pipe' });
+          hasStashed = true;
+        }
+      } catch (stashErr: any) {
+        onLog?.(`[合并保护 提示] 暂存本地改动跳过: ${stashErr.message}`);
       }
 
-      // 4. 清理 Worktree 目录与分支
-      this.cleanupTaskWorktree(repoRoot, taskId, onLog);
+      try {
+        // 4. 在宿主主分支执行合并
+        onLog?.(`[合并与清理] 正在将 ${branchName} 合并至本地宿主当前分支...`);
+        try {
+          execSync(`git merge "${branchName}" --no-ff -m "Merge branch '${branchName}' (Task: ${taskId})"`, {
+            cwd: repoRoot,
+            stdio: 'pipe',
+          });
+          onLog?.(`[合并与清理] ✔ 分支合并成功！`);
+        } catch (mergeErr: any) {
+          // 宿主立即回滚未决合并，确保主开发分支绝对不被污染
+          try {
+            execSync('git merge --abort', { cwd: repoRoot, stdio: 'ignore' });
+          } catch {}
 
-      return {
-        success: true,
-        message: `分支 ${branchName} 已成功合并至主分支，沙箱环境已安全清理`,
-      };
+          onLog?.(`[合并与清理 告警] 分支合并产生冲突，保留 Worktree 供排查: ${mergeErr.message}`);
+          return {
+            success: false,
+            message: `代码合并发生冲突，请手动检查: ${mergeErr.message}`,
+          };
+        }
+
+        // 5. 清理 Worktree 目录与分支
+        this.cleanupTaskWorktree(repoRoot, taskId, onLog);
+
+        return {
+          success: true,
+          message: `分支 ${branchName} 已成功合并至主分支，沙箱环境已安全清理`,
+        };
+      } finally {
+        if (hasStashed) {
+          try {
+            onLog?.(`[合并保护] 正在恢复宿主本地此前暂存的改动 (git stash pop)...`);
+            execSync('git stash pop', { cwd: repoRoot, stdio: 'pipe' });
+            onLog?.(`[合并保护] ✔ 本地临时改动已安全恢复！`);
+          } catch (popErr: any) {
+            onLog?.(`[合并保护 告警] 恢复本地暂存改动遇到冲突，已保留在 git stash list 中供随时恢复`);
+          }
+        }
+      }
     } catch (err: any) {
       onLog?.(`[合并与清理 Error] 流程异常: ${err.message}`);
       return { success: false, message: err.message };
     }
+  }
+
+  /**
+   * 在沙箱隔离区内，唤醒 Agent 协调并消解与主分支的代码合并冲突
+   */
+  public async resolveConflictWithAgent(
+    repoRoot: string,
+    taskId: string,
+    taskTitle: string,
+    sessionId: string | undefined,
+    onLog?: (msg: string) => void,
+    onSessionUpdate?: (state: any) => void
+  ): Promise<{ resolved: boolean; conflictFiles: string[]; summary?: string; error?: string }> {
+    const safeTaskId = taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const worktreeDir = path.join(repoRoot, '.worktrees', `task-${safeTaskId}`);
+
+    if (!fs.existsSync(worktreeDir)) {
+      return { resolved: false, conflictFiles: [], error: `沙箱工作区不存在: ${worktreeDir}` };
+    }
+
+    // 1. 获取宿主基线分支名
+    let baseBranch = 'main';
+    try {
+      baseBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim() || 'main';
+    } catch {}
+
+    // 2. 宿主立即回滚未决合并，确保主开发分支绝对不被污染
+    try {
+      execSync('git merge --abort', { cwd: repoRoot, stdio: 'ignore' });
+    } catch {}
+
+    // 3. 在沙箱工作区中执行 git merge <baseBranch>，将基线分支反向合入以暴露冲突文件
+    onLog?.(`[代码冲突自愈] 正在将基线分支「${baseBranch}」合入沙箱以暴露冲突细节...`);
+    try {
+      execSync(`git merge "${baseBranch}" --no-commit --no-ff`, {
+        cwd: worktreeDir,
+        stdio: 'pipe',
+      });
+      // 若无报错直接合并成功，说明并无实质冲突（仅需提交）
+      execSync(`git commit -m "chore(conflict): 同步基线分支 ${baseBranch} 最新变更"`, {
+        cwd: worktreeDir,
+        stdio: 'pipe',
+      });
+      onLog?.(`[代码冲突自愈] ✔ 基线分支已成功无冲突同步至沙箱`);
+      return { resolved: true, conflictFiles: [], summary: `已成功同步基线分支 ${baseBranch} 最新变更` };
+    } catch {
+      // 产生冲突，继续向下提取冲突文件
+    }
+
+    // 4. 提取沙箱中的冲突文件列表
+    let conflictFiles: string[] = [];
+    try {
+      const conflictOut = execSync('git diff --name-only --diff-filter=U', { cwd: worktreeDir, encoding: 'utf-8' });
+      conflictFiles = conflictOut
+        .split('\n')
+        .map((s) => s.trim())
+        .filter((s) => Boolean(s) && !s.includes('node_modules') && !s.includes('.worktrees'));
+    } catch {}
+
+    if (conflictFiles.length === 0) {
+      onLog?.(`[代码冲突自愈] 未检测到具体的冲突代码文件，尝试清理未决状态...`);
+      try {
+        execSync('git merge --abort', { cwd: worktreeDir, stdio: 'ignore' });
+      } catch {}
+      return { resolved: false, conflictFiles: [], error: '未检测到具体的代码冲突文件，可能由未提交改动导致' };
+    }
+
+    onLog?.(`[代码冲突自愈] 检测到代码冲突文件 (${conflictFiles.length} 个): ${conflictFiles.join(', ')}`);
+    onLog?.(`[代码冲突自愈] 正在唤醒沙箱 Agent 会话协调解决冲突...`);
+
+    const conflictPrompt = `【严重：代码合并冲突自动协调】
+当前沙箱特性分支在合入基线分支「${baseBranch}」时产生代码冲突。
+产生冲突的文件列表：
+${conflictFiles.map((f) => `- ${f}`).join('\n')}
+
+请立即协助完成冲突协调与自愈：
+1. 使用 read 工具查看上述冲突文件，识别出所有 Git 冲突标记块（形如 <<<<<<< HEAD ... ======= ... >>>>>>> ${baseBranch}）；
+2. 仔细理解双方代码改动：保留基线分支的新增逻辑与接口规范，同时完整保留当前任务实现的核心特性；
+3. 使用 edit 工具精确消除所有冲突标记（严格移除 <<<<<<<, =======, >>>>>>>），融合两方修改；
+4. 检查修改后的代码，确保无语法错误与未定义变量。
+5. 修改完成后，输出格式：
+【冲突消解总结】
+- 融合要点 1: ...
+- 融合要点 2: ...`;
+
+    const effectiveSessionId = sessionId || `session_${taskId}`;
+
+    // 5. 唤醒/创建沙箱 RPC Agent 会话
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (res: { resolved: boolean; conflictFiles: string[]; summary?: string; error?: string }) => {
+        if (settled) return;
+        settled = true;
+        resolve(res);
+      };
+
+      try {
+        const session = PiRpcSessionManager.getInstance().createSession({
+          taskId,
+          taskTitle: `[冲突协调] ${taskTitle}`,
+          sessionId: effectiveSessionId,
+          cwd: worktreeDir,
+          initialPrompt: conflictPrompt,
+          onLog: (type, text) => {
+            onLog?.(`[Agent 冲突协调] ${text}`);
+          },
+          onUpdate: onSessionUpdate,
+          onFinished: (error) => {
+            if (error) {
+              onLog?.(`[代码冲突自愈 失败] Agent 执行异常: ${error}`);
+              finish({ resolved: false, conflictFiles, error });
+              return;
+            }
+
+            // 6. 验证沙箱冲突是否彻底消除
+            try {
+              const remainingOutput = execSync('git diff --name-only --diff-filter=U', { cwd: worktreeDir, encoding: 'utf-8' });
+              const remaining = remainingOutput.split('\n').map((s) => s.trim()).filter(Boolean);
+
+              if (remaining.length > 0) {
+                const errMsg = `仍有未消解的冲突文件: ${remaining.join(', ')}`;
+                onLog?.(`[代码冲突自愈 失败] ${errMsg}`);
+                finish({ resolved: false, conflictFiles: remaining, error: errMsg });
+                return;
+              }
+
+              // 检查文件中是否还残留冲突标记 <<<<<<<
+              let hasConflictMarkers = false;
+              for (const f of conflictFiles) {
+                const fullPath = path.join(worktreeDir, f);
+                if (fs.existsSync(fullPath)) {
+                  const content = fs.readFileSync(fullPath, 'utf-8');
+                  if (content.includes('<<<<<<<') || content.includes('>>>>>>>')) {
+                    hasConflictMarkers = true;
+                    break;
+                  }
+                }
+              }
+
+              if (hasConflictMarkers) {
+                const errMsg = `代码中仍残留 Git 冲突标记 (<<<<<<< 或 >>>>>>>)`;
+                onLog?.(`[代码冲突自愈 失败] ${errMsg}`);
+                finish({ resolved: false, conflictFiles, error: errMsg });
+                return;
+              }
+
+              // 7. 提交消解后的代码至沙箱分支
+              execSync('git add -A', { cwd: worktreeDir, stdio: 'pipe' });
+              execSync(`git commit -m "chore(conflict): 自动消解与基线分支 ${baseBranch} 的合并冲突"`, {
+                cwd: worktreeDir,
+                stdio: 'pipe',
+              });
+
+              let diffStat = '';
+              try {
+                diffStat = execSync('git show --stat HEAD', { cwd: worktreeDir, encoding: 'utf-8' }).trim();
+              } catch {}
+
+              onLog?.(`[代码冲突自愈] ✔ 冲突已成功消解并提交到沙箱特性分支！`);
+              finish({
+                resolved: true,
+                conflictFiles,
+                summary: diffStat || `已成功消解 ${conflictFiles.length} 个冲突文件`,
+              });
+            } catch (checkErr: any) {
+              finish({ resolved: false, conflictFiles, error: checkErr.message });
+            }
+          },
+        });
+      } catch (spawnErr: any) {
+        finish({ resolved: false, conflictFiles, error: spawnErr.message });
+      }
+    });
   }
 
   /**
