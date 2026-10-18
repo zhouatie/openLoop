@@ -437,13 +437,17 @@ export class DagEngine extends EventEmitter {
       if (allUpstreamResolved) {
         const anyActiveSuccess = upstreamEdges.some((e) => {
           const nr = task.nodeRuns[e.source];
-          if (!nr || nr.status !== 'success') return false;
+          if (!nr || (nr.status !== 'success' && nr.status !== 'skipped')) return false;
+          // 若上游节点状态为 skipped（手动跳过）：只要出边是无条件边，即视为流水线向下传递推进
+          if (nr.status === 'skipped') {
+            return !e.condition || !e.condition.trim();
+          }
           return this.isEdgeConditionMet(e, task, workflow);
         });
 
         if (anyActiveSuccess) {
           dagLogger.info(
-            `[DAG:Join] 汇聚节点 [${targetNode.name}] 检测到有效成功前置，启动调度`,
+            `[DAG:Join] 汇聚节点 [${targetNode.name}] 检测到有效流转前置，启动调度`,
             undefined,
             { taskId: task.id, nodeId: targetNode.id }
           );
@@ -548,7 +552,14 @@ export class DagEngine extends EventEmitter {
       // 所有上游均已达到终态，检查是否有任何一条入边满足激活条件
       const anyActiveSuccess = upstreamEdges.some((e) => {
         const nr = task.nodeRuns[e.source];
-        if (!nr || nr.status !== 'success') return false;
+        if (!nr || (nr.status !== 'success' && nr.status !== 'skipped')) return false;
+
+        // 若上游节点状态为 skipped（如用户手动跳过测试工序）：
+        // 只要出边是无条件边，即视为流水线向下传递推进
+        if (nr.status === 'skipped') {
+          return !e.condition || !e.condition.trim();
+        }
+
         if (e.source === completedNodeId) {
           return edgeResults.get(e.id) ?? true;
         }
