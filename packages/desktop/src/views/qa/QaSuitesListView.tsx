@@ -43,7 +43,7 @@ export const QaSuitesListView: React.FC<QaSuitesListViewProps> = ({
 
   return (
     <div className="space-y-3 select-none">
-      {/* 搜索与新建栏 */}
+      {/* 搜索与次级工具栏 */}
       <div className="flex items-center justify-between gap-3">
         <div className="relative w-72">
           <Search size={12} className="absolute left-2.5 top-2.5 text-[#85858d]" />
@@ -55,14 +55,6 @@ export const QaSuitesListView: React.FC<QaSuitesListViewProps> = ({
             className="w-full h-[28px] pl-7 pr-2.5 bg-white border border-[#e3e3e8] rounded-[6px] text-[12px] text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.03)] focus:border-[#b9b9c2]"
           />
         </div>
-
-        <button
-          onClick={onNewSuite}
-          className="flex items-center gap-1.5 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs cursor-pointer"
-        >
-          <Plus size={12} strokeWidth={2.4} />
-          <span>新建测试用例</span>
-        </button>
       </div>
 
       {/* 用例列表 (同款规范表格) */}
@@ -70,9 +62,16 @@ export const QaSuitesListView: React.FC<QaSuitesListViewProps> = ({
         <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-16 text-center shadow-sm select-none">
           <Target size={30} className="mx-auto text-[#b9b9c2] mb-2.5 stroke-[1.5]" />
           <div className="text-[13px] font-medium text-[#1c1c21]">暂无测试用例</div>
-          <p className="text-[11.5px] text-[#85858d] mt-1">
-            点击右上角“新建测试用例”配置 Midscene 视觉自动化指令
+          <p className="text-[11.5px] text-[#85858d] mt-1 mb-3">
+            点击右上角“新建用例”配置 Midscene 视觉自动化指令
           </p>
+          <button
+            onClick={onNewSuite}
+            className="inline-flex items-center gap-1.5 h-[28px] px-3.5 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs cursor-pointer"
+          >
+            <Plus size={12} strokeWidth={2.4} />
+            <span>创建第一个测试用例</span>
+          </button>
         </div>
       ) : (
         <div className="bg-white border border-[#e3e3e8] rounded-[8px] shadow-sm overflow-hidden flex flex-col">

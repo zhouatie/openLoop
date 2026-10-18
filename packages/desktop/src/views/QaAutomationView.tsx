@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   History,
   Target,
@@ -14,10 +14,28 @@ import { QaLiveRunModal } from '../components/qa/QaLiveRunModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { toast } from '../components/Toast';
 
+const STORAGE_KEY_QA_SUBTAB = 'openloop_qa_subtab';
+
 type QaTab = 'runs' | 'suites';
 
 export const QaAutomationView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<QaTab>('runs');
+  const [activeTab, setActiveTab] = useState<QaTab>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_QA_SUBTAB);
+      if (saved === 'runs' || saved === 'suites') return saved;
+    } catch {}
+    return 'runs';
+  });
+
+  const handleTabChange = (tab: QaTab) => {
+    setActiveTab(tab);
+    try {
+      localStorage.setItem(STORAGE_KEY_QA_SUBTAB, tab);
+    } catch {}
+    if (import.meta.env?.DEV) {
+      console.log('[QaAutomationView] 切换 QA 自动化子 Tab:', tab);
+    }
+  };
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   const [runs, setRuns] = useState<QaRunRecord[]>([]);
@@ -32,6 +50,10 @@ export const QaAutomationView: React.FC = () => {
 
   // 实时执行弹窗
   const [activeRunSuite, setActiveRunSuite] = useState<QaSuite | null>(null);
+
+  const hasRunningQa = useMemo(() => {
+    return runs.some((r) => r.status === 'running' || (r as any).status === 'in_progress');
+  }, [runs]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -135,63 +157,68 @@ export const QaAutomationView: React.FC = () => {
 
   return (
     <div className="flex-1 h-full flex flex-col bg-[#f4f4f6] overflow-hidden select-none">
-      {/* 顶部工具栏 (符合 openLoop 统一极简风格，白底、细边框) */}
-      <div className="bg-white border-b border-[#e3e3e8] px-6 py-3.5 flex items-center justify-between shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-[15px] font-semibold text-[#1c1c21]">QA 自动化测试</h2>
-            <span className="text-[11px] font-mono text-[#85858d] bg-[#f4f4f6] border border-[#e3e3e8] px-2 py-[1px] rounded-[5px]">
-              {activeTab === 'runs' ? `${runs.length} 次任务记录` : `${suites.length} 个用例`}
+      {/* 顶部主子标签栏 (对齐 openLoop 极简设计系统与流程编排模块，子 Tab 切换位于左侧) */}
+      <div className="px-6 pt-3 pb-1 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-1 bg-[#ececf0] p-0.5 rounded-[7px] border border-[#e3e3e8]/70">
+          <button
+            type="button"
+            onClick={() => handleTabChange('runs')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-[5px] text-[11.5px] font-medium transition-all cursor-pointer ${
+              activeTab === 'runs'
+                ? 'bg-white text-[#1c1c21] shadow-2xs font-semibold'
+                : 'text-[#63636b] hover:text-[#1c1c21]'
+            }`}
+          >
+            <History size={13} className={activeTab === 'runs' ? 'text-[#1c1c21]' : 'text-[#85858d]'} />
+            <span>任务执行记录</span>
+            <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded bg-black/5 text-[#63636b]">
+              {runs.length}
             </span>
-          </div>
-          <p className="text-[12px] text-[#85858d] mt-0.5">
-            基于 Midscene 多模态视觉模型驱动浏览器 UI 自动化验证，支持时间轴与截图逐帧回放。
-          </p>
-        </div>
-
-        {/* 顶部右侧：Tab 标签切换与新建按钮 */}
-        <div className="flex items-center gap-2.5">
-          <div className="flex items-center gap-1 bg-[#ececf0] p-0.5 rounded-[6px]">
-            <button
-              onClick={() => setActiveTab('runs')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] text-[11.5px] font-medium transition-all cursor-pointer ${
-                activeTab === 'runs'
-                  ? 'bg-white text-[#1c1c21] shadow-2xs'
-                  : 'text-[#71717a] hover:text-[#1c1c21]'
-              }`}
-            >
-              <History size={12} />
-              <span>任务执行记录</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('suites')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] text-[11.5px] font-medium transition-all cursor-pointer ${
-                activeTab === 'suites'
-                  ? 'bg-white text-[#1c1c21] shadow-2xs'
-                  : 'text-[#71717a] hover:text-[#1c1c21]'
-              }`}
-            >
-              <Target size={12} />
-              <span>测试用例库</span>
-            </button>
-          </div>
+            {hasRunningQa && (
+              <span className="relative flex h-2 w-2 ml-0.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+              </span>
+            )}
+          </button>
 
           <button
-            onClick={() => {
-              setEditingSuite(null);
-              setIsEditorOpen(true);
-            }}
-            className="flex items-center gap-1 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs cursor-pointer"
+            type="button"
+            onClick={() => handleTabChange('suites')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-[5px] text-[11.5px] font-medium transition-all cursor-pointer ${
+              activeTab === 'suites'
+                ? 'bg-white text-[#1c1c21] shadow-2xs font-semibold'
+                : 'text-[#63636b] hover:text-[#1c1c21]'
+            }`}
           >
-            <Plus size={12} strokeWidth={2.4} />
-            <span>新建用例</span>
+            <Target size={13} className={activeTab === 'suites' ? 'text-[#1c1c21]' : 'text-[#85858d]'} />
+            <span>测试用例库</span>
+            <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded bg-black/5 text-[#63636b]">
+              {suites.length}
+            </span>
           </button>
         </div>
+
+        {activeTab === 'suites' && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (import.meta.env?.DEV) console.log('[QaAutomationView] 点击新建用例');
+                setEditingSuite(null);
+                setIsEditorOpen(true);
+              }}
+              className="flex items-center gap-1.5 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs cursor-pointer"
+            >
+              <Plus size={13} strokeWidth={2.4} />
+              <span>新建用例</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 主视图内容区域 */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6 pt-3.5">
+      <div className="flex-1 overflow-y-auto px-6 pb-6 pt-2">
         {activeTab === 'runs' ? (
           <QaRunsListView
             runs={runs}
