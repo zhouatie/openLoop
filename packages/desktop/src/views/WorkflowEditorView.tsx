@@ -18,6 +18,7 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import {
+  Plus,
   Bot,
   Zap,
   Target,
@@ -92,49 +93,56 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
 
   const typeConfig: Record<
     NodeType,
-    { label: string; icon: React.ReactNode; bg: string; text: string }
+    { label: string; icon: React.ReactNode; bg: string; text: string; border: string }
   > = {
     agent: {
       label: 'Agent 编码',
-      icon: <Bot size={11} />,
+      icon: <Bot size={12} strokeWidth={2} />,
       bg: 'bg-[#eeedfd]',
       text: 'text-[#4f46e5]',
+      border: 'border-[#d8d6fb]',
     },
     hook: {
       label: 'Hook 触发',
-      icon: <Zap size={11} />,
-      bg: 'bg-[#fbf0df]',
-      text: 'text-[#b45309]',
+      icon: <Zap size={12} strokeWidth={2} />,
+      bg: 'bg-[#ffedd5]',
+      text: 'text-[#c2410c]',
+      border: 'border-[#fed7aa]',
     },
     midscene: {
       label: 'Midscene 测试',
-      icon: <Target size={11} />,
+      icon: <Target size={12} strokeWidth={2} />,
       bg: 'bg-[#e4f6ec]',
-      text: 'text-[#189a58]',
+      text: 'text-[#15803d]',
+      border: 'border-[#bbf7d0]',
     },
     'stitch-image': {
-      label: '截图拼接动图',
-      icon: <FileVideo size={11} />,
+      label: '拼接动图',
+      icon: <FileVideo size={12} strokeWidth={2} />,
       bg: 'bg-[#eff6ff]',
       text: 'text-[#1d4ed8]',
+      border: 'border-[#bfdbfe]',
     },
     'qa-approval': {
       label: 'QA 审核验收',
-      icon: <CheckSquare size={11} />,
-      bg: 'bg-[#fbf0df]',
+      icon: <CheckSquare size={12} strokeWidth={2} />,
+      bg: 'bg-[#fef3c7]',
       text: 'text-[#b45309]',
+      border: 'border-[#fde68a]',
     },
     cli: {
       label: 'CLI 脚本',
-      icon: <Terminal size={11} />,
-      bg: 'bg-[#f1f1f4]',
+      icon: <Terminal size={12} strokeWidth={2} />,
+      bg: 'bg-[#f4f4f6]',
       text: 'text-[#4b4b53]',
+      border: 'border-[#e3e3e8]',
     },
     custom: {
       label: '插件扩展',
-      icon: <Sparkles size={11} />,
+      icon: <Sparkles size={12} strokeWidth={2} />,
       bg: 'bg-[#fdf2f8]',
       text: 'text-[#db2777]',
+      border: 'border-[#fbcfe8]',
     },
   };
 
@@ -146,9 +154,10 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
     if (isGit) {
       return {
         label: 'Git 提交',
-        icon: <GitCommit size={11} />,
-        bg: 'bg-[#1c1c21] text-white',
-        text: 'text-[#1c1c21]',
+        icon: <GitCommit size={12} strokeWidth={2} />,
+        bg: 'bg-[#1c1c21]',
+        text: 'text-white',
+        border: 'border-[#1c1c21]',
       };
     }
     const isDeploy =
@@ -159,9 +168,10 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
     if (isDeploy) {
       return {
         label: '应用部署',
-        icon: <Rocket size={11} />,
-        bg: 'bg-[#0f172a] text-[#38bdf8]',
-        text: 'text-[#0f172a]',
+        icon: <Rocket size={12} strokeWidth={2} />,
+        bg: 'bg-[#0f172a]',
+        text: 'text-[#38bdf8]',
+        border: 'border-[#0f172a]',
       };
     }
     return typeConfig[type] || typeConfig.cli;
@@ -169,100 +179,134 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
 
   const nodeStatusClasses = useMemo(() => {
     if (isGhost) {
-      return 'border-2 border-dashed border-[#8b5cf6] bg-[#faf8ff] ring-3 ring-[#8b5cf6]/20 shadow-[0_0_18px_rgba(139,92,246,0.25)] animate-pulse';
+      return 'border-2 border-dashed border-[#8b5cf6] bg-[#faf8ff] ring-4 ring-[#8b5cf6]/15 shadow-[0_0_20px_rgba(139,92,246,0.2)] animate-pulse';
     }
     if (executionStatus === 'running') {
-      return 'border-[#3b82f6] bg-[#f8faff] ring-2 ring-[#3b82f6]/40 shadow-[0_0_16px_rgba(59,130,246,0.25)] animate-pulse';
+      return 'border-[#3b82f6] bg-[#f8faff] ring-4 ring-[#3b82f6]/20 shadow-[0_4px_20px_rgba(59,130,246,0.2)] animate-pulse';
     }
     if (executionStatus === 'success') {
-      return 'border-[#10b981] bg-white ring-1 ring-[#10b981]/30 shadow-[0_1px_4px_rgba(16,185,129,0.12)]';
+      return 'border-[#10b981] bg-white ring-2 ring-[#10b981]/20 shadow-[0_2px_8px_rgba(16,185,129,0.12)]';
     }
     if (executionStatus === 'failed') {
-      return 'border-[#ef4444] bg-[#fef2f2] ring-1 ring-[#ef4444]/30 shadow-[0_1px_4px_rgba(239,68,68,0.12)]';
+      return 'border-[#ef4444] bg-[#fffbfb] ring-2 ring-[#ef4444]/20 shadow-[0_2px_8px_rgba(239,68,68,0.12)]';
     }
     if (executionStatus === 'waiting_approval') {
-      return 'border-[#f59e0b] bg-[#fffbeb] ring-2 ring-[#f59e0b]/40 shadow-[0_0_14px_rgba(245,158,11,0.2)] animate-pulse';
+      return 'border-[#f59e0b] bg-[#fffdf5] ring-4 ring-[#f59e0b]/25 shadow-[0_4px_18px_rgba(245,158,11,0.2)] animate-pulse';
     }
     if (selected) {
-      return 'border-[#4f46e5] bg-white shadow-[0_0_0_2px_rgba(79,70,229,0.2),0_4px_12px_rgba(0,0,0,0.08)]';
+      return 'border-[#4f46e5] bg-white ring-3 ring-[#4f46e5]/15 shadow-[0_4px_16px_rgba(79,70,229,0.12)]';
     }
     if (isNew) {
-      return 'border-[#6366f1] bg-white ring-2 ring-[#6366f1]/40 shadow-[0_0_14px_rgba(99,102,241,0.2)]';
+      return 'border-[#6366f1] bg-white ring-3 ring-[#6366f1]/20 shadow-[0_2px_12px_rgba(99,102,241,0.15)]';
     }
-    return 'border-[#e3e3e8] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:border-[#b9b9c2]';
+    return 'border-[#e3e3e8] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)] hover:border-[#b9b9c2]';
   }, [isGhost, executionStatus, selected, isNew]);
 
   return (
     <div
-      className={`w-[195px] rounded-[7px] px-2.5 py-2 transition-all relative ${nodeStatusClasses}`}
+      className={`w-[230px] rounded-[12px] p-3 transition-all relative ${nodeStatusClasses}`}
     >
       <Handle
         type="target"
         position={Position.Top}
-        className={`w-2 h-2 border-[1.5px] border-white ${isGhost ? 'bg-[#8b5cf6]' : 'bg-[#4f46e5]'}`}
+        className={`w-2.5 h-2.5 border-2 ${
+          isGhost
+            ? 'bg-[#8b5cf6] border-white'
+            : selected
+            ? 'bg-[#4f46e5] border-white'
+            : 'bg-white border-[#85858d]'
+        }`}
       />
 
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-1.5">
-          <span className={`p-0.5 rounded-[3px] ${currentConfig.bg} ${currentConfig.text}`}>
+      {/* 头部：类型徽标与运行状态/ID */}
+      <div className="flex items-center justify-between gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[5px] text-[10px] font-semibold tracking-wide border ${currentConfig.bg} ${currentConfig.text} ${currentConfig.border}`}
+          >
             {currentConfig.icon}
-          </span>
-          <span className={`text-[9.5px] font-semibold tracking-wide ${currentConfig.text}`}>
-            {currentConfig.label}
+            <span>{currentConfig.label}</span>
           </span>
         </div>
-        <div className="flex items-center gap-1">
+
+        <div className="flex items-center gap-1 shrink-0">
           {isGhost ? (
-            <span className="flex items-center gap-0.5 text-[8.5px] px-1.5 py-[0.5px] rounded-full bg-[#f3e8ff] text-[#7c3aed] font-medium border border-[#d8b4fe]">
-              <span className="w-1 h-1 rounded-full bg-[#7c3aed] animate-ping" />
+            <span className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-[#f3e8ff] text-[#7c3aed] font-medium border border-[#d8b4fe]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />
               AI预演
             </span>
           ) : executionStatus === 'running' ? (
-            <span className="flex items-center gap-1 text-[8.5px] px-1.5 py-[0.5px] rounded bg-[#eff6ff] text-[#2563eb] font-semibold border border-[#bfdbfe]">
-              <Loader2 size={9} className="animate-spin text-[#2563eb]" />
+            <span className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-[#eff6ff] text-[#2563eb] font-semibold border border-[#bfdbfe]">
+              <Loader2 size={10} className="animate-spin text-[#2563eb]" />
               执行中
             </span>
           ) : executionStatus === 'success' ? (
-            <span className="flex items-center gap-0.5 text-[8.5px] px-1.5 py-[0.5px] rounded bg-[#ecfdf5] text-[#059669] font-medium border border-[#a7f3d0]">
-              <CheckCircle2 size={9} className="text-[#059669]" />
+            <span className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-[#ecfdf5] text-[#059669] font-medium border border-[#a7f3d0]">
+              <CheckCircle2 size={10} className="text-[#059669]" />
               成功{executionDuration ? ` ${executionDuration}s` : ''}
             </span>
           ) : executionStatus === 'failed' ? (
-            <span className="flex items-center gap-0.5 text-[8.5px] px-1.5 py-[0.5px] rounded bg-[#fef2f2] text-[#dc2626] font-medium border border-[#fecaca]">
-              <AlertCircle size={9} className="text-[#dc2626]" />
+            <span className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-[#fef2f2] text-[#dc2626] font-medium border border-[#fecaca]">
+              <AlertCircle size={10} className="text-[#dc2626]" />
               失败
             </span>
           ) : executionStatus === 'waiting_approval' ? (
-            <span className="flex items-center gap-0.5 text-[8.5px] px-1.5 py-[0.5px] rounded bg-[#fffbeb] text-[#d97706] font-medium border border-[#fde68a]">
-              <Clock size={9} className="text-[#d97706]" />
+            <span className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-[#fffbeb] text-[#d97706] font-medium border border-[#fde68a]">
+              <Clock size={10} className="text-[#d97706]" />
               待审批
             </span>
           ) : isNew ? (
-            <span className="text-[8.5px] px-1 py-[0.5px] rounded bg-[#eeedfd] text-[#4f46e5] font-medium scale-95">
-              已生效
+            <span className="text-[9px] px-1 py-0.5 rounded bg-[#eeedfd] text-[#4f46e5] font-medium">
+              新增加
             </span>
-          ) : null}
-          <span className="text-[9px] font-mono text-[#85858d]">{nodeData.id}</span>
+          ) : (
+            <span className="text-[9.5px] font-mono text-[#85858d]">{nodeData.id}</span>
+          )}
         </div>
       </div>
 
-      <div className="text-[11.5px] font-medium text-[#1c1c21] truncate leading-tight">{nodeData.name}</div>
-
-      <div className={`mt-1 text-[9px] font-mono px-1.5 py-0.5 rounded-[3px] truncate border ${
-        isGhost ? 'bg-[#f5f3ff] text-[#6b21a8] border-[#e9d5ff]' : 'text-[#85858d] bg-[#f9f9fb] border-[#ececf0]'
-      }`}>
-        {type === 'agent' && (nodeData.config?.prompt || 'Agent 自动实现需求')}
-        {type === 'midscene' && (nodeData.config?.testUrl || '智能断言与多步截屏')}
-        {type === 'stitch-image' && (nodeData.config?.outputFile || '生成动图 preview.gif')}
-        {type === 'hook' && (nodeData.config?.webhookUrl || '完成事件广播 -> 自动流转')}
-        {type === 'qa-approval' && (nodeData.config?.approvalPrompt || '人工与用例核验确认')}
-        {type === 'cli' && (nodeData.config?.command || '执行命令行指令')}
+      {/* 节点名称 */}
+      <div className="text-[12.5px] font-semibold text-[#1c1c21] leading-snug line-clamp-2 mt-2 mb-1.5">
+        {nodeData.name}
       </div>
 
-      {/* 编排调试执行状态与快捷日志入口 */}
+      {/* 节点配置/指令预览胶囊 */}
+      <div
+        className={`text-[10px] font-mono px-2 py-1 rounded-[6px] truncate border flex items-center gap-1 ${
+          isGhost
+            ? 'bg-[#f5f3ff] text-[#6b21a8] border-[#e9d5ff]'
+            : 'text-[#63636b] bg-[#f8f8fa] border-[#ececf0]'
+        }`}
+        title={
+          type === 'agent'
+            ? nodeData.config?.prompt
+            : type === 'midscene'
+            ? nodeData.config?.testUrl
+            : type === 'stitch-image'
+            ? nodeData.config?.outputFile
+            : type === 'hook'
+            ? nodeData.config?.webhookUrl
+            : type === 'qa-approval'
+            ? nodeData.config?.approvalPrompt
+            : nodeData.config?.command
+        }
+      >
+        <span className="text-[#85858d] select-none">&gt;_</span>
+        <span className="truncate">
+          {type === 'agent' && (nodeData.config?.prompt || 'Agent 自动实现需求')}
+          {type === 'midscene' && (nodeData.config?.testUrl || '智能断言与多步截屏')}
+          {type === 'stitch-image' && (nodeData.config?.outputFile || '生成动图 preview.gif')}
+          {type === 'hook' && (nodeData.config?.webhookUrl || '完成事件广播 -> 自动流转')}
+          {type === 'qa-approval' && (nodeData.config?.approvalPrompt || '人工与用例核验确认')}
+          {type === 'cli' && (nodeData.config?.command || '执行命令行指令')}
+          {type === 'custom' && (nodeData.config?.pluginId || '扩展插件自定义执行')}
+        </span>
+      </div>
+
+      {/* 调试状态行与日志入口 */}
       {Boolean(executionStatus) && (
-        <div className="mt-1.5 pt-1 border-t border-[#ececf0] flex items-center justify-between text-[9px]">
-          <span className="truncate max-w-[130px]">
+        <div className="mt-2 pt-1.5 border-t border-[#ececf0] flex items-center justify-between text-[10px]">
+          <span className="truncate max-w-[150px]">
             {executionError ? (
               <span className="text-[#dc2626] font-medium" title={executionError}>
                 报错: {executionError}
@@ -290,7 +334,7 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
               className="text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
             >
               <span>日志</span>
-              <ArrowRight size={8} />
+              <ArrowRight size={9} />
             </button>
           )}
         </div>
@@ -299,7 +343,13 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
       <Handle
         type="source"
         position={Position.Bottom}
-        className={`w-2 h-2 border-[1.5px] border-white ${isGhost ? 'bg-[#8b5cf6]' : 'bg-[#4f46e5]'}`}
+        className={`w-2.5 h-2.5 border-2 ${
+          isGhost
+            ? 'bg-[#8b5cf6] border-white'
+            : selected
+            ? 'bg-[#4f46e5] border-white'
+            : 'bg-white border-[#85858d]'
+        }`}
       />
     </div>
   );
@@ -376,9 +426,10 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const [isApprovingGate, setIsApprovingGate] = useState(false);
   const dismissedDebugTaskIdsRef = useRef<Set<string>>(new Set());
 
-  // 右侧边栏展开与标签页状态
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  // 右侧边栏展开与标签页状态 (默认纯净全景画布，点击节点或手动唤起展开)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<'copilot' | 'inspector'>('copilot');
+  const [isPaletteCollapsed, setIsPaletteCollapsed] = useState(false);
   const [qaSuites, setQaSuites] = useState<any[]>([]);
 
   useEffect(() => {
@@ -600,6 +651,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     }
     setSelectedEdgeId(null);
     setSelectedNodeId(node.id);
+    setSidebarTab('inspector');
     setIsSidebarOpen(true);
   };
 
@@ -1733,23 +1785,27 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">
-      {/* 编排器顶栏 */}
-      <div className="h-[46px] px-4 bg-white border-b border-[#e3e3e8] flex items-center justify-between shrink-0 z-20">
-        <div className="flex items-center gap-3">
+      {/* 编排器顶栏 (openLoop 极简设计系统，极致克制与现代感) */}
+      <div className="h-[48px] px-4 bg-white border-b border-[#e3e3e8] flex items-center justify-between shrink-0 z-20">
+        <div className="flex items-center gap-2.5 shrink-0">
           {/* 返回按钮 */}
           <button
-            onClick={onBack}
-            className="flex items-center gap-1 h-[26px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11.5px] font-medium text-[#4b4b53] transition-all shadow-xs"
+            onClick={() => {
+              if (import.meta.env?.DEV) console.log('[WorkflowEditor] 返回流程列表');
+              onBack();
+            }}
+            className="flex items-center gap-1 h-[28px] px-2 rounded-[6px] hover:bg-[#f1f1f4] text-[12px] font-medium text-[#63636b] hover:text-[#1c1c21] transition-all cursor-pointer whitespace-nowrap"
+            title="返回流程列表"
           >
-            <ArrowLeft size={12} />
-            <span>返回列表</span>
+            <ArrowLeft size={13} strokeWidth={2} />
+            <span>返回</span>
           </button>
 
-          <span className="text-[#e3e3e8]">|</span>
+          <div className="w-[1px] h-3.5 bg-[#e3e3e8] shrink-0" />
 
           {/* 流程名称与快速修改 */}
           {isEditingTitle ? (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 shrink-0">
               <input
                 autoFocus
                 type="text"
@@ -1776,7 +1832,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   }
                   setIsEditingTitle(false);
                 }}
-                className="h-[26px] px-2 text-[13px] font-semibold text-[#1c1c21] bg-[#f9f9fb] border border-[#4f46e5] rounded-[5px] outline-none shadow-xs"
+                className="h-[28px] px-2 text-[13px] font-semibold text-[#1c1c21] bg-[#f9f9fb] border border-[#4f46e5] rounded-[6px] outline-none shadow-xs"
               />
               <button
                 type="button"
@@ -1788,10 +1844,10 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   }
                   setIsEditingTitle(false);
                 }}
-                className="p-1 rounded hover:bg-[#e4f6ec] text-[#189a58] transition-colors"
+                className="p-1 rounded hover:bg-[#e4f6ec] text-[#189a58] transition-colors cursor-pointer"
                 title="确定修改"
               >
-                <Check size={12} strokeWidth={2.4} />
+                <Check size={13} strokeWidth={2.4} />
               </button>
               <button
                 type="button"
@@ -1799,20 +1855,20 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   setTitleDraft(workflowName);
                   setIsEditingTitle(false);
                 }}
-                className="p-1 rounded hover:bg-[#f1f1f4] text-[#85858d] transition-colors"
+                className="p-1 rounded hover:bg-[#f1f1f4] text-[#85858d] transition-colors cursor-pointer"
                 title="取消修改"
               >
-                <X size={12} />
+                <X size={13} />
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 group/title">
+            <div className="flex items-center gap-1.5 shrink-0 group/title">
               <span
                 onClick={() => {
                   setTitleDraft(workflowName);
                   setIsEditingTitle(true);
                 }}
-                className="text-[13px] font-semibold text-[#1c1c21] hover:text-[#4f46e5] cursor-pointer transition-colors"
+                className="text-[13.5px] font-semibold text-[#1c1c21] hover:text-[#4f46e5] cursor-pointer transition-colors whitespace-nowrap max-w-[200px] truncate"
                 title="点击重命名流程"
               >
                 {workflowName || activeWorkflow.name}
@@ -1823,57 +1879,71 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   setTitleDraft(workflowName);
                   setIsEditingTitle(true);
                 }}
-                className="p-0.5 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] opacity-0 group-hover/title:opacity-100 transition-all"
+                className="p-0.5 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] opacity-0 group-hover/title:opacity-100 transition-all cursor-pointer"
                 title="快速重命名"
               >
                 <Edit3 size={11} />
               </button>
-              <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0]">
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    navigator.clipboard.writeText(activeWorkflow.id);
+                    toast.success(`流程 ID 已复制: ${activeWorkflow.id}`);
+                  } catch {}
+                }}
+                className="text-[10px] font-mono text-[#85858d] hover:text-[#1c1c21] bg-[#f4f4f7] hover:bg-[#ececf0] px-1.5 py-[1.5px] rounded border border-[#ececf0] transition-colors whitespace-nowrap cursor-pointer shrink-0 max-w-[120px] truncate"
+                title="点击复制流程 ID"
+              >
                 {activeWorkflow.id}
-              </span>
+              </button>
             </div>
           )}
 
-          <div className="text-[11.5px] text-[#85858d] font-mono">
-            ({nodes.length} 节点 · {edges.length} 连线)
+          <div className="text-[10.5px] text-[#85858d] font-mono whitespace-nowrap shrink-0">
+            ({nodes.length} 节点)
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* 右侧动作群 */}
+        <div className="flex items-center gap-1.5 shrink-0">
           {undoSnapshot && (
             <button
               onClick={handleUndo}
-              className="flex items-center gap-1 px-2.5 h-[26px] rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11.5px] font-medium text-[#4b4b53] transition-all shadow-xs"
+              className="flex items-center gap-1 h-[28px] px-2 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11px] font-medium text-[#4b4b53] transition-all shadow-2xs whitespace-nowrap cursor-pointer"
               title="撤销上一次编排变更"
             >
-              <Undo2 size={12} />
-              <span>撤销变更</span>
+              <Undo2 size={11.5} />
+              <span>撤销</span>
             </button>
           )}
 
           {/* 自动排版按钮 */}
           <button
-            onClick={handleAutoLayout}
-            className="flex items-center gap-1 px-2.5 h-[26px] rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11.5px] font-medium text-[#4b4b53] transition-all shadow-xs"
-            title="使用 DAG 层次算法自动整齐对齐连线"
+            onClick={() => {
+              if (import.meta.env?.DEV) console.log('[WorkflowEditor] 自动排版 DAG 拓扑');
+              handleAutoLayout();
+            }}
+            className="flex items-center gap-1 h-[28px] px-2 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11px] font-medium text-[#4b4b53] transition-all shadow-2xs whitespace-nowrap cursor-pointer"
+            title="使用 DAG 层次算法自动对齐连线"
           >
-            <LayoutGrid size={12} className="text-[#4f46e5]" />
-            <span>自动排版</span>
+            <LayoutGrid size={11.5} className="text-[#4f46e5]" />
+            <span>排版</span>
           </button>
 
           {/* 复制流程 */}
           <button
             onClick={handleDuplicateCurrentWorkflow}
             disabled={isDuplicating}
-            className="flex items-center gap-1 px-2.5 h-[26px] rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11.5px] font-medium text-[#4b4b53] transition-all shadow-xs disabled:opacity-50"
+            className="flex items-center gap-1 h-[28px] px-2 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11px] font-medium text-[#4b4b53] transition-all shadow-2xs disabled:opacity-50 whitespace-nowrap cursor-pointer"
             title="克隆当前编排副本"
           >
             {isDuplicating ? (
-              <Loader2 size={11.5} className="animate-spin text-[#4f46e5]" />
+              <Loader2 size={11} className="animate-spin text-[#4f46e5]" />
             ) : (
-              <Copy size={11.5} />
+              <Copy size={11} />
             )}
-            <span>复制</span>
+            <span>克隆</span>
           </button>
 
           {/* 属性配置面板开关 */}
@@ -1886,15 +1956,15 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                 setSidebarTab('inspector');
               }
             }}
-            className={`flex items-center gap-1.5 px-2.5 h-[26px] rounded-[6px] border text-[11.5px] font-medium transition-all shadow-xs ${
+            className={`flex items-center gap-1 h-[28px] px-2 rounded-[6px] border text-[11px] font-medium transition-all shadow-2xs whitespace-nowrap cursor-pointer ${
               isSidebarOpen && sidebarTab === 'inspector'
                 ? 'bg-[#1c1c21] border-[#1c1c21] text-white'
                 : 'bg-white border-[#e3e3e8] hover:bg-[#f1f1f4] text-[#4b4b53]'
             }`}
             title="查看属性与配置"
           >
-            <Settings2 size={12} />
-            <span>{selectedNode ? '节点属性' : selectedEdge ? '连线属性' : '流程配置'}</span>
+            <Settings2 size={11.5} />
+            <span>{selectedNode ? '属性' : '配置'}</span>
             {(selectedNode || selectedEdge) && (
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
@@ -1907,13 +1977,13 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           {/* 删除流程 */}
           <button
             onClick={() => setIsDeleteModalOpen(true)}
-            className="flex items-center justify-center w-[26px] h-[26px] rounded-[6px] border border-transparent hover:border-[#ffe4e6] text-[#85858d] hover:bg-[#fff1f2] hover:text-[#e11d48] transition-all"
+            className="flex items-center justify-center w-[26px] h-[28px] rounded-[6px] text-[#85858d] hover:bg-[#fff1f2] hover:text-[#e11d48] transition-all cursor-pointer"
             title="删除此流程"
           >
             <Trash2 size={12} />
           </button>
 
-          <span className="text-[#e3e3e8]">|</span>
+          <div className="w-[1px] h-3.5 bg-[#e3e3e8]" />
 
           {/* AI 编排助手唤起按钮 */}
           <button
@@ -1925,7 +1995,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                 setSidebarTab('copilot');
               }
             }}
-            className={`flex items-center gap-1.5 px-3 h-[26px] rounded-[6px] border transition-all shadow-xs text-[11.5px] font-medium ${
+            className={`flex items-center gap-1.5 h-[28px] px-2.5 rounded-[6px] border transition-all shadow-2xs text-[11px] font-medium whitespace-nowrap cursor-pointer ${
               isSidebarOpen && sidebarTab === 'copilot'
                 ? 'bg-[#eeedfd] border-[#c7d2fe] text-[#4f46e5]'
                 : 'bg-white border-[#e3e3e8] hover:bg-[#f1f1f4] text-[#1c1c21]'
@@ -1933,27 +2003,27 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             title="展开/收起 AI 编排助手"
           >
             <Sparkles
-              size={12}
+              size={11.5}
               className={copilotState?.isBusy ? 'text-[#7c3aed] animate-spin' : 'text-[#4f46e5]'}
             />
-            <span>AI 编排助手</span>
+            <span>AI 助手</span>
             {copilotState?.isBusy && (
               <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-pulse" />
             )}
           </button>
 
-          <span className="text-[#e3e3e8]">|</span>
+          <div className="w-[1px] h-3.5 bg-[#e3e3e8]" />
 
           {saveStatus && (
-            <span className="text-[11.5px] text-[#189a58] font-medium">{saveStatus}</span>
+            <span className="text-[11px] text-[#189a58] font-medium whitespace-nowrap">{saveStatus}</span>
           )}
 
           <button
             onClick={handleSave}
-            className="flex items-center gap-1 px-3 h-[26px] rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[12px] font-medium text-[#1c1c21] transition-all shadow-xs"
+            className="flex items-center gap-1 h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11px] font-medium text-[#1c1c21] transition-all shadow-2xs whitespace-nowrap cursor-pointer"
           >
-            <Save size={13} />
-            <span>保存编排</span>
+            <Save size={11.5} />
+            <span>保存</span>
           </button>
 
           {/* 编排调试按钮组 */}
@@ -1961,23 +2031,23 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
             <button
               onClick={handleRunNow}
               disabled={isRunningDebug}
-              className="flex items-center gap-1 px-2.5 h-[26px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[12px] font-medium text-white transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-              title="配置并启动流水线编排调试"
+              className="flex items-center gap-1 px-2.5 h-[28px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[11px] font-medium text-white transition-all active:scale-95 disabled:opacity-60 cursor-pointer whitespace-nowrap"
+              title="启动流水线编排调试"
             >
               {isRunningDebug ? (
-                <Loader2 size={12} className="animate-spin" />
+                <Loader2 size={11} className="animate-spin" />
               ) : (
-                <Play size={11.5} strokeWidth={2.4} className="text-[#10b981]" />
+                <Play size={10} strokeWidth={2.4} className="text-[#10b981]" />
               )}
-              <span>{isRunningDebug ? '启动中...' : '立即调试'}</span>
+              <span>{isRunningDebug ? '调试中...' : '立即调试'}</span>
             </button>
             <button
               onClick={() => setIsDebugModalOpen(true)}
               disabled={isRunningDebug}
-              className="px-1.5 h-[26px] bg-[#2e2f36] hover:bg-[#3f404a] text-white/90 border-l border-white/20 flex items-center justify-center transition-all cursor-pointer disabled:opacity-60"
+              className="px-1.5 h-[28px] bg-[#2e2f36] hover:bg-[#3f404a] text-white/90 border-l border-white/20 flex items-center justify-center transition-all cursor-pointer disabled:opacity-60"
               title="配置调试参数并启动 (输入需求/关联工程工作区)"
             >
-              <ChevronDown size={11} />
+              <ChevronDown size={10} />
             </button>
           </div>
         </div>
@@ -2167,68 +2237,121 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
 
       {/* 画布核心与协同侧栏 */}
       <div className="flex-1 relative flex overflow-hidden">
-        {/* 左侧节点组件库悬浮栏 */}
-        <div className="absolute top-4 left-4 z-10 bg-white/95 backdrop-blur border border-[#e3e3e8] rounded-[10px] p-2 shadow-[0_4px_16px_rgba(0,0,0,0.06)] flex flex-col gap-1 w-44">
-          <div className="px-2 py-1 text-[10px] font-semibold text-[#85858d] tracking-wide flex items-center justify-between">
-            <span>+ 组件节点库</span>
-            <Layers size={11} className="text-[#85858d]" />
-          </div>
-          <button
-            onClick={() => addNode('agent', 'Agent 编码')}
-            className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
-          >
-            <Bot size={13} className="text-[#4f46e5]" />
-            <span>Agent 接入</span>
-          </button>
-          <button
-            onClick={() => addNode('hook', '开发完成 Hook')}
-            className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
-          >
-            <Zap size={13} className="text-[#b45309]" />
-            <span>Hook 调度流转</span>
-          </button>
-          <button
-            onClick={() => addNode('midscene', 'Midscene UI 验证')}
-            className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
-          >
-            <Target size={13} className="text-[#189a58]" />
-            <span>Midscene 自动化</span>
-          </button>
-          <button
-            onClick={() => addNode('stitch-image', '拼接动图 CLI')}
-            className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
-          >
-            <FileVideo size={13} className="text-[#1d4ed8]" />
-            <span>拼接动图 CLI</span>
-          </button>
-          <button
-            onClick={() => addNode('qa-approval', 'QA 用例人工验收')}
-            className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
-          >
-            <CheckSquare size={13} className="text-[#b45309]" />
-            <span>QA 人工/用例验收</span>
-          </button>
-          <button
-            onClick={() => addNode('git-commit', 'Git 自动提交代码')}
-            className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
-          >
-            <GitCommit size={13} className="text-[#1c1c21]" />
-            <span>Git 自动提交代码</span>
-          </button>
-          <button
-            onClick={() => addNode('deploy', '生产应用部署')}
-            className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
-          >
-            <Rocket size={13} className="text-[#0284c7]" />
-            <span>生产应用部署</span>
-          </button>
-          <button
-            onClick={() => addNode('cli', '通用 CLI 命令')}
-            className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all"
-          >
-            <Terminal size={13} className="text-[#85858d]" />
-            <span>Shell CLI 脚本</span>
-          </button>
+        {/* 左侧节点组件库悬浮栏 (极简折叠式胶囊坞) */}
+        <div className="absolute top-4 left-4 z-10 bg-white/95 backdrop-blur-md border border-[#e3e3e8] rounded-[10px] shadow-[0_4px_16px_rgba(0,0,0,0.06)] overflow-hidden transition-all duration-200">
+          {isPaletteCollapsed ? (
+            <button
+              onClick={() => {
+                if (import.meta.env?.DEV) console.log('[WorkflowEditor] 展开组件节点库');
+                setIsPaletteCollapsed(false);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] font-medium text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f1f1f4] transition-all cursor-pointer whitespace-nowrap"
+              title="展开组件节点库"
+            >
+              <Plus size={13} strokeWidth={2.4} className="text-[#4f46e5]" />
+              <span>添加节点</span>
+              <Layers size={11} className="text-[#85858d] ml-1" />
+            </button>
+          ) : (
+            <div className="p-2 flex flex-col gap-1 w-[165px]">
+              <div className="px-1.5 py-1 text-[11px] font-semibold text-[#85858d] flex items-center justify-between border-b border-[#ececf0] mb-0.5">
+                <span className="flex items-center gap-1 text-[#1c1c21]">
+                  <Layers size={12} className="text-[#4f46e5]" />
+                  <span>组件节点库</span>
+                </span>
+                <button
+                  onClick={() => {
+                    if (import.meta.env?.DEV) console.log('[WorkflowEditor] 收起组件节点库');
+                    setIsPaletteCollapsed(true);
+                  }}
+                  className="p-0.5 rounded hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#1c1c21] transition-colors cursor-pointer"
+                  title="收起节点库"
+                >
+                  <ChevronDown size={12} />
+                </button>
+              </div>
+
+              <button
+                onClick={() => addNode('agent', 'Agent 编码')}
+                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+              >
+                <span className="w-4 h-4 rounded bg-[#eeedfd] text-[#4f46e5] flex items-center justify-center shrink-0">
+                  <Bot size={11} />
+                </span>
+                <span className="truncate">Agent 编码</span>
+              </button>
+
+              <button
+                onClick={() => addNode('cli', 'CLI 脚本')}
+                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+              >
+                <span className="w-4 h-4 rounded bg-[#f4f4f6] text-[#4b4b53] flex items-center justify-center shrink-0">
+                  <Terminal size={11} />
+                </span>
+                <span className="truncate">Shell 脚本</span>
+              </button>
+
+              <button
+                onClick={() => addNode('qa-approval', 'QA 门禁验收')}
+                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+              >
+                <span className="w-4 h-4 rounded bg-[#fef3c7] text-[#b45309] flex items-center justify-center shrink-0">
+                  <CheckSquare size={11} />
+                </span>
+                <span className="truncate">QA 门禁验收</span>
+              </button>
+
+              <button
+                onClick={() => addNode('midscene', 'UI 自动化')}
+                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+              >
+                <span className="w-4 h-4 rounded bg-[#e4f6ec] text-[#15803d] flex items-center justify-center shrink-0">
+                  <Target size={11} />
+                </span>
+                <span className="truncate">Midscene 测试</span>
+              </button>
+
+              <button
+                onClick={() => addNode('stitch-image', '拼接动图')}
+                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+              >
+                <span className="w-4 h-4 rounded bg-[#eff6ff] text-[#1d4ed8] flex items-center justify-center shrink-0">
+                  <FileVideo size={11} />
+                </span>
+                <span className="truncate">拼接动图 CLI</span>
+              </button>
+
+              <button
+                onClick={() => addNode('git-commit', 'Git 提交')}
+                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+              >
+                <span className="w-4 h-4 rounded bg-[#1c1c21] text-white flex items-center justify-center shrink-0">
+                  <GitCommit size={11} />
+                </span>
+                <span className="truncate">Git 自动提交</span>
+              </button>
+
+              <button
+                onClick={() => addNode('deploy', '应用部署')}
+                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+              >
+                <span className="w-4 h-4 rounded bg-[#0f172a] text-[#38bdf8] flex items-center justify-center shrink-0">
+                  <Rocket size={11} />
+                </span>
+                <span className="truncate">应用部署</span>
+              </button>
+
+              <button
+                onClick={() => addNode('hook', 'Hook 触发')}
+                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+              >
+                <span className="w-4 h-4 rounded bg-[#ffedd5] text-[#c2410c] flex items-center justify-center shrink-0">
+                  <Zap size={11} />
+                </span>
+                <span className="truncate">Hook 调度</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* 零手动编排欢迎态（Empty / Welcome State Overlay，当节点数 <= 1 且无幽灵预演时出现） */}
@@ -2367,7 +2490,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
 
         {/* 右侧工作台侧栏 (AI 编排助手 & 属性配置) */}
         {isSidebarOpen && (
-          <div className="w-[420px] 2xl:w-[460px] border-l border-[#e3e3e8] bg-white flex flex-col z-20 shadow-[-4px_0_16px_rgba(0,0,0,0.04)] animate-in slide-in-from-right duration-200">
+          <div className="w-[360px] border-l border-[#e3e3e8] bg-white flex flex-col z-20 shadow-[-4px_0_16px_rgba(0,0,0,0.04)] animate-in slide-in-from-right duration-200">
             {/* 顶栏 Tab 切换器 */}
             <div className="h-[42px] px-3 border-b border-[#e3e3e8] flex items-center justify-between shrink-0 bg-[#fafafc]">
               <div className="flex items-center gap-1">

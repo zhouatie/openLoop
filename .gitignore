@@ -12,6 +12,7 @@ out/
 *.log
 .run.log
 .pi/
+.playwright-cli/
 .DS_Store
 *.local
 

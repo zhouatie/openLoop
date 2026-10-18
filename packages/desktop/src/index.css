@@ -69,44 +69,59 @@ button {
   background: rgba(133, 133, 141, 0.48);
 }
 
-/* React Flow 画布调优为 magpie 浅灰网格 */
+/* React Flow 画布调优为 openLoop 极简设计系统 */
 .react-flow__background {
   background-color: var(--bg) !important;
 }
 
+.react-flow__attribution {
+  display: none !important;
+}
+
 .react-flow__handle {
-  width: 8px;
-  height: 8px;
-  background: var(--accent);
-  border: 1.5px solid #ffffff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  width: 9px !important;
+  height: 9px !important;
+  background: #ffffff !important;
+  border: 2px solid #85858d !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+  transition: all 0.15s ease !important;
+}
+
+.react-flow__handle:hover,
+.react-flow__node.selected .react-flow__handle {
+  border-color: #4f46e5 !important;
+  background: #4f46e5 !important;
+  transform: scale(1.2);
 }
 
 .react-flow__edge-path {
-  stroke: var(--faint);
+  stroke: #c7c7cf;
   stroke-width: 1.8;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease;
 }
 
-.react-flow__edge.selected .react-flow__edge-path {
-  stroke: var(--accent);
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #4f46e5;
   stroke-width: 2.2;
 }
 
 .react-flow__controls {
-  border-radius: 8px;
-  box-shadow: var(--seg-edge);
-  border: 1px solid var(--line);
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+  border: 1px solid var(--line) !important;
   overflow: hidden;
+  background: #ffffff !important;
 }
 
 .react-flow__controls-button {
-  background: #ffffff;
-  border-bottom: 1px solid var(--line-2);
-  fill: var(--fg-2);
+  background: #ffffff !important;
+  border-bottom: 1px solid var(--line-2) !important;
+  fill: var(--fg-2) !important;
 }
 
 .react-flow__controls-button:hover {
-  background: var(--pill);
+  background: var(--pill) !important;
 }
 
 /* ==========================================================================

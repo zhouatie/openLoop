@@ -23,12 +23,12 @@ export function layoutWorkflowDag(
   if (!nodes || nodes.length === 0) return [];
 
   const direction = options.direction || 'TB';
-  const nodeWidth = options.nodeWidth || 190;
-  const nodeHeight = options.nodeHeight || 68;
-  const gapX = options.gapX || 40;
-  const gapY = options.gapY || 48;
-  const startX = options.startX || 120;
-  const startY = options.startY || 60;
+  const nodeWidth = options.nodeWidth || 230;
+  const nodeHeight = options.nodeHeight || 84;
+  const gapX = options.gapX || 48;
+  const gapY = options.gapY || 56;
+  const startX = options.startX || 140;
+  const startY = options.startY || 80;
 
   // 1. 构建邻接表与入度统计
   const nodeMap = new Map<string, Node>();
