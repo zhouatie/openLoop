@@ -62,6 +62,7 @@ import {
   RotateCcw,
   SkipForward,
   Bug,
+  Cpu,
 } from 'lucide-react';
 import {
   WorkflowDefinition,
