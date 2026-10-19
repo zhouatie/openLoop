@@ -30,6 +30,8 @@ import {
   X,
   History,
   MoreHorizontal,
+  Tag as TagIcon,
+  Tags as TagsIcon,
 } from 'lucide-react';
 import { WorkflowDefinition, NodeType, Task } from '@openloop/core';
 import { api } from '../services/api';
@@ -37,6 +39,7 @@ import { EditWorkflowModal } from '../components/EditWorkflowModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { DebugWorkflowModal } from '../components/DebugWorkflowModal';
 import { toast } from '../components/Toast';
+import { TagInput } from '../components/TagInput';
 import { WorkflowExecutionHistoryView } from './workflow/WorkflowExecutionHistoryView';
 
 const STORAGE_KEY_PINNED_WORKFLOWS = 'openloop_pinned_workflow_ids';
@@ -109,6 +112,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
+  const [newTags, setNewTags] = useState<string[]>([]);
   const [templateType, setTemplateType] = useState<'feature_dev' | 'standard' | 'deploy' | 'empty'>('feature_dev');
   const [loading, setLoading] = useState(false);
 
@@ -146,6 +150,9 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     }
   });
   const [filterCategory, setFilterCategory] = useState<'all' | 'pinned' | 'agent' | 'qa'>('all');
+  const [selectedTag, setSelectedTag] = useState<string | 'all'>('all');
+  const [isTagMenuOpen, setIsTagMenuOpen] = useState(false);
+  const tagMenuRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // 切换视图模式
@@ -177,20 +184,23 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     }
   };
 
-  // 点击外部收起排序下拉菜单
+  // 点击外部收起排序下拉菜单与标签筛选菜单
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
         setIsSortOpen(false);
       }
+      if (tagMenuRef.current && !tagMenuRef.current.contains(e.target as Node)) {
+        setIsTagMenuOpen(false);
+      }
     };
-    if (isSortOpen) {
+    if (isSortOpen || isTagMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isSortOpen]);
+  }, [isSortOpen, isTagMenuOpen]);
 
   // 点击外部关闭行级操作下拉菜单
   useEffect(() => {
@@ -263,6 +273,24 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       console.log('[WorkflowListView] 切换排序规则:', newSort);
     }
   };
+
+  // 提取全部可用标签并统计频次 (排序使得高频如「工作」靠前)
+  const allAvailableTags = useMemo(() => {
+    const tagCountMap: Record<string, number> = {};
+    workflows.forEach((w) => {
+      if (Array.isArray(w.tags)) {
+        w.tags.forEach((t) => {
+          const trimmed = t?.trim();
+          if (trimmed) {
+            tagCountMap[trimmed] = (tagCountMap[trimmed] || 0) + 1;
+          }
+        });
+      }
+    });
+    return Object.keys(tagCountMap)
+      .sort((a, b) => tagCountMap[b] - tagCountMap[a] || a.localeCompare(b, 'zh-CN'))
+      .map((tag) => ({ name: tag, count: tagCountMap[tag] }));
+  }, [workflows]);
 
   // 分类统计项
   const counts = useMemo(() => {
@@ -470,14 +498,22 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
         if (filterCategory === 'agent' && !w.nodes.some((n) => n.type === 'agent')) return false;
         if (filterCategory === 'qa' && !w.nodes.some((n) => n.type === 'qa-approval')) return false;
 
-        // 关键词筛选
+        // 标签筛选
+        if (selectedTag !== 'all') {
+          if (!w.tags || !w.tags.includes(selectedTag)) {
+            return false;
+          }
+        }
+
+        // 关键词筛选 (匹配名称、ID、描述、节点名、分类标签)
         if (!searchTerm) return true;
         const kw = searchTerm.toLowerCase();
         return (
           w.name.toLowerCase().includes(kw) ||
           w.id.toLowerCase().includes(kw) ||
           (w.description && w.description.toLowerCase().includes(kw)) ||
-          w.nodes.some((n) => n.name.toLowerCase().includes(kw))
+          w.nodes.some((n) => n.name.toLowerCase().includes(kw)) ||
+          (w.tags && w.tags.some((t) => t.toLowerCase().includes(kw)))
         );
       })
       .sort((a, b) => {
@@ -505,7 +541,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
         }
         return 0;
       });
-  }, [workflows, searchTerm, pinnedIds, sortBy, filterCategory]);
+  }, [workflows, searchTerm, pinnedIds, sortBy, filterCategory, selectedTag]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -662,6 +698,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
         id,
         name: newTitle.trim(),
         description: newDesc.trim() || '自定义自动化编排流程',
+        tags: newTags,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         nodes,
@@ -672,6 +709,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       setIsCreateModalOpen(false);
       setNewTitle('');
       setNewDesc('');
+      setNewTags([]);
       toast.success(`流程「${newTitle.trim()}」创建成功`);
       onRefresh();
       // 直接打开新创建的流程画布
@@ -759,6 +797,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       id: newId,
       name: `${wf.name} (副本)`,
       description: wf.description || '',
+      tags: wf.tags ? [...wf.tags] : [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: JSON.parse(JSON.stringify(wf.nodes || [])),
@@ -796,10 +835,12 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     id,
     name,
     description,
+    tags,
   }: {
     id: string;
     name: string;
     description: string;
+    tags?: string[];
   }) => {
     const target = workflows.find((w) => w.id === id);
     if (!target) return;
@@ -808,6 +849,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       ...target,
       name,
       description,
+      tags: tags !== undefined ? tags : (target.tags || []),
       updatedAt: Date.now(),
     };
 
@@ -816,6 +858,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
         id,
         name,
         description,
+        tags: updatedWf.tags,
       });
     }
 
@@ -1033,6 +1076,91 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
             </button>
           </div>
 
+          {/* 标签专属快速筛选下拉 */}
+          <div className="relative" ref={tagMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIsTagMenuOpen(!isTagMenuOpen)}
+              className={`h-[28px] px-2.5 rounded-[6px] border text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer ${
+                selectedTag !== 'all'
+                  ? 'border-[#4f46e5] bg-[#eeedfd]/40 text-[#4f46e5]'
+                  : 'border-[#e3e3e8] bg-white text-[#4b4b53] hover:text-[#1c1c21] hover:border-[#b9b9c2]'
+              }`}
+            >
+              <TagIcon size={11} className={selectedTag !== 'all' ? 'text-[#4f46e5]' : 'text-[#85858d]'} />
+              <span>{selectedTag === 'all' ? '全部标签' : `#${selectedTag}`}</span>
+              {selectedTag !== 'all' && (
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedTag('all');
+                    if (import.meta.env?.DEV) console.log('[WorkflowListView] 清除标签筛选');
+                  }}
+                  className="w-3.5 h-3.5 rounded-full hover:bg-[#4f46e5]/10 flex items-center justify-center text-[#4f46e5] transition-colors ml-0.5"
+                  title="清除标签筛选"
+                >
+                  <X size={9} strokeWidth={2.2} />
+                </span>
+              )}
+              <ChevronDown size={10} className={`text-[#85858d] transition-transform ${isTagMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isTagMenuOpen && (
+              <div className="absolute left-0 top-[calc(100%+4px)] w-48 bg-white border border-[#e3e3e8] rounded-[8px] p-1 shadow-[0_8px_20px_rgba(0,0,0,0.08)] z-30 animate-in fade-in zoom-in-95 duration-100 text-[11.5px] max-h-64 overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTag('all');
+                    setIsTagMenuOpen(false);
+                    if (import.meta.env?.DEV) console.log('[WorkflowListView] 标签筛选: 全部');
+                  }}
+                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded-[5px] text-left transition-colors cursor-pointer ${
+                    selectedTag === 'all'
+                      ? 'bg-[#eeedfd] text-[#4f46e5] font-medium'
+                      : 'text-[#4b4b53] hover:bg-[#f4f4f6]'
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <TagsIcon size={11} className="text-[#85858d]" />
+                    <span>全部标签</span>
+                  </span>
+                  <span className="text-[10px] text-[#85858d] font-mono">{workflows.length}</span>
+                </button>
+
+                {allAvailableTags.length > 0 && <div className="h-[1px] bg-[#f1f1f4] my-1" />}
+
+                {allAvailableTags.map(({ name: tag, count }) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTag(tag);
+                      setIsTagMenuOpen(false);
+                      if (import.meta.env?.DEV) console.log('[WorkflowListView] 标签筛选:', tag);
+                    }}
+                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded-[5px] text-left transition-colors cursor-pointer ${
+                      selectedTag === tag
+                        ? 'bg-[#eeedfd] text-[#4f46e5] font-medium'
+                        : 'text-[#4b4b53] hover:bg-[#f4f4f6]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <TagIcon size={10.5} className={selectedTag === tag ? 'text-[#4f46e5]' : 'text-[#85858d]'} />
+                      <span className="truncate">#{tag}</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-[#85858d] ml-1">{count}</span>
+                  </button>
+                ))}
+
+                {allAvailableTags.length === 0 && (
+                  <div className="px-2 py-2 text-[11px] text-[#85858d] text-center italic">
+                    暂无流水线标签
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* 搜索框 */}
           <div className="relative w-64">
             <Search size={12} className="absolute left-2.5 top-2 text-[#85858d]" />
@@ -1171,18 +1299,19 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
               <Workflow size={22} strokeWidth={1.8} />
             </div>
             <div className="text-[14px] font-semibold text-[#1c1c21]">
-              {searchTerm || filterCategory !== 'all' ? '未匹配到符合条件的工作流' : '暂无自动化流水线'}
+              {searchTerm || filterCategory !== 'all' || selectedTag !== 'all' ? '未匹配到符合条件的工作流' : '暂无自动化流水线'}
             </div>
             <p className="text-[12px] text-[#85858d] mt-1 max-w-sm">
-              {searchTerm || filterCategory !== 'all'
-                ? '可以尝试更换筛选条件或清空搜索关键词'
+              {searchTerm || filterCategory !== 'all' || selectedTag !== 'all'
+                ? '可以尝试更换筛选条件、清除标签或清空搜索关键词'
                 : '点击右上角“新建工作流”基于 DAG 节点自由连线编排'}
             </p>
-            {searchTerm || filterCategory !== 'all' ? (
+            {searchTerm || filterCategory !== 'all' || selectedTag !== 'all' ? (
               <button
                 onClick={() => {
                   setSearchTerm('');
                   setFilterCategory('all');
+                  setSelectedTag('all');
                 }}
                 className="mt-4 h-[28px] px-3 rounded-[6px] bg-[#f4f4f7] hover:bg-[#ececf0] text-[#1c1c21] text-[12px] font-medium transition-all"
               >
@@ -1203,11 +1332,12 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           <div className="bg-white border border-[#e3e3e8] rounded-[8px] shadow-sm overflow-hidden flex flex-col">
             {/* 表头 */}
             <div className="h-[34px] bg-[#fafafc] border-b border-[#e3e3e8] px-4 flex items-center text-[11px] font-medium text-[#85858d] select-none">
-              <div className="w-[220px] shrink-0">流水线名称</div>
-              <div className="w-[85px] shrink-0">类型</div>
+              <div className="w-[210px] shrink-0">流水线名称</div>
+              <div className="w-[80px] shrink-0">类型</div>
+              <div className="w-[140px] shrink-0">标签</div>
               <div className="flex-1 min-w-0 px-3">环节构成</div>
-              <div className="w-[80px] shrink-0 text-center">节点规模</div>
-              <div className="w-[95px] shrink-0 text-right">更新时间</div>
+              <div className="w-[75px] shrink-0 text-center">节点规模</div>
+              <div className="w-[90px] shrink-0 text-right">更新时间</div>
               <div className="w-[110px] shrink-0 text-center">操作</div>
             </div>
 
@@ -1231,7 +1361,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     className="group px-4 py-2.5 flex items-center text-[12px] transition-colors cursor-pointer hover:bg-[#fafafc]"
                   >
                     {/* 流水线名称 */}
-                    <div className="w-[220px] shrink-0 flex items-center gap-2 pr-2">
+                    <div className="w-[210px] shrink-0 flex items-center gap-2 pr-2">
                       <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] group-hover:bg-white flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60 transition-colors">
                         <Workflow size={11} />
                       </div>
@@ -1252,10 +1382,50 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     </div>
 
                     {/* 类型 */}
-                    <div className="w-[85px] shrink-0">
+                    <div className="w-[80px] shrink-0">
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#63636b] text-[10.5px] font-medium border border-[#e3e3e8]/50">
                         {visual.tag}
                       </span>
+                    </div>
+
+                    {/* 分类标签微徽章 */}
+                    <div className="w-[140px] shrink-0 flex items-center gap-1 overflow-hidden pr-2">
+                      {wf.tags && wf.tags.length > 0 ? (
+                        <div className="flex items-center gap-1 flex-nowrap overflow-hidden">
+                          {wf.tags.slice(0, 2).map((tag) => (
+                            <span
+                              key={tag}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const next = selectedTag === tag ? 'all' : tag;
+                                setSelectedTag(next);
+                                if (import.meta.env?.DEV) {
+                                  console.log('[WorkflowListView] 点击微标切换标签筛选:', next);
+                                }
+                              }}
+                              className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[4px] text-[10px] font-medium border transition-colors cursor-pointer shrink-0 ${
+                                selectedTag === tag
+                                  ? 'bg-[#eeedfd] text-[#4f46e5] border-[#d8d6fb]'
+                                  : 'bg-[#f4f4f6] text-[#52525b] border-[#e3e3e8]/70 hover:bg-[#ececf0] hover:text-[#1c1c21]'
+                              }`}
+                              title={`点击筛选标签: #${tag}`}
+                            >
+                              <TagIcon size={9} className="opacity-70" />
+                              <span className="truncate max-w-[55px]">{tag}</span>
+                            </span>
+                          ))}
+                          {wf.tags.length > 2 && (
+                            <span
+                              className="text-[9.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1 py-0.5 rounded shrink-0 border border-[#e3e3e8]/50"
+                              title={wf.tags.slice(2).join(', ')}
+                            >
+                              +{wf.tags.length - 2}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-[#b9b9c2] select-none">-</span>
+                      )}
                     </div>
 
                     {/* 环节构成 */}
@@ -1285,7 +1455,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     </div>
 
                     {/* 节点规模 */}
-                    <div className="w-[80px] shrink-0 text-center">
+                    <div className="w-[75px] shrink-0 text-center">
                       <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded shrink-0">
                         {wf.nodes.length} 节点
                       </span>
@@ -1293,7 +1463,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
                     {/* 更新时间 */}
                     <div
-                      className="w-[95px] shrink-0 text-right text-[11px] text-[#85858d]"
+                      className="w-[90px] shrink-0 text-right text-[11px] text-[#85858d]"
                       title={new Date(wf.updatedAt || wf.createdAt).toLocaleString()}
                     >
                       {friendlyTime}
@@ -1520,6 +1690,34 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                       </span>
                     </div>
 
+                    {/* 标签微徽章列表 */}
+                    {wf.tags && wf.tags.length > 0 && (
+                      <div className="flex items-center gap-1 flex-wrap mt-2">
+                        {wf.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const next = selectedTag === tag ? 'all' : tag;
+                              setSelectedTag(next);
+                              if (import.meta.env?.DEV) {
+                                console.log('[WorkflowListView] 卡片点击标签筛选:', next);
+                              }
+                            }}
+                            className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[4px] text-[10px] font-medium border transition-colors cursor-pointer ${
+                              selectedTag === tag
+                                ? 'bg-[#eeedfd] text-[#4f46e5] border-[#d8d6fb]'
+                                : 'bg-[#f4f4f6] text-[#52525b] border-[#e3e3e8]/70 hover:bg-[#ececf0] hover:text-[#1c1c21]'
+                            }`}
+                            title={`点击筛选标签: #${tag}`}
+                          >
+                            <TagIcon size={9} className="opacity-70" />
+                            <span>{tag}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
                     {/* 流程描述 */}
                     <p className="text-[12px] text-[#71717a] line-clamp-2 leading-relaxed min-h-[34px] mt-2">
                       {wf.description || '暂无流程描述，点击进入画布编辑'}
@@ -1636,6 +1834,15 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
               </div>
 
               <div>
+                <label className="block font-medium text-[#4b4b53] mb-1">流水线分类标签</label>
+                <TagInput
+                  tags={newTags}
+                  onChange={setNewTags}
+                  placeholder="添加标签（例如：工作、部署、QA）后回车..."
+                />
+              </div>
+
+              <div>
                 <label className="block font-medium text-[#4b4b53] mb-1.5">初始化模板</label>
                 <div className="grid grid-cols-2 gap-2">
                   <div
@@ -1711,7 +1918,12 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
               <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#ececf0]">
                 <button
                   type="button"
-                  onClick={() => setIsCreateModalOpen(false)}
+                  onClick={() => {
+                    setIsCreateModalOpen(false);
+                    setNewTitle('');
+                    setNewDesc('');
+                    setNewTags([]);
+                  }}
                   className="h-[28px] px-3 rounded-[6px] text-[#4b4b53] hover:bg-[#f1f1f4] text-[12px]"
                 >
                   取消

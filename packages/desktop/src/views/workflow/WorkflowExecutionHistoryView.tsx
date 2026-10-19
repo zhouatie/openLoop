@@ -406,7 +406,8 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
         const matchId = task.id.toLowerCase().includes(q);
         const targetWf = workflows.find((w) => w.id === task.workflowId);
         const matchWfName = targetWf?.name.toLowerCase().includes(q);
-        if (!matchTitle && !matchDesc && !matchId && !matchWfName) {
+        const matchTag = targetWf?.tags && targetWf.tags.some((t) => t.toLowerCase().includes(q));
+        if (!matchTitle && !matchDesc && !matchId && !matchWfName && !matchTag) {
           return false;
         }
       }
@@ -666,7 +667,14 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                   </div>
 
                   {workflows
-                    .filter((w) => !wfSearchText.trim() || w.name.toLowerCase().includes(wfSearchText.toLowerCase()))
+                    .filter((w) => {
+                      if (!wfSearchText.trim()) return true;
+                      const q = wfSearchText.toLowerCase();
+                      return (
+                        w.name.toLowerCase().includes(q) ||
+                        (w.tags && w.tags.some((t) => t.toLowerCase().includes(q)))
+                      );
+                    })
                     .map((wf) => {
                       const count = tasks.filter((t) => t.workflowId === wf.id).length;
                       const isSelected = selectedWorkflowId === wf.id;
@@ -683,7 +691,14 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                               : 'text-[#1c1c21] hover:bg-[#f4f4f6]'
                           }`}
                         >
-                          <span className="truncate pr-2">{wf.name}</span>
+                          <div className="flex items-center gap-1.5 min-w-0 flex-1 pr-2">
+                            <span className="truncate">{wf.name}</span>
+                            {wf.tags && wf.tags.length > 0 && (
+                              <span className="text-[9px] px-1 py-[0.5px] rounded bg-white/80 border border-[#e3e3e8] text-[#63636b] shrink-0 font-medium">
+                                #{wf.tags[0]}
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[10px] font-mono text-[#85858d] shrink-0">
                             {count} 次
                           </span>
@@ -887,6 +902,11 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                       >
                         {wfInfo.name}
                       </span>
+                      {wfInfo.workflow?.tags && wfInfo.workflow.tags.length > 0 && (
+                        <span className="text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1 py-[0.5px] rounded shrink-0">
+                          #{wfInfo.workflow.tags[0]}
+                        </span>
+                      )}
                     </div>
 
                     {/* 触发来源 */}

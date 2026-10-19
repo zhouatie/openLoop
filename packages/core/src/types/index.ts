@@ -154,6 +154,7 @@ export interface WorkflowDefinition {
   updatedAt: number;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
+  tags?: string[]; // 流水线标签列表，用于归类、筛选与过滤 (例如: '工作', '部署', 'QA', '日常')
   variables?: Record<string, any>;
   requireWorkspace?: boolean; // 该流水线是否要求必须关联工程工作区根目录
   defaultWorkspace?: string; // 该流水线绑定的默认工程工作区目录 (可选)

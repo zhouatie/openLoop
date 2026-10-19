@@ -83,6 +83,7 @@ import { WorkspacePicker } from '../components/WorkspacePicker';
 import { AgentSessionDrawer } from '../components/AgentSessionDrawer';
 import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
+import { TagInput } from '../components/TagInput';
 
 // ==========================================
 // 1. 自定义节点外观（极简高质感 + 智能体生成发光 + 幽灵预演态 + 编排调试实时运行态）
@@ -457,6 +458,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   // 流水线基础信息与弹窗状态
   const [workflowName, setWorkflowName] = useState(activeWorkflow?.name || '');
   const [workflowDescription, setWorkflowDescription] = useState(activeWorkflow?.description || '');
+  const [workflowTags, setWorkflowTags] = useState<string[]>(activeWorkflow?.tags || []);
   const [workflowRequireWorkspace, setWorkflowRequireWorkspace] = useState(
     Boolean(activeWorkflow?.requireWorkspace)
   );
@@ -638,6 +640,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     if (activeWorkflow) {
       setWorkflowName(activeWorkflow.name || '');
       setWorkflowDescription(activeWorkflow.description || '');
+      setWorkflowTags(Array.isArray(activeWorkflow.tags) ? [...activeWorkflow.tags] : []);
       setWorkflowRequireWorkspace(Boolean(activeWorkflow.requireWorkspace));
       setWorkflowDefaultWorkspace(activeWorkflow.defaultWorkspace || '');
       setTitleDraft(activeWorkflow.name || '');
@@ -646,6 +649,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     activeWorkflow?.id,
     activeWorkflow?.name,
     activeWorkflow?.description,
+    activeWorkflow?.tags,
     activeWorkflow?.requireWorkspace,
     activeWorkflow?.defaultWorkspace,
   ]);
@@ -1411,16 +1415,18 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   };
 
   // 保存工作流
-  const handleSave = async (overrideName?: string, overrideDesc?: string) => {
+  const handleSave = async (overrideName?: string, overrideDesc?: string, overrideTags?: string[]) => {
     if (!activeWorkflow) return;
 
     const finalName = (overrideName ?? workflowName).trim() || activeWorkflow.name;
     const finalDesc = (overrideDesc ?? workflowDescription).trim();
+    const finalTags = overrideTags ?? workflowTags;
 
     const updatedWorkflow: WorkflowDefinition = {
       ...activeWorkflow,
       name: finalName,
       description: finalDesc,
+      tags: finalTags,
       requireWorkspace: workflowRequireWorkspace,
       defaultWorkspace: workflowDefaultWorkspace.trim() || undefined,
       updatedAt: Date.now(),
@@ -1475,6 +1481,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       id: newId,
       name: `${workflowName || activeWorkflow.name} (副本)`,
       description: workflowDescription || activeWorkflow.description || '',
+      tags: Array.isArray(workflowTags) ? [...workflowTags] : [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: nodes.map((n) => ({
@@ -3466,6 +3473,15 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                     </div>
 
                     <div>
+                      <label className="block text-[#85858d] mb-1 font-medium">流水线分类标签</label>
+                      <TagInput
+                        tags={workflowTags}
+                        onChange={setWorkflowTags}
+                        placeholder="输入标签（例如：工作、部署、QA）后回车..."
+                      />
+                    </div>
+
+                    <div>
                       <label className="block text-[#85858d] mb-1 font-medium">流程描述说明</label>
                       <textarea
                         rows={4}
@@ -3572,12 +3588,14 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           ...activeWorkflow,
           name: workflowName || activeWorkflow.name,
           description: workflowDescription,
+          tags: workflowTags,
         }}
         onClose={() => setIsEditModalOpen(false)}
-        onSave={async ({ name, description }) => {
+        onSave={async ({ name, description, tags }) => {
           setWorkflowName(name);
           setWorkflowDescription(description);
-          await handleSave(name, description);
+          if (tags) setWorkflowTags(tags);
+          await handleSave(name, description, tags);
         }}
       />
 
