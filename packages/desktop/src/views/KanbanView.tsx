@@ -1957,39 +1957,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </div>
                             )}
 
-                            {nodeRuns.some((r) => r.artifacts && r.artifacts.length > 0) && (
-                              <div className="mb-2 flex flex-wrap gap-1">
-                                {nodeRuns
-                                  .flatMap((r) => r.artifacts || [])
-                                  .map((art, idx) => (
-                                    <button
-                                      key={idx}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        const isImage = /\.(png|jpe?g|webp|svg)$/i.test(art.name);
-                                        if (isImage) {
-                                          setActiveDetailImage({
-                                            id: `art_${idx}`,
-                                            name: art.name,
-                                            mimeType: 'image/png',
-                                            path: art.path,
-                                            url: art.path,
-                                            size: 1024,
-                                            createdAt: Date.now(),
-                                          });
-                                        } else {
-                                          setPreviewArtifact(art);
-                                        }
-                                      }}
-                                      className="flex items-center gap-1 px-1.5 h-[20px] rounded-[4px] bg-[#f1f1f4] border border-[#e3e3e8] text-[10.5px] text-[#4b4b53] hover:bg-[#e9e9ee]"
-                                    >
-                                      <FileImage size={10} className="text-[#4f46e5]" />
-                                      <span>{art.name}</span>
-                                    </button>
-                                  ))}
-                              </div>
-                            )}
-
                             {task.context?.worktree?.conflictResolution && (
                               <div className="mb-1.5 flex items-center justify-between text-[10px] text-[#059669] bg-[#ecfdf5] px-2 py-[2.5px] rounded-[5px] border border-[#a7f3d0]">
                                 <span className="flex items-center gap-1 font-medium truncate">
