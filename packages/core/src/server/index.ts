@@ -732,18 +732,18 @@ export class OpenLoopServer {
         const task = this.store.getTask(taskId);
         if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
         const body = await this.parseJsonBody(req);
-        const { message, attachments } = body;
+        const { message, attachments, includeQaArtifacts } = body;
         const safeAttachments: TaskAttachment[] = Array.isArray(attachments) ? attachments : [];
         const rawMsg = typeof message === 'string' ? message.trim() : '';
 
-        if (!rawMsg && safeAttachments.length === 0) {
+        if (!rawMsg && safeAttachments.length === 0 && !includeQaArtifacts) {
           return this.sendJson(res, 400, { error: 'Message or attachments required' }, reqMeta);
         }
 
-        const finalMessage = rawMsg || (safeAttachments.length > 0 ? '请查看我提供的图片附件并推进任务。' : '');
+        const finalMessage = rawMsg || (includeQaArtifacts ? '请查看最新 UI 自动化测试产物并分析修复。' : (safeAttachments.length > 0 ? '请查看我提供的图片附件并推进任务。' : ''));
 
         serverLogger.info(
-          `[AgentChat] 接收到任务会话消息 (${taskId}): "${finalMessage.slice(0, 30)}", 附件数: ${safeAttachments.length}`
+          `[AgentChat] 接收到任务会话消息 (${taskId}): "${finalMessage.slice(0, 30)}", 附件数: ${safeAttachments.length}, 附带QA产物: ${!!includeQaArtifacts}`
         );
 
         // 如果用户上传了新图片，也同步累加到任务全局 attachments 中
@@ -757,18 +757,26 @@ export class OpenLoopServer {
           }
         }
 
-        // 自动装配最新的 QA 自动化测试产物信息，使 Agent 在收到用户消息时能自主感知和读取视觉测试截帧
+        // 仅在用户主动操作附带时，才装配 QA 自动化测试产物信息，默认绝不自动插入
         let enrichedMessage = finalMessage;
-        const qaRunId = task.context?.qaRunId;
-        if (qaRunId) {
-          const runDir = path.join(os.homedir(), '.openloop', 'artifacts', qaRunId);
-          const timelinePath = path.join(runDir, 'timeline.json');
-          const imageFiles = fs.existsSync(runDir)
-            ? fs.readdirSync(runDir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).map((f) => path.join(runDir, f))
-            : [];
+        if (includeQaArtifacts) {
+          let qaRunId = task.context?.qaRunId || (task.context?.worktree as any)?.qaRunId;
+          if (!qaRunId) {
+            const taskQaRuns = this.store.getQaRuns(undefined, taskId, 1);
+            if (taskQaRuns && taskQaRuns.length > 0) {
+              qaRunId = taskQaRuns[0].id;
+            }
+          }
+          if (qaRunId) {
+            const runDir = path.join(os.homedir(), '.openloop', 'artifacts', qaRunId);
+            const timelinePath = path.join(runDir, 'timeline.json');
+            const imageFiles = fs.existsSync(runDir)
+              ? fs.readdirSync(runDir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).map((f) => path.join(runDir, f))
+              : [];
 
-          if (imageFiles.length > 0) {
-            enrichedMessage += `\n\n[系统自动附加：最新 UI 自动化测试产物]\n- 自动化测试 Run ID: ${qaRunId}\n- 时间轴数据路径: ${timelinePath}\n- 本次生成的真实操作截图路径:\n${imageFiles.map((p) => `  * ${p}`).join('\n')}\n提示：你可以直接使用 read 工具查看上述图片截帧或 timeline.json，确认当前界面的真实渲染效果，进行精准代码修复。`;
+            if (imageFiles.length > 0) {
+              enrichedMessage += `\n\n[用户主动附带：最新 UI 自动化测试产物]\n- 自动化测试 Run ID: ${qaRunId}\n- 时间轴数据路径: ${timelinePath}\n- 本次生成的真实操作截图路径:\n${imageFiles.map((p) => `  * ${p}`).join('\n')}\n提示：你可以直接使用 read 工具查看上述图片截帧或 timeline.json，确认当前界面的真实渲染效果，进行精准代码修复。`;
+            }
           }
         }
 
@@ -793,7 +801,7 @@ export class OpenLoopServer {
         const userMsg = {
           id: `msg_u_${Date.now()}`,
           role: 'user' as const,
-          content: finalMessage,
+          content: enrichedMessage,
           attachments: safeAttachments.length > 0 ? safeAttachments : undefined,
           timestamp: Date.now(),
         };

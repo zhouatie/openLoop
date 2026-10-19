@@ -41,6 +41,7 @@ import {
   Image as ImageIcon,
   Loader2,
   ZoomIn,
+  FlaskConical,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage, TaskAttachment } from '@openloop/core';
 import { api } from '../services/api';
@@ -347,12 +348,14 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
           // 若任务正在执行中且处于 agent 状态，或已有历史消息，可智能保留或建议查看
         })
         .catch(() => {});
+      setIncludeQaArtifacts(false);
     } else {
       setSessionState(null);
       setDrawerTab('overview');
       setChatInput('');
       setChatAttachments([]);
       setPendingChatUploads([]);
+      setIncludeQaArtifacts(false);
     }
   }, [selectedTask?.id]);
 
@@ -372,6 +375,15 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [pendingChatUploads, setPendingChatUploads] = useState<PendingChatAttachment[]>([]);
   const [isChatDragging, setIsChatDragging] = useState(false);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
+
+  // 是否主动在本次对话中附带最新自动化测试产物
+  const [includeQaArtifacts, setIncludeQaArtifacts] = useState(false);
+  const [expandedQaAttachments, setExpandedQaAttachments] = useState<Record<string, boolean>>({});
+
+  // 结合全局 tasks 获取最新任务上下文信息
+  const activeTask = selectedTask ? (tasks.find((t) => t.id === selectedTask.id) || selectedTask) : null;
+  const currentQaRunId = activeTask?.context?.qaRunId || (activeTask?.context?.worktree as any)?.qaRunId;
+  const hasQaArtifacts = Boolean(currentQaRunId);
 
   const uploadChatFiles = async (files: File[]) => {
     const imageFiles = files.filter((f) => f.type.startsWith('image/'));
@@ -491,7 +503,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     if (!selectedTask || isSendingChat) return;
     const msg = chatInput.trim();
     const toSendAttachments = [...chatAttachments];
-    if (!msg && toSendAttachments.length === 0) return;
+    const willIncludeQa = includeQaArtifacts;
+    if (!msg && toSendAttachments.length === 0 && !willIncludeQa) return;
     if (pendingChatUploads.some((p) => p.status === 'uploading')) {
       toast.warning('请等待图片附件上传完成后再发送');
       return;
@@ -499,14 +512,18 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
     setChatInput('');
     setChatAttachments([]);
+    setIncludeQaArtifacts(false);
     setIsSendingChat(true);
     scrollChatToBottom(true);
+
+    const userDisplayMsg = msg || (willIncludeQa ? '请查看最新 UI 自动化测试产物并分析修复。' : '');
 
     if (import.meta.env?.DEV) {
       console.log('[UI:AgentChat] 用户向 Agent 发送对话:', {
         taskId: selectedTask.id,
-        content: msg,
+        content: userDisplayMsg,
         attachmentsCount: toSendAttachments.length,
+        includeQaArtifacts: willIncludeQa,
       });
     }
 
@@ -520,7 +537,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
           {
             id: `opt_${Date.now()}`,
             role: 'user',
-            content: msg,
+            content: userDisplayMsg,
             attachments: toSendAttachments.length > 0 ? toSendAttachments : undefined,
             timestamp: Date.now(),
           },
@@ -529,7 +546,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
 
     try {
-      await api.sendTaskChatMessage(selectedTask.id, msg, toSendAttachments);
+      await api.sendTaskChatMessage(selectedTask.id, userDisplayMsg, toSendAttachments, {
+        includeQaArtifacts: willIncludeQa,
+      });
     } catch (e: any) {
       if (import.meta.env?.DEV) {
         console.error('[KanbanView] 发送消息失败:', e);
@@ -2619,11 +2638,37 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   ) : (
                     sessionState.messages.map((msg, msgIdx) => {
                       if (msg.role === 'user') {
+                        // 检测是否包含 UI 自动化测试产物附加块
+                        const qaMarkerMatch = msg.content?.match(/\[(?:系统自动附加|用户主动附带|附带)：?最新 UI 自动化测试产物\]/);
+                        const qaMarkerIndex = qaMarkerMatch ? msg.content.indexOf(qaMarkerMatch[0]) : -1;
+                        const userText = qaMarkerIndex !== -1 ? msg.content.slice(0, qaMarkerIndex).trim() : msg.content;
+                        const qaText = qaMarkerIndex !== -1 ? msg.content.slice(qaMarkerIndex).trim() : '';
+
                         return (
                           <div key={msg.id} className="flex justify-end">
                             <div className="max-w-[85%] rounded-[9px] px-3.5 py-2.5 bg-[#f4f4f6] border border-[#e3e3e8] text-[#1c1c21] text-[12px] leading-relaxed shadow-sm">
                               <div className="text-[9.5px] font-mono text-[#85858d] mb-1 text-right">YOU</div>
-                              {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}
+                              {userText && <div className="whitespace-pre-wrap">{userText}</div>}
+
+                              {/* 自动化测试产物折叠卡片 */}
+                              {qaText && (
+                                <div className={`${userText ? 'mt-2 pt-2 border-t border-[#e6e6ec]' : ''}`}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedQaAttachments((prev) => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[5px] bg-[#eeedfd] border border-[#c7d2fe] text-[#4f46e5] text-[10.5px] font-medium hover:bg-[#e0e0fc] transition-colors cursor-pointer"
+                                  >
+                                    <FlaskConical size={10.5} />
+                                    <span>随附 UI 自动化测试产物</span>
+                                    {expandedQaAttachments[msg.id] ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                                  </button>
+                                  {expandedQaAttachments[msg.id] && (
+                                    <div className="mt-1.5 p-2 rounded-[5px] bg-white border border-[#e3e3e8] font-mono text-[10px] text-[#63636b] leading-relaxed whitespace-pre-wrap max-h-[160px] overflow-y-auto">
+                                      {qaText}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
 
                               {/* 用户随附图片缩略图画廊 */}
                               {msg.attachments && msg.attachments.length > 0 && (
@@ -2907,6 +2952,32 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       </div>
                     )}
 
+                    {/* 已附加测试产物微胶囊 */}
+                    {includeQaArtifacts && (
+                      <div className="mb-2 flex items-center">
+                        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[5px] bg-[#f0f0ff] border border-[#d8d6fb] text-[#4f46e5] text-[10.5px] font-medium select-none">
+                          <FlaskConical size={11} className="text-[#4f46e5]" />
+                          <span>本次将附带最新自动化测试产物</span>
+                          {currentQaRunId && (
+                            <span
+                              className="text-[9.5px] font-mono text-[#4f46e5]/80 bg-white/90 px-1 py-0.5 rounded border border-[#4f46e5]/20 max-w-[130px] truncate"
+                              title={currentQaRunId}
+                            >
+                              {currentQaRunId}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setIncludeQaArtifacts(false)}
+                            className="w-3.5 h-3.5 rounded-full hover:bg-[#4f46e5]/15 flex items-center justify-center text-[#4f46e5] transition-colors ml-0.5 cursor-pointer"
+                            title="取消附带测试产物"
+                          >
+                            <X size={9} strokeWidth={2.5} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <textarea
                       ref={chatTextareaRef}
                       value={chatInput}
@@ -2927,7 +2998,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       className="w-full resize-none border-none outline-none text-[12px] text-[#1c1c21] placeholder:text-[#a5a5b0] bg-transparent leading-relaxed"
                     />
 
-                    {/* 底部工具条：添加图片 + 字数 + 发送按钮 */}
+                    {/* 底部工具条：添加图片 + 附带测试产物 + 重测QA + 字数 + 发送按钮 */}
                     <div className="flex items-center justify-between pt-1.5 border-t border-[#f4f4f6]">
                       <div className="flex items-center gap-1.5">
                         <button
@@ -2940,7 +3011,36 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           <ImageIcon size={10.5} />
                           <span>图片</span>
                         </button>
-                        {selectedTask.context?.qaRunId && (
+
+                        {/* 主动附带测试产物开关按钮 */}
+                        {hasQaArtifacts && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = !includeQaArtifacts;
+                              setIncludeQaArtifacts(next);
+                              if (import.meta.env?.DEV) {
+                                console.log('[UI:AgentChat] 用户切换附带测试产物状态:', next);
+                              }
+                            }}
+                            className={`h-[22px] px-2 rounded-[5px] border text-[10.5px] font-medium flex items-center gap-1 transition-all cursor-pointer ${
+                              includeQaArtifacts
+                                ? 'border-[#4f46e5]/40 bg-[#eeedfd] text-[#4f46e5] shadow-xs font-semibold'
+                                : 'border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] hover:border-[#1c1c21]/30 text-[#63636b] hover:text-[#1c1c21]'
+                            }`}
+                            title={
+                              includeQaArtifacts
+                                ? '已开启：本次消息将随附最新自动化测试截帧与时间轴 (点击取消)'
+                                : '点击在本次消息中附带最新自动化测试截帧与时间轴'
+                            }
+                          >
+                            <FlaskConical size={10.5} className={includeQaArtifacts ? 'text-[#4f46e5]' : ''} />
+                            <span>{includeQaArtifacts ? '已带测试产物' : '附带测试产物'}</span>
+                            {includeQaArtifacts && <Check size={10} strokeWidth={2.5} />}
+                          </button>
+                        )}
+
+                        {hasQaArtifacts && (
                           <button
                             type="button"
                             onClick={() => handleRetryNode(selectedTask.id, 'node_qa_test')}
@@ -2966,11 +3066,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           </span>
                         )}
                         <button
-                          disabled={(!chatInput.trim() && chatAttachments.length === 0) || isSendingChat}
+                          disabled={(!chatInput.trim() && chatAttachments.length === 0 && !includeQaArtifacts) || isSendingChat}
                           onClick={handleSendChat}
                           className={`h-[24px] px-3 rounded-[5px] text-[11px] font-medium flex items-center gap-1 transition-all ${
-                            (chatInput.trim() || chatAttachments.length > 0) && !isSendingChat
-                              ? 'bg-[#1c1c21] hover:bg-[#2e2f36] text-white shadow-sm active:scale-95'
+                            (chatInput.trim() || chatAttachments.length > 0 || includeQaArtifacts) && !isSendingChat
+                              ? 'bg-[#1c1c21] hover:bg-[#2e2f36] text-white shadow-sm active:scale-95 cursor-pointer'
                               : 'bg-[#f4f4f6] text-[#a5a5b0] cursor-not-allowed'
                           }`}
                         >

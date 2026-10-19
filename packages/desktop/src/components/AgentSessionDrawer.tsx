@@ -15,6 +15,7 @@ import {
   Copy,
   RefreshCw,
   ExternalLink,
+  FlaskConical,
 } from 'lucide-react';
 import { TaskSessionState, SessionChatMessage } from '@openloop/core';
 import { api } from '../services/api';
@@ -49,6 +50,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
   const [isTogglingPause, setIsTogglingPause] = useState(false);
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const [expandedQaAttachments, setExpandedQaAttachments] = useState<Record<string, boolean>>({});
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -341,13 +343,36 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
           ) : (
             sessionState.messages.map((msg, msgIdx) => {
               if (msg.role === 'user') {
+                const qaMarkerMatch = msg.content?.match(/\[(?:系统自动附加|用户主动附带|附带)：?最新 UI 自动化测试产物\]/);
+                const qaMarkerIndex = qaMarkerMatch ? msg.content.indexOf(qaMarkerMatch[0]) : -1;
+                const userText = qaMarkerIndex !== -1 ? msg.content.slice(0, qaMarkerIndex).trim() : msg.content;
+                const qaText = qaMarkerIndex !== -1 ? msg.content.slice(qaMarkerIndex).trim() : '';
+
                 return (
                   <div key={msg.id} className="flex justify-end">
                     <div className="max-w-[85%] rounded-[9px] px-3.5 py-2.5 bg-white border border-[#e3e3e8] text-[#1c1c21] text-[12px] leading-relaxed shadow-2xs">
                       <div className="text-[9.5px] font-mono text-[#85858d] mb-1 text-right font-medium">
                         YOU / PROMPT
                       </div>
-                      {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}
+                      {userText && <div className="whitespace-pre-wrap">{userText}</div>}
+                      {qaText && (
+                        <div className={`${userText ? 'mt-2 pt-2 border-t border-[#e6e6ec]' : ''}`}>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedQaAttachments((prev) => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[5px] bg-[#eeedfd] border border-[#c7d2fe] text-[#4f46e5] text-[10.5px] font-medium hover:bg-[#e0e0fc] transition-colors cursor-pointer"
+                          >
+                            <FlaskConical size={10.5} />
+                            <span>随附 UI 自动化测试产物</span>
+                            {expandedQaAttachments[msg.id] ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                          </button>
+                          {expandedQaAttachments[msg.id] && (
+                            <div className="mt-1.5 p-2 rounded-[5px] bg-[#f9f9fb] border border-[#e3e3e8] font-mono text-[10px] text-[#63636b] leading-relaxed whitespace-pre-wrap max-h-[160px] overflow-y-auto">
+                              {qaText}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
