@@ -391,64 +391,67 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-4 select-none">
       <div className="w-full max-w-6xl h-[90vh] bg-[#f4f4f6] rounded-[12px] border border-[#e3e3e8] shadow-[0_24px_70px_rgba(0,0,0,0.18)] flex flex-col overflow-hidden text-[#1c1c21] animate-in fade-in zoom-in-95 duration-150">
         {/* 顶部 Header：白底、细下边框、对齐 openLoop 统一设计规范 */}
-        <div className="h-[50px] bg-white border-b border-[#e3e3e8] px-5 flex items-center justify-between shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="h-[50px] bg-white border-b border-[#e3e3e8] px-5 flex items-center justify-between gap-4 shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="w-6 h-6 rounded-[5px] bg-[#f4f4f6] border border-[#e3e3e8]/70 flex items-center justify-center text-[#1c1c21] shrink-0">
               <Camera size={13} strokeWidth={2.2} />
             </div>
 
-            <div className="flex items-center gap-2 min-w-0">
-              <h2 className="text-[13px] font-semibold text-[#1c1c21] truncate max-w-[380px]" title={task.title}>
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <h2 className="text-[13px] font-semibold text-[#1c1c21] truncate shrink min-w-0" title={task.title}>
                 {task.title}
               </h2>
 
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#71717a] text-[10.5px] font-medium border border-[#e3e3e8] shrink-0">
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#71717a] text-[10.5px] font-medium border border-[#e3e3e8] shrink-0 whitespace-nowrap">
                 视觉验收门禁
               </span>
 
               {worktree?.branchName && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] bg-[#eff6ff] text-[#2563eb] text-[10.5px] font-mono border border-[#bfdbfe]/60 shrink-0">
-                  <GitBranch size={10} />
-                  <span>{worktree.branchName}</span>
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] bg-[#eff6ff] text-[#2563eb] text-[10.5px] font-mono border border-[#bfdbfe]/60 shrink-0 max-w-[200px]"
+                  title={worktree.branchName}
+                >
+                  <GitBranch size={10} className="shrink-0" />
+                  <span className="truncate">{worktree.branchName}</span>
                 </span>
               )}
 
               {/* 冲突自愈微徽标 */}
               {worktree?.conflictResolution && (
                 <span
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0] shrink-0"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0] shrink-0 whitespace-nowrap"
                   title={`已由 Agent 自动消解冲突文件:\n${worktree.conflictResolution.conflictFiles.join('\n')}`}
                 >
-                  <Sparkles size={10} className="text-[#059669]" />
-                  <span>冲突已自愈 ({worktree.conflictResolution.conflictFiles.length})</span>
+                  <Sparkles size={10} className="text-[#059669] shrink-0" />
+                  <span className="whitespace-nowrap">冲突已自愈 ({worktree.conflictResolution.conflictFiles.length})</span>
                 </span>
               )}
 
               {/* 状态微徽章 */}
               {isPassed ? (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60 shrink-0">
-                  <CheckCircle2 size={10} strokeWidth={2.2} />
-                  <span>PASSED</span>
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60 shrink-0 whitespace-nowrap">
+                  <CheckCircle2 size={10} strokeWidth={2.2} className="shrink-0" />
+                  <span className="whitespace-nowrap">PASSED</span>
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10px] font-medium border border-[#fecaca]/60 shrink-0">
-                  <XCircle size={10} strokeWidth={2.2} />
-                  <span>FAILED</span>
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10px] font-medium border border-[#fecaca]/60 shrink-0 whitespace-nowrap">
+                  <XCircle size={10} strokeWidth={2.2} className="shrink-0" />
+                  <span className="whitespace-nowrap">FAILED</span>
                 </span>
               )}
             </div>
           </div>
 
-          {/* 右侧微操作群 */}
-          <div className="flex items-center gap-2">
+          {/* 右侧微操作群：绝对禁止压缩与折行 */}
+          <div className="flex items-center gap-2 shrink-0">
             {/* 靶机微交互直达/一键唤醒与关停按钮群 */}
             {worktree && (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
                   onClick={handleStartOrOpenSandbox}
                   disabled={isStartingSandbox}
-                  className={`h-[28px] px-2.5 rounded-[6px] text-[11.5px] font-medium flex items-center gap-1.5 border shadow-2xs transition-all active:scale-95 cursor-pointer disabled:opacity-60 ${
+                  className={`h-[28px] px-2.5 rounded-[6px] text-[11.5px] font-medium flex items-center gap-1.5 border shadow-2xs transition-all active:scale-95 cursor-pointer disabled:opacity-60 shrink-0 whitespace-nowrap ${
                     sandboxStatus === 'running'
                       ? 'bg-white hover:bg-[#fafafc] text-[#1c1c21] border-[#e3e3e8]'
                       : isStartingSandbox
@@ -464,20 +467,20 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                   }
                 >
                   {isStartingSandbox ? (
-                    <Loader2 size={12} className="animate-spin text-[#b45309]" />
+                    <Loader2 size={12} className="animate-spin text-[#b45309] shrink-0" />
                   ) : sandboxStatus === 'running' ? (
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#059669] shrink-0" />
+                    <Globe size={12} className="text-[#059669] shrink-0" />
                   ) : (
                     <Play size={10} className="fill-current text-white shrink-0" />
                   )}
-                  <span>
+                  <span className="whitespace-nowrap">
                     {isStartingSandbox
                       ? '正在唤醒靶机...'
                       : sandboxStatus === 'running'
                       ? `打开沙箱靶机 (${worktree.webPort})`
                       : `启动沙箱靶机 (${worktree.webPort})`}
                   </span>
-                  {sandboxStatus === 'running' && <ExternalLink size={10} className="text-[#85858d]" />}
+                  {sandboxStatus === 'running' && <ExternalLink size={10} className="text-[#85858d] shrink-0" />}
                 </button>
 
                 {/* 在线时展示一键关停微按钮 */}
@@ -485,11 +488,11 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                   <button
                     type="button"
                     onClick={handleStopSandbox}
-                    className="h-[28px] px-2 rounded-[6px] bg-white hover:bg-[#fef2f2] text-[#71717a] hover:text-[#dc2626] border border-[#e3e3e8] hover:border-[#fecaca] text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                    className="h-[28px] px-2 rounded-[6px] bg-white hover:bg-[#fef2f2] text-[#71717a] hover:text-[#dc2626] border border-[#e3e3e8] hover:border-[#fecaca] text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
                     title="立即关停沙箱靶机，释放端口与系统资源"
                   >
-                    <Square size={9} className="fill-current text-[#dc2626]" />
-                    <span>关停</span>
+                    <Square size={9} className="fill-current text-[#dc2626] shrink-0" />
+                    <span className="whitespace-nowrap">关停</span>
                   </button>
                 )}
               </div>
@@ -499,21 +502,21 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
             <button
               type="button"
               onClick={() => setIsAiOverlayVisible(!isAiOverlayVisible)}
-              className={`h-[28px] px-2.5 rounded-[6px] text-[11.5px] font-medium flex items-center gap-1.5 border transition-all cursor-pointer ${
+              className={`h-[28px] px-2.5 rounded-[6px] text-[11.5px] font-medium flex items-center gap-1.5 border transition-all cursor-pointer shrink-0 whitespace-nowrap ${
                 isAiOverlayVisible
                   ? 'bg-white text-[#1c1c21] border-[#1c1c21]/20 shadow-2xs'
                   : 'bg-transparent text-[#71717a] border-transparent hover:bg-[#ececf0]'
               }`}
             >
-              <Eye size={12} />
-              <span>AI 焦点标注</span>
+              <Eye size={12} className="shrink-0" />
+              <span className="whitespace-nowrap">AI 焦点标注</span>
             </button>
 
             {/* 关闭按钮 */}
             <button
               type="button"
               onClick={onClose}
-              className="w-7 h-7 rounded-[5px] text-[#71717a] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-colors cursor-pointer ml-1"
+              className="w-7 h-7 rounded-[5px] text-[#71717a] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-colors cursor-pointer ml-1 shrink-0"
               title="关闭 (Esc)"
             >
               <X size={15} />
@@ -712,12 +715,12 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
         {/* 底部播放控制与【验收通过并合并】决策工具栏（高 54px，白底微边框） */}
         <div className="h-[54px] bg-white border-t border-[#e3e3e8] px-5 flex items-center justify-between gap-5 shrink-0 shadow-[0_-1px_2px_rgba(0,0,0,0.02)]">
           {/* 左侧播放控制器 */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={handlePrev}
               disabled={currentStepIndex === 0 || steps.length <= 1}
-              className="w-7 h-7 rounded-[5px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] disabled:opacity-30 flex items-center justify-center transition-colors cursor-pointer"
+              className="w-7 h-7 rounded-[5px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] disabled:opacity-30 flex items-center justify-center transition-colors cursor-pointer shrink-0"
               title="上一帧 (←)"
             >
               <SkipBack size={13} />
@@ -727,7 +730,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
               type="button"
               onClick={togglePlay}
               disabled={steps.length <= 1}
-              className="w-8 h-8 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white flex items-center justify-center shadow-xs transition-transform active:scale-95 cursor-pointer disabled:opacity-40"
+              className="w-8 h-8 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white flex items-center justify-center shadow-xs transition-transform active:scale-95 cursor-pointer disabled:opacity-40 shrink-0"
               title={isPlaying ? '暂停 (空格)' : '连续播放 (空格)'}
             >
               {isPlaying ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
@@ -737,20 +740,20 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
               type="button"
               onClick={handleNext}
               disabled={currentStepIndex === steps.length - 1 || steps.length <= 1}
-              className="w-7 h-7 rounded-[5px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] disabled:opacity-30 flex items-center justify-center transition-colors cursor-pointer"
+              className="w-7 h-7 rounded-[5px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] disabled:opacity-30 flex items-center justify-center transition-colors cursor-pointer shrink-0"
               title="下一帧 (→)"
             >
               <SkipForward size={13} />
             </button>
 
             {/* 倍速切换微胶囊 */}
-            <div className="flex items-center bg-[#ececf0] rounded-[5px] p-0.5 border border-[#e3e3e8]/70 ml-2">
+            <div className="flex items-center bg-[#ececf0] rounded-[5px] p-0.5 border border-[#e3e3e8]/70 ml-2 shrink-0">
               {[1, 1.5, 2].map((spd) => (
                 <button
                   key={spd}
                   type="button"
                   onClick={() => setPlaybackSpeed(spd)}
-                  className={`px-1.5 py-0.5 text-[10.5px] font-mono rounded-[3px] transition-colors cursor-pointer ${
+                  className={`px-1.5 py-0.5 text-[10.5px] font-mono rounded-[3px] transition-colors cursor-pointer shrink-0 ${
                     playbackSpeed === spd
                       ? 'bg-white text-[#1c1c21] font-semibold shadow-2xs'
                       : 'text-[#63636b] hover:text-[#1c1c21]'
@@ -763,7 +766,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
           </div>
 
           {/* 中间进度条拖拽 */}
-          <div className="flex-1 max-w-lg mx-3 flex items-center gap-3">
+          <div className="flex-1 max-w-lg mx-3 flex items-center gap-3 min-w-0">
             <span className="text-[11px] font-mono text-[#85858d] shrink-0">
               {steps.length > 0 ? `${currentStepIndex + 1}/${steps.length}` : '0/0'}
             </span>
@@ -782,42 +785,42 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
           </div>
 
           {/* 右侧核心决策按钮群 */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               disabled={isSubmitting || isRerunning}
               onClick={handleRerunTest}
-              className="h-[30px] px-3 rounded-[6px] bg-white hover:bg-[#fafafc] border border-[#e3e3e8] text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-2xs cursor-pointer disabled:opacity-50"
+              className="h-[30px] px-3 rounded-[6px] bg-white hover:bg-[#fafafc] border border-[#e3e3e8] text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-2xs cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
               title="在靶机中重新执行自动化测试与截帧"
             >
-              <RotateCcw size={12} className={isRerunning ? 'animate-spin' : ''} />
-              <span>{isRerunning ? '测试中...' : '重新跑测试'}</span>
+              <RotateCcw size={12} className={isRerunning ? 'animate-spin shrink-0' : 'shrink-0'} />
+              <span className="whitespace-nowrap">{isRerunning ? '测试中...' : '重新跑测试'}</span>
             </button>
 
             <button
               type="button"
               disabled={isSubmitting || isRerunning}
               onClick={handleReject}
-              className="h-[30px] px-3 rounded-[6px] bg-white hover:bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] text-[11.5px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-2xs cursor-pointer disabled:opacity-50"
+              className="h-[30px] px-3 rounded-[6px] bg-white hover:bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] text-[11.5px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-2xs cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
             >
-              <span>驳回</span>
+              <span className="whitespace-nowrap">驳回</span>
             </button>
 
             <button
               type="button"
               disabled={isSubmitting || isRerunning}
               onClick={handleApproveAndMerge}
-              className="h-[30px] px-3.5 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-xs cursor-pointer disabled:opacity-50"
+              className="h-[30px] px-3.5 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-xs cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
             >
               {isSubmitting ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" />
-                  <span>正在合并并清理...</span>
+                  <Loader2 size={13} className="animate-spin shrink-0" />
+                  <span className="whitespace-nowrap">正在合并并清理...</span>
                 </>
               ) : (
                 <>
-                  <GitMerge size={13} />
-                  <span>验收通过并合并至主分支</span>
+                  <GitMerge size={13} className="shrink-0" />
+                  <span className="whitespace-nowrap">验收通过并合并至主分支</span>
                 </>
               )}
             </button>
