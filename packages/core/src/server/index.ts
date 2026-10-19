@@ -1,4 +1,5 @@
 import http from 'http';
+import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -12,7 +13,8 @@ import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
-import { WorktreeManager } from '../worktree/worktree-manager';
+import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
+import { interpolateString } from '../executors';
 
 const serverLogger = createLogger('Server');
 
@@ -599,6 +601,28 @@ export class OpenLoopServer {
         }
         if (kanbanColumn !== undefined) {
           existing.kanbanColumn = kanbanColumn;
+          // 当卡片被移入已完成列 (done) 时，立即清理该任务的所有子进程与沙箱靶机
+          if (kanbanColumn === 'done') {
+            try {
+              TaskProcessManager.stopAll(taskId);
+              if (existing.context?.worktree?.webPort) {
+                WorktreeManager.getInstance().killPortIfBusy(existing.context.worktree.webPort);
+              }
+              WorktreeManager.unregisterTaskPorts(taskId);
+            } catch (err: any) {
+              serverLogger.warn(`[Tasks:Update] 清理已完成任务的靶机进程告警: ${err.message}`);
+            }
+          }
+        }
+        if (body.status === 'completed' || body.status === 'cancelled') {
+          existing.status = body.status;
+          try {
+            TaskProcessManager.stopAll(taskId);
+            if (existing.context?.worktree?.webPort) {
+              WorktreeManager.getInstance().killPortIfBusy(existing.context.worktree.webPort);
+            }
+            WorktreeManager.unregisterTaskPorts(taskId);
+          } catch {}
         }
         existing.updatedAt = Date.now();
         serverLogger.info(`[Tasks:Update] 更新任务信息: ${taskId}`, { updatedFields: Object.keys(body) }, { taskId });
@@ -931,6 +955,196 @@ export class OpenLoopServer {
           serverLogger.error(`[Tasks:RetryNode] 重试节点失败: ${err.message}`, err, { taskId });
           return this.sendJson(res, 400, { error: err.message }, reqMeta);
         }
+      }
+
+      // Task custom retry: /api/tasks/:id/custom-retry
+      const taskCustomRetryMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/custom-retry$/);
+      if (taskCustomRetryMatch && method === 'POST') {
+        const taskId = taskCustomRetryMatch[1];
+        const body = await this.parseJsonBody(req);
+        const { selectedNodeIds, fromNodeId } = body;
+        serverLogger.info(
+          `[Tasks:CustomRetry] 接收到流水线定制重试指令: ${taskId}`,
+          { selectedNodeIds, fromNodeId },
+          { taskId }
+        );
+        try {
+          const task = await this.engine.customRetryTask(taskId, {
+            selectedNodeIds: Array.isArray(selectedNodeIds) ? selectedNodeIds : [],
+            fromNodeId,
+          });
+          return this.sendJson(res, 200, task, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[Tasks:CustomRetry] 定制重试失败: ${err.message}`, err, { taskId });
+          return this.sendJson(res, 400, { error: err.message }, reqMeta);
+        }
+      }
+
+      // Sandbox status: /api/tasks/:id/sandbox/status
+      const taskSandboxStatusMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/sandbox\/status$/);
+      if (taskSandboxStatusMatch && method === 'GET') {
+        const taskId = taskSandboxStatusMatch[1];
+        const task = this.store.getTask(taskId);
+        if (!task || !task.context?.worktree) {
+          return this.sendJson(res, 200, { status: 'none', message: 'No worktree context' }, reqMeta);
+        }
+        const port = task.context.worktree.webPort || task.context.worktree.ports?.webPort || 5175;
+        const targetUrl = task.context.worktree.targetUrl || `http://localhost:${port}`;
+        // 轻量极速端口探针 (<200ms)
+        const isRunning = await new Promise<boolean>((resolve) => {
+          const socket = new net.Socket();
+          socket.setTimeout(250);
+          socket.once('connect', () => {
+            socket.destroy();
+            resolve(true);
+          });
+          socket.once('timeout', () => {
+            socket.destroy();
+            resolve(false);
+          });
+          socket.once('error', () => {
+            socket.destroy();
+            resolve(false);
+          });
+          socket.connect(port, '127.0.0.1');
+        });
+
+        return this.sendJson(
+          res,
+          200,
+          {
+            status: isRunning ? 'running' : 'stopped',
+            port,
+            targetUrl,
+            worktreeDir: task.context.worktree.worktreeDir,
+            branchName: task.context.worktree.branchName,
+          },
+          reqMeta
+        );
+      }
+
+      // Sandbox start: /api/tasks/:id/sandbox/start
+      const taskSandboxStartMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/sandbox\/start$/);
+      if (taskSandboxStartMatch && method === 'POST') {
+        const taskId = taskSandboxStartMatch[1];
+        const task = this.store.getTask(taskId);
+        if (!task || !task.context?.worktree) {
+          return this.sendJson(res, 400, { error: '未找到任务或沙箱工作区' }, reqMeta);
+        }
+        const worktreeDir = task.context.worktree.worktreeDir;
+        if (!fs.existsSync(worktreeDir)) {
+          return this.sendJson(res, 400, { error: `沙箱工作区目录不存在: ${worktreeDir}` }, reqMeta);
+        }
+        const port = task.context.worktree.webPort || task.context.worktree.ports?.webPort || 5175;
+        const targetUrl = task.context.worktree.targetUrl || `http://localhost:${port}`;
+
+        // 核心原则：全局永远只有一个活跃的验收沙箱！
+        // 在启动当前任务靶机前，先停止所有其他任务可能残留的靶机进程，独占释放端口
+        try {
+          const allTasks = this.store.getTasks();
+          for (const other of allTasks) {
+            if (other.id !== taskId) {
+              TaskProcessManager.stopAll(other.id);
+              if (other.context?.worktree?.webPort) {
+                WorktreeManager.getInstance().killPortIfBusy(other.context.worktree.webPort);
+              }
+              WorktreeManager.unregisterTaskPorts(other.id);
+            }
+          }
+        } catch {}
+
+        // 1. 安全清理属于当前任务工作区的残留旧进程，杜绝端口冲突
+        WorktreeManager.getInstance().killPortIfBusy(port, {
+          allowWorktreeDir: worktreeDir,
+          forTaskId: taskId,
+        });
+
+        // 2. 获取命令：从任务工作流中查找 env-prepare 节点的 command 或默认启动
+        let cmd = `pnpm --filter @openloop/desktop dev --port ${port} --strictPort --host 0.0.0.0`;
+        const wf = this.store.getWorkflow(task.workflowId);
+        const envNode = wf?.nodes.find((n) => n.type === 'env-prepare');
+        if (envNode?.config?.command) {
+          cmd = interpolateString(envNode.config.command, {
+            task,
+            ports: { webPort: port },
+          });
+        }
+
+        serverLogger.info(`[Sandbox:Start] 为任务 ${taskId} 启动靶机服务: ${cmd} (目录: ${worktreeDir})`);
+
+        const isUnix = process.platform !== 'win32';
+        const child = spawn(cmd, {
+          cwd: worktreeDir,
+          shell: true,
+          detached: isUnix,
+          env: {
+            ...process.env,
+            PORT: String(port),
+            WEB_PORT: String(port),
+          },
+          stdio: 'pipe',
+        });
+
+        TaskProcessManager.getInstance().register(taskId, child, {
+          name: 'sandbox-dev-server',
+          port,
+        });
+
+        child.stdout?.on('data', (d) => {
+          this.engine.log(taskId, 'node_env_prep', 'stdout', d.toString().trimEnd());
+        });
+        child.stderr?.on('data', (d) => {
+          this.engine.log(taskId, 'node_env_prep', 'stderr', d.toString().trimEnd());
+        });
+
+        // 3. 探活等待就绪 (最多 15 秒)
+        const isReady = await WorktreeManager.getInstance().waitForHttpReady(targetUrl, 15000);
+        if (isReady) {
+          serverLogger.info(`[Sandbox:Start] ✔ 任务 ${taskId} 靶机服务已就绪 (${targetUrl})`);
+          return this.sendJson(
+            res,
+            200,
+            { success: true, status: 'running', port, targetUrl },
+            reqMeta
+          );
+        } else {
+          serverLogger.warn(`[Sandbox:Start] 任务 ${taskId} 靶机启动超时 (${targetUrl})`);
+          return this.sendJson(
+            res,
+            200,
+            { success: false, status: 'starting', port, targetUrl, message: '靶机启动中，探活尚在等待中' },
+            reqMeta
+          );
+        }
+      }
+
+      // Sandbox stop: /api/tasks/:id/sandbox/stop
+      const taskSandboxStopMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/sandbox\/stop$/);
+      if (taskSandboxStopMatch && method === 'POST') {
+        const taskId = taskSandboxStopMatch[1];
+        const task = this.store.getTask(taskId);
+        serverLogger.info(`[Sandbox:Stop] 收到任务 ${taskId} 沙箱靶机关停指令`);
+        TaskProcessManager.stopAll(taskId);
+        if (task?.context?.worktree?.webPort) {
+          WorktreeManager.getInstance().killPortIfBusy(task.context.worktree.webPort);
+        }
+        WorktreeManager.unregisterTaskPorts(taskId);
+        return this.sendJson(res, 200, { success: true, status: 'stopped' }, reqMeta);
+      }
+
+      // Sandbox cleanup all: /api/sandbox/cleanup-all
+      if (pathname === '/api/sandbox/cleanup-all' && method === 'POST') {
+        serverLogger.info(`[Sandbox:CleanupAll] 收到全局沙箱清理指令，清空所有靶机进程与端口占用`);
+        const allTasks = this.store.getTasks();
+        for (const t of allTasks) {
+          TaskProcessManager.stopAll(t.id);
+          if (t.context?.worktree?.webPort) {
+            WorktreeManager.getInstance().killPortIfBusy(t.context.worktree.webPort);
+          }
+          WorktreeManager.unregisterTaskPorts(t.id);
+        }
+        WorktreeManager.getInstance().killPortIfBusy(5175);
+        return this.sendJson(res, 200, { success: true, message: '全局沙箱与端口已全部清空' }, reqMeta);
       }
 
       // Task logs: /api/tasks/:id/logs

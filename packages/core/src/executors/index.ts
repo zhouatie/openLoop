@@ -719,6 +719,15 @@ export class EnvPrepareExecutor implements NodeExecutor {
         ...variables,
       });
 
+      // 启动前安全清理当前工作区残留进程，严禁误杀其他并行任务
+      const wtManager = WorktreeManager.getInstance();
+      if (ports.webPort) {
+        wtManager.killPortIfBusy(ports.webPort, {
+          allowWorktreeDir: task.context?.worktree?.worktreeDir || resolvedCwd,
+          forTaskId: task.id,
+        });
+      }
+
       emitLog('system', `[服务启动] 执行服务拉起命令: ${cmd} (目录: ${resolvedCwd})`);
 
       const isUnix = process.platform !== 'win32';

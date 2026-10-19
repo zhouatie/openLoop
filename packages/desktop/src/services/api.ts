@@ -359,6 +359,65 @@ export class DesktopApiService {
     });
   }
 
+  async customRetryTask(id: string, payload: { selectedNodeIds: string[]; fromNodeId?: string }): Promise<Task> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 请求流水线定制重试任务 [${id}]:`, payload);
+    }
+    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/custom-retry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getTaskSandboxStatus(id: string): Promise<{ status: 'running' | 'stopped' | 'none'; port?: number; targetUrl?: string }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 探测任务 [${id}] 沙箱靶机状态`);
+    }
+    return requestJson<{ status: 'running' | 'stopped' | 'none'; port?: number; targetUrl?: string }>(
+      `${BASE_URL}/api/tasks/${id}/sandbox/status`
+    );
+  }
+
+  async startTaskSandbox(id: string): Promise<{ success: boolean; status: string; port?: number; targetUrl?: string; message?: string }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 启动/唤醒任务 [${id}] 沙箱靶机服务`);
+    }
+    return requestJson<{ success: boolean; status: string; port?: number; targetUrl?: string; message?: string }>(
+      `${BASE_URL}/api/tasks/${id}/sandbox/start`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  async stopTaskSandbox(id: string): Promise<{ success: boolean; status: string }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 关停任务 [${id}] 沙箱靶机服务`);
+    }
+    return requestJson<{ success: boolean; status: string }>(
+      `${BASE_URL}/api/tasks/${id}/sandbox/stop`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  async cleanupAllSandboxes(): Promise<{ success: boolean; message: string }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 全局清空所有任务的沙箱靶机服务与端口占用`);
+    }
+    return requestJson<{ success: boolean; message: string }>(
+      `${BASE_URL}/api/sandbox/cleanup-all`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
   async getTaskLogs(id: string): Promise<LogEntry[]> {
     return requestJson<LogEntry[]>(`${BASE_URL}/api/tasks/${id}/logs`);
   }

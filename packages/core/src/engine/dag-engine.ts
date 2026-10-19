@@ -494,6 +494,18 @@ export class DagEngine extends EventEmitter {
         this.runningTasks.delete(task.id);
         this.abortControllers.delete(task.id);
         this.activeProcesses.delete(task.id);
+
+        // 任务全部执行完成，立即清理所有后台进程与沙箱端口，绝不留存孤儿进程
+        try {
+          TaskProcessManager.stopAll(task.id);
+          if (task.context?.worktree?.webPort) {
+            WorktreeManager.getInstance().killPortIfBusy(task.context.worktree.webPort);
+            WorktreeManager.unregisterTaskPorts(task.id);
+          }
+        } catch (cleanupErr: any) {
+          dagLogger.warn(`[Task:Complete] 清理后台进程告警: ${cleanupErr.message}`);
+        }
+
         dagLogger.info(
           `工作流 [${workflow.name}] 全部节点执行或按分支跳过完毕，任务标记为 COMPLETED`,
           undefined,
@@ -582,6 +594,13 @@ export class DagEngine extends EventEmitter {
             { taskId: task.id, nodeId: targetNode.id }
           );
           await this.scheduleNode(task, workflow, targetNode);
+        } else if (currentTargetStatus === 'skipped') {
+          dagLogger.info(
+            `下游节点 [${targetNode.name}] 已标记为跳过 (skipped)，继续向下传导调度`,
+            undefined,
+            { taskId: task.id, nodeId: targetNode.id }
+          );
+          await this.triggerNextNodes(task, workflow, targetNode.id);
         }
       } else {
         if (!task.nodeRuns[targetNode.id]?.status) {
@@ -672,6 +691,16 @@ export class DagEngine extends EventEmitter {
       { taskId, nodeId: currentNodeId }
     );
     this.log(task.id, currentNodeId, 'system', `[QA 审核通过]: ${feedback || '验证指标符合要求，继续流转'}`);
+
+    // 人工验收通过，关停可能拉起的临时沙箱靶机服务，释放端口
+    try {
+      TaskProcessManager.stopAll(task.id);
+      if (task.context?.worktree?.webPort) {
+        WorktreeManager.getInstance().killPortIfBusy(task.context.worktree.webPort);
+        WorktreeManager.unregisterTaskPorts(task.id);
+      }
+    } catch {}
+
     if (nodeRun) {
       nodeRun.status = 'success';
       nodeRun.finishedAt = Date.now();
@@ -863,6 +892,125 @@ export class DagEngine extends EventEmitter {
   }
 
   /**
+   * 定制重试任务工作流：支持精确勾选节点、跳过未勾选节点、或从指定节点向下执行
+   */
+  async customRetryTask(
+    taskId: string,
+    options: {
+      selectedNodeIds: string[];
+      fromNodeId?: string;
+    }
+  ): Promise<Task> {
+    const task = this.store.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+
+    const workflow = this.store.getWorkflow(task.workflowId);
+    if (!workflow) {
+      throw new Error(`Workflow ${task.workflowId} not found`);
+    }
+
+    const { selectedNodeIds, fromNodeId } = options;
+    const selectedSet = new Set(selectedNodeIds);
+
+    dagLogger.info(
+      `收到定制重试流水线指令: Task ${taskId}, From: ${fromNodeId || 'none'}, Selected: [${selectedNodeIds.join(', ')}]`,
+      undefined,
+      { taskId }
+    );
+    this.log(task.id, 'SYSTEM', 'system', `[定制重试] 用户触发流水线节点定制重试，已勾选 ${selectedNodeIds.length} 个节点重新执行`);
+
+    const nodeOrderMap = new Map<string, number>();
+    workflow.nodes.forEach((n, idx) => nodeOrderMap.set(n.id, idx));
+
+    let startIndex = 0;
+    if (fromNodeId) {
+      const idx = nodeOrderMap.get(fromNodeId);
+      if (idx !== undefined) startIndex = idx;
+    }
+
+    const now = Date.now();
+    for (let i = 0; i < workflow.nodes.length; i++) {
+      const node: WorkflowNode = workflow.nodes[i];
+      const nid = node.id;
+
+      if (i < startIndex) {
+        // 在起始节点之前：如果用户未重新勾选它，且此前已成功，则保持成果不重跑
+        if (!selectedSet.has(nid) && task.nodeRuns[nid]?.status === 'success') {
+          continue;
+        }
+      }
+
+      if (selectedSet.has(nid)) {
+        // 用户选中的待重跑节点：重置为 pending
+        if (task.nodeRuns[nid]) {
+          task.nodeRuns[nid].status = 'pending';
+          delete task.nodeRuns[nid].error;
+          delete task.nodeRuns[nid].exitCode;
+          delete task.nodeRuns[nid].finishedAt;
+          task.nodeRuns[nid].startedAt = now;
+        } else {
+          task.nodeRuns[nid] = {
+            nodeId: nid,
+            status: 'pending',
+            startedAt: now,
+          };
+        }
+      } else {
+        // 用户取消勾选的节点（在起始节点之后或未勾选）：标记为 skipped
+        if (i >= startIndex) {
+          task.nodeRuns[nid] = {
+            nodeId: nid,
+            status: 'skipped',
+            startedAt: now,
+            finishedAt: now,
+          };
+          this.log(task.id, nid, 'system', `[定制重试] 节点 [${node.name}] 被用户取消勾选，自动跳过`);
+        }
+      }
+    }
+
+    // 找到第一个需要执行的节点
+    let firstNodeToRun: WorkflowNode | undefined;
+    for (let i = startIndex; i < workflow.nodes.length; i++) {
+      const node: WorkflowNode = workflow.nodes[i];
+      if (selectedSet.has(node.id)) {
+        firstNodeToRun = node;
+        break;
+      }
+    }
+
+    if (!firstNodeToRun) {
+      throw new Error('未选择任何可执行的节点');
+    }
+
+    // 激活运行时上下文
+    if (!this.runningTasks.has(taskId)) {
+      this.runningTasks.add(taskId);
+    }
+    if (!this.abortControllers.has(taskId)) {
+      this.abortControllers.set(taskId, new AbortController());
+    }
+    if (!this.activeProcesses.has(taskId)) {
+      this.activeProcesses.set(taskId, new Set());
+    }
+
+    task.status = 'running';
+    task.kanbanColumn = 'in_progress';
+    task.currentNodeId = firstNodeToRun.id;
+    this.store.saveTask(task);
+    this.emit('task:update', task);
+
+    // 异步调度第一个节点
+    this.scheduleNode(task, workflow, firstNodeToRun).catch((err) => {
+      dagLogger.error(`定制重试调度异常 [${firstNodeToRun!.name}]: ${err.message}`, err, { taskId });
+    });
+
+    return task;
+  }
+
+  /**
    * 终止正在运行的任务
    */
   async cancelTask(taskId: string): Promise<Task> {
@@ -927,7 +1075,7 @@ export class DagEngine extends EventEmitter {
     return task;
   }
 
-  private log(taskId: string, nodeId: string, stream: 'stdout' | 'stderr' | 'system', message: string) {
+  public log(taskId: string, nodeId: string, stream: 'stdout' | 'stderr' | 'system', message: string) {
     const entry: LogEntry = {
       id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       taskId,

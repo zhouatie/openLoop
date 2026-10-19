@@ -44,6 +44,10 @@ export class TaskProcessManager {
     return TaskProcessManager.instance;
   }
 
+  public static stopAll(taskId: string) {
+    TaskProcessManager.getInstance().stopAll(taskId);
+  }
+
   public register(taskId: string, proc: ChildProcess, meta?: { name?: string; port?: number }) {
     const list = this.processes.get(taskId) || [];
     const item = {
@@ -110,6 +114,8 @@ export interface CreateWorktreeOptions {
 
 export class WorktreeManager {
   private static instance: WorktreeManager;
+  // 维护全局已分配但可能尚未监听的端口映射，杜绝并行任务端口时间差冲突
+  private static allocatedPorts: Map<string, number[]> = new Map();
 
   public static getInstance(): WorktreeManager {
     if (!WorktreeManager.instance) {
@@ -118,10 +124,45 @@ export class WorktreeManager {
     return WorktreeManager.instance;
   }
 
+  public static unregisterTaskPorts(taskId: string) {
+    WorktreeManager.getInstance().unregisterTaskPorts(taskId);
+  }
+
   /**
-   * 动态探测本地空闲端口（双栈 0.0.0.0 与 127.0.0.1 交叉验证，排查通配符冲突）
+   * 注册指定任务预占的端口列表
    */
-  public async getAvailablePort(startPort: number): Promise<number> {
+  public registerTaskPorts(taskId: string, ports: number[]) {
+    WorktreeManager.allocatedPorts.set(taskId, ports);
+    logger.info(`[Worktree:PortRegistry] 任务 ${taskId} 已登记占用端口: ${JSON.stringify(ports)}`);
+  }
+
+  /**
+   * 释放指定任务登记占用的端口
+   */
+  public unregisterTaskPorts(taskId: string) {
+    WorktreeManager.allocatedPorts.delete(taskId);
+    logger.info(`[Worktree:PortRegistry] 任务 ${taskId} 已注销预占端口`);
+  }
+
+  /**
+   * 获取当前所有活跃任务已登记的端口集合
+   */
+  public getBusyOrReservedPorts(): Set<number> {
+    const set = new Set<number>();
+    for (const portList of WorktreeManager.allocatedPorts.values()) {
+      portList.forEach((p) => set.add(p));
+    }
+    return set;
+  }
+
+  /**
+   * 动态探测本地空闲端口（双栈 0.0.0.0 与 127.0.0.1 交叉验证，排查通配符冲突，并跳过全局预占端口）
+   */
+  public async getAvailablePort(startPort: number, excludePorts?: Set<number>): Promise<number> {
+    if (excludePorts && excludePorts.has(startPort)) {
+      return this.getAvailablePort(startPort + 1, excludePorts);
+    }
+
     return new Promise((resolve) => {
       const server = net.createServer();
       server.listen(startPort, '0.0.0.0', () => {
@@ -132,21 +173,21 @@ export class WorktreeManager {
             s2.close(() => resolve(port));
           });
           s2.on('error', () => {
-            resolve(this.getAvailablePort(startPort + 1));
+            resolve(this.getAvailablePort(startPort + 1, excludePorts));
           });
         });
       });
       server.on('error', () => {
-        resolve(this.getAvailablePort(startPort + 1));
+        resolve(this.getAvailablePort(startPort + 1, excludePorts));
       });
     });
   }
 
   /**
-   * 强力清理指定端口上的孤儿/僵尸进程
-   * 内置自身进程与核心系统服务端口自杀保护
+   * 安全清理指定端口上的僵尸进程
+   * 深度校验进程 CWD 与工作区归属，严禁误杀其他并行且在验收中的任务靶机
    */
-  public killPortIfBusy(port: number) {
+  public killPortIfBusy(port: number, options?: { allowWorktreeDir?: string; forTaskId?: string }) {
     // 保护系统核心端口，严禁杀灭
     const protectedPorts = [19888, 5173];
     if (process.env.OPENLOOP_PORT) {
@@ -183,9 +224,31 @@ export class WorktreeManager {
               logger.warn(`[Worktree] 端口 ${port} 关联 PID ${pid} 为当前服务自身或父进程，跳过自杀`);
               continue;
             }
+
+            // 深度进程工作区归属校验：防止误杀并行运行/待验收的其他任务靶机
+            try {
+              const cwdOut = execSync(`lsof -a -p ${pid} -d cwd -Fn 2>/dev/null`, { encoding: 'utf-8' }).trim();
+              const cwdLine = cwdOut.split('\n').find((l) => l.startsWith('n'));
+              const procCwd = cwdLine ? cwdLine.slice(1).trim() : '';
+
+              if (procCwd) {
+                // 如果该进程在 .worktrees 下运行，但所属 worktree 并非当前任务的 worktreeDir，则判定为并行任务保护对象
+                if (options?.allowWorktreeDir) {
+                  const normalizedAllow = path.resolve(options.allowWorktreeDir);
+                  const normalizedProc = path.resolve(procCwd);
+                  if (normalizedProc.includes('.worktrees') && normalizedProc !== normalizedAllow) {
+                    logger.warn(
+                      `[Worktree:Guard] 端口 ${port} 占用进程 (PID: ${pid}, CWD: ${procCwd}) 属于其他并行任务工作区，严禁清理！`
+                    );
+                    continue;
+                  }
+                }
+              }
+            } catch {}
+
             try {
               process.kill(pid, 'SIGKILL');
-              logger.info(`[Worktree] 自动清理占用端口 ${port} 的僵尸进程 PID: ${pid}`);
+              logger.info(`[Worktree] 自动安全清理占用端口 ${port} 的孤儿/自身残留进程 PID: ${pid}`);
             } catch {}
           }
         }
@@ -247,18 +310,24 @@ export class WorktreeManager {
       : ['node_modules'];
     this.symlinkSharedPaths(repoRoot, worktreeDir, sharedPaths);
 
-    // 5. 通用动态端口分配
+    // 5. 通用动态端口分配（结合全局活跃端口注册表，防止并行任务抢占同一端口）
     const portKeys = options.portKeys && options.portKeys.length > 0
       ? options.portKeys
       : ['webPort', 'corePort'];
 
     const ports: Record<string, number> = {};
     let startScanPort = 5175;
+    const reservedPorts = this.getBusyOrReservedPorts();
+
     for (const key of portKeys) {
-      const p = await this.getAvailablePort(startScanPort);
+      const p = await this.getAvailablePort(startScanPort, reservedPorts);
       ports[key] = p;
+      reservedPorts.add(p);
       startScanPort = p + 1;
     }
+
+    // 登记预占端口
+    this.registerTaskPorts(taskId, Object.values(ports));
 
     const primaryPort = ports.webPort || ports.port || ports.PORT || Object.values(ports)[0] || 5173;
     const targetUrl = `http://localhost:${primaryPort}`;
@@ -423,6 +492,7 @@ export class WorktreeManager {
   ) {
     onLog?.(`[驳回清理] 正在释放任务 ${taskId} 关联的后台服务进程...`);
     TaskProcessManager.getInstance().stopAll(taskId);
+    this.unregisterTaskPorts(taskId);
     if (!keepWorktree) {
       this.cleanupTaskWorktree(repoRoot, taskId, onLog);
     }
@@ -717,8 +787,9 @@ ${conflictFiles.map((f) => `- ${f}`).join('\n')}
     const branchName = `feat/task-${safeTaskId}`;
     const worktreeDir = path.join(repoRoot, '.worktrees', `task-${safeTaskId}`);
 
-    // 1. 停止该任务的所有后台进程
+    // 1. 停止该任务的所有后台进程并注销端口
     TaskProcessManager.getInstance().stopAll(taskId);
+    this.unregisterTaskPorts(taskId);
 
     // 2. 移除 git worktree 关联
     try {

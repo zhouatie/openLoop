@@ -21,6 +21,7 @@ import {
   ChevronRight,
   Clock,
   Layers,
+  Square,
 } from 'lucide-react';
 import { Task, QaRunRecord, StepTimelineRecord, WorktreeContextInfo } from '@openloop/core';
 import { api } from '../../services/api';
@@ -51,8 +52,67 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   const [isAiOverlayVisible, setIsAiOverlayVisible] = useState(true);
   const timerRef = useRef<any>(null);
 
+  const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped'>('checking');
+  const [isStartingSandbox, setIsStartingSandbox] = useState<boolean>(false);
+
   const worktree: WorktreeContextInfo | undefined = task.context?.worktree;
   const qaRunId = task.context?.qaRunId || (worktree as any)?.qaRunId;
+
+  // 探测沙箱靶机在线状态
+  useEffect(() => {
+    let active = true;
+    if (task.context?.worktree) {
+      if (import.meta.env?.DEV) console.log('[VisualAcceptanceModal:Sandbox] 探活靶机状态...');
+      api.getTaskSandboxStatus(task.id)
+        .then((res) => {
+          if (active) setSandboxStatus(res.status === 'running' ? 'running' : 'stopped');
+        })
+        .catch(() => {
+          if (active) setSandboxStatus('stopped');
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [task.id, task.context?.worktree?.webPort]);
+
+  const handleStopSandbox = async () => {
+    try {
+      if (import.meta.env?.DEV) console.log('[VisualAcceptanceModal:Sandbox] 关停靶机服务...');
+      await api.stopTaskSandbox(task.id);
+      setSandboxStatus('stopped');
+      toast.info('沙箱靶机已关停，端口已释放');
+    } catch (err: any) {
+      toast.error(`关停靶机失败: ${err.message || '未知错误'}`);
+    }
+  };
+
+  const handleStartOrOpenSandbox = async () => {
+    const targetUrl = worktree?.targetUrl || `http://localhost:${worktree?.webPort || 5175}`;
+    if (sandboxStatus === 'running') {
+      window.open(targetUrl, '_blank');
+      return;
+    }
+
+    try {
+      setIsStartingSandbox(true);
+      if (import.meta.env?.DEV) console.log('[VisualAcceptanceModal:Sandbox] 启动靶机服务...');
+      const res = await api.startTaskSandbox(task.id);
+      if (res.success || res.status === 'running') {
+        setSandboxStatus('running');
+        toast.success('沙箱靶机服务已就绪');
+        window.open(res.targetUrl || targetUrl, '_blank');
+      } else {
+        toast.warning(res.message || '靶机服务启动超时');
+        setSandboxStatus('stopped');
+      }
+    } catch (err: any) {
+      toast.error(`启动靶机失败: ${err.message || '未知异常'}`);
+      setSandboxStatus('stopped');
+    } finally {
+      setIsStartingSandbox(false);
+    }
+  };
 
   // 加载 QA 执行结果
   useEffect(() => {
@@ -381,19 +441,58 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
 
           {/* 右侧微操作群 */}
           <div className="flex items-center gap-2">
-            {/* 靶机独立外链直达 */}
-            {worktree?.targetUrl && (
-              <a
-                href={worktree.targetUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="h-[28px] px-2.5 rounded-[6px] bg-white hover:bg-[#fafafc] text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1.5 border border-[#e3e3e8] shadow-2xs transition-all active:scale-95"
-                title="在浏览器新标签页中打开独立沙箱靶机"
-              >
-                <Globe size={12} className="text-[#63636b]" />
-                <span>打开沙箱靶机 ({worktree.webPort})</span>
-                <ExternalLink size={10} className="text-[#85858d]" />
-              </a>
+            {/* 靶机微交互直达/一键唤醒与关停按钮群 */}
+            {worktree && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleStartOrOpenSandbox}
+                  disabled={isStartingSandbox}
+                  className={`h-[28px] px-2.5 rounded-[6px] text-[11.5px] font-medium flex items-center gap-1.5 border shadow-2xs transition-all active:scale-95 cursor-pointer disabled:opacity-60 ${
+                    sandboxStatus === 'running'
+                      ? 'bg-white hover:bg-[#fafafc] text-[#1c1c21] border-[#e3e3e8]'
+                      : isStartingSandbox
+                      ? 'bg-[#fffbeb] text-[#b45309] border-[#fde68a]'
+                      : 'bg-[#1c1c21] hover:bg-[#2e2f36] text-white border-transparent'
+                  }`}
+                  title={
+                    sandboxStatus === 'running'
+                      ? '沙箱靶机在线，点击在新标签页打开'
+                      : isStartingSandbox
+                      ? '正在拉起靶机 dev server...'
+                      : '靶机离线，点击一键唤醒服务'
+                  }
+                >
+                  {isStartingSandbox ? (
+                    <Loader2 size={12} className="animate-spin text-[#b45309]" />
+                  ) : sandboxStatus === 'running' ? (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#059669] shrink-0" />
+                  ) : (
+                    <Play size={10} className="fill-current text-white shrink-0" />
+                  )}
+                  <span>
+                    {isStartingSandbox
+                      ? '正在唤醒靶机...'
+                      : sandboxStatus === 'running'
+                      ? `打开沙箱靶机 (${worktree.webPort})`
+                      : `启动沙箱靶机 (${worktree.webPort})`}
+                  </span>
+                  {sandboxStatus === 'running' && <ExternalLink size={10} className="text-[#85858d]" />}
+                </button>
+
+                {/* 在线时展示一键关停微按钮 */}
+                {sandboxStatus === 'running' && (
+                  <button
+                    type="button"
+                    onClick={handleStopSandbox}
+                    className="h-[28px] px-2 rounded-[6px] bg-white hover:bg-[#fef2f2] text-[#71717a] hover:text-[#dc2626] border border-[#e3e3e8] hover:border-[#fecaca] text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                    title="立即关停沙箱靶机，释放端口与系统资源"
+                  >
+                    <Square size={9} className="fill-current text-[#dc2626]" />
+                    <span>关停</span>
+                  </button>
+                )}
+              </div>
             )}
 
             {/* AI 热区开关 */}
@@ -441,17 +540,23 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                     <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f] border border-[#1aab29]/40 inline-block" />
                   </div>
 
-                  <a
-                    href={worktree?.targetUrl || '#'}
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
+                    onClick={handleStartOrOpenSandbox}
                     className="flex items-center gap-1.5 text-[10.5px] font-mono text-[#71717a] hover:text-[#1c1c21] bg-white hover:bg-[#fafafc] border border-[#e3e3e8]/80 hover:border-[#b9b9c2] px-2.5 py-[2px] rounded-[4px] shadow-3xs max-w-[340px] truncate transition-colors cursor-pointer group"
-                    title="点击在新窗口直接打开靶机预览"
+                    title={sandboxStatus === 'running' ? '点击在新窗口打开靶机预览' : '靶机离线，点击一键唤醒并打开'}
                   >
+                    {sandboxStatus === 'running' ? (
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#059669] shrink-0" />
+                    ) : isStartingSandbox ? (
+                      <Loader2 size={10} className="animate-spin text-[#b45309] shrink-0" />
+                    ) : (
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#a1a1aa] shrink-0" />
+                    )}
                     <Globe size={10} className="text-[#85858d] group-hover:text-[#4f46e5] shrink-0 transition-colors" />
                     <span className="truncate">{worktree?.targetUrl || 'http://localhost:5175/'}</span>
                     <ExternalLink size={9} className="opacity-60 group-hover:opacity-100 transition-opacity" />
-                  </a>
+                  </button>
 
                   <div className="w-12 text-right text-[10px] font-mono text-[#85858d]">
                     {currentStepIndex + 1}/{steps.length}

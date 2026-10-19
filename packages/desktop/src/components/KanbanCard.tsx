@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import {
   Check,
   Terminal,
@@ -19,6 +19,9 @@ import {
   Cpu,
   ClipboardCheck,
   Layers,
+  Loader2,
+  Globe,
+  ExternalLink,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
@@ -189,6 +192,58 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   onVisualAcceptance,
   onApprove,
 }) => {
+  const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped' | 'starting'>('checking');
+
+  // 当任务处于待人工门禁时，按需探活沙箱靶机状态
+  useEffect(() => {
+    let active = true;
+    if (task.status === 'waiting_approval' && task.context?.worktree) {
+      if (import.meta.env?.DEV) {
+        console.log(`[KanbanCard:Sandbox] 探活任务 ${task.id} 靶机端口: ${task.context.worktree.webPort}`);
+      }
+      api.getTaskSandboxStatus(task.id)
+        .then((res) => {
+          if (active) {
+            setSandboxStatus(res.status === 'running' ? 'running' : 'stopped');
+          }
+        })
+        .catch(() => {
+          if (active) setSandboxStatus('stopped');
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [task.id, task.status, task.context?.worktree?.webPort]);
+
+  const handleOpenOrStartSandbox = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const wt = task.context?.worktree;
+    if (!wt) return;
+    const targetUrl = wt.targetUrl || `http://localhost:${wt.webPort || 5175}`;
+
+    if (sandboxStatus === 'running') {
+      if (import.meta.env?.DEV) console.log(`[KanbanCard:Sandbox] 打开靶机: ${targetUrl}`);
+      window.open(targetUrl, '_blank');
+      return;
+    }
+
+    // 离线态，触发一键唤醒
+    try {
+      setSandboxStatus('starting');
+      if (import.meta.env?.DEV) console.log(`[KanbanCard:Sandbox] 触发一键唤醒任务 ${task.id} 靶机...`);
+      const res = await api.startTaskSandbox(task.id);
+      if (res.success || res.status === 'running') {
+        setSandboxStatus('running');
+        window.open(res.targetUrl || targetUrl, '_blank');
+      } else {
+        setSandboxStatus('stopped');
+      }
+    } catch (err) {
+      if (import.meta.env?.DEV) console.error(`[KanbanCard:Sandbox] 唤醒靶机失败:`, err);
+      setSandboxStatus('stopped');
+    }
+  };
   const currentNode = workflow?.nodes.find((n) => n.id === task.currentNodeId);
   const currentNodeMeta = task.currentNodeId
     ? resolveNodeMeta(task.currentNodeId, workflow, workflows)
@@ -544,9 +599,38 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
               </span>
             </span>
             {task.context?.worktree && (
-              <span className="text-[9.5px] font-mono bg-[#eff6ff] text-[#2563eb] px-1 rounded border border-[#bfdbfe]">
-                靶机 :{task.context.worktree.webPort}
-              </span>
+              <button
+                type="button"
+                onClick={handleOpenOrStartSandbox}
+                className={`text-[9.5px] font-mono px-1.5 py-[1.5px] rounded border flex items-center gap-1 transition-all cursor-pointer ${
+                  sandboxStatus === 'running'
+                    ? 'bg-[#eff6ff] hover:bg-[#dbeafe] text-[#2563eb] border-[#bfdbfe]'
+                    : sandboxStatus === 'starting'
+                    ? 'bg-[#fffbeb] text-[#b45309] border-[#fde68a]'
+                    : 'bg-[#f4f4f6] hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] border-[#e3e3e8]'
+                }`}
+                title={
+                  sandboxStatus === 'running'
+                    ? '沙箱靶机在线运行中，点击在新标签页打开'
+                    : sandboxStatus === 'starting'
+                    ? '正在拉起沙箱靶机服务...'
+                    : '沙箱靶机离线，点击一键唤醒'
+                }
+              >
+                {sandboxStatus === 'starting' ? (
+                  <Loader2 size={9} className="animate-spin text-[#b45309]" />
+                ) : sandboxStatus === 'running' ? (
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#059669] shrink-0" />
+                ) : (
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#a1a1aa] shrink-0" />
+                )}
+                <span>靶机 :{task.context.worktree.webPort}</span>
+                {sandboxStatus === 'running' ? (
+                  <ExternalLink size={8} className="opacity-70" />
+                ) : sandboxStatus === 'stopped' ? (
+                  <Play size={7} className="fill-current opacity-70" />
+                ) : null}
+              </button>
             )}
           </div>
 

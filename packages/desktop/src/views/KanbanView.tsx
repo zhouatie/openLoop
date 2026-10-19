@@ -303,6 +303,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [skippingTaskId, setSkippingTaskId] = useState<string | null>(null);
   const [retryingNodeKey, setRetryingNodeKey] = useState<string | null>(null);
+  const [isCustomRetrying, setIsCustomRetrying] = useState<boolean>(false);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
 
   const handleCancelTask = async (taskId: string) => {
@@ -887,6 +888,31 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       toast.error(`重试节点失败: ${e?.message || '未知错误'}`);
     } finally {
       setRetryingNodeKey(null);
+    }
+  };
+
+  const handleCustomRetry = async (taskId: string, payload: { selectedNodeIds: string[]; fromNodeId?: string }) => {
+    setIsCustomRetrying(true);
+    if (import.meta.env?.DEV) {
+      console.log(`[KanbanView] 触发任务 [${taskId}] 定制重试:`, payload);
+    }
+    try {
+      const updated = await api.customRetryTask(taskId, payload);
+      if (updated && onTaskUpdate) {
+        onTaskUpdate(updated);
+      }
+      if (selectedTask?.id === taskId && updated) {
+        setSelectedTask(updated);
+      }
+      toast.info(`已按定制勾选启动 ${payload.selectedNodeIds.length} 个节点重试`);
+      await onRefresh();
+    } catch (e: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 定制重试失败:', e);
+      }
+      toast.error(`定制重试失败: ${e?.message || '未知错误'}`);
+    } finally {
+      setIsCustomRetrying(false);
     }
   };
 
@@ -2046,6 +2072,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           onRetryNode={(taskId, nodeId) => handleRetryNode(taskId, nodeId)}
                           isSkipping={skippingTaskId === curTask.id}
                           isRetryingNode={retryingNodeKey?.startsWith(curTask.id)}
+                          onCustomRetry={handleCustomRetry}
+                          isCustomRetrying={isCustomRetrying}
                         />
                       </div>
                     </div>

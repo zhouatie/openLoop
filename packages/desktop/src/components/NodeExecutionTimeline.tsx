@@ -46,6 +46,8 @@ interface NodeExecutionTimelineProps {
   onRetryNode?: (taskId: string, nodeId: string) => void;
   isSkipping?: boolean;
   isRetryingNode?: boolean;
+  onCustomRetry?: (taskId: string, payload: { selectedNodeIds: string[]; fromNodeId?: string }) => void;
+  isCustomRetrying?: boolean;
 }
 
 interface TimelineItem {
@@ -76,9 +78,64 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
   onRetryNode,
   isSkipping = false,
   isRetryingNode = false,
+  onCustomRetry,
+  isCustomRetrying = false,
 }) => {
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // 定制重试模式与勾选节点集合
+  const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
+  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
+
+  const handleEnterCustomMode = () => {
+    setIsCustomMode(true);
+    const nextSet = new Set<string>();
+    timelineItems.forEach((it) => nextSet.add(it.id));
+    setSelectedNodes(nextSet);
+  };
+
+  const handleToggleNodeSelection = (nodeId: string) => {
+    setSelectedNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  };
+
+  const handleRunFromHere = (targetIdx: number) => {
+    const next = new Set<string>();
+    for (let i = 0; i < timelineItems.length; i++) {
+      if (i >= targetIdx) {
+        next.add(timelineItems[i].id);
+      }
+    }
+    setSelectedNodes(next);
+  };
+
+  const handleSelectAll = () => {
+    const next = new Set<string>();
+    timelineItems.forEach((it) => next.add(it.id));
+    setSelectedNodes(next);
+  };
+
+  const handleSelectNone = () => {
+    setSelectedNodes(new Set());
+  };
+
+  const handleExecuteCustomRetry = () => {
+    if (!onCustomRetry) return;
+    const selectedList = Array.from(selectedNodes);
+    if (selectedList.length === 0) return;
+    onCustomRetry(task.id, {
+      selectedNodeIds: selectedList,
+    });
+    setIsCustomMode(false);
+  };
 
   // 整理时间线全部节点（结合工作流定义与实际运行记录）
   const timelineItems: TimelineItem[] = useMemo(() => {
@@ -373,8 +430,20 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
           )}
         </div>
 
-        {/* 状态指示简报 */}
+        {/* 状态指示简报与定制重试入口 */}
         <div className="flex items-center gap-1.5">
+          {onCustomRetry && !isCustomMode && (
+            <button
+              type="button"
+              onClick={handleEnterCustomMode}
+              className="h-[22px] px-2 rounded-[5px] bg-white hover:bg-[#fafafc] text-[#1c1c21] border border-[#e3e3e8] hover:border-[#b9b9c2] text-[10.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-95 cursor-pointer mr-1"
+              title="自由勾选/取消流水线节点，支持按需跳过或从特定节点重跑"
+            >
+              <RotateCcw size={10} className="text-[#63636b]" />
+              <span>定制重试</span>
+            </button>
+          )}
+
           {metrics.running > 0 && (
             <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[9.5px] font-medium bg-[#eeedfd] text-[#4f46e5]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-ping" />
@@ -393,6 +462,59 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
           )}
         </div>
       </div>
+
+      {/* 定制重试悬浮控制抽屉条 */}
+      {isCustomMode && (
+        <div className="p-2.5 rounded-[8px] bg-[#1c1c21] text-white flex items-center justify-between text-[11px] shadow-sm animate-in fade-in slide-in-from-top-1 duration-150 select-none">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-white/95 flex items-center gap-1.5">
+              <CheckSquare size={12} className="text-[#818cf8]" />
+              <span>定制重试流水线</span>
+            </span>
+            <span className="text-white/60 font-mono text-[10px]">
+              (已选 {selectedNodes.size}/{timelineItems.length} 个节点执行)
+            </span>
+            <div className="h-3 w-[1px] bg-white/20 mx-0.5" />
+            <button
+              type="button"
+              onClick={handleSelectAll}
+              className="text-[10px] text-white/70 hover:text-white underline cursor-pointer"
+            >
+              全选
+            </button>
+            <button
+              type="button"
+              onClick={handleSelectNone}
+              className="text-[10px] text-white/70 hover:text-white underline cursor-pointer"
+            >
+              清空
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsCustomMode(false)}
+              className="h-[24px] px-2 rounded-[5px] bg-white/10 hover:bg-white/20 text-white/90 text-[10.5px] font-medium transition-colors cursor-pointer"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              disabled={selectedNodes.size === 0 || isCustomRetrying}
+              onClick={handleExecuteCustomRetry}
+              className="h-[24px] px-2.5 rounded-[5px] bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[10.5px] font-medium flex items-center gap-1 transition-all shadow-xs cursor-pointer disabled:opacity-50 active:scale-95"
+            >
+              {isCustomRetrying ? (
+                <Loader2 size={11} className="animate-spin text-white" />
+              ) : (
+                <Play size={10} className="fill-current text-white" />
+              )}
+              <span>立即执行 ({selectedNodes.size} 步)</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 垂直时间线卡片流 */}
       <div className="relative pl-6 space-y-3 before:absolute before:top-2 before:bottom-3 before:left-[9px] before:w-[2px] before:bg-[#ececf0]">
@@ -413,7 +535,9 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
               {/* 卡片主体 */}
               <div
                 className={`rounded-[8px] border transition-all ${
-                  item.status === 'running'
+                  isCustomMode && !selectedNodes.has(item.id)
+                    ? 'opacity-65 border-dashed border-[#d4d4d8] bg-[#fbfbfd]'
+                    : item.status === 'running'
                     ? 'border-[#c7d2fe] bg-[#fafaff] shadow-[0_2px_8px_rgba(79,70,229,0.06)]'
                     : item.status === 'waiting_approval'
                     ? 'border-[#fed7aa] bg-[#fffdfa] shadow-[0_2px_8px_rgba(245,158,11,0.06)]'
@@ -430,6 +554,16 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                   {/* 第一行：序号、中文主标题、类型胶囊与状态徽标 */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
+                      {isCustomMode && (
+                        <input
+                          type="checkbox"
+                          checked={selectedNodes.has(item.id)}
+                          onChange={() => handleToggleNodeSelection(item.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-3.5 h-3.5 rounded border-[#d4d4d8] text-[#4f46e5] focus:ring-0 cursor-pointer shrink-0"
+                          title={selectedNodes.has(item.id) ? '已勾选：执行此节点' : '未勾选：跳过此节点'}
+                        />
+                      )}
                       <span className="text-[10px] font-mono text-[#85858d] shrink-0 font-medium">
                         #{String(item.order).padStart(2, '0')}
                       </span>
@@ -485,6 +619,26 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                       className="flex items-center gap-1 shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {/* 定制重试模式下的专属微动作 */}
+                      {isCustomMode && (
+                        <div className="flex items-center gap-1">
+                          {!selectedNodes.has(item.id) && (
+                            <span className="text-[9.5px] font-mono text-[#a1a1aa] bg-[#f4f4f6] px-1 py-[0.5px] rounded border border-[#e4e4e7]">
+                              将跳过
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleRunFromHere(index)}
+                            className="h-[21px] px-1.5 rounded-[4px] bg-[#eff6ff] hover:bg-[#dbeafe] text-[#2563eb] border border-[#bfdbfe] text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer"
+                            title="以此节点为起点，向下执行后续所有节点，跳过前序步骤"
+                          >
+                            <Play size={8} className="fill-current" />
+                            <span>从此执行</span>
+                          </button>
+                        </div>
+                      )}
+
                       {/* 失败节点微型快捷操作 */}
                       {item.status === 'failed' && onSkipNode && (
                         <button
