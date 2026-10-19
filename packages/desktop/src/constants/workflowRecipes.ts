@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { NodeType, NodeConfig } from '@openloop/core';
 
-export type RecipeCategory = 'ai' | 'quality' | 'testing' | 'release' | 'env';
+export type RecipeCategory = 'custom' | 'ai' | 'quality' | 'testing' | 'release' | 'env';
 
 export interface WorkflowRecipe {
   id: string;
@@ -35,14 +35,18 @@ export interface WorkflowRecipe {
   iconBg: string;
   iconText: string;
   borderClass: string;
-  badge: string;
+  badge?: string;
   defaultName: string;
   defaultConfig: Partial<NodeConfig>;
   description: string;
   popular?: boolean;
+  isCustom?: boolean;
+  isPinned?: boolean;
+  createdAt?: number;
 }
 
 export const WORKFLOW_RECIPE_CATEGORIES: { id: RecipeCategory; label: string }[] = [
+  { id: 'custom', label: '我的预设' },
   { id: 'ai', label: 'AI 智能体' },
   { id: 'quality', label: '代码与构建' },
   { id: 'testing', label: '自动化与验收' },

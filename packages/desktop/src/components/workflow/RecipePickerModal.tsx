@@ -4,17 +4,18 @@ import {
   X,
   Sparkles,
   ArrowRight,
-  Plus,
   Layers,
-  ChevronRight,
-  Workflow as WorkflowIcon,
+  Pin,
+  Trash2,
+  BookmarkPlus,
 } from 'lucide-react';
 import {
-  WORKFLOW_RECIPES,
   WORKFLOW_RECIPE_CATEGORIES,
   WorkflowRecipe,
   RecipeCategory,
 } from '../../constants/workflowRecipes';
+import { useWorkflowRecipes } from '../../services/recipeStore';
+import { toast } from '../Toast';
 
 export interface RecipePickerContextInfo {
   type: 'append' | 'insert' | 'create';
@@ -40,6 +41,8 @@ export const RecipePickerModal: React.FC<RecipePickerModalProps> = ({
   const [focusedIndex, setFocusedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const { allRecipes, togglePin, deleteCustom } = useWorkflowRecipes();
+
   // 每次打开重置状态并聚焦搜索框
   useEffect(() => {
     if (isOpen) {
@@ -53,7 +56,7 @@ export const RecipePickerModal: React.FC<RecipePickerModalProps> = ({
   // 过滤后的配方列表
   const filteredRecipes = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    return WORKFLOW_RECIPES.filter((recipe) => {
+    return allRecipes.filter((recipe) => {
       const matchCategory =
         selectedCategory === 'all' || recipe.category === selectedCategory;
       if (!matchCategory) return false;
@@ -61,12 +64,12 @@ export const RecipePickerModal: React.FC<RecipePickerModalProps> = ({
       return (
         recipe.name.toLowerCase().includes(term) ||
         recipe.subtitle.toLowerCase().includes(term) ||
-        recipe.description.toLowerCase().includes(term) ||
-        recipe.categoryLabel.toLowerCase().includes(term) ||
+        recipe.description?.toLowerCase().includes(term) ||
+        recipe.categoryLabel?.toLowerCase().includes(term) ||
         recipe.type.toLowerCase().includes(term)
       );
     });
-  }, [searchTerm, selectedCategory]);
+  }, [searchTerm, selectedCategory, allRecipes]);
 
   // 键盘导航 (上下选择与回车确认)
   useEffect(() => {
@@ -121,10 +124,27 @@ export const RecipePickerModal: React.FC<RecipePickerModalProps> = ({
     return '添加流水线步骤动作';
   }, [contextInfo]);
 
+  const handleTogglePin = (e: React.MouseEvent, recipe: WorkflowRecipe) => {
+    e.stopPropagation();
+    const willPin = !recipe.isPinned;
+    togglePin(recipe.id);
+    if (willPin) {
+      toast.success(`已固定「${recipe.name}」到左侧常用步骤坞`);
+    } else {
+      toast.info(`已从左侧常用步骤坞取消固定`);
+    }
+  };
+
+  const handleDeleteCustom = (e: React.MouseEvent, recipe: WorkflowRecipe) => {
+    e.stopPropagation();
+    deleteCustom(recipe.id);
+    toast.success(`已删除自定义配方「${recipe.name}」`);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150">
       <div
-        className="bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_40px_rgba(0,0,0,0.12)] w-full max-w-[580px] max-h-[82vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150 select-none"
+        className="bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_40px_rgba(0,0,0,0.12)] w-full max-w-[620px] max-h-[82vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150 select-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 1. 顶部 Header (依照 design-system.md 规范) */}
@@ -193,10 +213,10 @@ export const RecipePickerModal: React.FC<RecipePickerModalProps> = ({
                   : 'bg-[#f4f4f6] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0]'
               }`}
             >
-              全部 ({WORKFLOW_RECIPES.length})
+              全部 ({allRecipes.length})
             </button>
             {WORKFLOW_RECIPE_CATEGORIES.map((cat) => {
-              const count = WORKFLOW_RECIPES.filter((r) => r.category === cat.id).length;
+              const count = allRecipes.filter((r) => r.category === cat.id).length;
               const isActive = selectedCategory === cat.id;
               return (
                 <button
@@ -219,12 +239,20 @@ export const RecipePickerModal: React.FC<RecipePickerModalProps> = ({
         </div>
 
         {/* 3. 配方列表区域 (符合 design-system 单行紧凑高密度规范) */}
-        <div className="flex-1 overflow-y-auto divide-y divide-[#f1f1f4] min-h-[260px] p-1.5">
+        <div className="flex-1 overflow-y-auto divide-y divide-[#f1f1f4] min-h-[280px] p-1.5">
           {filteredRecipes.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-[#85858d]">
               <Layers size={24} className="mb-2 text-[#a1a1aa]" />
-              <div className="text-[12px] font-medium text-[#1c1c21] mb-1">未匹配到相关动作</div>
-              <div className="text-[11px]">请尝试更改搜索关键词或切换上方分类</div>
+              <div className="text-[12px] font-medium text-[#1c1c21] mb-1">
+                {selectedCategory === 'custom'
+                  ? '暂无自定义预设配方'
+                  : '未匹配到相关动作'}
+              </div>
+              <div className="text-[11px] text-center max-w-sm px-4">
+                {selectedCategory === 'custom'
+                  ? '在流水线画布中选中并调通任意节点后，在右侧检查器点击「存为常用」，即可将该配置持久沉淀至此。'
+                  : '请尝试更改搜索关键词或切换上方分类'}
+              </div>
             </div>
           ) : (
             filteredRecipes.map((recipe, idx) => {
@@ -263,7 +291,12 @@ export const RecipePickerModal: React.FC<RecipePickerModalProps> = ({
                         <span className="text-[9.5px] px-1 py-[0.5px] rounded bg-[#f4f4f6] text-[#71717a] font-mono border border-[#e3e3e8]">
                           {recipe.type}
                         </span>
-                        {recipe.badge && (
+                        {recipe.isCustom && (
+                          <span className="text-[9.5px] px-1.5 py-[0.5px] rounded bg-[#faf5ff] text-[#9333ea] font-medium border border-[#e9d5ff]">
+                            我的预设
+                          </span>
+                        )}
+                        {!recipe.isCustom && recipe.badge && (
                           <span className="text-[9.5px] px-1.5 py-[0.5px] rounded bg-[#ecfdf5] text-[#059669] font-medium border border-[#a7f3d0]/60">
                             {recipe.badge}
                           </span>
@@ -276,9 +309,40 @@ export const RecipePickerModal: React.FC<RecipePickerModalProps> = ({
                     </div>
                   </div>
 
-                  {/* 右侧微操作反馈 */}
-                  <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="text-[10.5px] text-[#4f46e5] font-medium flex items-center gap-0.5">
+                  {/* 右侧微操作反馈：固定 Pin + 删除 (如果是自定义) + 选用 */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {/* 图钉快捷固定到常用坞 */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleTogglePin(e, recipe)}
+                      className={`w-6 h-6 rounded-[4px] flex items-center justify-center transition-all cursor-pointer ${
+                        recipe.isPinned
+                          ? 'bg-[#eeedfd] text-[#4f46e5] border border-[#c7d2fe]'
+                          : 'opacity-0 group-hover:opacity-100 text-[#85858d] hover:text-[#4f46e5] hover:bg-[#ececf0]'
+                      }`}
+                      title={
+                        recipe.isPinned
+                          ? '已固定到画布左侧常用步骤坞，点击取消'
+                          : '固定到画布左侧常用步骤坞'
+                      }
+                    >
+                      <Pin size={11} strokeWidth={recipe.isPinned ? 2.4 : 1.8} />
+                    </button>
+
+                    {/* 自定义配方支持删除 */}
+                    {recipe.isCustom && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteCustom(e, recipe)}
+                        className="w-6 h-6 rounded-[4px] opacity-0 group-hover:opacity-100 text-[#85858d] hover:text-[#dc2626] hover:bg-[#fef2f2] flex items-center justify-center transition-all cursor-pointer"
+                        title="删除该自定义配方"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+
+                    {/* 选用提示 */}
+                    <span className="text-[10.5px] text-[#4f46e5] font-medium flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
                       <span>选用</span>
                       <ArrowRight size={10} strokeWidth={2.4} />
                     </span>
@@ -291,8 +355,15 @@ export const RecipePickerModal: React.FC<RecipePickerModalProps> = ({
 
         {/* 4. 底部微型操作提示条 */}
         <div className="h-[34px] px-3 bg-[#fafafc] border-t border-[#e3e3e8] flex items-center justify-between text-[10.5px] text-[#85858d] shrink-0">
-          <span>单击或按 Enter 即可直接完成流转接驳并自动排版</span>
-          <span className="font-mono">openLoop Recipe Engine</span>
+          <div className="flex items-center gap-2">
+            <span>单击或按 Enter 即可直接落库排版</span>
+            <span className="text-[#d4d4d8]">|</span>
+            <span className="flex items-center gap-1 text-[#63636b]">
+              <Pin size={10} className="text-[#4f46e5]" />
+              <span>点击图钉可将动作常驻到画布左侧步骤坞</span>
+            </span>
+          </div>
+          <span className="font-mono text-[10px]">openLoop Recipe Engine</span>
         </div>
       </div>
     </div>

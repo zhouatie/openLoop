@@ -64,6 +64,8 @@ import {
   Bug,
   ClipboardCheck,
   Cpu,
+  BookmarkPlus,
+  Pin,
 } from 'lucide-react';
 import {
   WorkflowDefinition,
@@ -87,6 +89,8 @@ import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 import { TagInput } from '../components/TagInput';
 import { WORKFLOW_RECIPES, WorkflowRecipe } from '../constants/workflowRecipes';
 import { RecipePickerModal, RecipePickerContextInfo } from '../components/workflow/RecipePickerModal';
+import { SaveRecipeModal } from '../components/workflow/SaveRecipeModal';
+import { useWorkflowRecipes, saveCustomRecipe } from '../services/recipeStore';
 import { WorkflowCustomEdge } from '../components/workflow/WorkflowCustomEdge';
 import { WorkflowLinearFlowView } from '../components/workflow/WorkflowLinearFlowView';
 import { WorkflowNodeBranchMenu } from '../components/workflow/WorkflowNodeBranchMenu';
@@ -651,6 +655,47 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     edgeId?: string;
     position?: { x: number; y: number };
   }>({ mode: 'create' });
+
+  // 常用动作配方与固定列表 (Recipe Store)
+  const { pinnedRecipes } = useWorkflowRecipes();
+  const [isSaveRecipeModalOpen, setIsSaveRecipeModalOpen] = useState(false);
+  const [nodeToSaveAsRecipe, setNodeToSaveAsRecipe] = useState<Node | null>(null);
+
+  const handleOpenSaveRecipeModal = useCallback((node: Node) => {
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowEditor] 打开存为常用配方弹窗:', node.id, (node.data as any)?.name);
+    }
+    setNodeToSaveAsRecipe(node);
+    setIsSaveRecipeModalOpen(true);
+  }, []);
+
+  const handleSaveNodeAsRecipe = useCallback(
+    (data: {
+      name: string;
+      subtitle: string;
+      description: string;
+      pinToSidebar: boolean;
+    }) => {
+      if (!nodeToSaveAsRecipe) return;
+      const nodeData = (nodeToSaveAsRecipe.data as any) || {};
+      saveCustomRecipe({
+        name: data.name,
+        subtitle: data.subtitle,
+        description: data.description,
+        type: nodeData.type || 'cli',
+        defaultConfig: nodeData.config || {},
+        pinToSidebar: data.pinToSidebar,
+      });
+      setIsSaveRecipeModalOpen(false);
+      setNodeToSaveAsRecipe(null);
+      toast.success(
+        data.pinToSidebar
+          ? `「${data.name}」已保存并固定至左侧常用步骤坞`
+          : `「${data.name}」已保存至常用动作配方库`
+      );
+    },
+    [nodeToSaveAsRecipe]
+  );
 
   // XMind 风格节点行内向右分支选单状态 (当前呼出分支选单的源节点 ID)
   const [branchMenuNodeId, setBranchMenuNodeId] = useState<string | null>(null);
@@ -2985,75 +3030,47 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                   <span className="truncate">浏览动作配方库...</span>
                 </button>
 
-                <button
-                  onClick={() => addNode('agent', 'AI 自动实现需求')}
-                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-                >
-                  <span className="w-4 h-4 rounded bg-[#eeedfd] text-[#4f46e5] flex items-center justify-center shrink-0">
-                    <Bot size={11} />
-                  </span>
-                  <span className="truncate">AI 需求实现</span>
-                </button>
-
-                <button
-                  onClick={() => addNode('cli', '代码规范检查')}
-                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-                >
-                  <span className="w-4 h-4 rounded bg-[#f4f4f6] text-[#4b4b53] flex items-center justify-center shrink-0">
-                    <Terminal size={11} />
-                  </span>
-                  <span className="truncate">Lint / 单测脚本</span>
-                </button>
-
-                <button
-                  onClick={() => addNode('qa-approval', 'QA 门禁验收')}
-                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-                >
-                  <span className="w-4 h-4 rounded bg-[#fef3c7] text-[#b45309] flex items-center justify-center shrink-0">
-                    <CheckSquare size={11} />
-                  </span>
-                  <span className="truncate">QA 门禁验收</span>
-                </button>
-
-                <button
-                  onClick={() => addNode('midscene', 'UI 视觉自动化')}
-                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-                >
-                  <span className="w-4 h-4 rounded bg-[#e4f6ec] text-[#15803d] flex items-center justify-center shrink-0">
-                    <Target size={11} />
-                  </span>
-                  <span className="truncate">Midscene 测试</span>
-                </button>
-
-                <button
-                  onClick={() => addNode('stitch-image', '拼接动图')}
-                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-                >
-                  <span className="w-4 h-4 rounded bg-[#eff6ff] text-[#1d4ed8] flex items-center justify-center shrink-0">
-                    <FileVideo size={11} />
-                  </span>
-                  <span className="truncate">拼接动图 CLI</span>
-                </button>
-
-                <button
-                  onClick={() => addNode('git-commit', 'Git 自动提交')}
-                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-                >
-                  <span className="w-4 h-4 rounded bg-[#1c1c21] text-white flex items-center justify-center shrink-0">
-                    <GitCommit size={11} />
-                  </span>
-                  <span className="truncate">Git 自动提交</span>
-                </button>
-
-                <button
-                  onClick={() => addNode('hook', 'Webhook 通知')}
-                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-                >
-                  <span className="w-4 h-4 rounded bg-[#ffedd5] text-[#c2410c] flex items-center justify-center shrink-0">
-                    <Zap size={11} />
-                  </span>
-                  <span className="truncate">Webhook 通知</span>
-                </button>
+                {/* 常用动作步骤列表 (读取 Pinned 配方) */}
+                <div className="flex flex-col gap-0.5 max-h-[360px] overflow-y-auto no-scrollbar">
+                  {pinnedRecipes.length === 0 ? (
+                    <div className="px-2 py-3 text-center text-[10.5px] text-[#85858d] leading-relaxed">
+                      暂无固定常用动作
+                      <br />
+                      可在配方库点亮图钉
+                    </div>
+                  ) : (
+                    pinnedRecipes.map((recipe) => {
+                      const IconComp = recipe.icon;
+                      return (
+                        <button
+                          key={recipe.id}
+                          onClick={() => {
+                            if (import.meta.env?.DEV) {
+                              console.log('[WorkflowEditor] 从常用步骤坞直接添加步骤:', recipe.name);
+                            }
+                            setPendingRecipeTarget({ mode: 'create' });
+                            handleApplyRecipe(recipe);
+                          }}
+                          className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer group"
+                          title={`${recipe.name} — ${recipe.subtitle || recipe.description || ''}`}
+                        >
+                          <span
+                            className={`w-4 h-4 rounded ${recipe.iconBg} ${recipe.iconText} flex items-center justify-center shrink-0`}
+                          >
+                            <IconComp size={11} strokeWidth={2.2} />
+                          </span>
+                          <span className="truncate flex-1 font-medium">{recipe.name}</span>
+                          {recipe.isCustom && (
+                            <span
+                              className="w-1.5 h-1.5 rounded-full bg-[#9333ea] shrink-0"
+                              title="我的自定义预设"
+                            />
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -3605,13 +3622,24 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                       <div className="text-[11px] text-[#85858d] font-mono">
                         ID: {selectedNode.id}
                       </div>
-                      <button
-                        onClick={deleteSelectedNode}
-                        className="p-1 rounded hover:bg-[#fbe9e9] text-[#d64545] transition-colors"
-                        title="删除该节点"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSaveRecipeModal(selectedNode)}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded-[5px] bg-[#eeedfd] hover:bg-[#e0e7ff] text-[#4f46e5] text-[10.5px] font-medium transition-colors cursor-pointer"
+                          title="将当前节点配置另存为常用配方，方便日后直接选用"
+                        >
+                          <BookmarkPlus size={11} strokeWidth={2.2} />
+                          <span>存为常用</span>
+                        </button>
+                        <button
+                          onClick={deleteSelectedNode}
+                          className="p-1 rounded hover:bg-[#fbe9e9] text-[#d64545] transition-colors cursor-pointer"
+                          title="删除该节点"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </div>
 
                     {/* 编排调试单节点执行状态与单节点试跑控制 */}
@@ -4352,6 +4380,21 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         onSelectRecipe={handleApplyRecipe}
         contextInfo={recipePickerContext}
       />
+
+      {/* 另存为常用动作配方弹窗 */}
+      {nodeToSaveAsRecipe && (
+        <SaveRecipeModal
+          isOpen={isSaveRecipeModalOpen}
+          nodeName={(nodeToSaveAsRecipe.data as any)?.name || ''}
+          nodeType={(nodeToSaveAsRecipe.data as any)?.type || 'cli'}
+          nodeConfig={(nodeToSaveAsRecipe.data as any)?.config || {}}
+          onClose={() => {
+            setIsSaveRecipeModalOpen(false);
+            setNodeToSaveAsRecipe(null);
+          }}
+          onSave={handleSaveNodeAsRecipe}
+        />
+      )}
     </div>
   );
 };

@@ -8,11 +8,11 @@ import {
   Layers,
 } from 'lucide-react';
 import {
-  WORKFLOW_RECIPES,
   WORKFLOW_RECIPE_CATEGORIES,
   WorkflowRecipe,
   RecipeCategory,
 } from '../../constants/workflowRecipes';
+import { useWorkflowRecipes } from '../../services/recipeStore';
 
 export interface WorkflowNodeBranchMenuProps {
   sourceNodeId: string;
@@ -42,6 +42,8 @@ export const WorkflowNodeBranchMenu: React.FC<WorkflowNodeBranchMenuProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<RecipeCategory | 'all'>('all');
   const [highlightIndex, setHighlightIndex] = useState(0);
 
+  const { allRecipes } = useWorkflowRecipes();
+
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -63,7 +65,7 @@ export const WorkflowNodeBranchMenu: React.FC<WorkflowNodeBranchMenuProps> = ({
   // 模糊搜索过滤
   const filteredRecipes = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    return WORKFLOW_RECIPES.filter((recipe) => {
+    return allRecipes.filter((recipe) => {
       const matchCat = selectedCategory === 'all' || recipe.category === selectedCategory;
       if (!matchCat) return false;
       if (!term) return true;
@@ -75,7 +77,7 @@ export const WorkflowNodeBranchMenu: React.FC<WorkflowNodeBranchMenuProps> = ({
         recipe.type.toLowerCase().includes(term)
       );
     });
-  }, [searchTerm, selectedCategory]);
+  }, [searchTerm, selectedCategory, allRecipes]);
 
   // 当过滤列表变化时纠正高亮索引
   useEffect(() => {
