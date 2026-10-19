@@ -52,6 +52,7 @@ export class SqliteStore {
         nodes_json TEXT NOT NULL,
         edges_json TEXT NOT NULL,
         variables_json TEXT,
+        tags_json TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
@@ -154,6 +155,13 @@ export class SqliteStore {
       CREATE INDEX IF NOT EXISTS idx_qa_runs_suite ON qa_runs(suite_id, created_at DESC);
     `);
 
+    // 增量表结构平滑迁移：为历史已有数据库的 workflows 表补齐 tags_json 字段
+    try {
+      this.db.exec('ALTER TABLE workflows ADD COLUMN tags_json TEXT');
+    } catch {
+      // 字段已存在，忽略
+    }
+
     // 增量表结构平滑迁移：为历史已有数据库的 tasks 表补齐 workspace 字段
     try {
       this.db.exec('ALTER TABLE tasks ADD COLUMN workspace TEXT');
@@ -208,6 +216,40 @@ export class SqliteStore {
       this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
     }
 
+    // 平滑补齐或迁移标签数据 (针对已有库中内置工作流或缺少 tags_json 的工作流)
+    try {
+      const defaultTagMap: Record<string, string[]> = {
+        wf_agent_feature_dev: ['工作', '研发', 'AI Agent'],
+        wf_febase_app_deploy: ['工作', '部署', 'FEBase'],
+        wf_worktree_auto_dev_qa_merge: ['工作', '研发', '沙箱', 'QA'],
+        wf_app_build_deploy: ['工作', '部署', '构建', 'CI/CD'],
+        wf_auto_dev_qa: ['工作', '研发', '测试', 'AI Agent'],
+      };
+      const rows = this.db.prepare('SELECT id, tags_json, variables_json FROM workflows').all() as any[];
+      const updateStmt = this.db.prepare('UPDATE workflows SET tags_json = ? WHERE id = ?');
+      for (const row of rows) {
+        if (!row.tags_json || row.tags_json === '[]') {
+          let tags: string[] = [];
+          if (row.variables_json) {
+            try {
+              const vars = JSON.parse(row.variables_json);
+              if (Array.isArray(vars.tags) && vars.tags.length > 0) {
+                tags = vars.tags;
+              }
+            } catch {}
+          }
+          if (tags.length === 0 && defaultTagMap[row.id]) {
+            tags = defaultTagMap[row.id];
+          }
+          if (tags.length > 0) {
+            updateStmt.run(JSON.stringify(tags), row.id);
+          }
+        }
+      }
+    } catch {
+      // 忽略
+    }
+
     // 系统启动自愈：清理因服务崩溃/重启而残留为 running 状态的孤立任务
     this.recoverOrphanRunningTasks();
   }
@@ -243,6 +285,7 @@ export class SqliteStore {
       id: 'wf_febase_app_deploy',
       name: 'FEBase 应用智能编排与部署流水线',
       description: 'AI Agent 驱动的极简部署编排流水线：Agent 智能校验 Prompt 充足性并锁定发布单（信息不足自动终止） -> 原生 mws CLI 分配环境 -> 原生 mws CLI 触发云端打包',
+      tags: ['工作', '部署', 'FEBase'],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -329,6 +372,7 @@ export class SqliteStore {
       id: 'wf_app_build_deploy',
       name: '全自动化应用构建与部署流水线',
       description: '通用应用部署流水线：环境自检 -> 生产全量构建 -> 应用部署发布 -> 线上健康探针 -> 发布上线验收门禁',
+      tags: ['工作', '部署', '构建', 'CI/CD'],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -401,6 +445,7 @@ export class SqliteStore {
       id: 'wf_worktree_auto_dev_qa_merge',
       name: 'Worktree 隔离开发与视觉 QA 自动验收流水线',
       description: '端到端全闭环研发流水线：根据需求创建 Git Worktree 与独立端口靶机，Agent 隔离编写代码，Playwright 真实浏览器 UI 自动化截帧，查看连贯截图回放验收通过后自动合并到开发分支并清理沙箱',
+      tags: ['工作', '研发', '沙箱', 'QA'],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -504,6 +549,7 @@ export class SqliteStore {
       id: 'wf_agent_feature_dev',
       name: '通用研发流水线',
       description: '通用智能体敏捷开发流程：AI 智能体根据需求修改代码，执行前端构建自检，经由 QA 人工验收门禁确认',
+      tags: ['工作', '研发', 'AI Agent'],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -564,6 +610,7 @@ export class SqliteStore {
       id: 'wf_auto_dev_qa',
       name: 'Agent开发与Midscene自动化测试验证流水线',
       description: '触发 Agent 进行功能开发，完成后调用 Midscene 自动 UI 测试并截屏，拼接动图后流转到 QA 审核',
+      tags: ['工作', '研发', '测试', 'AI Agent'],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -741,12 +788,22 @@ export class SqliteStore {
     const rows = this.db.prepare('SELECT * FROM workflows ORDER BY created_at DESC').all() as any[];
     return rows.map((r) => {
       const variables = r.variables_json ? JSON.parse(r.variables_json) : undefined;
+      let tags: string[] = [];
+      if (r.tags_json) {
+        try {
+          const parsed = JSON.parse(r.tags_json);
+          if (Array.isArray(parsed)) tags = parsed;
+        } catch {}
+      } else if (variables?.tags && Array.isArray(variables.tags)) {
+        tags = variables.tags;
+      }
       return {
         id: r.id,
         name: r.name,
         description: r.description,
         nodes: JSON.parse(r.nodes_json),
         edges: JSON.parse(r.edges_json),
+        tags,
         variables,
         requireWorkspace: variables?.requireWorkspace,
         defaultWorkspace: variables?.defaultWorkspace,
@@ -760,12 +817,22 @@ export class SqliteStore {
     const row = this.db.prepare('SELECT * FROM workflows WHERE id = ?').get(id) as any;
     if (!row) return undefined;
     const variables = row.variables_json ? JSON.parse(row.variables_json) : undefined;
+    let tags: string[] = [];
+    if (row.tags_json) {
+      try {
+        const parsed = JSON.parse(row.tags_json);
+        if (Array.isArray(parsed)) tags = parsed;
+      } catch {}
+    } else if (variables?.tags && Array.isArray(variables.tags)) {
+      tags = variables.tags;
+    }
     return {
       id: row.id,
       name: row.name,
       description: row.description,
       nodes: JSON.parse(row.nodes_json),
       edges: JSON.parse(row.edges_json),
+      tags,
       variables,
       requireWorkspace: variables?.requireWorkspace,
       defaultWorkspace: variables?.defaultWorkspace,
@@ -778,22 +845,29 @@ export class SqliteStore {
     wf.updatedAt = Date.now();
     if (!wf.createdAt) wf.createdAt = wf.updatedAt;
 
+    const tagsList = Array.isArray(wf.tags)
+      ? Array.from(new Set(wf.tags.map((t) => (typeof t === 'string' ? t.trim() : '')).filter(Boolean)))
+      : [];
+    wf.tags = tagsList;
+
     const variablesObj = {
       ...(wf.variables || {}),
       ...(wf.requireWorkspace !== undefined ? { requireWorkspace: wf.requireWorkspace } : {}),
       ...(wf.defaultWorkspace !== undefined ? { defaultWorkspace: wf.defaultWorkspace } : {}),
+      tags: tagsList,
     };
     const hasVariables = Object.keys(variablesObj).length > 0;
 
     const stmt = this.db.prepare(`
-      INSERT INTO workflows (id, name, description, nodes_json, edges_json, variables_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO workflows (id, name, description, nodes_json, edges_json, variables_json, tags_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
         nodes_json = excluded.nodes_json,
         edges_json = excluded.edges_json,
         variables_json = excluded.variables_json,
+        tags_json = excluded.tags_json,
         updated_at = excluded.updated_at
     `);
 
@@ -804,6 +878,7 @@ export class SqliteStore {
       JSON.stringify(wf.nodes || []),
       JSON.stringify(wf.edges || []),
       hasVariables ? JSON.stringify(variablesObj) : null,
+      JSON.stringify(tagsList),
       wf.createdAt,
       wf.updatedAt
     );

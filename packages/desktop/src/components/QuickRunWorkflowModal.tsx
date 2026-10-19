@@ -115,7 +115,8 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
       (w) =>
         w.name.toLowerCase().includes(q) ||
         w.id.toLowerCase().includes(q) ||
-        (w.description && w.description.toLowerCase().includes(q))
+        (w.description && w.description.toLowerCase().includes(q)) ||
+        (w.tags && w.tags.some((t) => t.toLowerCase().includes(q)))
     );
   }, [workflows, searchQuery]);
 
@@ -305,6 +306,11 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
                   <span className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1 py-[0.5px] rounded shrink-0">
                     {activeWorkflow.nodes.length} 节点
                   </span>
+                  {activeWorkflow.tags && activeWorkflow.tags.length > 0 && (
+                    <span className="text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1 py-[0.5px] rounded shrink-0">
+                      #{activeWorkflow.tags[0]}
+                    </span>
+                  )}
                 </div>
               ) : (
                 <span className="text-[#85858d] text-[11.5px]">选择工作流...</span>
@@ -361,6 +367,11 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
                         >
                           <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
                             <span className="truncate">{wf.name}</span>
+                            {wf.tags && wf.tags.length > 0 && (
+                              <span className="text-[9px] px-1 py-[0.5px] rounded bg-white/70 border border-[#e3e3e8] text-[#63636b] shrink-0 font-medium">
+                                #{wf.tags[0]}
+                              </span>
+                            )}
                             <span className="text-[9.5px] font-mono text-[#85858d] opacity-75 shrink-0">
                               {wf.nodes.length} 节点
                             </span>

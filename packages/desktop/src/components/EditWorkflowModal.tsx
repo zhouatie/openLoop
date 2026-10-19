@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, Workflow, Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { WorkflowDefinition } from '@openloop/core';
+import { TagInput } from './TagInput';
 
 export interface EditWorkflowModalProps {
   isOpen: boolean;
   onClose: () => void;
   workflow: WorkflowDefinition | null;
-  onSave: (params: { id: string; name: string; description: string }) => Promise<void>;
+  onSave: (params: { id: string; name: string; description: string; tags?: string[] }) => Promise<void>;
 }
 
 export const EditWorkflowModal: React.FC<EditWorkflowModalProps> = ({
@@ -17,6 +18,7 @@ export const EditWorkflowModal: React.FC<EditWorkflowModalProps> = ({
 }) => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState(false);
@@ -26,6 +28,7 @@ export const EditWorkflowModal: React.FC<EditWorkflowModalProps> = ({
     if (workflow) {
       setName(workflow.name || '');
       setDescription(workflow.description || '');
+      setTags(Array.isArray(workflow.tags) ? [...workflow.tags] : []);
       setErrorMsg(null);
       setCopiedId(false);
     }
@@ -92,6 +95,7 @@ export const EditWorkflowModal: React.FC<EditWorkflowModalProps> = ({
         id: workflow.id,
         name: trimmedName,
         description: description.trim(),
+        tags,
       });
     }
 
@@ -100,6 +104,7 @@ export const EditWorkflowModal: React.FC<EditWorkflowModalProps> = ({
         id: workflow.id,
         name: trimmedName,
         description: description.trim(),
+        tags,
       });
       onClose();
     } catch (err: any) {
@@ -201,6 +206,16 @@ export const EditWorkflowModal: React.FC<EditWorkflowModalProps> = ({
               }}
               placeholder="例如: 智能 PR Review 与回归测试流水线"
               className="w-full h-[32px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2.5 text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/30 transition-all placeholder:text-[#85858d]"
+            />
+          </div>
+
+          {/* 分类标签 */}
+          <div>
+            <label className="block font-medium text-[#4b4b53] mb-1">流水线分类标签</label>
+            <TagInput
+              tags={tags}
+              onChange={setTags}
+              placeholder="输入标签（例如：工作、部署、QA）后回车..."
             />
           </div>
 

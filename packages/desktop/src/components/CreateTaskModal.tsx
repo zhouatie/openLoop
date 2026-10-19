@@ -193,7 +193,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       (w) =>
         w.name.toLowerCase().includes(keyword) ||
         w.id.toLowerCase().includes(keyword) ||
-        (w.description && w.description.toLowerCase().includes(keyword))
+        (w.description && w.description.toLowerCase().includes(keyword)) ||
+        (w.tags && w.tags.some((t) => t.toLowerCase().includes(keyword)))
     );
   }, [allSortedWorkflows, workflowSearch]);
 
@@ -248,6 +249,19 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             <div className="text-[11px] text-[#85858d] truncate mt-0.5">
               {wf.description || '无附加描述'}
             </div>
+
+            {wf.tags && wf.tags.length > 0 && (
+              <div className="flex items-center gap-1 flex-wrap mt-1">
+                {wf.tags.map((t) => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center gap-0.5 px-1.5 py-[0.5px] rounded-[3px] bg-[#f4f4f6] text-[#52525b] text-[9.5px] border border-[#e3e3e8]/60 font-medium"
+                  >
+                    #{t}
+                  </span>
+                ))}
+              </div>
+            )}
 
             {getNodeSummaryBadges(wf)}
           </div>
@@ -465,6 +479,11 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   <span className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1 py-[0.5px] rounded shrink-0">
                     {currentWf.id}
                   </span>
+                  {currentWf.tags && currentWf.tags.length > 0 && (
+                    <span className="text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1 py-[0.5px] rounded shrink-0">
+                      #{currentWf.tags[0]}
+                    </span>
+                  )}
                 </div>
               ) : (
                 <span className="text-[#85858d] text-[11.5px]">请选择工作流</span>
