@@ -466,7 +466,10 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     let icon = <Workflow size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
     let tag = '通用编排';
 
-    if (nodeTypes.has('agent')) {
+    if (wf.id.includes('raven') || wf.name.includes('Raven')) {
+      icon = <GitBranch size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
+      tag = '业务研发';
+    } else if (nodeTypes.has('agent')) {
       icon = <Bot size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
       tag = 'AI Agent';
     } else if (nodeTypes.has('midscene')) {

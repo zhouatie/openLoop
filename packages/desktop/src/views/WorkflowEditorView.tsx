@@ -151,6 +151,13 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
       text: 'text-[#047857]',
       border: 'border-[#a7f3d0]',
     },
+    'sub-workflow': {
+      label: '子流水线 / 支线',
+      icon: <Workflow size={12} strokeWidth={2} />,
+      bg: 'bg-[#f0f9ff]',
+      text: 'text-[#0284c7]',
+      border: 'border-[#bae6fd]',
+    },
     'qa-planner': {
       label: 'QA 用例设计',
       icon: <ClipboardCheck size={12} strokeWidth={2} />,
@@ -250,7 +257,7 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
     >
       <Handle
         type="target"
-        position={Position.Top}
+        position={Position.Left}
         className={`w-2.5 h-2.5 border-2 ${
           isGhost
             ? 'bg-[#8b5cf6] border-white'
@@ -402,7 +409,7 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
 
       <Handle
         type="source"
-        position={Position.Bottom}
+        position={Position.Right}
         className={`w-2.5 h-2.5 border-2 ${
           isGhost
             ? 'bg-[#8b5cf6] border-white'
@@ -620,17 +627,12 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       };
     });
 
-    // 若原始坐标全为 0，或属于旧版水平横向排列数据 (所有节点 Y 轴相近)，自动执行一次智能纵向排版
-    const isOldHorizontalLayout =
-      rfNodes.length > 1 &&
-      rfNodes.every((n) => Math.abs(n.position.y - rfNodes[0].position.y) < 20);
-
+    // 若原始坐标全为 0，自动执行一次智能排版
     const needsInitialLayout =
-      (rfNodes.length > 1 &&
-        rfNodes.every((n) => n.position.x === 0 && n.position.y === 0)) ||
-      isOldHorizontalLayout;
+      rfNodes.length > 1 &&
+      rfNodes.every((n) => n.position.x === 0 && n.position.y === 0);
 
-    const finalNodes = needsInitialLayout ? layoutWorkflowDag(rfNodes, rfEdges) : rfNodes;
+    const finalNodes = needsInitialLayout ? layoutWorkflowDag(rfNodes, rfEdges, { direction: 'LR' }) : rfNodes;
 
     setNodes(finalNodes);
     setEdges(rfEdges);
@@ -2467,6 +2469,16 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
               </button>
 
               <button
+                onClick={() => addNode('sub-workflow', '子流水线 / 支线')}
+                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+              >
+                <span className="w-4 h-4 rounded bg-[#f0f9ff] text-[#0284c7] flex items-center justify-center shrink-0">
+                  <Workflow size={11} />
+                </span>
+                <span className="truncate">子流水线 / 支线</span>
+              </button>
+
+              <button
                 onClick={() => addNode('hook', 'Hook 触发')}
                 className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
               >
@@ -3247,6 +3259,47 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                           placeholder="说明人工验收或 QA 审批的标准与重点事项..."
                           className="w-full min-h-[80px] bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 rounded-[8px] p-2.5 text-[12px] leading-relaxed text-[#1c1c21] outline-none resize-y transition-all"
                         />
+                      </div>
+                    )}
+
+                    {selectedNodeData.type === 'sub-workflow' && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[#85858d] mb-1 font-medium">选择调用的子流水线 / 支线</label>
+                          <select
+                            value={selectedNodeData.config?.subWorkflowId || ''}
+                            onChange={(e) => updateSelectedNodeConfig('subWorkflowId', e.target.value)}
+                            className="w-full h-[30px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[#1c1c21] text-[12px] outline-none cursor-pointer"
+                          >
+                            <option value="">-- 请选择要内嵌的子流水线 --</option>
+                            {workflows
+                              .filter((w) => w.id !== workflowId)
+                              .map((w) => (
+                                <option key={w.id} value={w.id}>
+                                  {w.name} ({w.id})
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                        {selectedNodeData.config?.subWorkflowId && (
+                          <div className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-[6px] bg-[#f0f9ff] border border-[#bae6fd]">
+                            <span className="text-[#0369a1] font-medium truncate">
+                              已选: {workflows.find((w) => w.id === selectedNodeData.config?.subWorkflowId)?.name || selectedNodeData.config?.subWorkflowId}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => onSelectWorkflow(selectedNodeData.config.subWorkflowId)}
+                              className="text-[#0284c7] hover:underline font-medium shrink-0 ml-2 cursor-pointer flex items-center gap-0.5"
+                            >
+                              <span>跳转查看</span>
+                              <ChevronRight size={11} />
+                            </button>
+                          </div>
+                        )}
+                        <div className="p-2.5 rounded-[6px] bg-[#f8fafc] border border-[#e2e8f0] text-[11px] text-[#475569] leading-relaxed">
+                          <p className="font-semibold text-[#1e293b] mb-0.5">💡 子流水线执行机制：</p>
+                          <p>作为独立支线嵌入流转，自动继承当前任务的标题、工作区与环境变量。执行时其内部的 DAG 拓扑节点将有序触发，前台终端带专属支线前缀实时回显。</p>
+                        </div>
                       </div>
                     )}
 

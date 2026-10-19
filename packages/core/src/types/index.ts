@@ -7,6 +7,7 @@ export type KanbanColumn = 'inbox' | 'backlog' | 'in_progress' | 'agent_executin
 export type NodeType = 
   | 'cli'             // 通用 CLI 脚本执行
   | 'agent'           // AI Agent 调用
+  | 'sub-workflow'    // 子流水线 / 复合支线调用
   | 'qa-planner'      // 资深 QA 工程师黑盒用例设计
   | 'midscene'        // Midscene 自动化 UI 测试
   | 'stitch-image'    // 拼接截图与生成动图
@@ -63,6 +64,10 @@ export interface NodeConfig {
   // 审批相关
   approvalPrompt?: string;
   checklist?: string[];
+
+  // 子流水线 (sub-workflow) 专用
+  subWorkflowId?: string;     // 关联的子流水线定义 ID (如 wf_febase_app_deploy)
+  inheritContext?: boolean;   // 是否继承父级任务全部变量与工作区，默认 true
 
   // 节点超时与重试配置
   timeoutSec?: number;
@@ -149,6 +154,12 @@ export interface WorkflowEdge {
   condition?: string; // 支持简单表达式，如 outcome === 'success'
 }
 
+export interface WorkflowTaskTemplate {
+  titlePlaceholder?: string;       // 任务标题输入指引
+  descriptionTemplate?: string;    // 默认需求与上下文描述 Markdown 骨架模板
+  acceptanceTemplate?: string;     // 默认验收标准与用例骨架模板
+}
+
 export interface WorkflowDefinition {
   id: string;
   name: string;
@@ -158,6 +169,7 @@ export interface WorkflowDefinition {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   tags?: string[]; // 流水线标签列表，用于归类、筛选与过滤 (例如: '工作', '部署', 'QA', '日常')
+  taskTemplate?: WorkflowTaskTemplate; // 流水线关联的创建任务输入模板
   variables?: Record<string, any>;
   requireWorkspace?: boolean; // 该流水线是否要求必须关联工程工作区根目录
   defaultWorkspace?: string; // 该流水线绑定的默认工程工作区目录 (可选)

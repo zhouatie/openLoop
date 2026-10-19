@@ -2,7 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { WorkflowNode, Task, LogEntry, NodeRun, TaskSessionState, QaSuite, QaStep } from '../types';
+import { WorkflowNode, WorkflowDefinition, Task, LogEntry, NodeRun, TaskSessionState, QaSuite, QaStep } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
@@ -274,6 +274,31 @@ export class CliCommandExecutor implements NodeExecutor {
       const handleExit = (code: number | null) => {
         const duration = Date.now() - startTime;
         if (code === 0) {
+          // 智能感知：检测是否生成了工作区环境变量文件 (如 Raven 初始化时动态生成的目录)
+          try {
+            const envFile = '/tmp/openloop-raven-env.sh';
+            if (fs.existsSync(envFile)) {
+              const content = fs.readFileSync(envFile, 'utf-8');
+              const wsMatch = content.match(/export RAVEN_WORKSPACE=["']?([^"'\n\r]+)["']?/);
+              if (wsMatch && wsMatch[1] && fs.existsSync(wsMatch[1].trim())) {
+                const detectedWs = wsMatch[1].trim();
+                if (!ctx.task.workspace || ctx.task.workspace !== detectedWs) {
+                  ctx.task.workspace = detectedWs;
+                  if (ctx.store?.saveTask) {
+                    ctx.store.saveTask(ctx.task);
+                  }
+                  executorLogger.info(`[CLI] 自动同步任务工作区目录至: ${detectedWs}`, undefined, {
+                    taskId: ctx.task.id,
+                    nodeId: node.id,
+                  });
+                  emitLog('system', `[工作区自动绑定] 任务工作区已同步切换为: ${detectedWs}`);
+                }
+              }
+            }
+          } catch (e) {
+            // 忽略环境变量解析异常
+          }
+
           executorLogger.info(
             `[CLI:Exit] 进程执行成功，退出码: 0 (耗时: ${duration}ms)`,
             undefined,
@@ -1398,12 +1423,154 @@ export class WorktreeCleanupExecutor implements NodeExecutor {
   }
 }
 
+// 子流水线 / 复合支线执行器：支持在当前工作流中内嵌调用并流转另一条完整流水线
+export class SubWorkflowExecutor implements NodeExecutor {
+  private registryGetter: () => ExecutorRegistry;
+
+  constructor(registryGetter: () => ExecutorRegistry) {
+    this.registryGetter = registryGetter;
+  }
+
+  async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
+    const { node, task, emitLog, variables, settings, abortSignal, store } = ctx;
+    const subWorkflowId = node.config.subWorkflowId;
+
+    if (!subWorkflowId || !subWorkflowId.trim()) {
+      const err = `[子流水线节点 ${node.id}] 未配置要执行的目标流水线 ID (subWorkflowId)`;
+      emitLog('stderr', err);
+      return { status: 'failed', exitCode: 1, error: err };
+    }
+
+    if (!store) {
+      const err = `[子流水线节点 ${node.id}] 执行上下文缺少 store 引用，无法获取子流水线定义`;
+      emitLog('stderr', err);
+      return { status: 'failed', exitCode: 1, error: err };
+    }
+
+    const subWorkflow: WorkflowDefinition | undefined = store.getWorkflow(subWorkflowId.trim());
+    if (!subWorkflow) {
+      const err = `[子流水线节点 ${node.id}] 未在系统中找到 ID 为 "${subWorkflowId}" 的流水线定义`;
+      emitLog('stderr', err);
+      return { status: 'failed', exitCode: 1, error: err };
+    }
+
+    emitLog(
+      'system',
+      `[子流水线激活] 开始流转子流水线: 「${subWorkflow.name}」(${subWorkflow.id})，共包含 ${subWorkflow.nodes.length} 个执行节点`
+    );
+
+    // 继承主流水线上下文与变量
+    const subVariables: Record<string, any> = {
+      ...subWorkflow.variables,
+      ...variables,
+      parentTaskId: task.id,
+      parentWorkflowId: task.workflowId,
+      subWorkflowId: subWorkflow.id,
+      subWorkflowName: subWorkflow.name,
+    };
+
+    // 拓扑排序计算执行序列
+    const nodeMap = new Map<string, WorkflowNode>(subWorkflow.nodes.map((n: WorkflowNode) => [n.id, n]));
+    const inDegree = new Map<string, number>();
+    for (const n of subWorkflow.nodes) {
+      inDegree.set(n.id, 0);
+    }
+    for (const e of subWorkflow.edges) {
+      inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
+    }
+
+    const queue: string[] = [];
+    for (const [id, deg] of inDegree.entries()) {
+      if (deg === 0) queue.push(id);
+    }
+
+    const subOutputs: Record<string, any> = {};
+    const executedNodes = new Set<string>();
+    const registry = this.registryGetter();
+
+    while (queue.length > 0) {
+      if (abortSignal?.aborted) {
+        emitLog('system', `[子流水线中断] 收到终止信号，已停止流转子流水线`);
+        return { status: 'failed', error: 'Aborted by user' };
+      }
+
+      const currentId = queue.shift()!;
+      const currentNode = nodeMap.get(currentId);
+      if (!currentNode) continue;
+
+      executedNodes.add(currentId);
+      emitLog('system', `[子流水线] >> 节点开始: 「${currentNode.name}」(${currentNode.type})`);
+
+      const childExecutor = registry.get(currentNode.type);
+      const childCtx: ExecutionContext = {
+        task,
+        node: currentNode,
+        variables: {
+          ...subVariables,
+          ...subOutputs,
+        },
+        emitLog: (stream, msg) => {
+          emitLog(stream, `[支线:${subWorkflow.name}] ${msg}`);
+        },
+        settings,
+        abortSignal,
+        store,
+      };
+
+      const result = await childExecutor.execute(childCtx);
+
+      if (result.status === 'failed') {
+        const err = `[子流水线] 节点「${currentNode.name}」执行异常，子流水线流转中止: ${result.error || '执行失败'}`;
+        emitLog('stderr', err);
+        return {
+          status: 'failed',
+          exitCode: result.exitCode ?? 1,
+          error: err,
+        };
+      }
+
+      if (result.output) {
+        subOutputs[currentNode.id] = result.output;
+      }
+
+      // 下游入度更新
+      const outgoing = subWorkflow.edges.filter((e: any) => e.source === currentId);
+      for (const edge of outgoing) {
+        const nextTarget = edge.target;
+        const curDeg = inDegree.get(nextTarget) || 0;
+        if (curDeg > 0) {
+          inDegree.set(nextTarget, curDeg - 1);
+          if (curDeg - 1 === 0) {
+            queue.push(nextTarget);
+          }
+        }
+      }
+    }
+
+    emitLog(
+      'system',
+      `[子流水线完成] ✔ 支线流水线「${subWorkflow.name}」执行完毕，成功运行 ${executedNodes.size} 个节点`
+    );
+    return {
+      status: 'success',
+      exitCode: 0,
+      output: {
+        subWorkflowId,
+        subWorkflowName: subWorkflow.name,
+        nodesExecuted: executedNodes.size,
+        outputs: subOutputs,
+      },
+    };
+  }
+}
+
 export class ExecutorRegistry {
   private executors: Map<string, NodeExecutor> = new Map();
 
   constructor() {
     this.register('cli', new CliCommandExecutor());
     this.register('agent', new AgentExecutor());
+    this.register('sub-workflow', new SubWorkflowExecutor(() => this));
     this.register('hook', new HookExecutor());
     this.register('midscene', new MidsceneExecutor());
     this.register('stitch-image', new StitchImageExecutor());

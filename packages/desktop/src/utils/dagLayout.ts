@@ -12,7 +12,7 @@ export interface LayoutOptions {
 
 /**
  * 高性能零依赖 DAG 层次拓扑排版算法
- * 默认使用从上到下 (Top-to-Bottom, TB) 轴对称层次排版，兼具多分支水平居中平衡
+ * 默认使用从左到右 (Left-to-Right, LR) 轴对称层次排版，兼具多分支垂直居中平衡
  * 耗时 < 1ms，完全不卡顿 UI
  */
 export function layoutWorkflowDag(
@@ -22,13 +22,13 @@ export function layoutWorkflowDag(
 ): Node[] {
   if (!nodes || nodes.length === 0) return [];
 
-  const direction = options.direction || 'TB';
+  const direction = options.direction || 'LR';
   const nodeWidth = options.nodeWidth || 230;
   const nodeHeight = options.nodeHeight || 84;
-  const gapX = options.gapX || 48;
-  const gapY = options.gapY || 56;
-  const startX = options.startX || 140;
-  const startY = options.startY || 80;
+  const gapX = options.gapX || 80;
+  const gapY = options.gapY || 60;
+  const startX = options.startX || 100;
+  const startY = options.startY || 120;
 
   // 1. 构建邻接表与入度统计
   const nodeMap = new Map<string, Node>();

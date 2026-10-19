@@ -19,6 +19,7 @@ import {
 import { WorkflowDefinition, NodeType, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { WorkspacePicker } from './WorkspacePicker';
 import { TaskPromptArea } from './TaskPromptArea';
+import { toast } from './Toast';
 import { api } from '../services/api';
 
 const STORAGE_KEY_LAST_WORKFLOW = 'openloop_last_used_workflow_id';
@@ -75,6 +76,27 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   });
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const lastAutoTemplateRef = useRef<string>('');
+  const lastAutoAcceptanceRef = useRef<string>('');
+
+  const currentWf = useMemo(
+    () => workflows.find((w) => w.id === workflowId) || workflows[0],
+    [workflows, workflowId]
+  );
+  const isRavenWorkflow = currentWf?.id === 'wf_raven_business_dev';
+
+  const isCurrentWfWsRequired = !isRavenWorkflow && Boolean(
+    currentWf?.requireWorkspace ||
+    currentWf?.nodes?.some((node) => {
+      if (node.type === 'cli') {
+        const cmd = node.config?.command?.toLowerCase() || '';
+        const hasGit = cmd.includes('git commit') || cmd.includes('git push') || cmd.includes('git add');
+        const hasBuild = cmd.includes('pnpm') || cmd.includes('npm run') || cmd.includes('yarn') || cmd.includes('mvn') || cmd.includes('gradle');
+        return (hasGit || hasBuild) && !node.config?.cwd;
+      }
+      return false;
+    })
+  );
 
   // 弹窗打开或 workflows 变更时，优先恢复本地上次使用的流程与工作区记忆
   useEffect(() => {
@@ -128,6 +150,29 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   }, [isOpen, defaultColumn]);
 
+  // 响应 workflow 切换，智能自动填充模板
+  useEffect(() => {
+    if (!isOpen || !currentWf) return;
+
+    const tplDesc = currentWf.taskTemplate?.descriptionTemplate || '';
+    const tplAcc = currentWf.taskTemplate?.acceptanceTemplate || '';
+
+    // 描述框：如果当前为空，或等于上一个自动填充的模版，则无缝更新为当前流程的模版
+    if (!description.trim() || description === lastAutoTemplateRef.current) {
+      setDescription(tplDesc);
+      lastAutoTemplateRef.current = tplDesc;
+    }
+
+    // 验收标准：如果当前为空，或等于上一个自动填充的模版
+    if (!acceptanceCriteria.trim() || acceptanceCriteria === lastAutoAcceptanceRef.current) {
+      setAcceptanceCriteria(tplAcc);
+      lastAutoAcceptanceRef.current = tplAcc;
+      if (tplAcc.trim()) {
+        setIsCriteriaOpen(true);
+      }
+    }
+  }, [workflowId, isOpen, currentWf]);
+
   // 按 Esc 键优先关闭下拉菜单，再关闭整个弹窗
   useEffect(() => {
     if (!isOpen) return;
@@ -158,21 +203,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [isDropdownOpen]);
-
-  const currentWf = workflows.find((w) => w.id === workflowId) || workflows[0];
-
-  const isCurrentWfWsRequired = Boolean(
-    currentWf?.requireWorkspace ||
-    currentWf?.nodes?.some((node) => {
-      if (node.type === 'cli') {
-        const cmd = node.config?.command?.toLowerCase() || '';
-        const hasGit = cmd.includes('git commit') || cmd.includes('git push') || cmd.includes('git add');
-        const hasBuild = cmd.includes('pnpm') || cmd.includes('npm run') || cmd.includes('yarn') || cmd.includes('mvn') || cmd.includes('gradle');
-        return (hasGit || hasBuild) && !node.config?.cwd;
-      }
-      return false;
-    })
-  );
 
   // 全量流程按最近更新时间倒序排列
   const allSortedWorkflows = useMemo(() => {
@@ -385,9 +415,12 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
       setTitle('');
       setDescription('');
+      setAcceptanceCriteria('');
       setAttachments([]);
       setWorkflowSearch('');
       setIsDropdownOpen(false);
+      lastAutoTemplateRef.current = '';
+      lastAutoAcceptanceRef.current = '';
       onClose();
     } finally {
       setLoading(false);
@@ -455,7 +488,12 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             <input
               type="text"
               required
-              placeholder="例如: 购物车结算全链路回归与截图验收"
+              placeholder={
+                currentWf?.taskTemplate?.titlePlaceholder ||
+                (isRavenWorkflow
+                  ? '输入 Overmind 工单号或需求标题 (如: OMMUSIC-3825400 或 前端优质作者反馈链路)'
+                  : '例如: 购物车结算全链路回归与截图验收')
+              }
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="w-full h-[30px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2.5 text-[12px] text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all"
@@ -478,6 +516,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               <span className={`text-[10px] ${isCurrentWfWsRequired ? 'text-[#dc2626] font-medium' : 'text-[#85858d]'}`}>
                 {workspace
                   ? '已关联独立工程'
+                  : isRavenWorkflow
+                  ? '可留空，首个节点将自动根据工单号在 ~/raven/active 快速建区'
                   : isCurrentWfWsRequired
                   ? '此流程必须手动选择工程根目录'
                   : '非必选；未关联时在独立沙箱执行'}
@@ -487,7 +527,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               value={workspace}
               onChange={setWorkspace}
               placeholder={
-                isCurrentWfWsRequired
+                isRavenWorkflow
+                  ? '可选；若留空则自动根据工单号建区，或直接选择 ~/raven/active 现有工作区'
+                  : isCurrentWfWsRequired
                   ? '必须选择该任务执行所需的本地代码工程根目录...'
                   : '选择工程工作区 (点击下拉或右侧打开访达)...'
               }
@@ -616,16 +658,34 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
           {/* 任务说明与提示词 */}
           <div>
-            <label className="block text-[11px] font-medium text-[#63636b] mb-1">
-              任务说明与提示词 (可选)
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-medium text-[#63636b]">
+                任务说明与提示词
+              </label>
+              {currentWf?.taskTemplate?.descriptionTemplate &&
+                description.trim() !== currentWf.taskTemplate.descriptionTemplate.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDescription(currentWf.taskTemplate!.descriptionTemplate!);
+                      lastAutoTemplateRef.current = currentWf.taskTemplate!.descriptionTemplate!;
+                      toast.success(`已套用「${currentWf.name}」专属模板`);
+                    }}
+                    className="text-[10px] text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                    title="将说明框重置为当前流水线的专属结构化模板"
+                  >
+                    <Sparkles size={10} />
+                    <span>套用流程模板</span>
+                  </button>
+                )}
+            </div>
             <TaskPromptArea
               value={description}
               onChange={setDescription}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               disabled={loading}
-              rows={2}
+              rows={4}
             />
           </div>
 
@@ -643,6 +703,22 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {currentWf?.taskTemplate?.acceptanceTemplate &&
+                  acceptanceCriteria.trim() !== currentWf.taskTemplate.acceptanceTemplate.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAcceptanceCriteria(currentWf.taskTemplate!.acceptanceTemplate!);
+                        lastAutoAcceptanceRef.current = currentWf.taskTemplate!.acceptanceTemplate!;
+                        setIsCriteriaOpen(true);
+                        toast.success('已应用流程验收标准模板');
+                      }}
+                      className="h-[19px] px-1.5 rounded-[4px] bg-white hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                    >
+                      <Sparkles size={9} />
+                      <span>套用验收模板</span>
+                    </button>
+                  )}
                 <button
                   type="button"
                   onClick={handleGenerateQaPlan}

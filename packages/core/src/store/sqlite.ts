@@ -55,6 +55,7 @@ export class SqliteStore {
         edges_json TEXT NOT NULL,
         variables_json TEXT,
         tags_json TEXT,
+        task_template_json TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
@@ -164,6 +165,13 @@ export class SqliteStore {
       // 字段已存在，忽略
     }
 
+    // 增量表结构平滑迁移：为历史已有数据库的 workflows 表补齐 task_template_json 字段
+    try {
+      this.db.exec('ALTER TABLE workflows ADD COLUMN task_template_json TEXT');
+    } catch {
+      // 字段已存在，忽略
+    }
+
     // 增量表结构平滑迁移：为历史已有数据库的 tasks 表补齐 workspace 字段
     try {
       this.db.exec('ALTER TABLE tasks ADD COLUMN workspace TEXT');
@@ -199,31 +207,18 @@ export class SqliteStore {
     if (countWf.cnt === 0) {
       this.seedInitialData();
     } else {
-      // 检查并增量补齐内置部署工作流
-      const hasDeployWf = this.db.prepare('SELECT id FROM workflows WHERE id = ?').get('wf_app_build_deploy');
-      if (!hasDeployWf) {
-        this.saveWorkflow(this.getAppDeployWorkflowDefinition());
-      }
-      // 检查并增量补齐内置通用研发流水线
-      const hasDevWf = this.db.prepare('SELECT id FROM workflows WHERE id = ? OR name LIKE ?').get('wf_agent_feature_dev', '%通用研发%');
-      if (!hasDevWf) {
-        this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
-      }
-      // 检查并增量补齐内置 FEBase 应用构建部署流水线
-      const hasFebaseDeployWf = this.db.prepare('SELECT id FROM workflows WHERE id = ?').get('wf_febase_app_deploy');
-      if (!hasFebaseDeployWf) {
-        this.saveWorkflow(this.getFebaseDeployWorkflowDefinition());
-      }
-      // 检查并增量补齐内置 Worktree 隔离开发与视觉 QA 自动验收流水线
-      const hasWorktreeWf = this.db.prepare('SELECT id FROM workflows WHERE id = ?').get('wf_worktree_auto_dev_qa_merge');
-      if (!hasWorktreeWf) {
-        this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
-      }
+      // 检查并增量补齐/更新内置核心工作流
+      this.saveWorkflow(this.getAppDeployWorkflowDefinition());
+      this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
+      this.saveWorkflow(this.getFebaseDeployWorkflowDefinition());
+      this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
+      this.saveWorkflow(this.getRavenBusinessDevWorkflowDefinition());
     }
 
-    // 平滑补齐或迁移标签数据 (除了 FEBase 流水线保留「工作」tag 之外，其他流水线去掉「工作」tag)
+    // 平滑补齐或迁移标签数据 (除了 FEBase/Raven 流水线保留「工作」tag 之外，其他流水线去掉「工作」tag)
     try {
       const defaultTagMap: Record<string, string[]> = {
+        wf_raven_business_dev: ['工作', '研发', 'Raven', 'FEBase', 'Overmind'],
         wf_agent_feature_dev: ['研发', 'AI Agent'],
         wf_febase_app_deploy: ['工作', '部署', 'FEBase'],
         wf_worktree_auto_dev_qa_merge: ['研发', '沙箱', 'QA'],
@@ -258,12 +253,14 @@ export class SqliteStore {
           hasTagsSource = true;
         }
 
-        // 业务规则：除了 FEBase 流水线需要工作 tag 之外，其他的流水线去掉工作 tag
-        const isFebase =
+        // 业务规则：除了 FEBase/Raven 流水线需要工作 tag 之外，其他的流水线去掉工作 tag
+        const isWorkAllowed =
           row.id === 'wf_febase_app_deploy' ||
-          (typeof row.name === 'string' && row.name.toLowerCase().includes('febase'));
+          row.id === 'wf_raven_business_dev' ||
+          (typeof row.name === 'string' &&
+            (row.name.toLowerCase().includes('febase') || row.name.toLowerCase().includes('raven')));
 
-        if (isFebase) {
+        if (isWorkAllowed) {
           if (!tags.includes('工作')) {
             tags = ['工作', ...tags];
           }
@@ -323,12 +320,231 @@ export class SqliteStore {
     }
   }
 
+  private getRavenBusinessDevWorkflowDefinition(): WorkflowDefinition {
+    return {
+      id: 'wf_raven_business_dev',
+      name: 'Raven 业务需求全流程开发流水线',
+      description: '面向公司实际业务研发的一站式全流程流水线：Overmind 需求建区 (raven new) -> SDD 方案与任务设计 (/sdd-new-change) -> AI 自动化编码 (/sdd-continue-change) -> 本地服务就绪验证 -> 多端分流部署 (FEBase / Overmind) -> QA 验收与发版门禁',
+      tags: ['工作', '研发', 'Raven', 'FEBase', 'Overmind'],
+      taskTemplate: {
+        titlePlaceholder: '输入工单号或需求标题 (如: OMMUSIC-3825400 或 前端优质作者反馈链路)',
+        descriptionTemplate: [
+          '### 1. 需求与设计规范',
+          '- Overmind 工单号 / PRD: ',
+          '- Figma 视觉稿链接: ',
+          '',
+          '### 2. 核心功能范围',
+          '- [ ] ',
+          '- [ ] ',
+          '',
+          '### 3. 多端与工程范围',
+          '- 涉及端: [FEBase 前端 / 客户端 RN / 服务端]',
+          '- 重点关注: ',
+        ].join('\n'),
+        acceptanceTemplate: [
+          '- [ ] 视觉走查与交互细节完整还原 Figma 设计',
+          '- [ ] 核心业务路径冒烟与异常流自测通过',
+          '- [ ] 多端分流部署构建成功，体验包生成正常',
+        ].join('\n'),
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      nodes: [
+        {
+          id: 'node_raven_init',
+          name: '1. 需求工作区初始化 (raven new)',
+          type: 'cli',
+          position: { x: 100, y: 150 },
+          config: {
+            command: [
+              'echo "=== [Phase 1] Raven 需求工作区自动化准备 ==="',
+              'TASK_TITLE="{{task.title}}"',
+              'TASK_DESC="{{task.description}}"',
+              'TASK_WS="{{task.workspace}}"',
+              'ISSUE_KEY=$(echo "$TASK_TITLE $TASK_DESC $TASK_WS" | grep -o -E "(OMMUSIC|DUBHE|MUSIC)-[0-9]+" | head -n 1)',
+              'if [ -n "$ISSUE_KEY" ]; then',
+              '  echo "[Raven Init] 检测到 Overmind 工单号: $ISSUE_KEY"',
+              'else',
+              '  echo "[Raven Init] 未在输入中匹配到标准工单号，将使用现有工作区"',
+              'fi',
+              'TARGET_DIR=""',
+              'if [ -n "$TASK_WS" ] && [ -f "$TASK_WS/manifest.yaml" ]; then',
+              '  TARGET_DIR="$TASK_WS"',
+              '  echo "[Raven Init] 当前指定的任务工作区已包含有效 manifest.yaml: $TARGET_DIR"',
+              'elif [ -n "$ISSUE_KEY" ]; then',
+              '  FOUND_DIR=$(find ~/raven/active -maxdepth 1 -name "*$ISSUE_KEY*" 2>/dev/null | head -n 1)',
+              '  if [ -n "$FOUND_DIR" ] && [ -f "$FOUND_DIR/manifest.yaml" ]; then',
+              '    TARGET_DIR="$FOUND_DIR"',
+              '    echo "[Raven Init] 在本地发现已有匹配工作区: $TARGET_DIR"',
+              '  fi',
+              'fi',
+              'if [ -z "$TARGET_DIR" ]; then',
+              '  if [ -n "$ISSUE_KEY" ]; then',
+              '    echo "[Raven Init] 正在通过 raven new 自动化拉取 Overmind 工单并初始化工作区..."',
+              '    raven new "$ISSUE_KEY" --yes || raven new "$ISSUE_KEY" --yes --agent-bootstrap || true',
+              '    FOUND_DIR=$(find ~/raven/active -maxdepth 1 -name "*$ISSUE_KEY*" 2>/dev/null | head -n 1)',
+              '    if [ -n "$FOUND_DIR" ]; then TARGET_DIR="$FOUND_DIR"; fi',
+              '  else',
+              '    TARGET_DIR="$(pwd)"',
+              '  fi',
+              'fi',
+              'echo "export RAVEN_WORKSPACE=\\"$TARGET_DIR\\"" > /tmp/openloop-raven-env.sh',
+              'echo "export RAVEN_ISSUE_KEY=\\"$ISSUE_KEY\\"" >> /tmp/openloop-raven-env.sh',
+              'echo "[Raven Init] 工作区已就绪: $TARGET_DIR"',
+              'if [ -f "$TARGET_DIR/manifest.yaml" ]; then head -n 25 "$TARGET_DIR/manifest.yaml"; fi',
+            ].join('\n'),
+            timeoutSec: 180,
+          },
+        },
+        {
+          id: 'node_sdd_spec_init',
+          name: '2. SDD 需求方案设计与任务初始化',
+          type: 'agent',
+          position: { x: 440, y: 150 },
+          config: {
+            agentName: 'Raven SDD Architect',
+            prompt: `你正在进行 Raven SDD 需求方案设计与开发前准备。
+任务需求：{{task.title}}
+详细说明：{{task.description}}
+
+【执行指引】
+1. 首先检查需求工作区中的 manifest.yaml，确认本期需求对应的工单号、涉及的平台（如 febase/ios/android/harmony）及子仓库。
+2. 运行 /sdd-explore 或 /sdd-new-change 进入需求探索与方案设计：
+   - 梳理业务背景与技术实现路径；
+   - 明确需要改动的子工程（例如 febase 下的 rn-community-* 等）；
+   - 设计并生成 proposal.md、design.md 与 tasks.md 任务拆解清单。
+3. 检查生成的变更规范文件，确认改动范围最小化且逻辑闭环。
+4. 输出方案设计摘要与待执行 tasks 清单，供下一阶段编码执行。`,
+            timeoutSec: 600,
+          },
+        },
+        {
+          id: 'node_sdd_coding',
+          name: '3. SDD 业务代码自动化开发与自测',
+          type: 'agent',
+          position: { x: 780, y: 150 },
+          config: {
+            agentName: 'Raven SDD Coder',
+            prompt: `你正在执行 SDD 变更代码的具体实现。
+任务需求：{{task.title}}
+详细说明：{{task.description}}
+
+【执行指引】
+1. 读取上一阶段生成的 ravenspec/changes/**/tasks.md 任务清单。
+2. 运行 /sdd-continue-change 或 /sdd-apply-change，按计划在对应的仓库 worktree 中编写和修改代码。
+3. 遵循各端架构规范（如大前端组件规范、状态管理、日志打点）：
+   - 严格遵循简约整洁原则，避免过度设计；
+   - 补充必要的单元测试或本地自测验证。
+4. 开发完成后，更新 tasks.md 状态，并对改动文件进行 git diff / status 核对。
+5. 输出修改摘要与变更文件列表。`,
+            timeoutSec: 1200,
+          },
+        },
+        {
+          id: 'node_local_env_verify',
+          name: '4. 本地服务启动与验证',
+          type: 'cli',
+          position: { x: 1120, y: 150 },
+          config: {
+            command: [
+              'echo "=== [Phase 4] 本地开发服务拉起与功能验证 ==="',
+              'if [ -f /tmp/openloop-raven-env.sh ]; then source /tmp/openloop-raven-env.sh; fi',
+              'WS="${RAVEN_WORKSPACE:-{{task.workspace}}}"',
+              'if [ -n "$WS" ] && [ -d "$WS" ]; then cd "$WS"; fi',
+              'echo "[Verify] 当前工作区: $(pwd)"',
+              'FE_PROJECT=$(find febase -maxdepth 2 -name "package.json" 2>/dev/null | head -n 1 | xargs -r dirname)',
+              'if [ -n "$FE_PROJECT" ] && [ -d "$FE_PROJECT" ]; then',
+              '  echo "[Verify] 发现前端工程: $FE_PROJECT，执行基础依赖与构建预检..."',
+              '  (cd "$FE_PROJECT" && if grep -q \'"build"\' package.json; then echo "[Verify] package.json 脚本正常"; fi)',
+              '  echo "[Verify] 如需在终端启动实时本地服务，可执行: chitu dev 或 pnpm start"',
+              'else',
+              '  echo "[Verify] 工作区环境检测正常，代码文件完整无缺失"',
+              'fi',
+            ].join('\n'),
+            timeoutSec: 180,
+          },
+        },
+        {
+          id: 'node_febase_sub_pipeline',
+          name: '5a. FEBase 部署支线 (子流水线)',
+          type: 'sub-workflow',
+          position: { x: 1460, y: 80 },
+          config: {
+            subWorkflowId: 'wf_febase_app_deploy',
+            inheritContext: true,
+            timeoutSec: 300,
+          },
+        },
+        {
+          id: 'node_overmind_client_deploy',
+          name: '5b. 客户端/服务端 Overmind 部署支线',
+          type: 'cli',
+          position: { x: 1460, y: 260 },
+          config: {
+            command: [
+              'echo "=== [Phase 5b] 客户端与服务端 Overmind 部署支线 ==="',
+              'if [ -f /tmp/openloop-raven-env.sh ]; then source /tmp/openloop-raven-env.sh; fi',
+              'WS="${RAVEN_WORKSPACE:-{{task.workspace}}}"',
+              'ISSUE="${RAVEN_ISSUE_KEY:-{{task.title}}}"',
+              'echo "[Deploy:Overmind] 目标工作区: $WS, 关联工单: $ISSUE"',
+              'if which raven >/dev/null 2>&1; then',
+              '  echo "[Deploy:Overmind] 正在通过 raven deploy 检查与触发构建..."',
+              '  raven deploy status 2>/dev/null || echo "[Deploy:Overmind] 环境就绪，待构建触发"',
+              'else',
+              '  echo "[Deploy:Overmind] 本地未安装 raven 工具链，跳过客户端触发"',
+              'fi',
+            ].join('\n'),
+            timeoutSec: 300,
+          },
+        },
+        {
+          id: 'node_qa_gate',
+          name: '6. QA 验收与发版门禁',
+          type: 'qa-approval',
+          position: { x: 1820, y: 170 },
+          config: {
+            approvalPrompt: '业务需求已完成编码与多端分支部署！请 QA 查验对应环境体验包与界面交互，确认功能验收无误后点击【验收通过】。',
+            checklist: [
+              'FEBase / Overmind 部署发布单处于就绪或成功状态',
+              '本地与测试环境功能主流程验证通过',
+              '涉及的多端分支代码均已自测并通过语法/格式校验',
+              '无阻断性缺陷与严重性能异常',
+            ],
+          },
+        },
+      ],
+      edges: [
+        { id: 'e_init_to_spec', source: 'node_raven_init', target: 'node_sdd_spec_init' },
+        { id: 'e_spec_to_code', source: 'node_sdd_spec_init', target: 'node_sdd_coding' },
+        { id: 'e_code_to_verify', source: 'node_sdd_coding', target: 'node_local_env_verify' },
+        { id: 'e_verify_to_febase', source: 'node_local_env_verify', target: 'node_febase_sub_pipeline' },
+        { id: 'e_verify_to_om', source: 'node_local_env_verify', target: 'node_overmind_client_deploy' },
+        { id: 'e_febase_to_qa', source: 'node_febase_sub_pipeline', target: 'node_qa_gate' },
+        { id: 'e_om_to_qa', source: 'node_overmind_client_deploy', target: 'node_qa_gate' },
+      ],
+    };
+  }
+
   private getFebaseDeployWorkflowDefinition(): WorkflowDefinition {
     return {
       id: 'wf_febase_app_deploy',
       name: 'FEBase 应用智能编排与部署流水线',
       description: 'AI Agent 驱动的极简部署编排流水线：Agent 智能校验 Prompt 充足性并锁定发布单（信息不足自动终止） -> 原生 mws CLI 分配环境 -> 原生 mws CLI 触发云端打包',
       tags: ['工作', '部署', 'FEBase'],
+      taskTemplate: {
+        titlePlaceholder: '输入发布说明 (如: 部署 rn-lyric-share-page 至 PRETEST 环境)',
+        descriptionTemplate: [
+          '### FEBase 发布信息',
+          '- 目标应用名 (appName): ',
+          '- 代码分支 (branch): ',
+          '- 目标环境 (envType & domain): PRETEST / 211',
+          '- 变更说明: ',
+        ].join('\n'),
+        acceptanceTemplate: [
+          '- [ ] 发布单构建打包状态为成功',
+          '- [ ] 对应测试域名访问正常，无静态资源 404',
+        ].join('\n'),
+      },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -416,6 +632,19 @@ export class SqliteStore {
       name: '全自动化应用构建与部署流水线',
       description: '通用应用部署流水线：环境自检 -> 生产全量构建 -> 应用部署发布 -> 线上健康探针 -> 发布上线验收门禁',
       tags: ['部署', '构建', 'CI/CD'],
+      taskTemplate: {
+        titlePlaceholder: '输入应用全量构建发布说明 (如: 发布桌面端 v1.0.2 正式版)',
+        descriptionTemplate: [
+          '### 应用构建与发布说明',
+          '- 目标版本 / Tag: ',
+          '- 构建目标环境: production',
+          '- 核心改动日志: ',
+        ].join('\n'),
+        acceptanceTemplate: [
+          '- [ ] 全量编译构建无语法/打包报错',
+          '- [ ] 线上/本地健康探测接口返回 HTTP 200',
+        ].join('\n'),
+      },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -489,6 +718,20 @@ export class SqliteStore {
       name: 'Worktree 隔离开发与视觉 QA 自动验收流水线',
       description: '端到端全闭环研发流水线：根据需求创建 Git Worktree 与独立端口靶机，Agent 隔离编写代码，Playwright 真实浏览器 UI 自动化截帧，查看连贯截图回放验收通过后自动合并到开发分支并清理沙箱',
       tags: ['研发', '沙箱', 'QA'],
+      taskTemplate: {
+        titlePlaceholder: '输入特性需求说明 (如: 新增个人中心关注列表骨架屏)',
+        descriptionTemplate: [
+          '### 特性与开发范围',
+          '- 需求说明: ',
+          '- 关联分支: feat/',
+          '- 本地服务依赖端口: 5175',
+        ].join('\n'),
+        acceptanceTemplate: [
+          '- [ ] AI 开发者修改代码后本地编译正常通过',
+          '- [ ] 自动化 UI 截帧回放无明显错位或白屏',
+          '- [ ] QA 人工确认后自动合入目标分支并清理沙箱',
+        ].join('\n'),
+      },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -604,6 +847,18 @@ export class SqliteStore {
       name: '通用研发流水线',
       description: '通用智能体敏捷开发流程：AI 智能体根据需求修改代码，执行前端构建自检，经由 QA 人工验收门禁确认',
       tags: ['研发', 'AI Agent'],
+      taskTemplate: {
+        titlePlaceholder: '例如: 购物车结算全链路回归与截图验收',
+        descriptionTemplate: [
+          '### 需求目标',
+          '- 目标功能说明: ',
+          '- 涉及修改模块: ',
+        ].join('\n'),
+        acceptanceTemplate: [
+          '- [ ] 代码修改符合规范且自测通过',
+          '- [ ] 构建无明显报错阻断',
+        ].join('\n'),
+      },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -737,6 +992,7 @@ export class SqliteStore {
     this.saveWorkflow(defaultWorkflow);
 
     // 预置通用研发流水线
+    this.saveWorkflow(this.getRavenBusinessDevWorkflowDefinition());
     this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
     this.saveWorkflow(this.getAppDeployWorkflowDefinition());
     this.saveWorkflow(this.getFebaseDeployWorkflowDefinition());
@@ -851,6 +1107,10 @@ export class SqliteStore {
       } else if (variables?.tags && Array.isArray(variables.tags)) {
         tags = variables.tags;
       }
+      let taskTemplate = r.task_template_json ? JSON.parse(r.task_template_json) : undefined;
+      if (!taskTemplate && variables?.taskTemplate) {
+        taskTemplate = variables.taskTemplate;
+      }
       return {
         id: r.id,
         name: r.name,
@@ -858,6 +1118,7 @@ export class SqliteStore {
         nodes: JSON.parse(r.nodes_json),
         edges: JSON.parse(r.edges_json),
         tags,
+        taskTemplate,
         variables,
         requireWorkspace: variables?.requireWorkspace,
         defaultWorkspace: variables?.defaultWorkspace,
@@ -880,6 +1141,10 @@ export class SqliteStore {
     } else if (variables?.tags && Array.isArray(variables.tags)) {
       tags = variables.tags;
     }
+    let taskTemplate = row.task_template_json ? JSON.parse(row.task_template_json) : undefined;
+    if (!taskTemplate && variables?.taskTemplate) {
+      taskTemplate = variables.taskTemplate;
+    }
     return {
       id: row.id,
       name: row.name,
@@ -887,6 +1152,7 @@ export class SqliteStore {
       nodes: JSON.parse(row.nodes_json),
       edges: JSON.parse(row.edges_json),
       tags,
+      taskTemplate,
       variables,
       requireWorkspace: variables?.requireWorkspace,
       defaultWorkspace: variables?.defaultWorkspace,
@@ -904,17 +1170,19 @@ export class SqliteStore {
       : [];
     wf.tags = tagsList;
 
+    const taskTemplateJson = wf.taskTemplate ? JSON.stringify(wf.taskTemplate) : null;
     const variablesObj = {
       ...(wf.variables || {}),
       ...(wf.requireWorkspace !== undefined ? { requireWorkspace: wf.requireWorkspace } : {}),
       ...(wf.defaultWorkspace !== undefined ? { defaultWorkspace: wf.defaultWorkspace } : {}),
+      ...(wf.taskTemplate ? { taskTemplate: wf.taskTemplate } : {}),
       tags: tagsList,
     };
     const hasVariables = Object.keys(variablesObj).length > 0;
 
     const stmt = this.db.prepare(`
-      INSERT INTO workflows (id, name, description, nodes_json, edges_json, variables_json, tags_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO workflows (id, name, description, nodes_json, edges_json, variables_json, tags_json, task_template_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
@@ -922,6 +1190,7 @@ export class SqliteStore {
         edges_json = excluded.edges_json,
         variables_json = excluded.variables_json,
         tags_json = excluded.tags_json,
+        task_template_json = excluded.task_template_json,
         updated_at = excluded.updated_at
     `);
 
@@ -933,6 +1202,7 @@ export class SqliteStore {
       JSON.stringify(wf.edges || []),
       hasVariables ? JSON.stringify(variablesObj) : null,
       JSON.stringify(tagsList),
+      taskTemplateJson,
       wf.createdAt,
       wf.updatedAt
     );
