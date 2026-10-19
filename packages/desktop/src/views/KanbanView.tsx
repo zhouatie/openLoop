@@ -1996,25 +1996,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               </div>
                             )}
 
-                            {task.context?.piSessionId && (
-                              <div
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleResumeTerminal(task.id);
-                                }}
-                                className="mb-1.5 flex items-center justify-between text-[10px] text-[#4b4b53] bg-[#f4f4f7] hover:bg-[#eaebee] px-2 py-[2.5px] rounded-[5px] border border-[#e3e3e8] cursor-pointer transition-colors"
-                                title="点击调起终端恢复会话"
-                              >
-                                <span className="flex items-center gap-1.5 font-mono truncate">
-                                  <Terminal size={9.5} className="text-[#85858d]" />
-                                  <span>pi: {task.context.piSessionId.replace('session_', '')}</span>
-                                </span>
-                                <span className="text-[9.5px] text-[#85858d] flex items-center gap-0.5">
-                                  恢复 <ExternalLink size={8.5} />
-                                </span>
-                              </div>
-                            )}
-
                             <div className="pt-1.5 border-t border-[#ececf0] flex items-center justify-between text-[10.5px] text-[#85858d]">
                               <div className="flex items-center gap-1.5">
                                 <span>
