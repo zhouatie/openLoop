@@ -85,6 +85,11 @@ import { AgentSessionDrawer } from '../components/AgentSessionDrawer';
 import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 import { TagInput } from '../components/TagInput';
+import { WORKFLOW_RECIPES, WorkflowRecipe } from '../constants/workflowRecipes';
+import { RecipePickerModal, RecipePickerContextInfo } from '../components/workflow/RecipePickerModal';
+import { WorkflowCustomEdge } from '../components/workflow/WorkflowCustomEdge';
+import { WorkflowLinearFlowView } from '../components/workflow/WorkflowLinearFlowView';
+import { WorkflowNodeBranchMenu } from '../components/workflow/WorkflowNodeBranchMenu';
 
 // ==========================================
 // 1. 自定义节点外观（极简高质感 + 智能体生成发光 + 幽灵预演态 + 编排调试实时运行态）
@@ -97,6 +102,14 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
   const executionStatus: string | undefined = nodeData.executionStatus;
   const executionDuration: number | undefined = nodeData.executionDuration;
   const executionError: string | undefined = nodeData.executionError;
+
+  // 双击原地就地重命名状态
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(nodeData.name || '');
+
+  useEffect(() => {
+    setTitleDraft(nodeData.name || '');
+  }, [nodeData.name]);
 
   const typeConfig: Record<
     NodeType,
@@ -253,7 +266,7 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
 
   return (
     <div
-      className={`w-[230px] rounded-[12px] p-3 transition-all relative ${nodeStatusClasses}`}
+      className={`w-[230px] rounded-[12px] p-3 transition-all relative group ${nodeStatusClasses}`}
     >
       <Handle
         type="target"
@@ -314,42 +327,72 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
         </div>
       </div>
 
-      {/* 节点名称 */}
-      <div className="text-[12.5px] font-semibold text-[#1c1c21] leading-snug line-clamp-2 mt-2 mb-1.5">
-        {nodeData.name}
-      </div>
+      {/* 节点名称 (支持双击就地重命名) */}
+      {isEditingTitle ? (
+        <input
+          type="text"
+          autoFocus
+          value={titleDraft}
+          onChange={(e) => setTitleDraft(e.target.value)}
+          onBlur={() => {
+            setIsEditingTitle(false);
+            if (titleDraft.trim() && titleDraft !== nodeData.name) {
+              nodeData.onInlineRename?.(nodeData.id, titleDraft.trim());
+            }
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              setIsEditingTitle(false);
+              if (titleDraft.trim() && titleDraft !== nodeData.name) {
+                nodeData.onInlineRename?.(nodeData.id, titleDraft.trim());
+              }
+            } else if (e.key === 'Escape') {
+              setIsEditingTitle(false);
+              setTitleDraft(nodeData.name || '');
+            }
+          }}
+          className="nodrag nopan w-full text-[12px] font-semibold text-[#1c1c21] bg-[#f0f0f4] px-1.5 py-0.5 rounded border border-[#6366f1] outline-none my-1"
+        />
+      ) : (
+        <div
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            setIsEditingTitle(true);
+          }}
+          className="text-[12.5px] font-semibold text-[#1c1c21] leading-snug line-clamp-2 mt-2 mb-1.5 cursor-pointer hover:text-[#4f46e5] transition-colors"
+          title="双击就地重命名步骤名称"
+        >
+          {nodeData.name}
+        </div>
+      )}
 
-      {/* 节点配置/指令预览胶囊 */}
+      {/* 节点配置/指令预览胶囊 (点击直接定位属性编辑) */}
       <div
-        className={`text-[10px] font-mono px-2 py-1 rounded-[6px] truncate border flex items-center gap-1 ${
+        onClick={(e) => {
+          e.stopPropagation();
+          nodeData.onEditNodeConfig?.(nodeData.id);
+        }}
+        className={`text-[10px] font-mono px-2 py-1 rounded-[6px] truncate border flex items-center justify-between gap-1 cursor-pointer transition-all hover:border-[#6366f1] group/cmd ${
           isGhost
             ? 'bg-[#f5f3ff] text-[#6b21a8] border-[#e9d5ff]'
-            : 'text-[#63636b] bg-[#f8f8fa] border-[#ececf0]'
+            : 'text-[#63636b] bg-[#f8f8fa] border-[#ececf0] hover:bg-white'
         }`}
-        title={
-          type === 'agent'
-            ? nodeData.config?.prompt
-            : type === 'midscene'
-            ? nodeData.config?.testUrl
-            : type === 'stitch-image'
-            ? nodeData.config?.outputFile
-            : type === 'hook'
-            ? nodeData.config?.webhookUrl
-            : type === 'qa-approval'
-            ? nodeData.config?.approvalPrompt
-            : nodeData.config?.command
-        }
+        title="点击直接编辑该步骤的具体命令 / Prompt / 参数"
       >
-        <span className="text-[#85858d] select-none">&gt;_</span>
-        <span className="truncate">
-          {type === 'agent' && (nodeData.config?.prompt || 'Agent 自动实现需求')}
-          {type === 'midscene' && (nodeData.config?.testUrl || '智能断言与多步截屏')}
-          {type === 'stitch-image' && (nodeData.config?.outputFile || '生成动图 preview.gif')}
-          {type === 'hook' && (nodeData.config?.webhookUrl || '完成事件广播 -> 自动流转')}
-          {type === 'qa-approval' && (nodeData.config?.approvalPrompt || '人工与用例核验确认')}
-          {type === 'cli' && (nodeData.config?.command || '执行命令行指令')}
-          {type === 'custom' && (nodeData.config?.pluginId || '扩展插件自定义执行')}
-        </span>
+        <div className="flex items-center gap-1 min-w-0 truncate">
+          <span className="text-[#85858d] select-none">&gt;_</span>
+          <span className="truncate">
+            {type === 'agent' && (nodeData.config?.prompt || 'Agent 自动实现需求')}
+            {type === 'midscene' && (nodeData.config?.testUrl || '智能断言与多步截屏')}
+            {type === 'stitch-image' && (nodeData.config?.outputFile || '生成动图 preview.gif')}
+            {type === 'hook' && (nodeData.config?.webhookUrl || '完成事件广播 -> 自动流转')}
+            {type === 'qa-approval' && (nodeData.config?.approvalPrompt || '人工与用例核验确认')}
+            {type === 'cli' && (nodeData.config?.command || '执行命令行指令')}
+            {type === 'custom' && (nodeData.config?.pluginId || '扩展插件自定义执行')}
+          </span>
+        </div>
+        <Edit3 size={9} className="text-[#85858d] opacity-0 group-hover/cmd:opacity-100 shrink-0" />
       </div>
 
       {/* 调试状态行与日志入口 */}
@@ -418,6 +461,47 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
             : 'bg-white border-[#85858d]'
         }`}
       />
+
+      {/* 节点末端快捷追加步骤圆钮 (+) */}
+      {!isGhost && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (import.meta.env?.DEV) {
+              console.log('[CustomWorkflowNode] 呼出向右行内分支选单:', nodeData.id, nodeData.name);
+            }
+            if (typeof nodeData.onOpenBranchMenu === 'function') {
+              nodeData.onOpenBranchMenu(nodeData.id);
+            } else if (typeof nodeData.onAppendStep === 'function') {
+              nodeData.onAppendStep(nodeData.id, nodeData.name);
+            }
+          }}
+          className="absolute -right-3 top-1/2 -translate-y-1/2 w-[18px] h-[18px] rounded-full bg-white border border-[#c7d2fe] hover:border-[#4f46e5] text-[#6366f1] hover:text-[#4f46e5] shadow-xs flex items-center justify-center transition-all hover:scale-120 active:scale-95 cursor-pointer z-20 opacity-0 group-hover:opacity-100"
+          title="按 Tab 或点击追加下一个步骤"
+        >
+          <Plus size={10} strokeWidth={2.6} />
+        </button>
+      )}
+
+      {/* XMind 风格节点行内分支选单 (挂载在节点右侧) */}
+      {!isGhost && (
+        <WorkflowNodeBranchMenu
+          sourceNodeId={nodeData.id}
+          sourceNodeName={nodeData.name}
+          isOpen={Boolean(nodeData.isBranchMenuOpen)}
+          onClose={() => {
+            if (typeof nodeData.onCloseBranchMenu === 'function') {
+              nodeData.onCloseBranchMenu();
+            }
+          }}
+          onSelectRecipe={(recipe) => {
+            if (typeof nodeData.onSelectBranchRecipe === 'function') {
+              nodeData.onSelectBranchRecipe(nodeData.id, recipe);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -552,6 +636,25 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   activeWorkflowRef.current = activeWorkflow;
   const handlePreviewRef = useRef<((action: WorkflowActionPayload, messageId?: string) => void) | null>(null);
 
+  // 视图模式：拓扑画布 (canvas) vs 步骤清单 (linear)
+  const [viewMode, setViewMode] = useState<'canvas' | 'linear'>('canvas');
+
+  // 动作配方选择器状态 (Recipe Picker)
+  const [isRecipePickerOpen, setIsRecipePickerOpen] = useState(false);
+  const [recipePickerContext, setRecipePickerContext] = useState<RecipePickerContextInfo>({
+    type: 'create',
+  });
+  const [pendingRecipeTarget, setPendingRecipeTarget] = useState<{
+    mode: 'append' | 'insert' | 'create';
+    sourceNodeId?: string;
+    targetNodeId?: string;
+    edgeId?: string;
+    position?: { x: number; y: number };
+  }>({ mode: 'create' });
+
+  // XMind 风格节点行内向右分支选单状态 (当前呼出分支选单的源节点 ID)
+  const [branchMenuNodeId, setBranchMenuNodeId] = useState<string | null>(null);
+
   // Copilot 会话状态
   const [copilotState, setCopilotState] = useState<WorkflowSessionState | null>(null);
   const [inputMessage, setInputMessage] = useState('');
@@ -592,6 +695,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   });
 
   const nodeTypes = useMemo(() => ({ customNode: CustomWorkflowNode }), []);
+  const edgeTypes = useMemo(() => ({ workflowEdge: WorkflowCustomEdge }), []);
 
   // 初始化加载工作流节点和连线
   useEffect(() => {
@@ -745,6 +849,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const handlePaneClick = useCallback(() => {
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
+    setBranchMenuNodeId(null);
   }, []);
 
   const handleNodeClick = (_: any, node: Node) => {
@@ -753,11 +858,366 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     }
     setSelectedEdgeId(null);
     setSelectedNodeId(node.id);
+    if (branchMenuNodeId && branchMenuNodeId !== node.id) {
+      setBranchMenuNodeId(null);
+    }
     setSidebarTab('inspector');
     setIsSidebarOpen(true);
   };
 
-  // 动态渲染 Edge 样式：支持高亮选中态、分支条件 Badge 气泡、发光效果
+  // 动作配方选择器唤起逻辑
+  const handleOpenAppendRecipePicker = useCallback(
+    (sourceId?: string, sourceName?: string) => {
+      const srcNode = sourceId ? nodes.find((n) => n.id === sourceId) : undefined;
+      const resolvedName = sourceName || (srcNode?.data as any)?.name;
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowEditor] 呼出追加步骤配方选择器:', { sourceId, resolvedName });
+      }
+      setRecipePickerContext({
+        type: 'append',
+        sourceNodeName: resolvedName,
+      });
+      setPendingRecipeTarget({
+        mode: 'append',
+        sourceNodeId: sourceId,
+      });
+      setIsRecipePickerOpen(true);
+    },
+    [nodes]
+  );
+
+  const handleOpenInsertRecipePicker = useCallback(
+    (edgeId: string, sourceId: string, targetId: string) => {
+      const sNode = nodes.find((n) => n.id === sourceId);
+      const tNode = nodes.find((n) => n.id === targetId);
+      if (import.meta.env?.DEV) {
+        console.log('[WorkflowEditor] 呼出连线中间插桩选择器:', { edgeId, sourceId, targetId });
+      }
+      setRecipePickerContext({
+        type: 'insert',
+        sourceNodeName: (sNode?.data as any)?.name || sourceId,
+        targetNodeName: (tNode?.data as any)?.name || targetId,
+      });
+      setPendingRecipeTarget({
+        mode: 'insert',
+        sourceNodeId: sourceId,
+        targetNodeId: targetId,
+        edgeId,
+      });
+      setIsRecipePickerOpen(true);
+    },
+    [nodes]
+  );
+
+  const handleOpenCreateRecipePicker = useCallback(() => {
+    if (import.meta.env?.DEV) {
+      console.log('[WorkflowEditor] 呼出全局新建步骤配方选择器');
+    }
+    setRecipePickerContext({ type: 'create' });
+    setPendingRecipeTarget({ mode: 'create' });
+    setIsRecipePickerOpen(true);
+  }, []);
+
+  // 选定配方并落库应用
+  const handleApplyRecipe = useCallback(
+    (recipe: WorkflowRecipe) => {
+      const target = pendingRecipeTarget;
+      const newId = `node_${recipe.type}_${Date.now().toString(36).substring(3, 7)}`;
+      const defaultCmd =
+        recipe.defaultConfig?.command ||
+        (recipe.type === 'cli' ? 'echo "cli task"' : undefined);
+
+      const newNode: Node = {
+        id: newId,
+        type: 'customNode',
+        position: target.position || {
+          x: 220 + Math.random() * 60,
+          y: 140 + Math.random() * 60,
+        },
+        data: {
+          id: newId,
+          name: recipe.defaultName,
+          type: recipe.type,
+          config: {
+            command: defaultCmd,
+            ...recipe.defaultConfig,
+          },
+          isNew: true,
+        },
+      };
+
+      if (import.meta.env?.DEV) {
+        console.log('[Workflow:ApplyRecipe] 应用动作配方:', {
+          recipeName: recipe.name,
+          newId,
+          target,
+        });
+      }
+
+      if (target.mode === 'insert' && target.sourceNodeId && target.targetNodeId) {
+        // 在两节点之间插桩
+        const remainingEdges = target.edgeId
+          ? edges.filter((e) => e.id !== target.edgeId)
+          : edges.filter(
+              (e) => !(e.source === target.sourceNodeId && e.target === target.targetNodeId)
+            );
+        const edge1: Edge = {
+          id: `e_${target.sourceNodeId}_${newId}_${Date.now().toString(36)}`,
+          source: target.sourceNodeId,
+          target: newId,
+          animated: true,
+          data: { condition: '', label: '' },
+          style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+        };
+        const edge2: Edge = {
+          id: `e_${newId}_${target.targetNodeId}_${Date.now().toString(36)}`,
+          source: newId,
+          target: target.targetNodeId,
+          animated: true,
+          data: { condition: '', label: '' },
+          style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+        };
+        const nextEdges = [...remainingEdges, edge1, edge2];
+        const nextNodes = [...nodes, newNode];
+        const layouted = layoutWorkflowDag(nextNodes, nextEdges, { direction: 'LR' });
+        setNodes(layouted);
+        setEdges(nextEdges);
+      } else if (target.mode === 'append' && target.sourceNodeId) {
+        // 在末端追加
+        const newEdge: Edge = {
+          id: `e_${target.sourceNodeId}_${newId}_${Date.now().toString(36)}`,
+          source: target.sourceNodeId,
+          target: newId,
+          animated: true,
+          data: { condition: '', label: '' },
+          style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+        };
+        const nextEdges = [...edges, newEdge];
+        const nextNodes = [...nodes, newNode];
+        const layouted = layoutWorkflowDag(nextNodes, nextEdges, { direction: 'LR' });
+        setNodes(layouted);
+        setEdges(nextEdges);
+      } else {
+        // 独立创建
+        const nextNodes = [...nodes, newNode];
+        const layouted =
+          nextNodes.length > 1
+            ? layoutWorkflowDag(nextNodes, edges, { direction: 'LR' })
+            : nextNodes;
+        setNodes(layouted);
+      }
+
+      setSelectedNodeId(newId);
+      setSelectedEdgeId(null);
+      setIsSidebarOpen(true);
+      setSidebarTab('inspector');
+      toast.success(`已添加「${recipe.name}」步骤`);
+    },
+    [pendingRecipeTarget, nodes, edges]
+  );
+
+  // 连线拖拽至空白处释放自动追加步骤
+  const onConnectEnd = useCallback(
+    (event: any, connectionState: any) => {
+      if (!connectionState.isValid && connectionState.fromNode) {
+        if (import.meta.env?.DEV) {
+          console.log('[WorkflowEditor] 连线拖拽至空白处释放:', connectionState.fromNode.id);
+        }
+        handleOpenAppendRecipePicker(
+          connectionState.fromNode.id,
+          (connectionState.fromNode.data as any)?.name
+        );
+      }
+    },
+    [handleOpenAppendRecipePicker]
+  );
+
+  // 步骤清单模式中的步骤上下移动调整
+  const handleMoveStep = useCallback(
+    (nodeId: string, direction: 'up' | 'down') => {
+      const inDegree = new Map<string, number>();
+      const adj = new Map<string, string[]>();
+      for (const n of nodes) {
+        inDegree.set(n.id, 0);
+        adj.set(n.id, []);
+      }
+      for (const e of edges) {
+        if (adj.has(e.source) && inDegree.has(e.target)) {
+          adj.get(e.source)!.push(e.target);
+          inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
+        }
+      }
+      const queue: string[] = [];
+      for (const [id, deg] of inDegree.entries()) {
+        if (deg === 0) queue.push(id);
+      }
+      const orderedIds: string[] = [];
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        orderedIds.push(curr);
+        for (const next of adj.get(curr) || []) {
+          const rem = (inDegree.get(next) || 1) - 1;
+          inDegree.set(next, rem);
+          if (rem === 0) queue.push(next);
+        }
+      }
+      for (const n of nodes) {
+        if (!orderedIds.includes(n.id)) orderedIds.push(n.id);
+      }
+
+      const idx = orderedIds.indexOf(nodeId);
+      if (idx === -1) return;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= orderedIds.length) return;
+
+      const nAId = orderedIds[Math.min(idx, targetIdx)];
+      const nBId = orderedIds[Math.max(idx, targetIdx)];
+
+      let changed = false;
+      let nextEdges = edges.map((e) => {
+        if (e.source === nAId && e.target === nBId) {
+          changed = true;
+          return { ...e, source: nBId, target: nAId };
+        }
+        return e;
+      });
+
+      if (!changed) {
+        nextEdges.push({
+          id: `e_${direction === 'up' ? nodeId : nAId}_${direction === 'up' ? nAId : nodeId}_${Date.now().toString(36)}`,
+          source: direction === 'up' ? nodeId : nAId,
+          target: direction === 'up' ? nAId : nodeId,
+          animated: true,
+          data: { condition: '', label: '' },
+          style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+        });
+      }
+
+      const layouted = layoutWorkflowDag(nodes, nextEdges, { direction: 'LR' });
+      setNodes(layouted);
+      setEdges(nextEdges);
+      toast.success('已调整步骤执行顺序');
+    },
+    [nodes, edges]
+  );
+
+  // XMind 风格节点分支动作应用（核心流程：建节点 -> 连线 -> 顺畅排版 -> 焦点立即切换到新节点 -> 支持再次连击 Tab）
+  const handleApplyBranchRecipe = useCallback(
+    (sourceNodeId: string, recipe: WorkflowRecipe) => {
+      const srcNode = nodes.find((n) => n.id === sourceNodeId);
+      const newId = `node_${recipe.type}_${Date.now().toString(36).substring(3, 7)}`;
+      const defaultCmd =
+        recipe.defaultConfig?.command ||
+        (recipe.type === 'cli' ? 'echo "cli task"' : undefined);
+
+      const basePos = srcNode?.position || { x: 200, y: 150 };
+      const newNode: Node = {
+        id: newId,
+        type: 'customNode',
+        position: {
+          x: basePos.x + 280,
+          y: basePos.y,
+        },
+        data: {
+          id: newId,
+          name: recipe.defaultName,
+          type: recipe.type,
+          config: {
+            command: defaultCmd,
+            ...recipe.defaultConfig,
+          },
+          isNew: true,
+        },
+      };
+
+      const newEdge: Edge = {
+        id: `e_${sourceNodeId}_${newId}_${Date.now().toString(36)}`,
+        source: sourceNodeId,
+        target: newId,
+        animated: true,
+        data: { condition: '', label: '' },
+        style: { stroke: '#4f46e5', strokeWidth: 1.8 },
+      };
+
+      const nextEdges = [...edges, newEdge];
+      const nextNodes = [...nodes, newNode];
+      const layouted = layoutWorkflowDag(nextNodes, nextEdges, { direction: 'LR' });
+
+      setNodes(layouted);
+      setEdges(nextEdges);
+
+      // 关键连贯性：关闭分支选单，并将焦点立即切到新创建的节点上，实现连续 Tab 编排！
+      setBranchMenuNodeId(null);
+      setSelectedNodeId(newId);
+      setSelectedEdgeId(null);
+
+      toast.success(`已添加「${recipe.name}」，按 Tab 键可继续向右追加`);
+    },
+    [nodes, edges]
+  );
+
+  // 双击步骤名称就地重命名
+  const handleUpdateNodeName = useCallback((nodeId: string, newName: string) => {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === nodeId
+          ? {
+              ...n,
+              data: {
+                ...(n.data as any),
+                name: newName,
+              },
+            }
+          : n
+      )
+    );
+    toast.success('步骤名称已更新');
+  }, []);
+
+  // 点击步骤指令胶囊聚焦右侧命令/配置编辑
+  const handleFocusCommandEdit = useCallback((nodeId: string) => {
+    setSelectedNodeId(nodeId);
+    setSelectedEdgeId(null);
+    setIsSidebarOpen(true);
+    setSidebarTab('inspector');
+  }, []);
+
+  // 注入节点行为 (包含 XMind 分支菜单、双击就地重命名、快速命令编辑)
+  const renderedNodes = useMemo(() => {
+    return nodes.map((n) => ({
+      ...n,
+      data: {
+        ...(n.data || {}),
+        isBranchMenuOpen: n.id === branchMenuNodeId,
+        onOpenBranchMenu: (id: string) => {
+          setSelectedNodeId(id);
+          setSelectedEdgeId(null);
+          setBranchMenuNodeId(id);
+        },
+        onCloseBranchMenu: () => {
+          setBranchMenuNodeId(null);
+        },
+        onSelectBranchRecipe: (srcId: string, recipe: WorkflowRecipe) => {
+          handleApplyBranchRecipe(srcId, recipe);
+        },
+        onInlineRename: handleUpdateNodeName,
+        onEditNodeConfig: handleFocusCommandEdit,
+        onAppendStep: (sourceId: string, sourceName: string) => {
+          setSelectedNodeId(sourceId);
+          setSelectedEdgeId(null);
+          setBranchMenuNodeId(sourceId);
+        },
+      },
+    }));
+  }, [
+    nodes,
+    branchMenuNodeId,
+    handleApplyBranchRecipe,
+    handleUpdateNodeName,
+    handleFocusCommandEdit,
+  ]);
+
+  // 动态渲染 Edge 样式：支持高亮选中态、分支条件 Badge 气泡、发光效果以及连线中点插桩 (+) 按钮
   const renderedEdges = useMemo(() => {
     return edges.map((e) => {
       const isSelected = e.id === selectedEdgeId;
@@ -766,7 +1226,16 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       const displayLabel = customLabel || (condition ? `[条件] ${condition}` : undefined);
       return {
         ...e,
+        type: 'workflowEdge',
         label: displayLabel,
+        data: {
+          ...(e.data || {}),
+          condition,
+          label: customLabel,
+          onInsertNode: (edgeId: string, source: string, target: string) => {
+            handleOpenInsertRecipePicker(edgeId, source, target);
+          },
+        },
         labelStyle: {
           fill: isSelected ? '#3730a3' : '#4338ca',
           fontWeight: 600,
@@ -790,7 +1259,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         },
       };
     });
-  }, [edges, selectedEdgeId]);
+  }, [edges, selectedEdgeId, handleOpenInsertRecipePicker]);
 
   // 取消新节点呼吸态
   useEffect(() => {
@@ -1153,9 +1622,10 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     [handlePreviewWorkflowAction, handleCommitGhostPreview]
   );
 
-  // 键盘快捷键 (Enter 采纳预演，Esc 放弃预演或取消选中节点)
+  // 键盘快捷键 (XMind 式 Tab 向右拉出分支选单，Enter 采纳预演或编辑配置，Esc 退出或取消选中)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. 幽灵方案预演状态下的回车与放弃
       if (ghostPreview?.active) {
         if (e.key === 'Enter' && !e.shiftKey) {
           const target = e.target as HTMLElement;
@@ -1170,15 +1640,75 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         return;
       }
 
+      const target = e.target as HTMLElement;
+      const isInput =
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'INPUT' ||
+        target.isContentEditable;
+
+      // 2. XMind 风格核心快捷键：选中节点时按 Tab 向右展开分支动作选单
+      if (e.key === 'Tab') {
+        if (!isInput && selectedNodeId && viewMode === 'canvas') {
+          e.preventDefault();
+          e.stopPropagation();
+          setBranchMenuNodeId(selectedNodeId);
+          return;
+        }
+      }
+
+      // 3. 回车键：未在输入框时，按 Enter 快速聚焦并编辑选中节点的配置
+      if (e.key === 'Enter') {
+        if (!isInput && selectedNodeId && !branchMenuNodeId && !isRecipePickerOpen) {
+          e.preventDefault();
+          setIsSidebarOpen(true);
+          setSidebarTab('inspector');
+          return;
+        }
+      }
+
+      // 4. Esc 退出逻辑 (分层逐级关闭)
       if (e.key === 'Escape') {
+        if (branchMenuNodeId) {
+          e.preventDefault();
+          setBranchMenuNodeId(null);
+          return;
+        }
+        if (isRecipePickerOpen) {
+          e.preventDefault();
+          setIsRecipePickerOpen(false);
+          return;
+        }
         if (selectedNodeId) {
           setSelectedNodeId(null);
+        }
+      }
+
+      // 5. 在未聚焦输入框时，按 A 键快捷打开动作配方选择器
+      if (
+        (e.key === 'a' || e.key === 'A') &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !isRecipePickerOpen &&
+        !branchMenuNodeId
+      ) {
+        if (!isInput) {
+          e.preventDefault();
+          handleOpenCreateRecipePicker();
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [ghostPreview, selectedNodeId, handleCommitGhostPreview, handleDiscardGhostPreview]);
+  }, [
+    ghostPreview,
+    selectedNodeId,
+    branchMenuNodeId,
+    isRecipePickerOpen,
+    viewMode,
+    handleCommitGhostPreview,
+    handleDiscardGhostPreview,
+    handleOpenCreateRecipePicker,
+  ]);
 
   // 撤销上一步编排变更
   const handleUndo = useCallback(() => {
@@ -1337,7 +1867,8 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     };
     setNodes((nds) => [...nds, newNode]);
     setSelectedNodeId(id);
-    setIsInspectorOpen(true);
+    setIsSidebarOpen(true);
+    setSidebarTab('inspector');
   };
 
   // 属性更新
@@ -2020,10 +2551,56 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           <div className="text-[10.5px] text-[#85858d] font-mono whitespace-nowrap shrink-0">
             ({nodes.length} 节点)
           </div>
+
+          <div className="w-[1px] h-3.5 bg-[#e3e3e8] shrink-0" />
+
+          {/* 双视口切换 Segmented Control (拓扑画布 vs 步骤清单) */}
+          <div className="flex items-center p-0.5 bg-[#f4f4f6] rounded-[6px] border border-[#e3e3e8] shrink-0">
+            <button
+              onClick={() => {
+                if (import.meta.env?.DEV) console.log('[WorkflowEditor] 切换到拓扑画布视图');
+                setViewMode('canvas');
+              }}
+              className={`flex items-center gap-1.5 h-[22px] px-2 rounded-[4px] text-[11px] font-medium transition-all cursor-pointer ${
+                viewMode === 'canvas'
+                  ? 'bg-white text-[#1c1c21] shadow-2xs font-semibold'
+                  : 'text-[#63636b] hover:text-[#1c1c21]'
+              }`}
+              title="切换到可视化 DAG 拓扑白板"
+            >
+              <LayoutGrid size={11} className={viewMode === 'canvas' ? 'text-[#4f46e5]' : ''} />
+              <span>拓扑画布</span>
+            </button>
+            <button
+              onClick={() => {
+                if (import.meta.env?.DEV) console.log('[WorkflowEditor] 切换到步骤清单视图');
+                setViewMode('linear');
+              }}
+              className={`flex items-center gap-1.5 h-[22px] px-2 rounded-[4px] text-[11px] font-medium transition-all cursor-pointer ${
+                viewMode === 'linear'
+                  ? 'bg-white text-[#1c1c21] shadow-2xs font-semibold'
+                  : 'text-[#63636b] hover:text-[#1c1c21]'
+              }`}
+              title="切换到直观的线性步骤流清单"
+            >
+              <Workflow size={11} className={viewMode === 'linear' ? 'text-[#4f46e5]' : ''} />
+              <span>步骤清单</span>
+            </button>
+          </div>
         </div>
 
         {/* 右侧动作群 */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* 添加步骤核心入口 */}
+          <button
+            onClick={() => handleOpenCreateRecipePicker()}
+            className="flex items-center gap-1.5 h-[28px] px-2.5 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium transition-all shadow-xs active:scale-95 cursor-pointer whitespace-nowrap"
+            title="挑选动作配方添加步骤 (快捷键: A)"
+          >
+            <Plus size={11} strokeWidth={2.4} />
+            <span>添加步骤</span>
+          </button>
+
           {undoSnapshot && (
             <button
               onClick={handleUndo}
@@ -2365,131 +2942,122 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       {/* 画布核心与协同侧栏 */}
       <div className="flex-1 relative flex overflow-hidden">
         {/* 左侧节点组件库悬浮栏 (极简折叠式胶囊坞) */}
-        <div className="absolute top-4 left-4 z-10 bg-white/95 backdrop-blur-md border border-[#e3e3e8] rounded-[10px] shadow-[0_4px_16px_rgba(0,0,0,0.06)] overflow-hidden transition-all duration-200">
-          {isPaletteCollapsed ? (
-            <button
-              onClick={() => {
-                if (import.meta.env?.DEV) console.log('[WorkflowEditor] 展开组件节点库');
-                setIsPaletteCollapsed(false);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] font-medium text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f1f1f4] transition-all cursor-pointer whitespace-nowrap"
-              title="展开组件节点库"
-            >
-              <Plus size={13} strokeWidth={2.4} className="text-[#4f46e5]" />
-              <span>添加节点</span>
-              <Layers size={11} className="text-[#85858d] ml-1" />
-            </button>
-          ) : (
-            <div className="p-2 flex flex-col gap-1 w-[165px]">
-              <div className="px-1.5 py-1 text-[11px] font-semibold text-[#85858d] flex items-center justify-between border-b border-[#ececf0] mb-0.5">
-                <span className="flex items-center gap-1 text-[#1c1c21]">
-                  <Layers size={12} className="text-[#4f46e5]" />
-                  <span>组件节点库</span>
-                </span>
+        {viewMode === 'canvas' && (
+          <div className="absolute top-4 left-4 z-10 bg-white/95 backdrop-blur-md border border-[#e3e3e8] rounded-[10px] shadow-[0_4px_16px_rgba(0,0,0,0.06)] overflow-hidden transition-all duration-200">
+            {isPaletteCollapsed ? (
+              <button
+                onClick={() => {
+                  if (import.meta.env?.DEV) console.log('[WorkflowEditor] 展开组件节点库');
+                  setIsPaletteCollapsed(false);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] font-medium text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f1f1f4] transition-all cursor-pointer whitespace-nowrap"
+                title="展开动作配方坞"
+              >
+                <Plus size={13} strokeWidth={2.4} className="text-[#4f46e5]" />
+                <span>添加步骤</span>
+                <Layers size={11} className="text-[#85858d] ml-1" />
+              </button>
+            ) : (
+              <div className="p-2 flex flex-col gap-1 w-[170px]">
+                <div className="px-1.5 py-1 text-[11px] font-semibold text-[#85858d] flex items-center justify-between border-b border-[#ececf0] mb-0.5">
+                  <span className="flex items-center gap-1 text-[#1c1c21]">
+                    <Layers size={12} className="text-[#4f46e5]" />
+                    <span>常用动作步骤</span>
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (import.meta.env?.DEV) console.log('[WorkflowEditor] 收起组件节点库');
+                      setIsPaletteCollapsed(true);
+                    }}
+                    className="p-0.5 rounded hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#1c1c21] transition-colors cursor-pointer"
+                    title="收起"
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+                </div>
+
+                {/* 核心入口：浏览全部配方库 */}
                 <button
-                  onClick={() => {
-                    if (import.meta.env?.DEV) console.log('[WorkflowEditor] 收起组件节点库');
-                    setIsPaletteCollapsed(true);
-                  }}
-                  className="p-0.5 rounded hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#1c1c21] transition-colors cursor-pointer"
-                  title="收起节点库"
+                  onClick={() => handleOpenCreateRecipePicker()}
+                  className="flex items-center gap-2 px-2 h-[28px] rounded-[6px] bg-[#eeedfd] hover:bg-[#e0e7ff] text-[#4f46e5] text-[11.5px] font-semibold text-left transition-all cursor-pointer mb-1"
                 >
-                  <ChevronDown size={12} />
+                  <Sparkles size={12} className="text-[#4f46e5] shrink-0" />
+                  <span className="truncate">浏览动作配方库...</span>
+                </button>
+
+                <button
+                  onClick={() => addNode('agent', 'AI 自动实现需求')}
+                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+                >
+                  <span className="w-4 h-4 rounded bg-[#eeedfd] text-[#4f46e5] flex items-center justify-center shrink-0">
+                    <Bot size={11} />
+                  </span>
+                  <span className="truncate">AI 需求实现</span>
+                </button>
+
+                <button
+                  onClick={() => addNode('cli', '代码规范检查')}
+                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+                >
+                  <span className="w-4 h-4 rounded bg-[#f4f4f6] text-[#4b4b53] flex items-center justify-center shrink-0">
+                    <Terminal size={11} />
+                  </span>
+                  <span className="truncate">Lint / 单测脚本</span>
+                </button>
+
+                <button
+                  onClick={() => addNode('qa-approval', 'QA 门禁验收')}
+                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+                >
+                  <span className="w-4 h-4 rounded bg-[#fef3c7] text-[#b45309] flex items-center justify-center shrink-0">
+                    <CheckSquare size={11} />
+                  </span>
+                  <span className="truncate">QA 门禁验收</span>
+                </button>
+
+                <button
+                  onClick={() => addNode('midscene', 'UI 视觉自动化')}
+                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+                >
+                  <span className="w-4 h-4 rounded bg-[#e4f6ec] text-[#15803d] flex items-center justify-center shrink-0">
+                    <Target size={11} />
+                  </span>
+                  <span className="truncate">Midscene 测试</span>
+                </button>
+
+                <button
+                  onClick={() => addNode('stitch-image', '拼接动图')}
+                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+                >
+                  <span className="w-4 h-4 rounded bg-[#eff6ff] text-[#1d4ed8] flex items-center justify-center shrink-0">
+                    <FileVideo size={11} />
+                  </span>
+                  <span className="truncate">拼接动图 CLI</span>
+                </button>
+
+                <button
+                  onClick={() => addNode('git-commit', 'Git 自动提交')}
+                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+                >
+                  <span className="w-4 h-4 rounded bg-[#1c1c21] text-white flex items-center justify-center shrink-0">
+                    <GitCommit size={11} />
+                  </span>
+                  <span className="truncate">Git 自动提交</span>
+                </button>
+
+                <button
+                  onClick={() => addNode('hook', 'Webhook 通知')}
+                  className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
+                >
+                  <span className="w-4 h-4 rounded bg-[#ffedd5] text-[#c2410c] flex items-center justify-center shrink-0">
+                    <Zap size={11} />
+                  </span>
+                  <span className="truncate">Webhook 通知</span>
                 </button>
               </div>
-
-              <button
-                onClick={() => addNode('agent', 'Agent 编码')}
-                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-              >
-                <span className="w-4 h-4 rounded bg-[#eeedfd] text-[#4f46e5] flex items-center justify-center shrink-0">
-                  <Bot size={11} />
-                </span>
-                <span className="truncate">Agent 编码</span>
-              </button>
-
-              <button
-                onClick={() => addNode('cli', 'CLI 脚本')}
-                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-              >
-                <span className="w-4 h-4 rounded bg-[#f4f4f6] text-[#4b4b53] flex items-center justify-center shrink-0">
-                  <Terminal size={11} />
-                </span>
-                <span className="truncate">Shell 脚本</span>
-              </button>
-
-              <button
-                onClick={() => addNode('qa-approval', 'QA 门禁验收')}
-                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-              >
-                <span className="w-4 h-4 rounded bg-[#fef3c7] text-[#b45309] flex items-center justify-center shrink-0">
-                  <CheckSquare size={11} />
-                </span>
-                <span className="truncate">QA 门禁验收</span>
-              </button>
-
-              <button
-                onClick={() => addNode('midscene', 'UI 自动化')}
-                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-              >
-                <span className="w-4 h-4 rounded bg-[#e4f6ec] text-[#15803d] flex items-center justify-center shrink-0">
-                  <Target size={11} />
-                </span>
-                <span className="truncate">Midscene 测试</span>
-              </button>
-
-              <button
-                onClick={() => addNode('stitch-image', '拼接动图')}
-                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-              >
-                <span className="w-4 h-4 rounded bg-[#eff6ff] text-[#1d4ed8] flex items-center justify-center shrink-0">
-                  <FileVideo size={11} />
-                </span>
-                <span className="truncate">拼接动图 CLI</span>
-              </button>
-
-              <button
-                onClick={() => addNode('git-commit', 'Git 提交')}
-                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-              >
-                <span className="w-4 h-4 rounded bg-[#1c1c21] text-white flex items-center justify-center shrink-0">
-                  <GitCommit size={11} />
-                </span>
-                <span className="truncate">Git 自动提交</span>
-              </button>
-
-              <button
-                onClick={() => addNode('deploy', '应用部署')}
-                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-              >
-                <span className="w-4 h-4 rounded bg-[#0f172a] text-[#38bdf8] flex items-center justify-center shrink-0">
-                  <Rocket size={11} />
-                </span>
-                <span className="truncate">应用部署</span>
-              </button>
-
-              <button
-                onClick={() => addNode('sub-workflow', '子流水线 / 支线')}
-                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-              >
-                <span className="w-4 h-4 rounded bg-[#f0f9ff] text-[#0284c7] flex items-center justify-center shrink-0">
-                  <Workflow size={11} />
-                </span>
-                <span className="truncate">子流水线 / 支线</span>
-              </button>
-
-              <button
-                onClick={() => addNode('hook', 'Hook 触发')}
-                className="flex items-center gap-2 px-2 h-[26px] rounded-[6px] hover:bg-[#f1f1f4] text-[11.5px] text-[#1c1c21] text-left transition-all cursor-pointer"
-              >
-                <span className="w-4 h-4 rounded bg-[#ffedd5] text-[#c2410c] flex items-center justify-center shrink-0">
-                  <Zap size={11} />
-                </span>
-                <span className="truncate">Hook 调度</span>
-              </button>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         {/* 零手动编排欢迎态（Empty / Welcome State Overlay，当节点数 <= 1 且无幽灵预演时出现） */}
         {nodes.length <= 1 && !ghostPreview && (
@@ -2605,25 +3173,56 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           </div>
         )}
 
-        {/* React Flow 画布主体 */}
-        <div className="flex-1 w-full h-full">
-          <ReactFlow
+        {/* 主视口区域：拓扑画布 (Canvas) vs 步骤清单 (Linear Flow) */}
+        {viewMode === 'canvas' ? (
+          <div className="flex-1 w-full h-full relative">
+            <ReactFlow
+              nodes={renderedNodes}
+              edges={renderedEdges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onConnectEnd={onConnectEnd}
+              onNodeClick={handleNodeClick}
+              onEdgeClick={handleEdgeClick}
+              onPaneClick={handlePaneClick}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              fitView
+              fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
+            >
+              <Background color="#d1d1d8" gap={18} size={1} />
+              <Controls />
+            </ReactFlow>
+          </div>
+        ) : (
+          <WorkflowLinearFlowView
             nodes={nodes}
-            edges={renderedEdges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={handleNodeClick}
-            onEdgeClick={handleEdgeClick}
-            onPaneClick={handlePaneClick}
-            nodeTypes={nodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
-          >
-            <Background color="#d1d1d8" gap={18} size={1} />
-            <Controls />
-          </ReactFlow>
-        </div>
+            edges={edges}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={(id) => {
+              setSelectedNodeId(id);
+              setSelectedEdgeId(null);
+              setIsSidebarOpen(true);
+              setSidebarTab('inspector');
+            }}
+            onDeleteNode={(id) => {
+              setSelectedNodeId(id);
+              deleteSelectedNode();
+            }}
+            onAppendStep={(srcId) => handleOpenAppendRecipePicker(srcId)}
+            onInsertStepBetween={(srcId, tgtId) => {
+              const matchedEdge = edges.find(
+                (e) => e.source === srcId && e.target === tgtId
+              );
+              handleOpenInsertRecipePicker(matchedEdge?.id || '', srcId, tgtId);
+            }}
+            onMoveStep={handleMoveStep}
+            debugTask={debugTask}
+            onOpenTaskLogs={onOpenTaskLogs}
+            onOpenAgentSession={handleOpenAgentSession}
+          />
+        )}
 
         {/* 右侧工作台侧栏 (AI 编排助手 & 属性配置) */}
         {isSidebarOpen && (
@@ -3744,6 +4343,14 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         nodeId={inspectingSessionNodeId}
         nodeName={inspectingSessionNodeName}
         workspace={debugTask?.workspace}
+      />
+
+      {/* 动作配方选择器弹窗 (Recipe Picker Modal) */}
+      <RecipePickerModal
+        isOpen={isRecipePickerOpen}
+        onClose={() => setIsRecipePickerOpen(false)}
+        onSelectRecipe={handleApplyRecipe}
+        contextInfo={recipePickerContext}
       />
     </div>
   );
