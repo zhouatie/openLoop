@@ -28,9 +28,11 @@ function computeSessionSnapshot(data: any): string {
       const last = msgs[len - 1];
       const contentLen = typeof last?.content === 'string' ? last.content.length : 0;
       const thinkingLen = typeof last?.thinking === 'string' ? last.thinking.length : 0;
-      const toolsLen = Array.isArray(last?.tools) ? last.tools.length : 0;
+      const toolsSummary = Array.isArray(last?.tools)
+        ? last.tools.map((t: any) => `${t.status}:${t.result ? 1 : 0}:${t.durationMs || 0}`).join('|')
+        : '';
       const isBusy = data.isBusy || data.isThinking ? 1 : 0;
-      return `${len}:${contentLen}:${thinkingLen}:${toolsLen}:${isBusy}`;
+      return `${len}:${contentLen}:${thinkingLen}:${toolsSummary}:${isBusy}`;
     }
   }
   return String(data);

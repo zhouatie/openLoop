@@ -19,7 +19,6 @@ export function findRepoRoot(startDir?: string): string {
   while (cur !== path.dirname(cur)) {
     if (
       fs.existsSync(path.join(cur, 'pnpm-workspace.yaml')) ||
-      fs.existsSync(path.join(cur, 'package.json')) ||
       fs.existsSync(path.join(cur, '.git'))
     ) {
       return cur;
@@ -47,13 +46,27 @@ export class TaskProcessManager {
 
   public register(taskId: string, proc: ChildProcess, meta?: { name?: string; port?: number }) {
     const list = this.processes.get(taskId) || [];
-    list.push({
+    const item = {
       id: Math.random().toString(36).substring(2),
       proc,
       name: meta?.name,
       port: meta?.port,
-    });
+    };
+    list.push(item);
     this.processes.set(taskId, list);
+
+    proc.once('exit', () => {
+      const currentList = this.processes.get(taskId);
+      if (currentList) {
+        const filtered = currentList.filter((p) => p.proc !== proc);
+        if (filtered.length > 0) {
+          this.processes.set(taskId, filtered);
+        } else {
+          this.processes.delete(taskId);
+        }
+      }
+    });
+
     logger.info(`[TaskProcess] 已注册后台进程 (Task: ${taskId}, PID: ${proc.pid}, Name: ${meta?.name || 'anonymous'})`);
   }
 
@@ -67,10 +80,14 @@ export class TaskProcessManager {
           if (process.platform !== 'win32') {
             process.kill(-item.proc.pid, 'SIGKILL');
           } else {
-            item.proc.kill('SIGKILL');
+            execSync(`taskkill /F /T /PID ${item.proc.pid}`, { stdio: 'ignore' });
           }
           logger.info(`[TaskProcess] 已安全终止后台进程 PID: ${item.proc.pid} (${item.name || ''})`);
-        } catch {}
+        } catch {
+          try {
+            item.proc.kill('SIGKILL');
+          } catch {}
+        }
       }
       if (item.port) {
         WorktreeManager.getInstance().killPortIfBusy(item.port);
@@ -127,17 +144,50 @@ export class WorktreeManager {
 
   /**
    * 强力清理指定端口上的孤儿/僵尸进程
+   * 内置自身进程与核心系统服务端口自杀保护
    */
   public killPortIfBusy(port: number) {
+    // 保护系统核心端口，严禁杀灭
+    const protectedPorts = [19888, 5173];
+    if (process.env.OPENLOOP_PORT) {
+      const customPort = parseInt(process.env.OPENLOOP_PORT, 10);
+      if (!isNaN(customPort)) protectedPorts.push(customPort);
+    }
+    if (protectedPorts.includes(port)) {
+      logger.info(`[Worktree] 端口 ${port} 为系统核心保护端口，跳过清理`);
+      return;
+    }
+
     try {
-      const out = execSync(`lsof -t -i :${port}`, { encoding: 'utf-8' }).trim();
-      if (out) {
-        const pids = out.split('\n').map((p) => p.trim()).filter(Boolean);
-        for (const pid of pids) {
-          try {
-            process.kill(parseInt(pid, 10), 'SIGKILL');
-            logger.info(`[Worktree] 自动清理占用端口 ${port} 的僵尸进程 PID: ${pid}`);
-          } catch {}
+      if (process.platform === 'win32') {
+        const out = execSync(`netstat -ano | findstr :${port}`, { encoding: 'utf-8' }).trim();
+        const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);
+        for (const line of lines) {
+          const parts = line.split(/\s+/);
+          const pidStr = parts[parts.length - 1];
+          const pid = parseInt(pidStr, 10);
+          if (!isNaN(pid) && pid !== process.pid && pid !== process.ppid) {
+            try {
+              execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' });
+              logger.info(`[Worktree] (Win) 自动清理占用端口 ${port} 的僵尸进程 PID: ${pid}`);
+            } catch {}
+          }
+        }
+      } else {
+        const out = execSync(`lsof -t -i :${port}`, { encoding: 'utf-8' }).trim();
+        if (out) {
+          const pids = out.split('\n').map((p) => p.trim()).filter(Boolean);
+          for (const pidStr of pids) {
+            const pid = parseInt(pidStr, 10);
+            if (isNaN(pid) || pid === process.pid || pid === process.ppid) {
+              logger.warn(`[Worktree] 端口 ${port} 关联 PID ${pid} 为当前服务自身或父进程，跳过自杀`);
+              continue;
+            }
+            try {
+              process.kill(pid, 'SIGKILL');
+              logger.info(`[Worktree] 自动清理占用端口 ${port} 的僵尸进程 PID: ${pid}`);
+            } catch {}
+          }
         }
       }
     } catch {}
@@ -495,6 +545,9 @@ export class WorktreeManager {
     let baseBranch = 'main';
     try {
       baseBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim() || 'main';
+      if (baseBranch === 'HEAD') {
+        baseBranch = execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim();
+      }
     } catch {}
 
     // 2. 宿主立即回滚未决合并，确保主开发分支绝对不被污染
@@ -564,6 +617,12 @@ ${conflictFiles.map((f) => `- ${f}`).join('\n')}
       const finish = (res: { resolved: boolean; conflictFiles: string[]; summary?: string; error?: string }) => {
         if (settled) return;
         settled = true;
+        if (!res.resolved) {
+          try {
+            execSync('git merge --abort', { cwd: worktreeDir, stdio: 'ignore' });
+            onLog?.(`[代码冲突自愈] 已安全回滚沙箱未决合并状态，保持工作区纯净`);
+          } catch {}
+        }
         resolve(res);
       };
 

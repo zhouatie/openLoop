@@ -11,6 +11,7 @@ export interface RunnerOptions {
   artifactBaseDir: string;
   serverBaseUrl?: string;
   platform?: QaPlatform;
+  signal?: AbortSignal;
   onStepStart?: (stepIndex: number, step: QaStep) => void;
   onStepFinish?: (stepIndex: number, record: StepTimelineRecord) => void;
   onLog?: (message: string, level?: 'info' | 'warn' | 'error') => void;
@@ -120,7 +121,24 @@ export class MidsceneRunner {
     let driverReady = false;
 
     try {
+      if (this.options.signal?.aborted) {
+        throw new Error('测试执行已提前中止 (Task cancelled)');
+      }
+
       driver = QaDriverFactory.createDriver(platform);
+
+      if (this.options.signal) {
+        this.options.signal.addEventListener(
+          'abort',
+          () => {
+            try {
+              driver?.close();
+            } catch {}
+          },
+          { once: true }
+        );
+      }
+
       await driver.initialize({
         targetUrl: suite.targetUrl,
         viewport: { width, height },
@@ -141,6 +159,10 @@ export class MidsceneRunner {
 
     try {
       for (let i = 0; i < suite.steps.length; i++) {
+        if (this.options.signal?.aborted) {
+          throw new Error('测试执行已被手动终止 (Task cancelled)');
+        }
+
         const step = suite.steps[i];
         const stepStartTime = Date.now();
         this.options.onStepStart?.(i, step);

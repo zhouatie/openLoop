@@ -213,7 +213,11 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   // 键盘快捷键监听 (方向键切帧、空格播放/暂停、ESC 关闭)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      const target = e.target as HTMLElement | null;
+      const isTextInput =
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLInputElement && target.type !== 'range');
+      if (isTextInput) {
         return;
       }
       if (e.key === 'ArrowLeft') {
@@ -437,10 +441,17 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                     <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f] border border-[#1aab29]/40 inline-block" />
                   </div>
 
-                  <div className="flex items-center gap-1.5 text-[10.5px] font-mono text-[#85858d] bg-white border border-[#e3e3e8]/70 px-2.5 py-[1px] rounded-[4px] shadow-3xs max-w-[340px] truncate">
-                    <Globe size={10} className="text-[#85858d] shrink-0" />
+                  <a
+                    href={worktree?.targetUrl || '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 text-[10.5px] font-mono text-[#71717a] hover:text-[#1c1c21] bg-white hover:bg-[#fafafc] border border-[#e3e3e8]/80 hover:border-[#b9b9c2] px-2.5 py-[2px] rounded-[4px] shadow-3xs max-w-[340px] truncate transition-colors cursor-pointer group"
+                    title="点击在新窗口直接打开靶机预览"
+                  >
+                    <Globe size={10} className="text-[#85858d] group-hover:text-[#4f46e5] shrink-0 transition-colors" />
                     <span className="truncate">{worktree?.targetUrl || 'http://localhost:5175/'}</span>
-                  </div>
+                    <ExternalLink size={9} className="opacity-60 group-hover:opacity-100 transition-opacity" />
+                  </a>
 
                   <div className="w-12 text-right text-[10px] font-mono text-[#85858d]">
                     {currentStepIndex + 1}/{steps.length}

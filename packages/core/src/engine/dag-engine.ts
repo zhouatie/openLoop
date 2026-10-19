@@ -6,7 +6,7 @@ import { Task, WorkflowDefinition, WorkflowNode, WorkflowEdge, LogEntry, KanbanC
 import { ExecutorRegistry, ExecutionContext } from '../executors';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
-import { WorktreeManager } from '../worktree/worktree-manager';
+import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 
 const dagLogger = createLogger('Engine:DAG');
 
@@ -466,22 +466,11 @@ export class DagEngine extends EventEmitter {
     const runs = Object.values(task.nodeRuns || {});
     const hasRunning = runs.some((r) => r.status === 'running');
     const hasWaiting = runs.some((r) => r.status === 'waiting_approval');
+    const hasPending = runs.some((r) => r.status === 'pending');
 
-    // 若仍有并发节点正在执行或等待人工审核，流水线未完成
-    if (hasRunning || hasWaiting) {
+    // 若仍有并发节点正在执行、等待调度或等待人工审核，流水线未完成
+    if (hasRunning || hasWaiting || hasPending) {
       return false;
-    }
-
-    // 容错处理：若流水线在执行过程中被动态修改模板增加了节点，或存在未激活的孤立分支，
-    // 检查所有未曾执行过的节点。若当前已无活跃节点能到达它们，自动标记为 skipped
-    for (const node of workflow.nodes) {
-      if (!task.nodeRuns[node.id]) {
-        task.nodeRuns[node.id] = {
-          nodeId: node.id,
-          status: 'skipped',
-          output: { reason: '未激活分支或模板变更自动跳过' },
-        };
-      }
     }
 
     const allResolved = workflow.nodes.every((n) => {
@@ -890,7 +879,10 @@ export class DagEngine extends EventEmitter {
     }
     PiRpcSessionManager.getInstance().removeSession(taskId);
 
-    // 2. 强杀已注册的所有活跃子进程组
+    // 2. 终止任务关联的所有后台守护进程与靶机进程 (通过 TaskProcessManager)
+    TaskProcessManager.getInstance().stopAll(taskId);
+
+    // 3. 强杀已注册的所有活跃子进程组
     const procs = this.activeProcesses.get(taskId);
     if (procs && procs.size > 0) {
       const isUnix = process.platform !== 'win32';

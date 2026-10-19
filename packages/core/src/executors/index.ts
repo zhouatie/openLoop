@@ -939,6 +939,7 @@ export class MidsceneExecutor implements NodeExecutor {
         artifactBaseDir: path.join(dataDir, 'artifacts'),
         serverBaseUrl: 'http://127.0.0.1:19888',
         platform,
+        signal: ctx.abortSignal,
         onStepStart: (index, step) => {
           emitLog('stdout', `[Midscene 步骤 ${index + 1}/${steps.length}] 执行: [${step.type}] ${step.prompt}`);
         },

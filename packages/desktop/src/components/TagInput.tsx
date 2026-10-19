@@ -47,7 +47,8 @@ export const TagInput: React.FC<TagInputProps> = ({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' || e.key === ',') {
+    if ((e.nativeEvent as any)?.isComposing) return;
+    if (e.key === 'Enter' || e.key === ',' || e.key === '，') {
       e.preventDefault();
       e.stopPropagation();
       handleAddTag(inputValue);
@@ -70,9 +71,9 @@ export const TagInput: React.FC<TagInputProps> = ({
         {tags.map((tag) => (
           <span
             key={tag}
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eeedfd] text-[#4f46e5] border border-[#d8d6fb] text-[11px] font-medium transition-colors select-none"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#3f3f46] border border-[#e3e3e8] text-[11px] font-medium transition-colors select-none group"
           >
-            <TagIcon size={10} className="shrink-0 text-[#6366f1]" />
+            <TagIcon size={9.5} className="shrink-0 text-[#85858d]" />
             <span className="max-w-[120px] truncate">{tag}</span>
             {!disabled && (
               <button
@@ -81,10 +82,10 @@ export const TagInput: React.FC<TagInputProps> = ({
                   e.stopPropagation();
                   handleRemoveTag(tag);
                 }}
-                className="hover:bg-[#4f46e5]/10 rounded p-0.5 text-[#6366f1] hover:text-[#4338ca] transition-colors cursor-pointer"
+                className="hover:bg-[#e4e4e7] rounded p-0.5 text-[#85858d] hover:text-[#1c1c21] transition-colors cursor-pointer ml-0.5"
                 title={`删除标签: ${tag}`}
               >
-                <X size={10} strokeWidth={2.2} />
+                <X size={9.5} strokeWidth={2.2} />
               </button>
             )}
           </span>
@@ -118,7 +119,7 @@ export const TagInput: React.FC<TagInputProps> = ({
               key={sug}
               type="button"
               onClick={() => handleAddTag(sug)}
-              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] border border-[#e3e3e8]/70 hover:border-[#d8d6fb] text-[10px] font-medium transition-all active:scale-95 cursor-pointer"
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] hover:bg-[#ececf0] text-[#63636b] hover:text-[#1c1c21] border border-[#e3e3e8] hover:border-[#b9b9c2] text-[10px] font-medium transition-all active:scale-95 cursor-pointer"
               title={`点击添加「${sug}」标签`}
             >
               <Plus size={9} strokeWidth={2.4} />
