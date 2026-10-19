@@ -1,0 +1,650 @@
+import React, { memo } from 'react';
+import {
+  Check,
+  Terminal,
+  Sparkles,
+  Trash2,
+  Play,
+  RotateCcw,
+  ArrowRight,
+  Edit3,
+  AlertCircle,
+  SkipForward,
+  Square,
+  Lightbulb,
+  FolderGit2,
+  Image as ImageIcon,
+  Bot,
+  FileImage,
+  Cpu,
+  ClipboardCheck,
+  Layers,
+} from 'lucide-react';
+import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
+import { api } from '../services/api';
+import { resolveNodeMeta } from '../utils/nodeMeta';
+
+interface RunningNodeVisual {
+  label: string;
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+  pingColor: string;
+  icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
+}
+
+const getRunningNodeVisual = (type?: string): RunningNodeVisual => {
+  switch (type) {
+    case 'agent':
+      return {
+        label: 'Agent 编码',
+        badgeBg: 'bg-[#f5f3ff]',
+        badgeText: 'text-[#6d28d9]',
+        badgeBorder: 'border-[#ddd6fe]',
+        pingColor: 'bg-[#7c3aed]',
+        icon: Bot,
+      };
+    case 'midscene':
+      return {
+        label: 'UI 自动化',
+        badgeBg: 'bg-[#eff6ff]',
+        badgeText: 'text-[#1d4ed8]',
+        badgeBorder: 'border-[#bfdbfe]',
+        pingColor: 'bg-[#2563eb]',
+        icon: Sparkles,
+      };
+    case 'cli':
+      return {
+        label: 'CLI 脚本',
+        badgeBg: 'bg-[#f4f4f6]',
+        badgeText: 'text-[#4b4b53]',
+        badgeBorder: 'border-[#e3e3e8]',
+        pingColor: 'bg-[#63636b]',
+        icon: Terminal,
+      };
+    case 'stitch-image':
+      return {
+        label: '产物合成',
+        badgeBg: 'bg-[#fdf2f8]',
+        badgeText: 'text-[#be185d]',
+        badgeBorder: 'border-[#fbcfe8]',
+        pingColor: 'bg-[#db2777]',
+        icon: FileImage,
+      };
+    case 'hook':
+      return {
+        label: '事件触发',
+        badgeBg: 'bg-[#fefce8]',
+        badgeText: 'text-[#a16207]',
+        badgeBorder: 'border-[#fef08a]',
+        pingColor: 'bg-[#ca8a04]',
+        icon: Cpu,
+      };
+    case 'qa-approval':
+      return {
+        label: '人工审批',
+        badgeBg: 'bg-[#fff7ed]',
+        badgeText: 'text-[#c2410c]',
+        badgeBorder: 'border-[#ffedd5]',
+        pingColor: 'bg-[#ea580c]',
+        icon: Check,
+      };
+    case 'env-prepare':
+      return {
+        label: '现场准备',
+        badgeBg: 'bg-[#ecfdf5]',
+        badgeText: 'text-[#047857]',
+        badgeBorder: 'border-[#a7f3d0]',
+        pingColor: 'bg-[#10b981]',
+        icon: Cpu,
+      };
+    case 'qa-planner':
+      return {
+        label: 'QA 用例设计',
+        badgeBg: 'bg-[#fdf4ff]',
+        badgeText: 'text-[#a21caf]',
+        badgeBorder: 'border-[#f5d0fe]',
+        pingColor: 'bg-[#c026d3]',
+        icon: ClipboardCheck,
+      };
+    case 'worktree-setup':
+      return {
+        label: '沙箱隔离',
+        badgeBg: 'bg-[#f0fdf4]',
+        badgeText: 'text-[#15803d]',
+        badgeBorder: 'border-[#bbf7d0]',
+        pingColor: 'bg-[#16a34a]',
+        icon: Layers,
+      };
+    case 'worktree-merge':
+      return {
+        label: '分支合并',
+        badgeBg: 'bg-[#faf5ff]',
+        badgeText: 'text-[#7e22ce]',
+        badgeBorder: 'border-[#e9d5ff]',
+        pingColor: 'bg-[#9333ea]',
+        icon: Layers,
+      };
+    case 'worktree-cleanup':
+      return {
+        label: '环境清理',
+        badgeBg: 'bg-[#f8fafc]',
+        badgeText: 'text-[#475569]',
+        badgeBorder: 'border-[#cbd5e1]',
+        pingColor: 'bg-[#64748b]',
+        icon: Layers,
+      };
+    default:
+      return {
+        label: '自动化工序',
+        badgeBg: 'bg-[#f4f4f7]',
+        badgeText: 'text-[#4f46e5]',
+        badgeBorder: 'border-[#d8d6fb]',
+        pingColor: 'bg-[#4f46e5]',
+        icon: Cpu,
+      };
+  }
+};
+
+export interface KanbanCardProps {
+  task: Task;
+  workflow?: WorkflowDefinition;
+  workflows: WorkflowDefinition[];
+  isSelected?: boolean;
+  isCancelling?: boolean;
+  isMoving?: boolean;
+  isRunning?: boolean;
+  isSkipping?: boolean;
+  isApproving?: boolean;
+  onSelect: (task: Task) => void;
+  onCancel: (taskId: string) => void;
+  onMoveColumn: (taskId: string, targetCol: KanbanColumn) => void;
+  onEdit: (task: Task) => void;
+  onOpenLogs: (taskId: string, nodeId?: string) => void;
+  onDelete: (task: Task) => void;
+  onRun: (taskId: string) => void;
+  onSkipNode: (taskId: string, nodeId?: string) => void;
+  onVisualAcceptance: (task: Task) => void;
+  onApprove: (taskId: string, approved: boolean) => void;
+}
+
+const KanbanCardComponent: React.FC<KanbanCardProps> = ({
+  task,
+  workflow,
+  workflows,
+  isSelected,
+  isCancelling,
+  isMoving,
+  isRunning,
+  isSkipping,
+  isApproving,
+  onSelect,
+  onCancel,
+  onMoveColumn,
+  onEdit,
+  onOpenLogs,
+  onDelete,
+  onRun,
+  onSkipNode,
+  onVisualAcceptance,
+  onApprove,
+}) => {
+  const currentNode = workflow?.nodes.find((n) => n.id === task.currentNodeId);
+  const currentNodeMeta = task.currentNodeId
+    ? resolveNodeMeta(task.currentNodeId, workflow, workflows)
+    : null;
+  const nodeRuns = Object.values(task.nodeRuns || {});
+  const isCompleted = task.status === 'completed';
+  const completedCount = nodeRuns.filter((r) => r.status === 'success' || r.status === 'skipped').length;
+  const totalNodes = workflow?.nodes.length || completedCount || 1;
+  const displayTotal = Math.max(totalNodes, completedCount);
+  const displayCompleted = isCompleted ? displayTotal : completedCount;
+  const progressPct = isCompleted ? 100 : Math.round((displayCompleted / displayTotal) * 100);
+  const lastFailedRun = nodeRuns.slice().reverse().find((r) => r.status === 'failed');
+  const failReason = lastFailedRun?.error || '执行中断或驳回';
+
+  return (
+    <div
+      onClick={() => onSelect(task)}
+      style={{
+        contentVisibility: 'auto',
+        containIntrinsicSize: 'auto 110px',
+      }}
+      className={`group bg-white border rounded-[8px] p-3 transition-all cursor-pointer ${
+        isSelected
+          ? 'ring-2 ring-[#4f46e5] border-transparent shadow-[0_2px_10px_rgba(79,70,229,0.15)]'
+          : task.status === 'waiting_approval'
+          ? 'border-[#1c1c21]/30 shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
+          : task.status === 'failed'
+          ? 'border-[#d64545]/30 shadow-[0_1px_2px_rgba(214,69,69,0.06)]'
+          : 'border-[#e3e3e8] hover:border-[#b9b9c2] shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
+      }`}
+    >
+      <div className="flex items-center justify-between mb-1.5 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span
+            className="text-[10.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0] truncate max-w-[100px]"
+            title={task.id}
+          >
+            {task.id}
+          </span>
+          {task.kanbanColumn === 'inbox' && (
+            <span className="flex items-center gap-1 text-[9.5px] font-medium text-[#6366f1] bg-[#f5f5ff] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded shrink-0">
+              <Lightbulb size={9.5} />
+              <span>想法</span>
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1">
+          {task.status === 'running' && (
+            <button
+              disabled={isCancelling}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (import.meta.env?.DEV) {
+                  console.log('[KanbanCard] 点击终止任务:', task.id);
+                }
+                onCancel(task.id);
+              }}
+              className="p-1 rounded text-[#85858d] hover:text-[#d64545] hover:bg-[#fbe9e9]"
+              title="终止此任务"
+            >
+              <Square size={11} className="fill-current" />
+            </button>
+          )}
+          {task.status === 'pending' && task.kanbanColumn === 'inbox' && (
+            <button
+              disabled={isMoving}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (import.meta.env?.DEV) {
+                  console.log('[KanbanCard] 移动任务到 backlog:', task.id);
+                }
+                onMoveColumn(task.id, 'backlog');
+              }}
+              className="p-1 rounded text-[#85858d] hover:text-[#4f46e5] hover:bg-[#eeedfd]"
+              title="移入待处理泳道"
+            >
+              <ArrowRight size={11} />
+            </button>
+          )}
+          {task.status === 'pending' && task.kanbanColumn === 'backlog' && (
+            <button
+              disabled={isMoving}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (import.meta.env?.DEV) {
+                  console.log('[KanbanCard] 移动任务到 inbox:', task.id);
+                }
+                onMoveColumn(task.id, 'inbox');
+              }}
+              className="p-1 rounded text-[#85858d] hover:text-[#6366f1] hover:bg-[#eeedfd]"
+              title="移入 Inbox 想法收集"
+            >
+              <ArrowRight size={11} className="rotate-180" />
+            </button>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(task);
+            }}
+            className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4]"
+            title="编辑任务"
+          >
+            <Edit3 size={11} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenLogs(task.id);
+            }}
+            className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4]"
+            title="查看实时终端"
+          >
+            <Terminal size={11} strokeWidth={1.8} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(task);
+            }}
+            className="p-1 rounded text-[#85858d] hover:text-[#e5484d] hover:bg-[#fbe9e9]"
+            title="删除此任务"
+          >
+            <Trash2 size={11} />
+          </button>
+        </div>
+      </div>
+
+      <h4 className="text-[12.5px] font-medium text-[#1c1c21] leading-snug line-clamp-2 mb-1">
+        {task.title}
+      </h4>
+
+      <div className="flex items-center gap-1.5 text-[11px] text-[#85858d] mb-2 min-w-0">
+        <span className="truncate">{workflow?.name || task.workflowId}</span>
+        {task.workspace && (
+          <>
+            <span className="shrink-0 text-[#c2c2c9]">·</span>
+            <span
+              className="flex items-center gap-1 text-[10px] font-mono text-[#63636b] bg-[#f4f4f7] px-1.5 py-[0.5px] rounded border border-[#ececf0] truncate max-w-[120px] shrink-0 hover:text-[#4f46e5] hover:border-[#d8d6fb] transition-colors"
+              title={`工程工作区: ${task.workspace} (点击在访达中打开)`}
+              onClick={(e) => {
+                e.stopPropagation();
+                api.openPath(task.workspace!);
+              }}
+            >
+              <FolderGit2 size={10} className="shrink-0 text-[#85858d]" />
+              <span className="truncate">
+                {task.workspace.replace(/[/\\]+$/, '').split(/[/\\]/).pop()}
+              </span>
+            </span>
+          </>
+        )}
+      </div>
+
+      {/* 未启动任务：卡片内一键启动按钮 */}
+      {task.status === 'pending' && (
+        <div className="my-2">
+          {task.kanbanColumn === 'inbox' ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                disabled={isMoving}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMoveColumn(task.id, 'backlog');
+                }}
+                className="flex-1 h-[24px] rounded-[5px] bg-[#f1f1f4] hover:bg-[#e4e4e9] text-[#1c1c21] text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 border border-[#e3e3e8]"
+                title="将此想法移入待处理准备执行"
+              >
+                <ArrowRight size={10} />
+                <span>{isMoving ? '移动中...' : '移入待处理'}</span>
+              </button>
+              <button
+                disabled={isRunning}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRun(task.id);
+                }}
+                className="h-[24px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
+                title="直接启动流水线"
+              >
+                <Play size={10} strokeWidth={2.4} />
+                <span>{isRunning ? '启动中' : '启动'}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <button
+                disabled={isRunning}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRun(task.id);
+                }}
+                className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
+              >
+                <Play size={10} strokeWidth={2.4} />
+                <span>{isRunning ? '启动中...' : '启动流水线'}</span>
+              </button>
+              <button
+                disabled={isMoving}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMoveColumn(task.id, 'inbox');
+                }}
+                className="h-[24px] px-2 rounded-[5px] bg-[#f9f9fb] hover:bg-[#eeedfd] text-[#85858d] hover:text-[#6366f1] text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all border border-[#e3e3e8]"
+                title="退回 Inbox 想法收集"
+              >
+                <ArrowRight size={10} className="rotate-180" />
+                <span>转想法</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 失败/驳回任务：克制优雅的错误状态与微型重试/跳过胶囊 */}
+      {task.status === 'failed' && (
+        <div className="my-2 space-y-1.5">
+          <div className="p-1.5 rounded-[6px] bg-[#fdf2f2] border border-[#fbd5d5] flex items-center justify-between gap-1.5">
+            <div className="min-w-0 flex items-center gap-1 text-[10.5px] text-[#d64545] font-medium truncate">
+              <AlertCircle size={11} className="shrink-0" />
+              <span className="truncate" title={failReason}>
+                {failReason}
+              </span>
+            </div>
+            <div className="shrink-0 flex items-center gap-1">
+              <button
+                disabled={isSkipping || isRunning}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSkipNode(task.id, lastFailedRun?.nodeId);
+                }}
+                className="h-[20px] px-1.5 rounded-[4px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50 cursor-pointer"
+                title="跳过当前报错节点，继续后续流程或标记完成"
+              >
+                <SkipForward size={9.5} className="text-[#85858d]" />
+                <span>{isSkipping ? '跳过中' : '跳过'}</span>
+              </button>
+              <button
+                disabled={isRunning || isSkipping}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRun(task.id);
+                }}
+                className="h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50 cursor-pointer"
+                title="重新运行整条流水线"
+              >
+                <RotateCcw size={9.5} />
+                <span>重试</span>
+              </button>
+            </div>
+          </div>
+
+          {(task.context?.worktree || nodeRuns.some((r) => r.artifacts && r.artifacts.length > 0)) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onVisualAcceptance(task);
+              }}
+              className="w-full h-[24px] rounded-[5px] bg-[#4f46e5]/10 hover:bg-[#4f46e5]/20 text-[#4338ca] text-[11px] font-medium flex items-center justify-center gap-1.5 border border-[#c7d2fe] transition-all cursor-pointer"
+            >
+              <Play size={10} className="fill-current" />
+              <span>查看截帧回放与靶机</span>
+              {task.context?.worktree?.webPort && (
+                <span className="text-[9.5px] font-mono opacity-80">(:{task.context.worktree.webPort})</span>
+              )}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 手动终止任务：克制微型状态与重新执行胶囊 */}
+      {task.status === 'cancelled' && (
+        <div className="my-2 p-1.5 rounded-[6px] bg-[#f4f4f6] border border-[#e3e3e8] flex items-center justify-between gap-1.5">
+          <div className="min-w-0 flex items-center gap-1.5 text-[10.5px] text-[#63636b] font-medium truncate">
+            <Square size={9.5} className="fill-current text-[#85858d] shrink-0" />
+            <span className="truncate">已手动终止</span>
+          </div>
+          <button
+            disabled={isRunning}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRun(task.id);
+            }}
+            className="shrink-0 h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50"
+          >
+            <RotateCcw size={9.5} />
+            <span>重新执行</span>
+          </button>
+        </div>
+      )}
+
+      {/* 自动化运行中卡片：高亮工序节点展示 */}
+      {task.status === 'running' && (currentNodeMeta || currentNode) && (() => {
+        const activeType = currentNode?.type || currentNodeMeta?.type;
+        const visual = getRunningNodeVisual(activeType);
+        const IconComp = visual.icon;
+        const activeName = currentNodeMeta?.name || currentNode?.name || '自动化工序执行中';
+
+        return (
+          <div className={`mb-2 p-2 rounded-[7px] border transition-all ${visual.badgeBg} ${visual.badgeBorder}`}>
+            <div className="flex items-center justify-between gap-1.5 mb-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${visual.pingColor}`} />
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${visual.pingColor}`} />
+                </span>
+                <span className={`text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/90 border ${visual.badgeBorder} ${visual.badgeText} flex items-center gap-1 shrink-0`}>
+                  <IconComp size={9.5} />
+                  <span>{visual.label}</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenLogs(task.id, task.currentNodeId);
+                  }}
+                  className="h-[19px] px-1.5 rounded-[4px] bg-white/90 hover:bg-white text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all shadow-xs"
+                  title="查看实时运行终端"
+                >
+                  <Terminal size={8.5} className="text-[#85858d]" />
+                  <span>终端</span>
+                </button>
+                <button
+                  disabled={isCancelling}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCancel(task.id);
+                  }}
+                  className="h-[19px] px-1.5 rounded-[4px] bg-white/90 hover:bg-[#fee2e2] text-[#85858d] hover:text-[#d64545] border border-[#e3e3e8] hover:border-[#fecaca] text-[9.5px] font-medium flex items-center gap-1 transition-all shadow-xs"
+                  title="终止任务"
+                >
+                  <Square size={8} className="fill-current" />
+                  <span>{isCancelling ? '终止中' : '终止'}</span>
+                </button>
+              </div>
+            </div>
+            <div className="text-[11px] font-medium text-[#1c1c21] truncate flex items-center gap-1" title={activeName}>
+              <span className="truncate">{activeName}</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 待人工验收门禁卡片 */}
+      {task.status === 'waiting_approval' && (
+        <div className="my-2 p-2 rounded-[7px] bg-[#f9f9fb] border border-[#e3e3e8] space-y-1.5">
+          <div className="text-[11px] font-medium text-[#1c1c21] flex items-center justify-between">
+            <span className="flex items-center gap-1.5 truncate">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1c1c21] animate-pulse shrink-0" />
+              <span className="truncate">
+                {currentNodeMeta?.name || currentNode?.name || 'QA 验收门禁'} · 待确认
+              </span>
+            </span>
+            {task.context?.worktree && (
+              <span className="text-[9.5px] font-mono bg-[#eff6ff] text-[#2563eb] px-1 rounded border border-[#bfdbfe]">
+                靶机 :{task.context.worktree.webPort}
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onVisualAcceptance(task);
+            }}
+            className="w-full h-[24px] rounded-[5px] bg-[#4f46e5]/10 hover:bg-[#4f46e5]/20 text-[#4338ca] text-[11px] font-medium flex items-center justify-center gap-1.5 border border-[#c7d2fe] transition-all cursor-pointer"
+          >
+            <Play size={10} className="fill-current" />
+            <span>查看截帧回放与验收</span>
+          </button>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              disabled={isApproving}
+              onClick={(e) => {
+                e.stopPropagation();
+                onApprove(task.id, true);
+              }}
+              className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-50 shadow-sm"
+            >
+              <Check size={11} strokeWidth={2.4} />
+              验收通过
+            </button>
+            <button
+              disabled={isApproving}
+              onClick={(e) => {
+                e.stopPropagation();
+                onApprove(task.id, false);
+              }}
+              className="h-[24px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[11px] font-medium transition-all"
+            >
+              驳回
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 冲突自愈提示 */}
+      {task.context?.worktree?.conflictResolution && (
+        <div className="mb-1.5 flex items-center justify-between text-[10px] text-[#059669] bg-[#ecfdf5] px-2 py-[2.5px] rounded-[5px] border border-[#a7f3d0]">
+          <span className="flex items-center gap-1 font-medium truncate">
+            <Sparkles size={9.5} className="text-[#059669]" />
+            <span>Agent 冲突自愈 ({task.context.worktree.conflictResolution.conflictFiles.length} 个文件)</span>
+          </span>
+          <span className="text-[9px] font-mono text-[#059669] opacity-80">已自动消解</span>
+        </div>
+      )}
+
+      {/* 卡片底栏：进度与附件 */}
+      <div className="pt-1.5 border-t border-[#ececf0] flex items-center justify-between text-[10.5px] text-[#85858d]">
+        <div className="flex items-center gap-1.5">
+          <span>
+            节点 {displayCompleted}/{displayTotal}
+          </span>
+          {task.attachments && task.attachments.length > 0 && (
+            <span
+              className="flex items-center gap-0.5 text-[9.5px] font-mono text-[#63636b] bg-[#f4f4f7] px-1 py-[0.5px] rounded border border-[#ececf0]"
+              title={`${task.attachments.length} 张参考图片`}
+            >
+              <ImageIcon size={9} className="text-[#85858d]" />
+              <span>{task.attachments.length}</span>
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-14 bg-[#e6e6eb] rounded-full h-[3px] overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ${
+                task.status === 'completed'
+                  ? 'bg-[#189a58]'
+                  : task.status === 'failed'
+                  ? 'bg-[#d64545]'
+                  : 'bg-[#1c1c21]'
+              }`}
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+          <span className="font-mono">{progressPct}%</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 使用 React.memo 精准隔离非必要重渲染
+export const KanbanCard = memo(KanbanCardComponent, (prev, next) => {
+  return (
+    prev.task === next.task &&
+    prev.workflow === next.workflow &&
+    prev.isSelected === next.isSelected &&
+    prev.isCancelling === next.isCancelling &&
+    prev.isMoving === next.isMoving &&
+    prev.isRunning === next.isRunning &&
+    prev.isSkipping === next.isSkipping &&
+    prev.isApproving === next.isApproving &&
+    prev.workflows === next.workflows
+  );
+});

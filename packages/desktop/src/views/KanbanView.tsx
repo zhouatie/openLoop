@@ -60,6 +60,7 @@ import { ImageLightboxModal } from '../components/ImageLightboxModal';
 import { AgentMarkdown } from '../components/AgentMarkdown';
 import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
 import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
+import { KanbanLaneList } from '../components/KanbanLaneList';
 import { toast } from '../components/Toast';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
@@ -707,28 +708,63 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     });
   }, [tasks, activeWorkspaceFilter]);
 
-  const filteredTasks = tasks.filter((t) => {
-    // 1. 工程项目过滤
-    if (activeWorkspaceFilter === 'none') {
-      if (t.workspace && t.workspace.trim()) return false;
-    } else if (activeWorkspaceFilter !== 'all') {
-      if (t.workspace !== activeWorkspaceFilter) return false;
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      // 1. 工程项目过滤
+      if (activeWorkspaceFilter === 'none') {
+        if (t.workspace && t.workspace.trim()) return false;
+      } else if (activeWorkspaceFilter !== 'all') {
+        if (t.workspace !== activeWorkspaceFilter) return false;
+      }
+
+      // 2. 自动化工作流过滤
+      if (selectedWorkflowFilter !== 'all' && t.workflowId !== selectedWorkflowFilter) {
+        return false;
+      }
+
+      // 3. 搜索词检索 (标题、ID、以及项目路径)
+      if (!searchTerm) return true;
+      const term = searchTerm.toLowerCase();
+      return (
+        t.title.toLowerCase().includes(term) ||
+        t.id.toLowerCase().includes(term) ||
+        (t.workspace && t.workspace.toLowerCase().includes(term))
+      );
+    });
+  }, [tasks, activeWorkspaceFilter, selectedWorkflowFilter, searchTerm]);
+
+  // 按泳道分流并排序（单次分流 + 各列独立排序缓存）
+  const tasksByColumn = useMemo(() => {
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanView] 重新分流并计算各泳道任务, 任务总数:', filteredTasks.length);
+    }
+    const grouped: Record<KanbanColumn, Task[]> = {
+      inbox: [],
+      backlog: [],
+      in_progress: [],
+      qa_review: [],
+      done: [],
+      agent_executing: [],
+    };
+
+    for (const t of filteredTasks) {
+      const colKey =
+        t.kanbanColumn === 'in_progress' || (t.kanbanColumn as string) === 'agent_executing'
+          ? 'in_progress'
+          : t.kanbanColumn;
+      if (grouped[colKey]) {
+        grouped[colKey].push(t);
+      }
     }
 
-    // 2. 自动化工作流过滤
-    if (selectedWorkflowFilter !== 'all' && t.workflowId !== selectedWorkflowFilter) {
-      return false;
+    const result: Record<string, Task[]> = {};
+    for (const col of COLUMNS) {
+      const rule = columnSortConfig[col.key] || DEFAULT_SORT_RULE;
+      result[col.key] = sortTasks(grouped[col.key] || [], rule);
     }
 
-    // 3. 搜索词检索 (标题、ID、以及项目路径)
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
-    return (
-      t.title.toLowerCase().includes(term) ||
-      t.id.toLowerCase().includes(term) ||
-      (t.workspace && t.workspace.toLowerCase().includes(term))
-    );
-  });
+    return result;
+  }, [filteredTasks, columnSortConfig]);
 
   const getTaskStatusInfo = (task: Task) => {
     switch (task.status) {
@@ -1476,14 +1512,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         {/* 满高泳道水平容器 */}
         <div className="flex-1 min-h-0 flex gap-3.5 overflow-x-auto pb-1 items-stretch">
             {COLUMNS.map((col) => {
-              const rawTasks = filteredTasks.filter((t) => {
-                if (col.key === 'in_progress') {
-                  return t.kanbanColumn === 'in_progress' || (t.kanbanColumn as string) === 'agent_executing';
-                }
-                return t.kanbanColumn === col.key;
-              });
               const colRule = columnSortConfig[col.key] || DEFAULT_SORT_RULE;
-              const colTasks = sortTasks(rawTasks, colRule);
+              const colTasks = tasksByColumn[col.key] || [];
 
               return (
                 <div
@@ -1608,434 +1638,27 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         )}
                       </div>
                     ) : (
-                      colTasks.map((task) => {
-                        const wf = wfMap.get(task.workflowId);
-                        const currentNode = wf?.nodes.find((n) => n.id === task.currentNodeId);
-                        const currentNodeMeta = task.currentNodeId
-                          ? resolveNodeMeta(task.currentNodeId, wf, workflows)
-                          : null;
-                        const nodeRuns = Object.values(task.nodeRuns || {});
-                        const isCompleted = task.status === 'completed';
-                        const completedCount = nodeRuns.filter((r) => r.status === 'success' || r.status === 'skipped').length;
-                        const totalNodes = wf?.nodes.length || completedCount || 1;
-                        const displayTotal = Math.max(totalNodes, completedCount);
-                        const displayCompleted = isCompleted ? displayTotal : completedCount;
-                        const progressPct = isCompleted ? 100 : Math.round((displayCompleted / displayTotal) * 100);
-                        const lastFailedRun = nodeRuns.slice().reverse().find((r) => r.status === 'failed');
-                        const failReason = lastFailedRun?.error || '执行中断或驳回';
-
-                        return (
-                          <div
-                            key={task.id}
-                            onClick={() => setSelectedTask(task)}
-                            className={`group bg-white border rounded-[8px] p-3 transition-all cursor-pointer ${
-                              task.status === 'waiting_approval'
-                                ? 'border-[#1c1c21]/30 shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
-                                : task.status === 'failed'
-                                ? 'border-[#d64545]/30 shadow-[0_1px_2px_rgba(214,69,69,0.06)]'
-                                : 'border-[#e3e3e8] hover:border-[#b9b9c2] shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between mb-1.5 min-w-0">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <span
-                                  className="text-[10.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0] truncate max-w-[100px]"
-                                  title={task.id}
-                                >
-                                  {task.id}
-                                </span>
-                                {task.kanbanColumn === 'inbox' && (
-                                  <span className="flex items-center gap-1 text-[9.5px] font-medium text-[#6366f1] bg-[#f5f5ff] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded shrink-0">
-                                    <Lightbulb size={9.5} />
-                                    <span>想法</span>
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1">
-                                {task.status === 'running' && (
-                                  <button
-                                    disabled={cancellingTaskId === task.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleCancelTask(task.id);
-                                    }}
-                                    className="p-1 rounded text-[#85858d] hover:text-[#d64545] hover:bg-[#fbe9e9]"
-                                    title="终止此任务"
-                                  >
-                                    <Square size={11} className="fill-current" />
-                                  </button>
-                                )}
-                                {task.status === 'pending' && task.kanbanColumn === 'inbox' && (
-                                  <button
-                                    disabled={movingTaskId === task.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleMoveTaskColumn(task.id, 'backlog');
-                                    }}
-                                    className="p-1 rounded text-[#85858d] hover:text-[#4f46e5] hover:bg-[#eeedfd]"
-                                    title="移入待处理泳道"
-                                  >
-                                    <ArrowRight size={11} />
-                                  </button>
-                                )}
-                                {task.status === 'pending' && task.kanbanColumn === 'backlog' && (
-                                  <button
-                                    disabled={movingTaskId === task.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleMoveTaskColumn(task.id, 'inbox');
-                                    }}
-                                    className="p-1 rounded text-[#85858d] hover:text-[#6366f1] hover:bg-[#eeedfd]"
-                                    title="移入 Inbox 想法收集"
-                                  >
-                                    <Inbox size={11} />
-                                  </button>
-                                )}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingTask(task);
-                                  }}
-                                  className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4]"
-                                  title="编辑任务"
-                                >
-                                  <Edit3 size={11} />
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onOpenTaskLogs(task.id);
-                                  }}
-                                  className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4]"
-                                  title="查看实时终端"
-                                >
-                                  <Terminal size={11} strokeWidth={1.8} />
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setTaskToDelete(task);
-                                  }}
-                                  className="p-1 rounded text-[#85858d] hover:text-[#e5484d] hover:bg-[#fbe9e9]"
-                                  title="删除此任务"
-                                >
-                                  <Trash2 size={11} />
-                                </button>
-                              </div>
-                            </div>
-
-                            <h4 className="text-[12.5px] font-medium text-[#1c1c21] leading-snug line-clamp-2 mb-1">
-                              {task.title}
-                            </h4>
-
-                            <div className="flex items-center gap-1.5 text-[11px] text-[#85858d] mb-2 min-w-0">
-                              <span className="truncate">{wf?.name || task.workflowId}</span>
-                              {task.workspace && (
-                                <>
-                                  <span className="shrink-0 text-[#c2c2c9]">·</span>
-                                  <span
-                                    className="flex items-center gap-1 text-[10px] font-mono text-[#63636b] bg-[#f4f4f7] px-1.5 py-[0.5px] rounded border border-[#ececf0] truncate max-w-[120px] shrink-0 hover:text-[#4f46e5] hover:border-[#d8d6fb] transition-colors"
-                                    title={`工程工作区: ${task.workspace} (点击在访达中打开)`}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      api.openPath(task.workspace!);
-                                    }}
-                                  >
-                                    <FolderGit2 size={10} className="shrink-0 text-[#85858d]" />
-                                    <span className="truncate">
-                                      {task.workspace.replace(/[/\\]+$/, '').split(/[/\\]/).pop()}
-                                    </span>
-                                  </span>
-                                </>
-                              )}
-                            </div>
-
-                            {/* 未启动任务：卡片内一键启动按钮 */}
-                            {task.status === 'pending' && (
-                              <div className="my-2">
-                                {task.kanbanColumn === 'inbox' ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <button
-                                      disabled={movingTaskId === task.id}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleMoveTaskColumn(task.id, 'backlog');
-                                      }}
-                                      className="flex-1 h-[24px] rounded-[5px] bg-[#f1f1f4] hover:bg-[#e4e4e9] text-[#1c1c21] text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 border border-[#e3e3e8]"
-                                      title="将此想法移入待处理准备执行"
-                                    >
-                                      <ArrowRight size={10} />
-                                      <span>{movingTaskId === task.id ? '移动中...' : '移入待处理'}</span>
-                                    </button>
-                                    <button
-                                      disabled={runningTaskId === task.id}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRunTask(task.id);
-                                      }}
-                                      className="h-[24px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
-                                      title="直接启动流水线"
-                                    >
-                                      <Play size={10} strokeWidth={2.4} />
-                                      <span>{runningTaskId === task.id ? '启动中' : '启动'}</span>
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-1.5">
-                                    <button
-                                      disabled={runningTaskId === task.id}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRunTask(task.id);
-                                      }}
-                                      className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
-                                    >
-                                      <Play size={10} strokeWidth={2.4} />
-                                      <span>{runningTaskId === task.id ? '启动中...' : '启动流水线'}</span>
-                                    </button>
-                                    <button
-                                      disabled={movingTaskId === task.id}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleMoveTaskColumn(task.id, 'inbox');
-                                      }}
-                                      className="h-[24px] px-2 rounded-[5px] bg-[#f9f9fb] hover:bg-[#eeedfd] text-[#85858d] hover:text-[#6366f1] text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all border border-[#e3e3e8]"
-                                      title="退回 Inbox 想法收集"
-                                    >
-                                      <Inbox size={10} />
-                                      <span>转想法</span>
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* 失败/驳回任务：克制优雅的错误状态与微型重试/跳过胶囊 */}
-                            {task.status === 'failed' && (
-                              <div className="my-2 space-y-1.5">
-                                <div className="p-1.5 rounded-[6px] bg-[#fdf2f2] border border-[#fbd5d5] flex items-center justify-between gap-1.5">
-                                  <div className="min-w-0 flex items-center gap-1 text-[10.5px] text-[#d64545] font-medium truncate">
-                                    <AlertCircle size={11} className="shrink-0" />
-                                    <span className="truncate" title={failReason}>
-                                      {failReason}
-                                    </span>
-                                  </div>
-                                  <div className="shrink-0 flex items-center gap-1">
-                                    <button
-                                      disabled={skippingTaskId === task.id || runningTaskId === task.id}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleSkipNode(task.id, lastFailedRun?.nodeId);
-                                      }}
-                                      className="h-[20px] px-1.5 rounded-[4px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50 cursor-pointer"
-                                      title="跳过当前报错节点，继续后续流程或标记完成"
-                                    >
-                                      <SkipForward size={9.5} className="text-[#85858d]" />
-                                      <span>{skippingTaskId === task.id ? '跳过中' : '跳过'}</span>
-                                    </button>
-                                    <button
-                                      disabled={runningTaskId === task.id || skippingTaskId === task.id}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRunTask(task.id);
-                                      }}
-                                      className="h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50 cursor-pointer"
-                                      title="重新运行整条流水线"
-                                    >
-                                      <RotateCcw size={9.5} />
-                                      <span>重试</span>
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {(task.context?.worktree || nodeRuns.some((r) => r.artifacts && r.artifacts.length > 0)) && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setVisualAcceptanceTask(task);
-                                    }}
-                                    className="w-full h-[24px] rounded-[5px] bg-[#4f46e5]/10 hover:bg-[#4f46e5]/20 text-[#4338ca] text-[11px] font-medium flex items-center justify-center gap-1.5 border border-[#c7d2fe] transition-all cursor-pointer"
-                                  >
-                                    <Play size={10} className="fill-current" />
-                                    <span>查看截帧回放与靶机</span>
-                                    {task.context?.worktree?.webPort && (
-                                      <span className="text-[9.5px] font-mono opacity-80">(:{task.context.worktree.webPort})</span>
-                                    )}
-                                  </button>
-                                )}
-                              </div>
-                            )}
-
-                            {/* 手动终止任务：克制微型状态与重新执行胶囊 */}
-                            {task.status === 'cancelled' && (
-                              <div className="my-2 p-1.5 rounded-[6px] bg-[#f4f4f6] border border-[#e3e3e8] flex items-center justify-between gap-1.5">
-                                <div className="min-w-0 flex items-center gap-1.5 text-[10.5px] text-[#63636b] font-medium truncate">
-                                  <Square size={9.5} className="fill-current text-[#85858d] shrink-0" />
-                                  <span className="truncate">已手动终止</span>
-                                </div>
-                                <button
-                                  disabled={runningTaskId === task.id}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRunTask(task.id);
-                                  }}
-                                  className="shrink-0 h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50"
-                                >
-                                  <RotateCcw size={9.5} />
-                                  <span>重新执行</span>
-                                </button>
-                              </div>
-                            )}
-
-                            {task.status === 'running' && (currentNodeMeta || currentNode) && (() => {
-                              const activeType = currentNode?.type || currentNodeMeta?.type;
-                              const visual = getRunningNodeVisual(activeType);
-                              const IconComp = visual.icon;
-                              const activeName = currentNodeMeta?.name || currentNode?.name || '自动化工序执行中';
-
-                              return (
-                                <div className={`mb-2 p-2 rounded-[7px] border transition-all ${visual.badgeBg} ${visual.badgeBorder}`}>
-                                  <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                      <span className="relative flex h-2 w-2 shrink-0">
-                                        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${visual.pingColor}`} />
-                                        <span className={`relative inline-flex rounded-full h-2 w-2 ${visual.pingColor}`} />
-                                      </span>
-                                      <span className={`text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/90 border ${visual.badgeBorder} ${visual.badgeText} flex items-center gap-1 shrink-0`}>
-                                        <IconComp size={9.5} />
-                                        <span>{visual.label}</span>
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          onOpenTaskLogs(task.id, task.currentNodeId);
-                                        }}
-                                        className="h-[19px] px-1.5 rounded-[4px] bg-white/90 hover:bg-white text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all shadow-xs"
-                                        title="查看实时运行终端"
-                                      >
-                                        <Terminal size={8.5} className="text-[#85858d]" />
-                                        <span>终端</span>
-                                      </button>
-                                      <button
-                                        disabled={cancellingTaskId === task.id}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleCancelTask(task.id);
-                                        }}
-                                        className="h-[19px] px-1.5 rounded-[4px] bg-white/90 hover:bg-[#fee2e2] text-[#85858d] hover:text-[#d64545] border border-[#e3e3e8] hover:border-[#fecaca] text-[9.5px] font-medium flex items-center gap-1 transition-all shadow-xs"
-                                        title="终止任务"
-                                      >
-                                        <Square size={8} className="fill-current" />
-                                        <span>{cancellingTaskId === task.id ? '终止中' : '终止'}</span>
-                                      </button>
-                                    </div>
-                                  </div>
-                                  <div className="text-[11px] font-medium text-[#1c1c21] truncate flex items-center gap-1" title={activeName}>
-                                    <span className="truncate">{activeName}</span>
-                                  </div>
-                                </div>
-                              );
-                            })()}
-
-                            {task.status === 'waiting_approval' && (
-                              <div className="my-2 p-2 rounded-[7px] bg-[#f9f9fb] border border-[#e3e3e8] space-y-1.5">
-                                <div className="text-[11px] font-medium text-[#1c1c21] flex items-center justify-between">
-                                  <span className="flex items-center gap-1.5 truncate">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-[#1c1c21] animate-pulse shrink-0" />
-                                    <span className="truncate">
-                                      {currentNodeMeta?.name || currentNode?.name || 'QA 验收门禁'} · 待确认
-                                    </span>
-                                  </span>
-                                  {task.context?.worktree && (
-                                    <span className="text-[9.5px] font-mono bg-[#eff6ff] text-[#2563eb] px-1 rounded border border-[#bfdbfe]">
-                                      靶机 :{task.context.worktree.webPort}
-                                    </span>
-                                  )}
-                                </div>
-
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setVisualAcceptanceTask(task);
-                                  }}
-                                  className="w-full h-[24px] rounded-[5px] bg-[#4f46e5]/10 hover:bg-[#4f46e5]/20 text-[#4338ca] text-[11px] font-medium flex items-center justify-center gap-1.5 border border-[#c7d2fe] transition-all cursor-pointer"
-                                >
-                                  <Play size={10} className="fill-current" />
-                                  <span>查看截帧回放与验收</span>
-                                </button>
-
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    disabled={approvingId === task.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleApprove(task.id, true);
-                                    }}
-                                    className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-50 shadow-sm"
-                                  >
-                                    <Check size={11} strokeWidth={2.4} />
-                                    验收通过
-                                  </button>
-                                  <button
-                                    disabled={approvingId === task.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleApprove(task.id, false);
-                                    }}
-                                    className="h-[24px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[11px] font-medium transition-all"
-                                  >
-                                    驳回
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {task.context?.worktree?.conflictResolution && (
-                              <div className="mb-1.5 flex items-center justify-between text-[10px] text-[#059669] bg-[#ecfdf5] px-2 py-[2.5px] rounded-[5px] border border-[#a7f3d0]">
-                                <span className="flex items-center gap-1 font-medium truncate">
-                                  <Sparkles size={9.5} className="text-[#059669]" />
-                                  <span>Agent 冲突自愈 ({task.context.worktree.conflictResolution.conflictFiles.length} 个文件)</span>
-                                </span>
-                                <span className="text-[9px] font-mono text-[#059669] opacity-80">已自动消解</span>
-                              </div>
-                            )}
-
-                            <div className="pt-1.5 border-t border-[#ececf0] flex items-center justify-between text-[10.5px] text-[#85858d]">
-                              <div className="flex items-center gap-1.5">
-                                <span>
-                                  节点 {displayCompleted}/{displayTotal}
-                                </span>
-                                {task.attachments && task.attachments.length > 0 && (
-                                  <span
-                                    className="flex items-center gap-0.5 text-[9.5px] font-mono text-[#63636b] bg-[#f4f4f7] px-1 py-[0.5px] rounded border border-[#ececf0]"
-                                    title={`${task.attachments.length} 张参考图片`}
-                                  >
-                                    <ImageIcon size={9} className="text-[#85858d]" />
-                                    <span>{task.attachments.length}</span>
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="w-14 bg-[#e6e6eb] rounded-full h-[3px] overflow-hidden">
-                                  <div
-                                    className={`h-full rounded-full transition-all duration-300 ${
-                                      task.status === 'completed'
-                                        ? 'bg-[#189a58]'
-                                        : task.status === 'failed'
-                                        ? 'bg-[#d64545]'
-                                        : 'bg-[#1c1c21]'
-                                    }`}
-                                    style={{ width: `${progressPct}%` }}
-                                  />
-                                </div>
-                                <span className="font-mono">{progressPct}%</span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
+                      <KanbanLaneList
+                        tasks={colTasks}
+                        workflows={workflows}
+                        wfMap={wfMap}
+                        selectedTaskId={selectedTask?.id}
+                        cancellingTaskId={cancellingTaskId}
+                        movingTaskId={movingTaskId}
+                        runningTaskId={runningTaskId}
+                        skippingTaskId={skippingTaskId}
+                        approvingId={approvingId}
+                        onSelectTask={setSelectedTask}
+                        onCancelTask={handleCancelTask}
+                        onMoveTaskColumn={handleMoveTaskColumn}
+                        onEditTask={setEditingTask}
+                        onOpenTaskLogs={onOpenTaskLogs}
+                        onDeleteTask={setTaskToDelete}
+                        onRunTask={handleRunTask}
+                        onSkipNode={handleSkipNode}
+                        onVisualAcceptance={setVisualAcceptanceTask}
+                        onApprove={handleApprove}
+                      />
                     )}
                   </div>
                 </div>
