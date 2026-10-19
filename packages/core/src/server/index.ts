@@ -15,6 +15,7 @@ import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { WorktreeManager, TaskProcessManager, findRepoRoot } from '../worktree/worktree-manager';
 import { interpolateString } from '../executors';
+import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 
 const serverLogger = createLogger('Server');
 
@@ -814,7 +815,14 @@ export class OpenLoopServer {
               : [];
 
             if (imageFiles.length > 0) {
-              enrichedMessage += `\n\n[用户主动附带：最新 UI 自动化测试产物]\n- 自动化测试 Run ID: ${qaRunId}\n- 时间轴数据路径: ${timelinePath}\n- 本次生成的真实操作截图路径:\n${imageFiles.map((p) => `  * ${p}`).join('\n')}\n提示：你可以直接使用 read 工具查看上述图片截帧或 timeline.json，确认当前界面的真实渲染效果，进行精准代码修复。`;
+              const settings = this.store.getSettings();
+              const feedbackTemplate = getEffectivePrompt('qaArtifactFeedback', settings.prompts);
+              const feedbackText = renderPromptTemplate(feedbackTemplate, {
+                qaRunId,
+                timelinePath,
+                screenshotPaths: imageFiles.map((p) => `  * ${p}`).join('\n'),
+              });
+              enrichedMessage += `\n\n${feedbackText}`;
             }
           }
         }
@@ -1223,30 +1231,13 @@ export class OpenLoopServer {
         const repoRoot = findRepoRoot(workspace || process.cwd());
         const cwd = workspace || repoRoot;
 
-        const rolePrompt = `你是一名资深质量工程师（QA Engineer），负责对产品需求进行纯黑盒端到端自动化测试设计。
-
-【输入需求】
-- 任务标题: ${title}
-- 详细说明: ${description || '无'}
-
-【测试设计原则】
-1. 需求驱动（黑盒视角）：严格依据上述需求设计操作路径与预期结果，关注最终用户可见的界面功能与业务逻辑，不考虑底层实现细节；
-2. 适量精炼（严格 3~4 步）：步骤数量控制在 3~4 步，覆盖核心端到端冒烟链路，坚决避免冗长繁琐；
-3. 典型结构：
-   - 步骤 1：导航/进入需求涉及的功能页面或模块（如：点击左侧导航「xxx」进入对应模块）
-   - 步骤 2：执行需求的核心交互或状态操作
-   - 步骤 3：断言检查符合需求预期的界面关键渲染或反馈效果
-   - 步骤 4：校验界面正常无报错与异常提示；
-4. 语言明确易执行：采用明确的动词（点击「xxx」、输入「xxx」）与断言（检查「xxx」、校验「xxx」）；严禁编造需要外部复杂模拟的不可达伪步骤。
-
-【输出格式】
-请直接输出用例清单块（注意每行以 - 开头），无需多余客套：
-\`\`\`qa-plan
-- 点击导航「xxx」进入目标页面
-- 执行核心操作「xxx」
-- 检查界面出现符合需求预期的「xxx」
-- 校验页面正常无报错与异常提示
-\`\`\``;
+        const rolePromptTemplate = getEffectivePrompt('qaPlanner', settings.prompts);
+        const rolePrompt = renderPromptTemplate(rolePromptTemplate, {
+          task: {
+            title,
+            description: description || '无',
+          },
+        });
 
         const tempTaskId = `qa_plan_modal_${Date.now()}`;
         const sessionId = `session_qa_plan_${Date.now()}`;

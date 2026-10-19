@@ -247,6 +247,24 @@ export type PiThinkingLevel = 'off' | 'low' | 'medium' | 'high';
 
 export type ShortcutSuperKey = 'Control' | 'Meta' | 'Alt';
 
+export type AgentPromptKey =
+  | 'workflowCopilot'
+  | 'qaPlanner'
+  | 'agentNodeRequirement'
+  | 'conflictResolution'
+  | 'qaArtifactFeedback';
+
+export type AgentPromptTemplates = Partial<Record<AgentPromptKey, string>>;
+
+export interface PromptMeta {
+  key: AgentPromptKey;
+  label: string;
+  category: string;
+  description: string;
+  variables: Array<{ name: string; description: string }>;
+  defaultTemplate: string;
+}
+
 export interface OpenLoopSettings {
   agentProvider?: AgentProviderType;
   piModel?: string;
@@ -255,6 +273,7 @@ export interface OpenLoopSettings {
   defaultCwd?: string;
   autoSnapshot?: boolean;
   shortcutSuperKey?: ShortcutSuperKey;
+  prompts?: AgentPromptTemplates;
   [key: string]: any;
 }
 

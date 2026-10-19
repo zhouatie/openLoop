@@ -6,6 +6,7 @@ import { spawn, execSync, ChildProcess } from 'child_process';
 import { WorktreeContextInfo } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
+import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 
 const logger = createLogger('WorktreeManager');
 
@@ -604,7 +605,8 @@ export class WorktreeManager {
     taskTitle: string,
     sessionId: string | undefined,
     onLog?: (msg: string) => void,
-    onSessionUpdate?: (state: any) => void
+    onSessionUpdate?: (state: any) => void,
+    options?: { customPrompt?: string }
   ): Promise<{ resolved: boolean; conflictFiles: string[]; summary?: string; error?: string }> {
     const safeTaskId = taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
     const worktreeDir = path.join(repoRoot, '.worktrees', `task-${safeTaskId}`);
@@ -666,20 +668,11 @@ export class WorktreeManager {
     onLog?.(`[代码冲突自愈] 检测到代码冲突文件 (${conflictFiles.length} 个): ${conflictFiles.join(', ')}`);
     onLog?.(`[代码冲突自愈] 正在唤醒沙箱 Agent 会话协调解决冲突...`);
 
-    const conflictPrompt = `【严重：代码合并冲突自动协调】
-当前沙箱特性分支在合入基线分支「${baseBranch}」时产生代码冲突。
-产生冲突的文件列表：
-${conflictFiles.map((f) => `- ${f}`).join('\n')}
-
-请立即协助完成冲突协调与自愈：
-1. 使用 read 工具查看上述冲突文件，识别出所有 Git 冲突标记块（形如 <<<<<<< HEAD ... ======= ... >>>>>>> ${baseBranch}）；
-2. 仔细理解双方代码改动：保留基线分支的新增逻辑与接口规范，同时完整保留当前任务实现的核心特性；
-3. 使用 edit 工具精确消除所有冲突标记（严格移除 <<<<<<<, =======, >>>>>>>），融合两方修改；
-4. 检查修改后的代码，确保无语法错误与未定义变量。
-5. 修改完成后，输出格式：
-【冲突消解总结】
-- 融合要点 1: ...
-- 融合要点 2: ...`;
+    const conflictTemplate = options?.customPrompt?.trim() || getEffectivePrompt('conflictResolution');
+    const conflictPrompt = renderPromptTemplate(conflictTemplate, {
+      baseBranch,
+      conflictFiles: conflictFiles.map((f) => `- ${f}`).join('\n'),
+    });
 
     const effectiveSessionId = sessionId || `session_${taskId}`;
 

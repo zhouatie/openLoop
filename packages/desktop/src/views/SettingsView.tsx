@@ -23,6 +23,7 @@ import {
   Puzzle,
   ShieldCheck,
   Sparkles,
+  Search,
 } from 'lucide-react';
 import { api } from '../services/api';
 import {
@@ -31,7 +32,10 @@ import {
   PiThinkingLevel,
   ShortcutSuperKey,
   PluginManifest,
+  AgentPromptKey,
+  AgentPromptTemplates,
 } from '@openloop/core';
+import { PROMPT_METAS, DEFAULT_PROMPT_TEMPLATES } from '../constants/prompts';
 import { useShortcuts } from '../context/ShortcutContext';
 import { Kbd } from '../components/Kbd';
 import { toast } from '../components/Toast';
@@ -42,7 +46,7 @@ import {
   moveSidebarItem,
 } from '../utils/sidebarOrder';
 
-export type SettingsTabId = 'agent' | 'workspace' | 'sidebar' | 'plugins' | 'shortcuts';
+export type SettingsTabId = 'agent' | 'prompts' | 'workspace' | 'sidebar' | 'plugins' | 'shortcuts';
 
 interface SettingsViewProps {
   activeSubTab?: string;
@@ -55,6 +59,7 @@ interface SettingsViewProps {
 
 const SETTINGS_TAB_ITEMS: { id: SettingsTabId; label: string; icon: React.ReactNode }[] = [
   { id: 'agent', label: '智能体驱动', icon: <Cpu size={14} strokeWidth={2} /> },
+  { id: 'prompts', label: '提示词配置', icon: <Sparkles size={14} strokeWidth={2} /> },
   { id: 'workspace', label: '工作区与环境', icon: <Folder size={14} strokeWidth={2} /> },
   { id: 'sidebar', label: '侧边栏排序', icon: <Sliders size={14} strokeWidth={2} /> },
   { id: 'plugins', label: '插件扩展', icon: <Boxes size={14} strokeWidth={2} /> },
@@ -80,6 +85,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // 解析初始选中的 Tab
   const resolveInitialTab = (): SettingsTabId => {
     if (activeSubTab) {
+      if (activeSubTab.includes('prompt')) return 'prompts';
       if (activeSubTab.includes('plugin')) return 'plugins';
       if (activeSubTab.includes('sidebar')) return 'sidebar';
       if (activeSubTab.includes('general') || activeSubTab.includes('workspace')) return 'workspace';
@@ -113,6 +119,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
+  // 提示词状态
+  const [prompts, setPrompts] = useState<AgentPromptTemplates>({ ...DEFAULT_PROMPT_TEMPLATES });
+  const [activePromptKey, setActivePromptKey] = useState<AgentPromptKey>('workflowCopilot');
+  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const promptSaveDebounceRef = useRef<any>(null);
+
   // 导出配置状态
   const [isExporting, setIsExporting] = useState(false);
   const [hasExported, setHasExported] = useState(false);
@@ -121,11 +133,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
+  // Tab 检索过滤
+  const [tabSearchQuery, setTabSearchQuery] = useState('');
+
+  const filteredTabs = useMemo(() => {
+    if (!tabSearchQuery.trim()) return SETTINGS_TAB_ITEMS;
+    const q = tabSearchQuery.trim().toLowerCase();
+    return SETTINGS_TAB_ITEMS.filter((t) => t.label.toLowerCase().includes(q));
+  }, [tabSearchQuery]);
+
+  const currentTabItem = useMemo(() => {
+    return SETTINGS_TAB_ITEMS.find((t) => t.id === activeTab) || SETTINGS_TAB_ITEMS[0];
+  }, [activeTab]);
+
   // 当外部 activeSubTab 发生变化时同步更新
   useEffect(() => {
     if (!activeSubTab) return;
     let target: SettingsTabId = 'agent';
-    if (activeSubTab.includes('plugin')) target = 'plugins';
+    if (activeSubTab.includes('prompt')) target = 'prompts';
+    else if (activeSubTab.includes('plugin')) target = 'plugins';
     else if (activeSubTab.includes('sidebar')) target = 'sidebar';
     else if (activeSubTab.includes('general') || activeSubTab.includes('workspace')) target = 'workspace';
     else if (activeSubTab.includes('shortcut')) target = 'shortcuts';
@@ -180,12 +206,93 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         if (settings.piTools) setPiTools(settings.piTools);
         if (settings.defaultCwd) setDefaultCwd(settings.defaultCwd);
         if (settings.autoSnapshot !== undefined) setAutoSnapshot(settings.autoSnapshot);
+        if (settings.prompts) {
+          setPrompts({ ...DEFAULT_PROMPT_TEMPLATES, ...settings.prompts });
+        }
       }
     } catch (err) {
       console.error('加载系统设置失败:', err);
     } finally {
       setLoading(false);
     }
+  };
+
+  // 提示词更新与防抖保存
+  const handlePromptChange = (key: AgentPromptKey, val: string, immediateSave = false) => {
+    const updated = { ...prompts, [key]: val };
+    setPrompts(updated);
+
+    if (promptSaveDebounceRef.current) {
+      clearTimeout(promptSaveDebounceRef.current);
+    }
+
+    const doSave = async () => {
+      try {
+        await api.updateSettings({ prompts: updated });
+        if (import.meta.env?.DEV) {
+          console.log('[Settings:Prompts] 提示词已持久化保存:', { key, length: val.length });
+        }
+        setSaveStatus('已自动保存');
+        setTimeout(() => setSaveStatus(null), 1800);
+      } catch (err: any) {
+        toast.error(`保存失败: ${err?.message || '未知错误'}`);
+      }
+    };
+
+    if (immediateSave) {
+      doSave();
+    } else {
+      promptSaveDebounceRef.current = setTimeout(doSave, 400);
+    }
+  };
+
+  // 恢复单项出厂提示词
+  const handleResetCurrentPrompt = () => {
+    const defaultVal = DEFAULT_PROMPT_TEMPLATES[activePromptKey] || '';
+    handlePromptChange(activePromptKey, defaultVal, true);
+    const meta = PROMPT_METAS.find((m) => m.key === activePromptKey);
+    toast.success(`已恢复【${meta?.label || '当前场景'}】为出厂默认设置`);
+  };
+
+  // 恢复全部出厂提示词
+  const handleResetAllPrompts = async () => {
+    const reset = { ...DEFAULT_PROMPT_TEMPLATES };
+    setPrompts(reset);
+    if (promptSaveDebounceRef.current) clearTimeout(promptSaveDebounceRef.current);
+    try {
+      await api.updateSettings({ prompts: reset });
+      toast.success('已将所有场景的提示词恢复为出厂配置');
+      setSaveStatus('已恢复默认并保存');
+      setTimeout(() => setSaveStatus(null), 1800);
+    } catch (err: any) {
+      toast.error(`重置失败: ${err?.message || '未知错误'}`);
+    }
+  };
+
+  // 插入变量到光标位置
+  const handleInsertVariable = (varName: string) => {
+    const textarea = promptTextareaRef.current;
+    const currentVal = prompts[activePromptKey] ?? DEFAULT_PROMPT_TEMPLATES[activePromptKey] ?? '';
+    if (!textarea) {
+      handlePromptChange(activePromptKey, currentVal + (currentVal ? '\n' : '') + varName);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const newVal = currentVal.substring(0, start) + varName + currentVal.substring(end);
+    handlePromptChange(activePromptKey, newVal);
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + varName.length, start + varName.length);
+    }, 0);
+  };
+
+  // 判断某场景是否已被用户自定义
+  const isPromptCustomized = (key: AgentPromptKey) => {
+    const val = prompts[key];
+    if (val === undefined || val === null) return false;
+    return val.trim() !== (DEFAULT_PROMPT_TEMPLATES[key] || '').trim();
   };
 
   const handleSave = async (override?: Partial<OpenLoopSettings>) => {
@@ -250,6 +357,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         defaultCwd,
         autoSnapshot,
         shortcutSuperKey: superKey,
+        prompts,
       };
 
       const jsonContent = JSON.stringify(configToExport, null, 2);
@@ -373,78 +481,120 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-y-auto select-none px-8 py-6">
-      <div className="max-w-[1040px] w-full space-y-5 mx-auto">
-        {/* ==================== 顶部标题与 Tab 导航栏 ==================== */}
-        <div className="pb-1 pt-1 space-y-3.5">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-[17px] font-semibold text-[#1c1c21] tracking-tight">系统设置</h1>
-              <p className="text-[12px] text-[#85858d] mt-0.5">
-                管理 openLoop 核心调度服务、智能体驱动、侧边栏导航与插件生态
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2.5">
-              {saveStatus && (
-                <span className="text-[11.5px] text-[#189a58] flex items-center gap-1 bg-[#eaf7ee] px-2 py-1 rounded-[6px] transition-all">
-                  <Check size={12} className="stroke-[2.2]" />
-                  <span>{saveStatus}</span>
-                </span>
-              )}
-
-              <button
-                type="button"
-                onClick={handleExportConfig}
-                disabled={isExporting}
-                className={`h-[28px] px-3 rounded-[7px] text-[12px] font-medium flex items-center gap-1.5 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.04)] border cursor-pointer active:scale-95 ${
-                  hasExported
-                    ? 'bg-[#eaf7ee] border-[#b6e8c4] text-[#189a58]'
-                    : 'bg-white hover:bg-[#fafafc] active:bg-[#f1f1f4] border-[#e3e3e8] text-[#1c1c21] hover:border-[#d0d0d7]'
-                }`}
-                title="导出当前配置为 openloop-settings.json"
-              >
-                {hasExported ? (
-                  <>
-                    <Check size={13} className="stroke-[2.2]" />
-                    <span>已导出 JSON</span>
-                  </>
-                ) : (
-                  <>
-                    <Download size={13} className="text-[#63636b] stroke-[1.9]" />
-                    <span>导出配置</span>
-                  </>
-                )}
-              </button>
-            </div>
+    <div className="flex-1 flex h-full bg-[#f4f4f6] overflow-hidden select-none">
+      {/* ==================== 左侧偏好设置导航栏 ==================== */}
+      <div className="w-[210px] shrink-0 h-full flex flex-col bg-[#f9f9fb] border-r border-[#e3e3e8]">
+        {/* 顶部标题与搜索框 */}
+        <div className="p-3 border-b border-[#ececf0] space-y-2">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[13px] font-semibold text-[#1c1c21] tracking-tight">系统设置</span>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-[4px] bg-[#eaeaf0] text-[#71717a]">
+              Preferences
+            </span>
           </div>
 
-          {/* 选项卡切换 Bar (macOS 极简分段器设计) */}
-          <div className="inline-flex p-[3px] rounded-[9px] bg-[#e6e6eb] border border-[#dddee3] shadow-sm">
-            {SETTINGS_TAB_ITEMS.map((tab) => {
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => handleTabChange(tab.id)}
-                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-[7px] text-[12.5px] transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-white text-[#1c1c21] font-semibold shadow-[0_1px_3px_rgba(0,0,0,0.1),0_0_0_0.5px_rgba(0,0,0,0.04)]'
-                      : 'text-[#63636b] hover:text-[#1c1c21] hover:bg-white/40'
-                  }`}
-                >
-                  <span className={isActive ? 'text-[#1c1c21]' : 'text-[#85858d]'}>
-                    {tab.icon}
-                  </span>
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
+          <div className="relative">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#85858d]" />
+            <input
+              type="text"
+              value={tabSearchQuery}
+              onChange={(e) => setTabSearchQuery(e.target.value)}
+              placeholder="搜索设置项..."
+              className="w-full h-[26px] pl-7 pr-2 rounded-[6px] bg-[#f1f1f4] hover:bg-[#ececf0] focus:bg-white border border-transparent focus:border-[#4f46e5] text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none transition-all"
+            />
           </div>
         </div>
 
-        {/* ==================== TAB 1: 智能体驱动 ==================== */}
+        {/* 纵向选项卡列表 */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {filteredTabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleTabChange(tab.id)}
+                className={`w-full flex items-center justify-between px-2.5 py-2 rounded-[6px] text-[12.5px] transition-all cursor-pointer relative group ${
+                  isActive
+                    ? 'bg-[#ececf0] text-[#1c1c21] font-medium shadow-2xs'
+                    : 'text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4]'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className={isActive ? 'text-[#1c1c21]' : 'text-[#85858d] group-hover:text-[#63636b]'}>
+                    {tab.icon}
+                  </span>
+                  <span className="truncate">{tab.label}</span>
+                </div>
+                {isActive && (
+                  <div className="w-[3px] h-[14px] rounded-full bg-[#4f46e5] shrink-0" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 左侧底部版本标识 */}
+        <div className="p-3 border-t border-[#ececf0] flex items-center justify-between text-[11px] text-[#85858d]">
+          <span className="font-mono">OpenLoop v0.1</span>
+          <span className="inline-flex items-center gap-1 text-[10px] text-[#189a58]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#189a58]" />
+            在线
+          </span>
+        </div>
+      </div>
+
+      {/* ==================== 右侧配置主工作区 ==================== */}
+      <div className="flex-1 h-full flex flex-col min-w-0 bg-[#f4f4f6] overflow-hidden">
+        {/* 固定顶部 Header：当前分类标题与快捷操作 */}
+        <div className="h-[48px] px-6 bg-white border-b border-[#e3e3e8] flex items-center justify-between shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+          <div className="flex items-center gap-2.5">
+            <span className="text-[#4f46e5]">
+              {currentTabItem.icon}
+            </span>
+            <h2 className="text-[14px] font-semibold text-[#1c1c21] tracking-tight">
+              {currentTabItem.label}
+            </h2>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {saveStatus && (
+              <span className="text-[11.5px] text-[#189a58] flex items-center gap-1 bg-[#eaf7ee] px-2 py-0.5 rounded-[5px] transition-all">
+                <Check size={11} className="stroke-[2.2]" />
+                <span>{saveStatus}</span>
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={handleExportConfig}
+              disabled={isExporting}
+              className={`h-[26px] px-2.5 rounded-[6px] text-[11.5px] font-medium flex items-center gap-1.5 transition-all border cursor-pointer active:scale-95 shadow-2xs ${
+                hasExported
+                  ? 'bg-[#eaf7ee] border-[#b6e8c4] text-[#189a58]'
+                  : 'bg-white hover:bg-[#fafafc] active:bg-[#f1f1f4] border-[#e3e3e8] text-[#1c1c21] hover:border-[#d0d0d7]'
+              }`}
+              title="导出当前配置为 openloop-settings.json"
+            >
+              {hasExported ? (
+                <>
+                  <Check size={12} className="stroke-[2.2]" />
+                  <span>已导出 JSON</span>
+                </>
+              ) : (
+                <>
+                  <Download size={12} className="text-[#63636b] stroke-[1.9]" />
+                  <span>导出配置</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* 滚动配置内容区 */}
+        <div className="flex-1 overflow-y-auto px-7 py-6">
+          <div className={`${activeTab === 'prompts' ? 'max-w-none' : 'max-w-[880px]'} w-full mx-auto space-y-5`}>
+            {/* ==================== TAB 1: 智能体驱动 ==================== */}
         {activeTab === 'agent' && (
           <div className="space-y-5 animate-in fade-in duration-150">
             {/* 智能体底层驱动 */}
@@ -695,7 +845,206 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         )}
 
-        {/* ==================== TAB 2: 工作区与环境 ==================== */}
+        {/* ==================== TAB 2: 提示词配置 (统一纳管) ==================== */}
+        {activeTab === 'prompts' && (
+          <div className="space-y-4 animate-in fade-in duration-150">
+            {/* 顶栏说明与全量重置 */}
+            <div className="flex items-center justify-between px-0.5">
+              <div>
+                <div className="text-[13px] font-medium text-[#1c1c21]">系统提示词统一配置中心</div>
+                <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                  集中维护 OpenLoop 全链路 Agent 提示词与模板；留空将自动回退至系统内置最佳实践
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleResetAllPrompts}
+                className="h-[26px] px-2.5 rounded-[6px] bg-white hover:bg-[#fafafc] text-[#dc2626] hover:text-[#b91c1c] border border-[#fca5a5]/70 hover:border-[#f87171] text-[11.5px] font-medium flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer active:scale-95"
+                title="将所有场景的提示词恢复为系统出厂默认值"
+              >
+                <RotateCcw size={11.5} className="stroke-[2.2]" />
+                <span>全部恢复出厂</span>
+              </button>
+            </div>
+
+            {/* 双栏工作区 */}
+            <div className="flex gap-4 items-start">
+              {/* 左侧：场景清单导航 */}
+              <div className="w-[240px] shrink-0 bg-white border border-[#e3e3e8] rounded-[10px] p-2 space-y-1 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                <div className="px-2 py-1 text-[10.5px] font-medium text-[#85858d] tracking-wider uppercase">
+                  场景导航
+                </div>
+
+                {PROMPT_METAS.map((meta) => {
+                  const isActive = activePromptKey === meta.key;
+                  const customized = isPromptCustomized(meta.key);
+
+                  return (
+                    <button
+                      key={meta.key}
+                      type="button"
+                      onClick={() => {
+                        if (import.meta.env?.DEV) {
+                          console.log('[Settings:Prompts] 切换提示词场景:', meta.key);
+                        }
+                        setActivePromptKey(meta.key);
+                      }}
+                      className={`w-full text-left p-2.5 rounded-[7px] transition-all cursor-pointer border ${
+                        isActive
+                          ? 'bg-[#f4f4f6] border-[#d1d1d8] text-[#1c1c21] shadow-2xs'
+                          : 'bg-transparent border-transparent hover:bg-[#fafafc] hover:border-[#ececf0] text-[#4b4b53]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1.5 mb-1">
+                        <span className="text-[12px] font-medium truncate leading-tight">
+                          {meta.label}
+                        </span>
+                        {customized ? (
+                          <span className="inline-flex items-center px-1.5 py-0.2 rounded-[3px] bg-[#eff6ff] text-[#2563eb] text-[9.5px] font-medium border border-[#bfdbfe]/70 shrink-0">
+                            已自定义
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-1.5 py-0.2 rounded-[3px] bg-[#f4f4f6] text-[#71717a] text-[9.5px] font-medium border border-[#e3e3e8] shrink-0">
+                            内置
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-[10.5px] text-[#85858d]">
+                        <span>{meta.category}</span>
+                        <span className="font-mono text-[9.5px]">
+                          {(prompts[meta.key] || DEFAULT_PROMPT_TEMPLATES[meta.key] || '').length} 字符
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* 右侧：当前场景专注编辑器 */}
+              {(() => {
+                const currentMeta = PROMPT_METAS.find((m) => m.key === activePromptKey) || PROMPT_METAS[0];
+                const currentPromptText =
+                  prompts[currentMeta.key] ?? DEFAULT_PROMPT_TEMPLATES[currentMeta.key] ?? '';
+                const lineCount = currentPromptText.split('\n').length;
+                const charCount = currentPromptText.length;
+                const customized = isPromptCustomized(currentMeta.key);
+
+                return (
+                  <div className="flex-1 bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.02)] flex flex-col">
+                    {/* 编辑器顶栏 */}
+                    <div className="px-4 py-3 border-b border-[#ececf0] flex items-start justify-between gap-4 bg-[#fafafc]">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[13px] font-semibold text-[#1c1c21]">
+                            {currentMeta.label}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f5] text-[#52525b] text-[10.5px] font-medium">
+                            {currentMeta.category}
+                          </span>
+                          <span className="text-[11px] font-mono text-[#85858d]">
+                            ({lineCount} 行 · {charCount} 字)
+                          </span>
+                        </div>
+                        <div className="text-[11.5px] text-[#85858d] leading-relaxed">
+                          {currentMeta.description}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {/* 复制按钮 */}
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(currentPromptText, `prompt_${currentMeta.key}`)}
+                          className="h-[24px] px-2 rounded-[5px] bg-white hover:bg-[#f1f1f4] text-[#63636b] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                          title="复制当前提示词文本到剪贴板"
+                        >
+                          {copiedKey === `prompt_${currentMeta.key}` ? (
+                            <>
+                              <Check size={11} className="text-[#189a58]" />
+                              <span className="text-[#189a58]">已复制</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={11} />
+                              <span>复制</span>
+                            </>
+                          )}
+                        </button>
+
+                        {/* 恢复单项出厂按钮 */}
+                        <button
+                          type="button"
+                          onClick={handleResetCurrentPrompt}
+                          disabled={!customized}
+                          className={`h-[24px] px-2 rounded-[5px] text-[11px] font-medium flex items-center gap-1 transition-all border shadow-2xs ${
+                            customized
+                              ? 'bg-white hover:bg-[#fafafc] text-[#dc2626] border-[#fca5a5]/70 hover:border-[#f87171] cursor-pointer active:scale-95'
+                              : 'bg-[#fafafc] text-[#a1a1aa] border-[#e4e4e7] cursor-not-allowed opacity-60'
+                          }`}
+                          title={customized ? '恢复此场景为出厂内置提示词' : '当前内容与出厂配置一致'}
+                        >
+                          <RotateCcw size={11} />
+                          <span>恢复出厂</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 插值变量提示与点击插入栏 */}
+                    {currentMeta.variables && currentMeta.variables.length > 0 && (
+                      <div className="px-4 py-2 border-b border-[#ececf0] bg-[#fafafc]/50 flex items-center flex-wrap gap-1.5">
+                        <span className="text-[11px] text-[#71717a] font-normal mr-1">
+                          点击插入插值变量:
+                        </span>
+                        {currentMeta.variables.map((v) => (
+                          <button
+                            key={v.name}
+                            type="button"
+                            onClick={() => handleInsertVariable(v.name)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] bg-white border border-[#d4d4d8] hover:border-[#4f46e5] text-[11px] font-mono text-[#374151] hover:text-[#4f46e5] transition-all cursor-pointer shadow-2xs active:scale-95"
+                            title={`点击将变量 ${v.name} 插入到光标所在位置`}
+                          >
+                            <span>{v.name}</span>
+                            <span className="text-[#a1a1aa] text-[10px]">({v.description})</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 编辑区 */}
+                    <div className="p-3.5 flex-1 flex flex-col bg-white">
+                      <textarea
+                        ref={promptTextareaRef}
+                        value={currentPromptText}
+                        onChange={(e) => handlePromptChange(currentMeta.key, e.target.value)}
+                        placeholder="请输入该场景的系统提示词或格式规范..."
+                        spellCheck={false}
+                        className="w-full flex-1 min-h-[380px] p-3 rounded-[7px] bg-[#fafafc] border border-[#e3e3e8] text-[12px] font-mono leading-relaxed text-[#1c1c21] resize-none outline-none focus:border-[#4f46e5] focus:bg-white transition-all shadow-inner"
+                      />
+                    </div>
+
+                    {/* 底部状态提示条 */}
+                    <div className="px-4 py-2 bg-[#fafafc] border-t border-[#ececf0] flex items-center justify-between text-[11px] text-[#85858d]">
+                      <div className="flex items-center gap-1.5">
+                        <Sparkles size={11} className="text-[#4f46e5]" />
+                        <span>修改后实时保存至本地数据库，下次触发对应场景时即刻生效；清空将自动以出厂模板兜底。</span>
+                      </div>
+                      <div className="shrink-0 font-mono text-[10.5px]">
+                        {saveStatus ? (
+                          <span className="text-[#189a58] font-medium">{saveStatus}</span>
+                        ) : (
+                          <span>输入自动保存</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 3: 工作区与环境 ==================== */}
         {activeTab === 'workspace' && (
           <div className="space-y-5 animate-in fade-in duration-150">
             <div>
@@ -1031,6 +1380,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
         )}
+          </div>
+        </div>
+
+        {/* 固定底栏 Footer */}
+        <div className="h-[40px] px-6 bg-white border-t border-[#e3e3e8] flex items-center justify-between shrink-0 text-[11.5px] text-[#85858d]">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#189a58]" />
+            <span>所有更改已自动持久化保存在本地 SQLite 数据库中</span>
+          </div>
+
+          <div className="text-[11px] font-mono text-[#a1a1aa]">
+            openLoop Core Daemon · IPC Active
+          </div>
+        </div>
       </div>
     </div>
   );

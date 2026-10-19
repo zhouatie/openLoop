@@ -5,6 +5,7 @@ import os from 'os';
 import { WorkflowNode, Task, LogEntry, NodeRun, TaskSessionState, QaSuite, QaStep } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
+import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 
@@ -346,7 +347,15 @@ export class AgentExecutor implements NodeExecutor {
 
       // 兜底保障：确保 Prompt 中始终包含具体的任务标题与详细说明，防止模板插值留白
       if (!prompt.includes(task.title)) {
-        prompt = `任务需求: ${task.title}\n详细说明: ${task.description || '无详细说明'}\n\n执行要求:\n${prompt}`;
+        const wrapTemplate = getEffectivePrompt('agentNodeRequirement', settings.prompts);
+        prompt = renderPromptTemplate(wrapTemplate, {
+          task: {
+            id: task.id,
+            title: task.title,
+            description: task.description || '无详细说明',
+            prompt,
+          },
+        });
       }
 
       // 若任务附带图片附件，注入本地物理文件路径提示，使 Agent 能够直接通过文件工具进行多模态视觉感知
@@ -563,30 +572,13 @@ export class QaPlannerExecutor implements NodeExecutor {
 
     emitLog('system', `[QA 黑盒用例设计] 正在以资深质量工程师视角，根据需求规划端到端验收用例...`);
 
-    const rolePrompt = `你是一名资深质量工程师（QA Engineer），负责对产品需求进行纯黑盒端到端自动化测试设计。
-
-【输入需求】
-- 任务标题: ${title}
-- 详细说明: ${description || '无'}
-
-【测试设计原则】
-1. 需求驱动（黑盒视角）：严格依据上述需求设计操作路径与预期结果，关注最终用户可见的界面功能与业务逻辑，不考虑底层实现细节；
-2. 适量精炼（严格 3~4 步）：步骤数量控制在 3~4 步，覆盖核心端到端冒烟链路，坚决避免冗长繁琐；
-3. 典型结构：
-   - 步骤 1：导航/进入需求涉及的功能页面或模块（如：点击左侧导航「xxx」进入对应模块）
-   - 步骤 2：执行需求的核心交互或状态操作
-   - 步骤 3：断言检查符合需求预期的界面关键渲染或反馈效果
-   - 步骤 4：校验界面正常无报错与异常提示；
-4. 语言明确易执行：采用明确的动词（点击「xxx」、输入「xxx」）与断言（检查「xxx」、校验「xxx」）；严禁编造需要外部复杂模拟的不可达伪步骤。
-
-【输出格式】
-请直接输出用例清单块（注意每行以 - 开头），无需多余客套：
-\`\`\`qa-plan
-- 点击导航「xxx」进入目标页面
-- 执行核心操作「xxx」
-- 检查界面出现符合需求预期的「xxx」
-- 校验页面正常无报错与异常提示
-\`\`\``;
+    const rolePromptTemplate = getEffectivePrompt('qaPlanner', settings.prompts);
+    const rolePrompt = renderPromptTemplate(rolePromptTemplate, {
+      task: {
+        title,
+        description: description || '无',
+      },
+    });
 
     // 确定工作目录
     const repoRoot = findRepoRoot(
@@ -1276,7 +1268,8 @@ export class WorktreeMergeExecutor implements NodeExecutor {
             task.title,
             task.context?.piSessionId,
             (msg) => emitLog('system', msg),
-            ctx.onSessionUpdate
+            ctx.onSessionUpdate,
+            { customPrompt: ctx.settings?.prompts?.conflictResolution }
           );
 
           if (resolveResult.resolved) {

@@ -13,6 +13,7 @@ import {
   QaSuite,
   QaRunRecord,
 } from '../types';
+import { DEFAULT_PROMPT_TEMPLATES } from '../constants/prompts';
 import { createLogger } from '../logger';
 
 const storeLogger = createLogger('Store:SQLite');
@@ -22,6 +23,7 @@ export class SqliteStore {
   private db: Database.Database;
   private dataDir: string;
   private dbFilePath: string;
+  private cachedSettings: OpenLoopSettings | null = null;
 
   constructor(customDir?: string) {
     this.dataDir = customDir || path.join(os.homedir(), '.openloop');
@@ -1226,6 +1228,10 @@ export class SqliteStore {
   }
 
   public getSettings(): OpenLoopSettings {
+    if (this.cachedSettings) {
+      return this.cachedSettings;
+    }
+
     const rows = this.db.prepare('SELECT key, value_json FROM settings').all() as any[];
     const result: OpenLoopSettings = {
       agentProvider: 'pi',
@@ -1233,18 +1239,29 @@ export class SqliteStore {
       piThinking: 'medium',
       piTools: '',
       defaultCwd: process.cwd(),
+      prompts: { ...DEFAULT_PROMPT_TEMPLATES },
     };
     for (const r of rows) {
       try {
-        result[r.key] = JSON.parse(r.value_json);
+        const val = JSON.parse(r.value_json);
+        if (r.key === 'prompts' && typeof val === 'object' && val !== null) {
+          result.prompts = {
+            ...DEFAULT_PROMPT_TEMPLATES,
+            ...val,
+          };
+        } else {
+          result[r.key] = val;
+        }
       } catch {
         result[r.key] = r.value_json;
       }
     }
+    this.cachedSettings = result;
     return result;
   }
 
   public updateSettings(settings: Partial<OpenLoopSettings>): OpenLoopSettings {
+    this.cachedSettings = null;
     const stmt = this.db.prepare(`
       INSERT INTO settings (key, value_json, updated_at)
       VALUES (?, ?, ?)
