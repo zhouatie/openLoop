@@ -88,7 +88,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   };
 
   const handleStartOrOpenSandbox = async () => {
-    const targetUrl = worktree?.targetUrl || `http://localhost:${worktree?.webPort || 5175}`;
+    const targetUrl = worktree?.targetUrl || (worktree?.webPort ? `http://localhost:${worktree.webPort}` : 'http://localhost');
     if (sandboxStatus === 'running') {
       window.open(targetUrl, '_blank');
       return;
@@ -477,8 +477,8 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                     {isStartingSandbox
                       ? '正在唤醒靶机...'
                       : sandboxStatus === 'running'
-                      ? `打开沙箱靶机 (${worktree.webPort})`
-                      : `启动沙箱靶机 (${worktree.webPort})`}
+                      ? `打开沙箱靶机${worktree?.webPort ? ` (${worktree.webPort})` : ''}`
+                      : `启动沙箱靶机${worktree?.webPort ? ` (${worktree.webPort})` : ''}`}
                   </span>
                   {sandboxStatus === 'running' && <ExternalLink size={10} className="text-[#85858d] shrink-0" />}
                 </button>
@@ -557,7 +557,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                       <span className="w-1.5 h-1.5 rounded-full bg-[#a1a1aa] shrink-0" />
                     )}
                     <Globe size={10} className="text-[#85858d] group-hover:text-[#4f46e5] shrink-0 transition-colors" />
-                    <span className="truncate">{worktree?.targetUrl || 'http://localhost:5175/'}</span>
+                    <span className="truncate">{worktree?.targetUrl || (worktree?.webPort ? `http://localhost:${worktree.webPort}/` : 'http://localhost/')}</span>
                     <ExternalLink size={9} className="opacity-60 group-hover:opacity-100 transition-opacity" />
                   </button>
 

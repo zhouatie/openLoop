@@ -110,6 +110,8 @@ export interface CreateWorktreeOptions {
   baseBranch?: string;
   sharedPaths?: string[]; // 相对路径列表，例如 ['node_modules']
   portKeys?: string[];    // 需要动态分配的端口变量键名，如 ['webPort', 'corePort']
+  basePort?: number;      // 动态分配起始基准端口（例如 3000, 8080 等）
+  portBases?: Record<string, number>; // 针对具体端口变量名的起始基准端口字典，如 { webPort: 3000, corePort: 19890 }
 }
 
 export class WorktreeManager {
@@ -310,26 +312,26 @@ export class WorktreeManager {
       : ['node_modules'];
     this.symlinkSharedPaths(repoRoot, worktreeDir, sharedPaths);
 
-    // 5. 通用动态端口分配（结合全局活跃端口注册表，防止并行任务抢占同一端口）
+    // 5. 通用动态端口分配（结合编排配置的 basePort / portBases 与全局活跃端口注册表）
     const portKeys = options.portKeys && options.portKeys.length > 0
       ? options.portKeys
       : ['webPort', 'corePort'];
 
     const ports: Record<string, number> = {};
-    let startScanPort = 5175;
+    const defaultBase = options.basePort || 5175;
     const reservedPorts = this.getBusyOrReservedPorts();
 
     for (const key of portKeys) {
-      const p = await this.getAvailablePort(startScanPort, reservedPorts);
+      const startPortForKey = options.portBases?.[key] || defaultBase;
+      const p = await this.getAvailablePort(startPortForKey, reservedPorts);
       ports[key] = p;
       reservedPorts.add(p);
-      startScanPort = p + 1;
     }
 
     // 登记预占端口
     this.registerTaskPorts(taskId, Object.values(ports));
 
-    const primaryPort = ports.webPort || ports.port || ports.PORT || Object.values(ports)[0] || 5173;
+    const primaryPort = ports.webPort || ports.port || ports.PORT || Object.values(ports)[0] || defaultBase;
     const targetUrl = `http://localhost:${primaryPort}`;
 
     logger.info(`[Worktree:Ready] 隔离工作区就绪，分配端口: ${JSON.stringify(ports)}`);

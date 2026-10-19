@@ -645,6 +645,16 @@ export class DesktopApiService {
     return requestJson<QaRunRecord>(`${BASE_URL}/api/qa/runs/${encodeURIComponent(id)}`);
   }
 
+  async generateQaPlan(payload: { title: string; description?: string; workspace?: string }): Promise<{ success: boolean; steps: string[]; text: string; fallback?: boolean }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 请求 AI 规划验收用例:', payload);
+    }
+    return requestJson<{ success: boolean; steps: string[]; text: string; fallback?: boolean }>(`${BASE_URL}/api/qa/generate-plan`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   getArtifactUrl(pathOrUrl: string): string {
     if (!pathOrUrl) return '';
     if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://') || pathOrUrl.startsWith('blob:')) {

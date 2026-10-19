@@ -1426,9 +1426,13 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const handleSave = async (overrideName?: string, overrideDesc?: string, overrideTags?: string[]) => {
     if (!activeWorkflow) return;
 
-    const finalName = (overrideName ?? workflowName).trim() || activeWorkflow.name;
-    const finalDesc = (overrideDesc ?? workflowDescription).trim();
-    const finalTags = overrideTags ?? workflowTags;
+    const safeOverrideName = typeof overrideName === 'string' ? overrideName : undefined;
+    const safeOverrideDesc = typeof overrideDesc === 'string' ? overrideDesc : undefined;
+    const safeOverrideTags = Array.isArray(overrideTags) ? overrideTags : undefined;
+
+    const finalName = (safeOverrideName ?? workflowName).trim() || activeWorkflow.name;
+    const finalDesc = (safeOverrideDesc ?? workflowDescription).trim();
+    const finalTags = safeOverrideTags ?? workflowTags;
 
     const updatedWorkflow: WorkflowDefinition = {
       ...activeWorkflow,
@@ -2130,7 +2134,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           )}
 
           <button
-            onClick={handleSave}
+            onClick={() => handleSave()}
             className="flex items-center gap-1 h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[11px] font-medium text-[#1c1c21] transition-all shadow-2xs whitespace-nowrap cursor-pointer"
           >
             <Save size={11.5} />
@@ -3475,6 +3479,12 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                         type="text"
                         value={workflowName}
                         onChange={(e) => setWorkflowName(e.target.value)}
+                        onBlur={() => {
+                          const trimmed = workflowName.trim();
+                          if (trimmed && trimmed !== activeWorkflow.name) {
+                            handleSave(trimmed);
+                          }
+                        }}
                         className="w-full h-[30px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2.5 text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5] transition-all"
                         placeholder="流水线名称"
                       />
@@ -3484,7 +3494,10 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                       <label className="block text-[#85858d] mb-1 font-medium">流水线分类标签</label>
                       <TagInput
                         tags={workflowTags}
-                        onChange={setWorkflowTags}
+                        onChange={(newTags) => {
+                          setWorkflowTags(newTags);
+                          handleSave(undefined, undefined, newTags);
+                        }}
                         placeholder="输入标签（例如：工作、部署、QA）后回车..."
                       />
                     </div>
@@ -3495,6 +3508,12 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                         rows={4}
                         value={workflowDescription}
                         onChange={(e) => setWorkflowDescription(e.target.value)}
+                        onBlur={() => {
+                          const trimmed = workflowDescription.trim();
+                          if (trimmed !== (activeWorkflow.description || '')) {
+                            handleSave(undefined, trimmed);
+                          }
+                        }}
                         className="w-full min-h-[96px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[8px] p-2.5 text-[12px] leading-relaxed text-[#1c1c21] outline-none resize-y focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all placeholder:text-[#85858d]"
                         placeholder="描述此流水线的业务目标与流转规则..."
                       />

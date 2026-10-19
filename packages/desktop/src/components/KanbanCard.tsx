@@ -220,7 +220,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
     e.stopPropagation();
     const wt = task.context?.worktree;
     if (!wt) return;
-    const targetUrl = wt.targetUrl || `http://localhost:${wt.webPort || 5175}`;
+    const targetUrl = wt.targetUrl || (wt.webPort ? `http://localhost:${wt.webPort}` : 'http://localhost');
 
     if (sandboxStatus === 'running') {
       if (import.meta.env?.DEV) console.log(`[KanbanCard:Sandbox] 打开靶机: ${targetUrl}`);

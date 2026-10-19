@@ -14,10 +14,12 @@ import {
   ListTodo,
   Clock,
   Search,
+  Loader2,
 } from 'lucide-react';
 import { WorkflowDefinition, NodeType, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { WorkspacePicker } from './WorkspacePicker';
 import { TaskPromptArea } from './TaskPromptArea';
+import { api } from '../services/api';
 
 const STORAGE_KEY_LAST_WORKFLOW = 'openloop_last_used_workflow_id';
 const STORAGE_KEY_RECENT_WORKFLOWS = 'openloop_recent_workflow_ids';
@@ -54,6 +56,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [description, setDescription] = useState('');
   const [acceptanceCriteria, setAcceptanceCriteria] = useState('');
   const [isCriteriaOpen, setIsCriteriaOpen] = useState(false);
+  const [isGeneratingQa, setIsGeneratingQa] = useState(false);
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [workflowId, setWorkflowId] = useState(workflows[0]?.id || '');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>(defaultColumn);
@@ -282,6 +285,46 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     );
   };
 
+  const handleGenerateQaPlan = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle || isGeneratingQa) return;
+
+    setIsGeneratingQa(true);
+    setIsCriteriaOpen(true);
+
+    const trimmedWorkspace = workspace.trim();
+    if (import.meta.env?.DEV) {
+      console.log('[CreateTaskModal:AI QA] 开始根据标题与说明智能生成验收用例:', {
+        title: trimmedTitle,
+        description: description.trim(),
+        workspace: trimmedWorkspace || undefined,
+      });
+    }
+
+    try {
+      const res = await api.generateQaPlan({
+        title: trimmedTitle,
+        description: description.trim() || undefined,
+        workspace: trimmedWorkspace || undefined,
+      });
+      if (res && res.text) {
+        setAcceptanceCriteria(res.text);
+        if (import.meta.env?.DEV) {
+          console.log('[CreateTaskModal:AI QA] 生成用例成功:', res);
+        }
+      }
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[CreateTaskModal:AI QA] 生成用例异常:', err);
+      }
+    } finally {
+      setIsGeneratingQa(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !workflowId) return;
@@ -299,6 +342,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         workflowId,
         kanbanColumn,
         workspace: trimmedWorkspace || '未指定(留空)',
+        acceptanceCriteria: acceptanceCriteria.trim() || undefined,
         autoRun,
       });
     }
@@ -587,28 +631,49 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
           {/* 验收预期 / UI 自动化测试用例 (可选折叠区域) */}
           <div className="border border-[#e3e3e8] rounded-[6px] bg-[#fafafc] overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setIsCriteriaOpen(!isCriteriaOpen)}
-              className="w-full px-3 py-1.5 flex items-center justify-between text-[11px] font-medium text-[#63636b] hover:text-[#1c1c21] transition-colors cursor-pointer select-none"
-            >
-              <div className="flex items-center gap-1.5">
-                <Target size={12} className="text-[#63636b]" />
-                <span>验收预期 / UI 自动化用例 (可选)</span>
+            <div className="w-full px-3 py-1.5 flex items-center justify-between text-[11px] font-medium text-[#63636b] select-none">
+              <div
+                onClick={() => setIsCriteriaOpen(!isCriteriaOpen)}
+                className="flex items-center gap-1.5 cursor-pointer hover:text-[#1c1c21] transition-colors flex-1 min-w-0"
+              >
+                <Target size={12} className="text-[#63636b] shrink-0" />
+                <span className="truncate">验收预期 / UI 自动化用例 (可选)</span>
                 {acceptanceCriteria.trim() && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#1c1c21]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#1c1c21] shrink-0" />
                 )}
               </div>
-              <ChevronDown
-                size={12}
-                className={`transition-transform duration-150 ${isCriteriaOpen ? 'rotate-180' : ''}`}
-              />
-            </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleGenerateQaPlan}
+                  disabled={isGeneratingQa || !title.trim()}
+                  className="h-[19px] px-2 rounded-[4px] bg-white hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] border border-[#e3e3e8] hover:border-[#c7d2fe] text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed select-none active:scale-95 shadow-2xs"
+                  title={!title.trim() ? '请先填写任务名称' : '根据标题与说明智能生成验收用例'}
+                >
+                  {isGeneratingQa ? (
+                    <Loader2 size={10} className="animate-spin text-[#4f46e5]" />
+                  ) : (
+                    <Sparkles size={10} className="text-[#4f46e5]" />
+                  )}
+                  <span>{isGeneratingQa ? 'AI 规划中...' : 'AI 规划用例'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCriteriaOpen(!isCriteriaOpen)}
+                  className="p-0.5 hover:text-[#1c1c21] transition-colors cursor-pointer"
+                >
+                  <ChevronDown
+                    size={12}
+                    className={`transition-transform duration-150 ${isCriteriaOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+              </div>
+            </div>
 
             {isCriteriaOpen && (
               <div className="p-2.5 pt-0 border-t border-[#f1f1f4] bg-white animate-in fade-in duration-100">
                 <p className="text-[10px] text-[#85858d] mb-1.5 leading-relaxed">
-                  每行一步操作或校验指令。若留空，Agent 完成后会自动输出用例并驱动浏览器执行。
+                  每行一步操作或校验指令。留空则运行期自动规划，也可点击右上角由 AI 预填草稿。
                 </p>
                 <textarea
                   value={acceptanceCriteria}

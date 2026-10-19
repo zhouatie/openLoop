@@ -213,7 +213,10 @@ export class SqliteStore {
         this.saveWorkflow(this.getFebaseDeployWorkflowDefinition());
       }
       // 检查并增量补齐内置 Worktree 隔离开发与视觉 QA 自动验收流水线
-      this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
+      const hasWorktreeWf = this.db.prepare('SELECT id FROM workflows WHERE id = ?').get('wf_worktree_auto_dev_qa_merge');
+      if (!hasWorktreeWf) {
+        this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
+      }
     }
 
     // 平滑补齐或迁移标签数据 (除了 FEBase 流水线保留「工作」tag 之外，其他流水线去掉「工作」tag)
@@ -494,6 +497,7 @@ export class SqliteStore {
           position: { x: 100, y: 150 },
           config: {
             allocatePorts: ['webPort'],
+            basePort: 5175,
             sharedPaths: ['node_modules', 'packages/*/node_modules'],
             timeoutSec: 120,
           },

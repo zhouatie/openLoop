@@ -13,7 +13,7 @@ import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
-import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
+import { WorktreeManager, TaskProcessManager, findRepoRoot } from '../worktree/worktree-manager';
 import { interpolateString } from '../executors';
 
 const serverLogger = createLogger('Server');
@@ -599,6 +599,21 @@ export class OpenLoopServer {
         if (context !== undefined) {
           existing.context = { ...existing.context, ...context };
         }
+        if (body.qaInstructions && Array.isArray(body.qaInstructions)) {
+          existing.context = {
+            ...(existing.context || {}),
+            qaInstructions: body.qaInstructions.map((s: any) => String(s).trim()).filter(Boolean),
+          };
+        } else if (body.acceptanceCriteria && typeof body.acceptanceCriteria === 'string') {
+          const steps = body.acceptanceCriteria
+            .split('\n')
+            .map((s: string) => s.replace(/^[-*•\d.]+\s*/, '').trim())
+            .filter(Boolean);
+          existing.context = {
+            ...(existing.context || {}),
+            qaInstructions: steps,
+          };
+        }
         if (kanbanColumn !== undefined) {
           existing.kanbanColumn = kanbanColumn;
           // 当卡片被移入已完成列 (done) 时，立即清理该任务的所有子进程与沙箱靶机
@@ -1036,41 +1051,44 @@ export class OpenLoopServer {
           return this.sendJson(res, 400, { error: `沙箱工作区目录不存在: ${worktreeDir}` }, reqMeta);
         }
         const port = task.context.worktree.webPort || task.context.worktree.ports?.webPort || 5175;
-        const targetUrl = task.context.worktree.targetUrl || `http://localhost:${port}`;
 
-        // 核心原则：全局永远只有一个活跃的验收沙箱！
-        // 在启动当前任务靶机前，先停止所有其他任务可能残留的靶机进程，独占释放端口
-        try {
-          const allTasks = this.store.getTasks();
-          for (const other of allTasks) {
-            if (other.id !== taskId) {
-              TaskProcessManager.stopAll(other.id);
-              if (other.context?.worktree?.webPort) {
-                WorktreeManager.getInstance().killPortIfBusy(other.context.worktree.webPort);
-              }
-              WorktreeManager.unregisterTaskPorts(other.id);
-            }
-          }
-        } catch {}
-
-        // 1. 安全清理属于当前任务工作区的残留旧进程，杜绝端口冲突
+        // 1. 安全清理属于当前任务工作区的残留旧进程，不影响其他并行任务沙箱
+        TaskProcessManager.stopAll(taskId);
         WorktreeManager.getInstance().killPortIfBusy(port, {
           allowWorktreeDir: worktreeDir,
           forTaskId: taskId,
         });
 
-        // 2. 获取命令：从任务工作流中查找 env-prepare 节点的 command 或默认启动
-        let cmd = `pnpm --filter @openloop/desktop dev --port ${port} --strictPort --host 0.0.0.0`;
+        // 2. 动态获取命令与配置：优先从流水线 env-prepare 编排节点提取
+        const ports = {
+          webPort: port,
+          ...(task.context.worktree.ports || {}),
+        };
         const wf = this.store.getWorkflow(task.workflowId);
         const envNode = wf?.nodes.find((n) => n.type === 'env-prepare');
+
+        let cmd = '';
         if (envNode?.config?.command) {
           cmd = interpolateString(envNode.config.command, {
             task,
-            ports: { webPort: port },
+            ports,
           });
+        } else {
+          cmd = `pnpm --filter @openloop/desktop dev --port ${port} --strictPort --host 0.0.0.0`;
+          serverLogger.warn(`[Sandbox:Start] 任务 ${taskId} 工作流未声明 env-prepare 节点命令，回退默认命令: ${cmd}`);
         }
 
-        serverLogger.info(`[Sandbox:Start] 为任务 ${taskId} 启动靶机服务: ${cmd} (目录: ${worktreeDir})`);
+        // 3. 探活地址与超时时间优先采用编排配置
+        let targetUrl = task.context.worktree.targetUrl || `http://localhost:${port}`;
+        if (envNode?.config?.healthUrl) {
+          targetUrl = interpolateString(envNode.config.healthUrl, {
+            task,
+            ports,
+          });
+        }
+        const warmupTimeoutMs = envNode?.config?.warmupTimeoutMs || 20000;
+
+        serverLogger.info(`[Sandbox:Start] 为任务 ${taskId} 启动靶机服务: ${cmd} (目录: ${worktreeDir}, 探活: ${targetUrl})`);
 
         const isUnix = process.platform !== 'win32';
         const child = spawn(cmd, {
@@ -1097,8 +1115,8 @@ export class OpenLoopServer {
           this.engine.log(taskId, 'node_env_prep', 'stderr', d.toString().trimEnd());
         });
 
-        // 3. 探活等待就绪 (最多 15 秒)
-        const isReady = await WorktreeManager.getInstance().waitForHttpReady(targetUrl, 15000);
+        // 4. 探活等待就绪
+        const isReady = await WorktreeManager.getInstance().waitForHttpReady(targetUrl, warmupTimeoutMs);
         if (isReady) {
           serverLogger.info(`[Sandbox:Start] ✔ 任务 ${taskId} 靶机服务已就绪 (${targetUrl})`);
           return this.sendJson(
@@ -1143,7 +1161,9 @@ export class OpenLoopServer {
           }
           WorktreeManager.unregisterTaskPorts(t.id);
         }
-        WorktreeManager.getInstance().killPortIfBusy(5175);
+        for (const p of WorktreeManager.getInstance().getBusyOrReservedPorts()) {
+          WorktreeManager.getInstance().killPortIfBusy(p);
+        }
         return this.sendJson(res, 200, { success: true, message: '全局沙箱与端口已全部清空' }, reqMeta);
       }
 
@@ -1184,6 +1204,131 @@ export class OpenLoopServer {
         serverLogger.info(`[Settings:Update] 更新全局配置`, { keys: Object.keys(body) });
         const updated = this.store.updateSettings(body);
         return this.sendJson(res, 200, updated, reqMeta);
+      }
+
+      // AI QA Plan Generation: /api/qa/generate-plan
+      if (pathname === '/api/qa/generate-plan' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const title = (body.title || '').trim();
+        const description = (body.description || '').trim();
+        const workspace = body.workspace ? String(body.workspace).trim() : undefined;
+
+        if (!title) {
+          return this.sendJson(res, 400, { error: '任务标题不可为空' }, reqMeta);
+        }
+
+        serverLogger.info(`[QA:GeneratePlan] 接收到 AI 验收用例规划请求: "${title}"`, { description, workspace }, reqMeta);
+
+        const settings = this.store.getSettings();
+        const repoRoot = findRepoRoot(workspace || process.cwd());
+        const cwd = workspace || repoRoot;
+
+        const rolePrompt = `你是一名资深质量工程师（QA Engineer），负责对产品需求进行纯黑盒端到端自动化测试设计。
+
+【输入需求】
+- 任务标题: ${title}
+- 详细说明: ${description || '无'}
+
+【测试设计原则】
+1. 需求驱动（黑盒视角）：严格依据上述需求设计操作路径与预期结果，关注最终用户可见的界面功能与业务逻辑，不考虑底层实现细节；
+2. 适量精炼（严格 3~4 步）：步骤数量控制在 3~4 步，覆盖核心端到端冒烟链路，坚决避免冗长繁琐；
+3. 典型结构：
+   - 步骤 1：导航/进入需求涉及的功能页面或模块（如：点击左侧导航「xxx」进入对应模块）
+   - 步骤 2：执行需求的核心交互或状态操作
+   - 步骤 3：断言检查符合需求预期的界面关键渲染或反馈效果
+   - 步骤 4：校验界面正常无报错与异常提示；
+4. 语言明确易执行：采用明确的动词（点击「xxx」、输入「xxx」）与断言（检查「xxx」、校验「xxx」）；严禁编造需要外部复杂模拟的不可达伪步骤。
+
+【输出格式】
+请直接输出用例清单块（注意每行以 - 开头），无需多余客套：
+\`\`\`qa-plan
+- 点击导航「xxx」进入目标页面
+- 执行核心操作「xxx」
+- 检查界面出现符合需求预期的「xxx」
+- 校验页面正常无报错与异常提示
+\`\`\``;
+
+        const tempTaskId = `qa_plan_modal_${Date.now()}`;
+        const sessionId = `session_qa_plan_${Date.now()}`;
+
+        try {
+          const steps = await new Promise<string[]>((resolve, reject) => {
+            const timeoutTimer = setTimeout(() => {
+              cleanup();
+              reject(new Error('AI 生成用例超时'));
+            }, 30000);
+
+            const cleanup = () => {
+              clearTimeout(timeoutTimer);
+              PiRpcSessionManager.getInstance().removeSession(tempTaskId);
+            };
+
+            const session = PiRpcSessionManager.getInstance().createSession({
+              taskId: tempTaskId,
+              taskTitle: `[QA 快速规划] ${title}`,
+              sessionId,
+              agentName: '资深 QA 工程师',
+              model: settings.piModel,
+              thinking: 'off',
+              cwd,
+              initialPrompt: rolePrompt,
+              onFinished: (error) => {
+                cleanup();
+                if (error) {
+                  return reject(new Error(error));
+                }
+                try {
+                  const state = session.getState();
+                  const lastMsg = [...state.messages].reverse().find((m) => m.role === 'assistant');
+                  const content = lastMsg?.content || '';
+                  const match = content.match(/```qa-plan\s*([\s\S]*?)\s*```/i);
+                  let parsedSteps: string[] = [];
+                  if (match && match[1]) {
+                    parsedSteps = match[1]
+                      .split('\n')
+                      .map((l) => l.replace(/^[-*•\d.]+\s*/, '').trim())
+                      .filter((l) => Boolean(l) && !l.startsWith('//') && !l.startsWith('#'));
+                  }
+                  parsedSteps = parsedSteps
+                    .filter((s) => !s.includes('模拟') && !s.includes('等待后台推送'))
+                    .slice(0, 4);
+
+                  if (parsedSteps.length === 0) {
+                    parsedSteps = [
+                      `打开并进入相关功能界面`,
+                      `触发需求核心操作并检查响应`,
+                      `校验界面数据与状态更新正常`,
+                      `校验页面渲染正常无报错`,
+                    ];
+                  }
+                  resolve(parsedSteps);
+                } catch (e: any) {
+                  reject(e);
+                }
+              },
+            });
+          });
+
+          return this.sendJson(res, 200, {
+            success: true,
+            steps,
+            text: steps.join('\n'),
+          }, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[QA:GeneratePlan] 生成失败: ${err.message}`, err, reqMeta);
+          const fallbackSteps = [
+            `进入与「${title.slice(0, 15)}」相关的界面`,
+            `执行核心功能操作`,
+            `检查界面按预期更新渲染`,
+            `校验页面无报错与异常提示`,
+          ];
+          return this.sendJson(res, 200, {
+            success: true,
+            steps: fallbackSteps,
+            text: fallbackSteps.join('\n'),
+            fallback: true,
+          }, reqMeta);
+        }
       }
 
       // QA Automation Suites: /api/qa/suites

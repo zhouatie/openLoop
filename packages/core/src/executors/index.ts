@@ -525,6 +525,39 @@ export class QaPlannerExecutor implements NodeExecutor {
     const { task, node, emitLog, settings = {} } = ctx;
     emitLog('system', `>>> 开始执行节点 [${node.name || 'QA 黑盒用例设计'}] (qa-planner)`);
 
+    // 优先复用人工预设验收用例：若创建任务时已配置，直接复用并跳过 AI 规划
+    if (Array.isArray(task.context?.qaInstructions) && task.context.qaInstructions.length > 0) {
+      const steps = task.context.qaInstructions;
+      if (!task.context.qaPlan) {
+        task.context.qaPlan = {
+          role: '人工预设用例 (任务配置)',
+          createdAt: Date.now(),
+          steps,
+        };
+      }
+      if (ctx.store) {
+        ctx.store.saveTask(task);
+      }
+      executorLogger.info(
+        `[QA 黑盒用例设计] 命中人工预设用例 (${steps.length} 步)，跳过 AI 规划`,
+        { steps },
+        { taskId: task.id, nodeId: node.id }
+      );
+      emitLog(
+        'system',
+        `[QA 黑盒用例设计] ✔ 检测到任务已预设验收用例 (${steps.length} 步)，跳过 AI 规划直接采用:\n${steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
+      );
+      return {
+        status: 'success',
+        exitCode: 0,
+        output: {
+          qaInstructions: steps,
+          stepsCount: steps.length,
+          preset: true,
+        },
+      };
+    }
+
     const title = task.title || '功能需求';
     const description = task.description || '';
 
@@ -1164,6 +1197,8 @@ export class WorktreeSetupExecutor implements NodeExecutor {
       const wtInfo = await wtManager.createWorktree(repoRoot, task.id, task.title, {
         sharedPaths,
         portKeys,
+        basePort: node.config.basePort,
+        portBases: node.config.portBases,
       });
 
       // 将任务物理工作空间无缝切换为隔离的 worktree 目录

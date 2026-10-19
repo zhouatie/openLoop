@@ -39,6 +39,8 @@ export interface NodeConfig {
   // 沙箱隔离 (worktree-setup) 专用
   sharedPaths?: string[];   // 需要软链共享的相对路径列表，默认 ['node_modules']
   allocatePorts?: string[]; // 需要动态分配并注入的端口变量名，例如 ['webPort', 'corePort']
+  basePort?: number;        // 动态分配起始基准端口（如 3000, 5173, 8080），默认 5175
+  portBases?: Record<string, number>; // 针对具体端口变量名的起始基准端口字典，如 { webPort: 3000, corePort: 19890 }
 
   // Midscene 自动化测试专用
   platform?: 'web' | 'android' | 'ios' | 'desktop';
