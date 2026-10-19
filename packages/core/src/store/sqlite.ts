@@ -216,34 +216,72 @@ export class SqliteStore {
       this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
     }
 
-    // 平滑补齐或迁移标签数据 (针对已有库中内置工作流或缺少 tags_json 的工作流)
+    // 平滑补齐或迁移标签数据 (除了 FEBase 流水线保留「工作」tag 之外，其他流水线去掉「工作」tag)
     try {
       const defaultTagMap: Record<string, string[]> = {
-        wf_agent_feature_dev: ['工作', '研发', 'AI Agent'],
+        wf_agent_feature_dev: ['研发', 'AI Agent'],
         wf_febase_app_deploy: ['工作', '部署', 'FEBase'],
-        wf_worktree_auto_dev_qa_merge: ['工作', '研发', '沙箱', 'QA'],
-        wf_app_build_deploy: ['工作', '部署', '构建', 'CI/CD'],
-        wf_auto_dev_qa: ['工作', '研发', '测试', 'AI Agent'],
+        wf_worktree_auto_dev_qa_merge: ['研发', '沙箱', 'QA'],
+        wf_app_build_deploy: ['部署', '构建', 'CI/CD'],
+        wf_auto_dev_qa: ['研发', '测试', 'AI Agent'],
       };
-      const rows = this.db.prepare('SELECT id, tags_json, variables_json FROM workflows').all() as any[];
-      const updateStmt = this.db.prepare('UPDATE workflows SET tags_json = ? WHERE id = ?');
+      const rows = this.db.prepare('SELECT id, name, tags_json, variables_json FROM workflows').all() as any[];
+      const updateStmt = this.db.prepare('UPDATE workflows SET tags_json = ?, variables_json = ? WHERE id = ?');
       for (const row of rows) {
-        if (!row.tags_json || row.tags_json === '[]') {
-          let tags: string[] = [];
-          if (row.variables_json) {
-            try {
-              const vars = JSON.parse(row.variables_json);
-              if (Array.isArray(vars.tags) && vars.tags.length > 0) {
-                tags = vars.tags;
-              }
-            } catch {}
+        let tags: string[] = [];
+        let hasTagsSource = false;
+        if (row.tags_json) {
+          try {
+            const parsed = JSON.parse(row.tags_json);
+            if (Array.isArray(parsed)) {
+              tags = parsed;
+              hasTagsSource = true;
+            }
+          } catch {}
+        }
+        if (!hasTagsSource && row.variables_json) {
+          try {
+            const vars = JSON.parse(row.variables_json);
+            if (Array.isArray(vars.tags) && vars.tags.length > 0) {
+              tags = vars.tags;
+              hasTagsSource = true;
+            }
+          } catch {}
+        }
+        if (!hasTagsSource && defaultTagMap[row.id]) {
+          tags = defaultTagMap[row.id];
+          hasTagsSource = true;
+        }
+
+        // 业务规则：除了 FEBase 流水线需要工作 tag 之外，其他的流水线去掉工作 tag
+        const isFebase =
+          row.id === 'wf_febase_app_deploy' ||
+          (typeof row.name === 'string' && row.name.toLowerCase().includes('febase'));
+
+        if (isFebase) {
+          if (!tags.includes('工作')) {
+            tags = ['工作', ...tags];
           }
-          if (tags.length === 0 && defaultTagMap[row.id]) {
-            tags = defaultTagMap[row.id];
+        } else {
+          if (tags.includes('工作')) {
+            tags = tags.filter((t) => t !== '工作');
           }
-          if (tags.length > 0) {
-            updateStmt.run(JSON.stringify(tags), row.id);
-          }
+        }
+
+        let varsObj: any = null;
+        if (row.variables_json) {
+          try {
+            varsObj = JSON.parse(row.variables_json);
+          } catch {}
+        }
+        if (varsObj && typeof varsObj === 'object') {
+          varsObj.tags = tags;
+        }
+
+        const newTagsJson = JSON.stringify(tags);
+        const newVarsJson = varsObj ? JSON.stringify(varsObj) : row.variables_json;
+        if (newTagsJson !== row.tags_json || newVarsJson !== row.variables_json) {
+          updateStmt.run(newTagsJson, newVarsJson, row.id);
         }
       }
     } catch {
@@ -372,7 +410,7 @@ export class SqliteStore {
       id: 'wf_app_build_deploy',
       name: '全自动化应用构建与部署流水线',
       description: '通用应用部署流水线：环境自检 -> 生产全量构建 -> 应用部署发布 -> 线上健康探针 -> 发布上线验收门禁',
-      tags: ['工作', '部署', '构建', 'CI/CD'],
+      tags: ['部署', '构建', 'CI/CD'],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -445,7 +483,7 @@ export class SqliteStore {
       id: 'wf_worktree_auto_dev_qa_merge',
       name: 'Worktree 隔离开发与视觉 QA 自动验收流水线',
       description: '端到端全闭环研发流水线：根据需求创建 Git Worktree 与独立端口靶机，Agent 隔离编写代码，Playwright 真实浏览器 UI 自动化截帧，查看连贯截图回放验收通过后自动合并到开发分支并清理沙箱',
-      tags: ['工作', '研发', '沙箱', 'QA'],
+      tags: ['研发', '沙箱', 'QA'],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -559,7 +597,7 @@ export class SqliteStore {
       id: 'wf_agent_feature_dev',
       name: '通用研发流水线',
       description: '通用智能体敏捷开发流程：AI 智能体根据需求修改代码，执行前端构建自检，经由 QA 人工验收门禁确认',
-      tags: ['工作', '研发', 'AI Agent'],
+      tags: ['研发', 'AI Agent'],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
@@ -620,7 +658,7 @@ export class SqliteStore {
       id: 'wf_auto_dev_qa',
       name: 'Agent开发与Midscene自动化测试验证流水线',
       description: '触发 Agent 进行功能开发，完成后调用 Midscene 自动 UI 测试并截屏，拼接动图后流转到 QA 审核',
-      tags: ['工作', '研发', '测试', 'AI Agent'],
+      tags: ['研发', '测试', 'AI Agent'],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       nodes: [
