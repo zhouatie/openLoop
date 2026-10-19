@@ -463,27 +463,45 @@ export class DagEngine extends EventEmitter {
    * 检查工作流是否所有节点均已达到终态 (全部完成或按分支跳过)
    */
   private checkWorkflowCompletion(task: Task, workflow: WorkflowDefinition): boolean {
+    const runs = Object.values(task.nodeRuns || {});
+    const hasRunning = runs.some((r) => r.status === 'running');
+    const hasWaiting = runs.some((r) => r.status === 'waiting_approval');
+
+    // 若仍有并发节点正在执行或等待人工审核，流水线未完成
+    if (hasRunning || hasWaiting) {
+      return false;
+    }
+
+    // 容错处理：若流水线在执行过程中被动态修改模板增加了节点，或存在未激活的孤立分支，
+    // 检查所有未曾执行过的节点。若当前已无活跃节点能到达它们，自动标记为 skipped
+    for (const node of workflow.nodes) {
+      if (!task.nodeRuns[node.id]) {
+        task.nodeRuns[node.id] = {
+          nodeId: node.id,
+          status: 'skipped',
+          output: { reason: '未激活分支或模板变更自动跳过' },
+        };
+      }
+    }
+
     const allResolved = workflow.nodes.every((n) => {
       const nr = task.nodeRuns[n.id];
       return nr && (nr.status === 'success' || nr.status === 'skipped');
     });
 
     if (allResolved) {
-      const runs = Object.values(task.nodeRuns || {});
-      const hasFailed = runs.some((r) => r.status === 'failed');
-      const hasWaiting = runs.some((r) => r.status === 'waiting_approval');
+      const allRuns = Object.values(task.nodeRuns || {});
+      const hasFailed = allRuns.some((r) => r.status === 'failed');
       if (hasFailed) {
         this.runningTasks.delete(task.id);
         this.abortControllers.delete(task.id);
         this.activeProcesses.delete(task.id);
         task.status = 'failed';
         task.kanbanColumn = 'backlog';
-      } else if (hasWaiting) {
-        task.status = 'waiting_approval';
-        task.kanbanColumn = 'qa_review';
       } else {
         task.status = 'completed';
         task.kanbanColumn = 'done';
+        task.currentNodeId = undefined;
         this.runningTasks.delete(task.id);
         this.abortControllers.delete(task.id);
         this.activeProcesses.delete(task.id);

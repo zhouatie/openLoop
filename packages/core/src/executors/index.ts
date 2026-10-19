@@ -349,8 +349,6 @@ export class AgentExecutor implements NodeExecutor {
         prompt = `任务需求: ${task.title}\n详细说明: ${task.description || '无详细说明'}\n\n执行要求:\n${prompt}`;
       }
 
-      prompt += `\n\n【自动化验收用例建议规范】\n如果你修改了前端页面、交互控件、路由或视觉样式，请在最终总结末尾附上推荐的浏览器自动化操作与断言步骤（系统流水线将驱动多模态视觉引擎执行测试与截帧验收）：\n\`\`\`qa-plan\n- 点击左侧菜单「目标菜单名」\n- 检查关键组件渲染与交互状态\n- 校验页面无报错与异常提示\n\`\`\``;
-
       // 若任务附带图片附件，注入本地物理文件路径提示，使 Agent 能够直接通过文件工具进行多模态视觉感知
       if (task.attachments && task.attachments.length > 0) {
         const attList = task.attachments
@@ -446,26 +444,6 @@ export class AgentExecutor implements NodeExecutor {
                 error: finalError,
               });
             } else {
-              // 自动从 Agent 最终回复中提取规划的 QA 自动化用例
-              try {
-                const state = session.getState();
-                const lastAssistantMsg = [...state.messages].reverse().find((m) => m.role === 'assistant');
-                if (lastAssistantMsg && lastAssistantMsg.content) {
-                  const match = lastAssistantMsg.content.match(/```qa-plan\s*([\s\S]*?)\s*```/i);
-                  if (match && match[1]) {
-                    const steps = match[1]
-                      .split('\n')
-                      .map((l) => l.replace(/^[-*•\d.]+\s*/, '').trim())
-                      .filter(Boolean);
-                    if (steps.length > 0) {
-                      if (!task.context) task.context = {};
-                      task.context.qaInstructions = steps;
-                      emitLog('system', `[智能 QA 规划] 捕获到 Agent 输出的专属验收用例 (${steps.length} 步):\n${steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`);
-                    }
-                  }
-                }
-              } catch {}
-
               finish({
                 status: 'success',
                 exitCode: 0,
@@ -473,7 +451,6 @@ export class AgentExecutor implements NodeExecutor {
                   agentProvider: 'pi',
                   piSessionId: sessionId,
                   resumeCommand: `pi --session ${sessionId}`,
-                  qaInstructions: task.context?.qaInstructions,
                 },
               });
             }
@@ -538,6 +515,182 @@ export class HookExecutor implements NodeExecutor {
     }
 
     return this.cliExecutor.execute(ctx);
+  }
+}
+
+// 资深 QA 工程师黑盒自动化测试用例设计执行器 (qa-planner 节点)
+// 职责：基于产品需求纯黑盒视角，设计适量精炼（3~4步）的端到端自动化验收步骤，彻底解耦 Coder Agent
+export class QaPlannerExecutor implements NodeExecutor {
+  async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
+    const { task, node, emitLog, settings = {} } = ctx;
+    emitLog('system', `>>> 开始执行节点 [${node.name || 'QA 黑盒用例设计'}] (qa-planner)`);
+
+    const title = task.title || '功能需求';
+    const description = task.description || '';
+
+    emitLog('system', `[QA 黑盒用例设计] 正在以资深质量工程师视角，根据需求规划端到端验收用例...`);
+
+    const rolePrompt = `你是一名资深质量工程师（QA Engineer），负责对产品需求进行纯黑盒端到端自动化测试设计。
+
+【输入需求】
+- 任务标题: ${title}
+- 详细说明: ${description || '无'}
+
+【测试设计原则】
+1. 需求驱动（黑盒视角）：严格依据上述需求设计操作路径与预期结果，关注最终用户可见的界面功能与业务逻辑，不考虑底层实现细节；
+2. 适量精炼（严格 3~4 步）：步骤数量控制在 3~4 步，覆盖核心端到端冒烟链路，坚决避免冗长繁琐；
+3. 典型结构：
+   - 步骤 1：导航/进入需求涉及的功能页面或模块（如：点击左侧导航「xxx」进入对应模块）
+   - 步骤 2：执行需求的核心交互或状态操作
+   - 步骤 3：断言检查符合需求预期的界面关键渲染或反馈效果
+   - 步骤 4：校验界面正常无报错与异常提示；
+4. 语言明确易执行：采用明确的动词（点击「xxx」、输入「xxx」）与断言（检查「xxx」、校验「xxx」）；严禁编造需要外部复杂模拟的不可达伪步骤。
+
+【输出格式】
+请直接输出用例清单块（注意每行以 - 开头），无需多余客套：
+\`\`\`qa-plan
+- 点击导航「xxx」进入目标页面
+- 执行核心操作「xxx」
+- 检查界面出现符合需求预期的「xxx」
+- 校验页面正常无报错与异常提示
+\`\`\``;
+
+    // 确定工作目录
+    const repoRoot = findRepoRoot(
+      node.config?.cwd ||
+      (task.context?.worktree ? task.context.worktree.worktreeDir : undefined)
+    );
+    const cwd = task.context?.worktree?.worktreeDir || task.workspace || repoRoot;
+
+    // 创建专属 QA 规划会话
+    const qaSessionId = `qa_plan_${task.id}`;
+
+    return new Promise<ExecutionResult>((resolve) => {
+      let settled = false;
+      const finish = (res: ExecutionResult) => {
+        if (settled) return;
+        settled = true;
+        resolve(res);
+      };
+
+      try {
+        const session = PiRpcSessionManager.getInstance().createSession({
+          taskId: `${task.id}_qa`,
+          taskTitle: `[QA 用例设计] ${title}`,
+          sessionId: qaSessionId,
+          agentName: '资深 QA 工程师',
+          model: settings.piModel,
+          thinking: 'off', // QA 规划用例无需长思考，极速产出
+          cwd,
+          initialPrompt: rolePrompt,
+          onLog: (type, text) => {
+            if (type === 'stdout' || type === 'system') {
+              emitLog('stdout', text);
+            }
+          },
+          onFinished: (error) => {
+            if (error) {
+              emitLog('stderr', `[QA 用例设计 异常] ${error}，启用平台通用默认冒烟用例`);
+              this.applyFallbackInstructions(task, emitLog);
+              finish({
+                status: 'success',
+                exitCode: 0,
+                output: { fallback: true, qaInstructions: task.context?.qaInstructions },
+              });
+              return;
+            }
+
+            try {
+              const state = session.getState();
+              const lastMsg = [...state.messages].reverse().find((m) => m.role === 'assistant');
+              const content = lastMsg?.content || '';
+
+              const match = content.match(/```qa-plan\s*([\s\S]*?)\s*```/i);
+              let steps: string[] = [];
+              if (match && match[1]) {
+                steps = match[1]
+                  .split('\n')
+                  .map((l) => l.replace(/^[-*•\d.]+\s*/, '').trim())
+                  .filter((l) => Boolean(l) && !l.startsWith('//') && !l.startsWith('#'));
+              }
+
+              // 清洗步骤：剔除空行和过度复杂的模拟项，最多保留 4 步
+              steps = steps
+                .filter((s) => !s.includes('模拟') && !s.includes('等待后台推送'))
+                .slice(0, 4);
+
+              // 兜底保障
+              if (steps.length === 0) {
+                this.applyFallbackInstructions(task, emitLog);
+              } else {
+                if (!task.context) task.context = {};
+                task.context.qaInstructions = steps;
+                task.context.qaPlan = {
+                  role: '资深 QA 工程师 (黑盒测试)',
+                  createdAt: Date.now(),
+                  steps,
+                };
+                emitLog(
+                  'system',
+                  `[QA 黑盒用例设计] ✔ 资深 QA 专家成功设计 ${steps.length} 步核心端到端验收用例:\n${steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
+                );
+              }
+
+              if (ctx.store) {
+                ctx.store.saveTask(task);
+              }
+
+              finish({
+                status: 'success',
+                exitCode: 0,
+                output: {
+                  qaInstructions: task.context?.qaInstructions,
+                  stepsCount: task.context?.qaInstructions?.length || 0,
+                },
+              });
+            } catch (err: any) {
+              this.applyFallbackInstructions(task, emitLog);
+              finish({
+                status: 'success',
+                exitCode: 0,
+                output: { fallback: true, error: err.message },
+              });
+            }
+          },
+        });
+
+        if (ctx.abortSignal) {
+          ctx.abortSignal.addEventListener('abort', () => {
+            session.terminate();
+            finish({ status: 'failed', exitCode: 1, error: 'QA 规划已手动取消' });
+          });
+        }
+      } catch (e: any) {
+        emitLog('stderr', `[QA 用例设计 启动失败] ${e.message}，使用兜底通用用例`);
+        this.applyFallbackInstructions(task, emitLog);
+        finish({
+          status: 'success',
+          exitCode: 0,
+          output: { fallback: true, qaInstructions: task.context?.qaInstructions },
+        });
+      }
+    });
+  }
+
+  private applyFallbackInstructions(task: any, emitLog: (stream: any, text: string) => void) {
+    const fallbackSteps = [
+      '等待页面加载并处于就绪状态',
+      '检查关键主视觉元素正常渲染',
+      '校验页面无报错与异常提示',
+    ];
+    if (!task.context) task.context = {};
+    task.context.qaInstructions = fallbackSteps;
+    task.context.qaPlan = {
+      role: '资深 QA 工程师 (通用兜底)',
+      createdAt: Date.now(),
+      steps: fallbackSteps,
+    };
+    emitLog('system', `[QA 黑盒用例设计] 载入通用黑盒冒烟用例 (${fallbackSteps.length} 步)`);
   }
 }
 
@@ -1217,6 +1370,7 @@ export class ExecutorRegistry {
     this.register('midscene', new MidsceneExecutor());
     this.register('stitch-image', new StitchImageExecutor());
     this.register('qa-approval', new QaApprovalExecutor());
+    this.register('qa-planner', new QaPlannerExecutor());
     this.register('worktree-setup', new WorktreeSetupExecutor());
     this.register('worktree-merge', new WorktreeMergeExecutor());
     this.register('worktree-cleanup', new WorktreeCleanupExecutor());

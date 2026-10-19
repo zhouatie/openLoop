@@ -42,6 +42,7 @@ import {
   Loader2,
   ZoomIn,
   FlaskConical,
+  ClipboardCheck,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage, TaskAttachment } from '@openloop/core';
 import { api } from '../services/api';
@@ -156,6 +157,15 @@ const getRunningNodeVisual = (type?: string): RunningNodeVisual => {
         badgeBorder: 'border-[#a7f3d0]',
         pingColor: 'bg-[#10b981]',
         icon: Cpu,
+      };
+    case 'qa-planner':
+      return {
+        label: 'QA 用例设计',
+        badgeBg: 'bg-[#fdf4ff]',
+        badgeText: 'text-[#a21caf]',
+        badgeBorder: 'border-[#f5d0fe]',
+        pingColor: 'bg-[#c026d3]',
+        icon: ClipboardCheck,
       };
     case 'worktree-setup':
       return {
@@ -1600,7 +1610,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           : null;
                         const nodeRuns = Object.values(task.nodeRuns || {});
                         const isCompleted = task.status === 'completed';
-                        const completedCount = nodeRuns.filter((r) => r.status === 'success').length;
+                        const completedCount = nodeRuns.filter((r) => r.status === 'success' || r.status === 'skipped').length;
                         const totalNodes = wf?.nodes.length || completedCount || 1;
                         const displayTotal = Math.max(totalNodes, completedCount);
                         const displayCompleted = isCompleted ? displayTotal : completedCount;

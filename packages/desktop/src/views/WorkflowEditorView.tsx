@@ -62,6 +62,7 @@ import {
   RotateCcw,
   SkipForward,
   Bug,
+  ClipboardCheck,
   Cpu,
 } from 'lucide-react';
 import {
@@ -149,6 +150,13 @@ const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
       bg: 'bg-[#ecfdf5]',
       text: 'text-[#047857]',
       border: 'border-[#a7f3d0]',
+    },
+    'qa-planner': {
+      label: 'QA 用例设计',
+      icon: <ClipboardCheck size={12} strokeWidth={2} />,
+      bg: 'bg-[#fdf4ff]',
+      text: 'text-[#a21caf]',
+      border: 'border-[#f5d0fe]',
     },
     'worktree-setup': {
       label: '沙箱隔离',

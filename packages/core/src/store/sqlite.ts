@@ -462,7 +462,7 @@ export class SqliteStore {
         },
         {
           id: 'node_agent_coder',
-          name: '2. AI Agent 隔离编码实现',
+          name: '2. AI 开发者隔离编码实现',
           type: 'agent',
           position: { x: 380, y: 150 },
           config: {
@@ -472,10 +472,19 @@ export class SqliteStore {
           },
         },
         {
-          id: 'node_env_prep',
-          name: '3. 测试现场准备与服务就绪',
-          type: 'env-prepare',
+          id: 'node_qa_plan',
+          name: '3. QA 黑盒验收用例设计',
+          type: 'qa-planner',
           position: { x: 660, y: 150 },
+          config: {
+            timeoutSec: 60,
+          },
+        },
+        {
+          id: 'node_env_prep',
+          name: '4. 测试现场准备与服务就绪',
+          type: 'env-prepare',
+          position: { x: 940, y: 150 },
           config: {
             command: 'pnpm --filter @openloop/desktop dev --port {{ports.webPort}} --strictPort --host 0.0.0.0',
             healthUrl: 'http://127.0.0.1:{{ports.webPort}}',
@@ -487,9 +496,9 @@ export class SqliteStore {
         },
         {
           id: 'node_qa_test',
-          name: '4. 自动化测试执行与视觉截帧',
+          name: '5. 自动化测试执行与视觉截帧',
           type: 'midscene',
-          position: { x: 940, y: 150 },
+          position: { x: 1220, y: 150 },
           config: {
             platform: 'web',
             instructions: [
@@ -502,9 +511,9 @@ export class SqliteStore {
         },
         {
           id: 'node_qa_gate',
-          name: '5. 视觉操作回放与验收门禁',
+          name: '6. 视觉操作回放与验收门禁',
           type: 'qa-approval',
-          position: { x: 1220, y: 150 },
+          position: { x: 1500, y: 150 },
           config: {
             approvalPrompt: '请查看 UI 自动化截帧序列回放与变更统计，确认效果无误后点击【验收通过并合并】',
             checklist: [
@@ -516,18 +525,18 @@ export class SqliteStore {
         },
         {
           id: 'node_wt_merge',
-          name: '6. 自动合并代码分支',
+          name: '7. 自动合并代码分支',
           type: 'worktree-merge',
-          position: { x: 1500, y: 150 },
+          position: { x: 1780, y: 150 },
           config: {
             timeoutSec: 60,
           },
         },
         {
           id: 'node_wt_cleanup',
-          name: '7. 环境释放与沙箱清理',
+          name: '8. 环境释放与沙箱清理',
           type: 'worktree-cleanup',
-          position: { x: 1780, y: 150 },
+          position: { x: 2060, y: 150 },
           config: {
             timeoutSec: 60,
           },
@@ -535,7 +544,8 @@ export class SqliteStore {
       ],
       edges: [
         { id: 'e_wt_to_agent', source: 'node_wt_setup', target: 'node_agent_coder' },
-        { id: 'e_agent_to_prep', source: 'node_agent_coder', target: 'node_env_prep' },
+        { id: 'e_agent_to_qaplan', source: 'node_agent_coder', target: 'node_qa_plan' },
+        { id: 'e_qaplan_to_prep', source: 'node_qa_plan', target: 'node_env_prep' },
         { id: 'e_prep_to_qa', source: 'node_env_prep', target: 'node_qa_test' },
         { id: 'e_qa_to_gate', source: 'node_qa_test', target: 'node_qa_gate' },
         { id: 'e_gate_to_merge', source: 'node_qa_gate', target: 'node_wt_merge' },

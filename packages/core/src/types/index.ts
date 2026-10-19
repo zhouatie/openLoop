@@ -7,6 +7,7 @@ export type KanbanColumn = 'inbox' | 'backlog' | 'in_progress' | 'agent_executin
 export type NodeType = 
   | 'cli'             // 通用 CLI 脚本执行
   | 'agent'           // AI Agent 调用
+  | 'qa-planner'      // 资深 QA 工程师黑盒用例设计
   | 'midscene'        // Midscene 自动化 UI 测试
   | 'stitch-image'    // 拼接截图与生成动图
   | 'hook'            // Webhook / 触发器
