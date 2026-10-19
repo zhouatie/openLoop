@@ -407,17 +407,27 @@ export class DesktopApiService {
     return requestJson<TaskSessionState>(`${BASE_URL}/api/tasks/${taskId}/session`);
   }
 
-  async sendTaskChatMessage(taskId: string, message: string, attachments?: TaskAttachment[]): Promise<any> {
+  async sendTaskChatMessage(
+    taskId: string,
+    message: string,
+    attachments?: TaskAttachment[],
+    options?: { includeQaArtifacts?: boolean }
+  ): Promise<any> {
     if (import.meta.env?.DEV) {
       console.log(`[UI:API] 发送任务会话消息 (${taskId}):`, {
         message: message ? message.slice(0, 40) : '',
         attachmentsCount: attachments?.length || 0,
+        includeQaArtifacts: !!options?.includeQaArtifacts,
       });
     }
     return requestJson<any>(`${BASE_URL}/api/tasks/${taskId}/session/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, attachments }),
+      body: JSON.stringify({
+        message,
+        attachments,
+        includeQaArtifacts: options?.includeQaArtifacts ?? false,
+      }),
     });
   }
 
