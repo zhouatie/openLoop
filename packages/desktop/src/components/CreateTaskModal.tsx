@@ -16,6 +16,9 @@ import {
   Search,
   Loader2,
   Plus,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
 } from 'lucide-react';
 import type { WorkflowDefinition, NodeType, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { WorkflowRecommender } from '../utils/workflowRecommender';
@@ -29,6 +32,15 @@ const STORAGE_KEY_RECENT_WORKFLOWS = 'openloop_recent_workflow_ids';
 const STORAGE_KEY_LAST_WORKSPACE = 'openloop_last_used_workspace';
 const MAX_RECENT_COUNT = 3;
 
+/** 将多行验收预期文本解析为纯净的用例步骤列表（自动剥离各类 markdown checkbox/序号前缀） */
+const parseCriteriaText = (text: string): string[] => {
+  if (!text) return [];
+  return text
+    .split('\n')
+    .map((line) => line.replace(/^[-*•\d.]+\s*(\[[ xX]\]\s*)?/, '').trim())
+    .filter(Boolean);
+};
+
 interface CreateTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -40,6 +52,7 @@ interface CreateTaskModalProps {
     workflowId: string;
     description: string;
     acceptanceCriteria?: string;
+    qaInstructions?: string[];
     autoRun: boolean;
     kanbanColumn?: KanbanColumn;
     workspace?: string;
@@ -62,9 +75,11 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [acceptanceCriteria, setAcceptanceCriteria] = useState('');
+  const [criteriaList, setCriteriaList] = useState<string[]>([]);
   const [isCriteriaOpen, setIsCriteriaOpen] = useState(false);
   const [isGeneratingQa, setIsGeneratingQa] = useState(false);
+  const focusIndexRef = useRef<number | null>(null);
+  const criteriaInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [workflowId, setWorkflowId] = useState(workflows[0]?.id || '');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>(defaultColumn);
@@ -175,13 +190,25 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     if (!isOpen) {
       setTitle('');
       setDescription('');
-      setAcceptanceCriteria('');
+      setCriteriaList([]);
       setIsCriteriaOpen(false);
       setAttachments([]);
       setWorkflowSearch('');
       setIsDropdownOpen(false);
     }
   }, [isOpen]);
+
+  // 当新增步骤或删除步骤时自动聚焦到对应输入框
+  useEffect(() => {
+    if (focusIndexRef.current !== null) {
+      const idx = focusIndexRef.current;
+      const targetEl = criteriaInputRefs.current[idx];
+      if (targetEl) {
+        targetEl.focus();
+      }
+      focusIndexRef.current = null;
+    }
+  }, [criteriaList]);
 
   // 按 Esc 键优先关闭下拉菜单，再关闭整个弹窗
   useEffect(() => {
@@ -333,6 +360,80 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     );
   };
 
+  const isCriteriaTemplateDifferent = useMemo(() => {
+    const tplAcc = currentWf?.taskTemplate?.acceptanceTemplate;
+    if (!tplAcc) return false;
+    const parsedTpl = parseCriteriaText(tplAcc);
+    if (parsedTpl.length === 0) return false;
+    const cleanCurrent = criteriaList.map((s) => s.trim()).filter(Boolean);
+    if (cleanCurrent.length !== parsedTpl.length) return true;
+    return cleanCurrent.some((val, idx) => val !== parsedTpl[idx]);
+  }, [currentWf, criteriaList]);
+
+  const handleAddCriteria = () => {
+    setCriteriaList((prev) => {
+      const next = [...prev, ''];
+      focusIndexRef.current = next.length - 1;
+      return next;
+    });
+    if (import.meta.env?.DEV) {
+      console.log('[CreateTaskModal] 添加一条新验收用例');
+    }
+  };
+
+  const handleUpdateCriteria = (index: number, value: string) => {
+    setCriteriaList((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+  };
+
+  const handleRemoveCriteria = (index: number) => {
+    setCriteriaList((prev) => prev.filter((_, i) => i !== index));
+    if (import.meta.env?.DEV) {
+      console.log('[CreateTaskModal] 删除验收用例 index:', index);
+    }
+  };
+
+  const handleMoveCriteria = (index: number, direction: -1 | 1) => {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= criteriaList.length) return;
+    setCriteriaList((prev) => {
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[targetIndex];
+      next[targetIndex] = temp;
+      return next;
+    });
+    if (import.meta.env?.DEV) {
+      console.log('[CreateTaskModal] 调整用例位置:', { from: index, to: targetIndex });
+    }
+  };
+
+  const handleCriteriaKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      setCriteriaList((prev) => {
+        const next = [...prev];
+        next.splice(index + 1, 0, '');
+        focusIndexRef.current = index + 1;
+        return next;
+      });
+    } else if (e.key === 'Backspace' && !criteriaList[index] && criteriaList.length > 1) {
+      e.preventDefault();
+      handleRemoveCriteria(index);
+      focusIndexRef.current = Math.max(0, index - 1);
+    }
+  };
+
+  const handleClearAllCriteria = () => {
+    setCriteriaList([]);
+    if (import.meta.env?.DEV) {
+      console.log('[CreateTaskModal] 清空全部验收用例');
+    }
+  };
+
   const handleGenerateQaPlan = async (e?: React.MouseEvent) => {
     if (e) {
       e.stopPropagation();
@@ -358,16 +459,26 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         description: description.trim() || undefined,
         workspace: trimmedWorkspace || undefined,
       });
-      if (res && res.text) {
-        setAcceptanceCriteria(res.text);
-        if (import.meta.env?.DEV) {
-          console.log('[CreateTaskModal:AI QA] 生成用例成功:', res);
+      if (res) {
+        let newSteps: string[] = [];
+        if (Array.isArray(res.steps) && res.steps.length > 0) {
+          newSteps = res.steps.map((s) => s.trim()).filter(Boolean);
+        } else if (res.text) {
+          newSteps = parseCriteriaText(res.text);
+        }
+        if (newSteps.length > 0) {
+          setCriteriaList(newSteps);
+          toast.success(`AI 已规划 ${newSteps.length} 项验收用例`);
+          if (import.meta.env?.DEV) {
+            console.log('[CreateTaskModal:AI QA] 生成用例成功:', newSteps);
+          }
         }
       }
     } catch (err: any) {
       if (import.meta.env?.DEV) {
         console.error('[CreateTaskModal:AI QA] 生成用例异常:', err);
       }
+      toast.error('AI 规划用例失败，请稍后重试');
     } finally {
       setIsGeneratingQa(false);
     }
@@ -383,6 +494,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       return;
     }
 
+    const cleanCriteria = criteriaList.map((c) => c.trim()).filter(Boolean);
+    const acceptanceCriteria = cleanCriteria.length > 0 ? cleanCriteria.join('\n') : undefined;
+
     setLoading(true);
     if (import.meta.env?.DEV) {
       console.log('[CreateTaskModal] 提交创建任务:', {
@@ -390,7 +504,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         workflowId,
         kanbanColumn,
         workspace: trimmedWorkspace || '未指定(留空)',
-        acceptanceCriteria: acceptanceCriteria.trim() || undefined,
+        acceptanceCriteria,
+        qaInstructions: cleanCriteria.length > 0 ? cleanCriteria : undefined,
         autoRun,
         autoDecompose,
       });
@@ -400,7 +515,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         title: title.trim(),
         workflowId,
         description: description.trim(),
-        acceptanceCriteria: acceptanceCriteria.trim() || undefined,
+        acceptanceCriteria,
+        qaInstructions: cleanCriteria.length > 0 ? cleanCriteria : undefined,
         autoRun,
         kanbanColumn,
         workspace: trimmedWorkspace || undefined,
@@ -436,7 +552,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
       setTitle('');
       setDescription('');
-      setAcceptanceCriteria('');
+      setCriteriaList([]);
       setAttachments([]);
       setWorkflowSearch('');
       setIsDropdownOpen(false);
@@ -720,7 +836,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             />
           </div>
 
-          {/* 验收预期 / UI 自动化测试用例 (可选折叠区域) */}
+          {/* 验收预期 / UI 自动化测试用例 (List UI) */}
           <div className="border border-[#e3e3e8] rounded-[6px] bg-[#fafafc] overflow-hidden">
             <div className="w-full px-3 py-1.5 flex items-center justify-between text-[11px] font-medium text-[#63636b] select-none">
               <div
@@ -729,30 +845,32 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               >
                 <Target size={12} className="text-[#63636b] shrink-0" />
                 <span className="truncate">验收预期 / UI 自动化用例 (可选)</span>
-                {acceptanceCriteria.trim() && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#1c1c21] shrink-0" />
+                {criteriaList.some((c) => c.trim()) && (
+                  <span className="px-1.5 py-[0.5px] rounded-[3px] bg-[#eeedfd] text-[#4f46e5] text-[9.5px] font-mono font-medium border border-[#d8d6fb] shrink-0">
+                    {criteriaList.filter((c) => c.trim()).length} 项
+                  </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {currentWf?.taskTemplate?.acceptanceTemplate &&
-                  acceptanceCriteria.trim() !== currentWf.taskTemplate.acceptanceTemplate.trim() && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setAcceptanceCriteria(currentWf.taskTemplate!.acceptanceTemplate!);
-                        setIsCriteriaOpen(true);
-                        if (import.meta.env?.DEV) {
-                          console.log('[CreateTaskModal] 手动套用工作流验收模板:', currentWf.name);
-                        }
-                        toast.success('已应用流程验收标准模板');
-                      }}
-                      className="h-[19px] px-1.5 rounded-[4px] bg-white hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                    >
-                      <Sparkles size={9} />
-                      <span>套用验收模板</span>
-                    </button>
-                  )}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {currentWf?.taskTemplate?.acceptanceTemplate && isCriteriaTemplateDifferent && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const parsed = parseCriteriaText(currentWf.taskTemplate!.acceptanceTemplate!);
+                      setCriteriaList(parsed);
+                      setIsCriteriaOpen(true);
+                      if (import.meta.env?.DEV) {
+                        console.log('[CreateTaskModal] 手动套用工作流验收模板:', currentWf.name, parsed);
+                      }
+                      toast.success('已应用流程验收标准模板');
+                    }}
+                    className="h-[19px] px-1.5 rounded-[4px] bg-white hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                  >
+                    <Sparkles size={9} />
+                    <span>套用验收模板</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleGenerateQaPlan}
@@ -781,17 +899,92 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             </div>
 
             {isCriteriaOpen && (
-              <div className="p-2.5 pt-0 border-t border-[#f1f1f4] bg-white animate-in fade-in duration-100">
-                <p className="text-[10px] text-[#85858d] mb-1.5 leading-relaxed">
-                  每行一步操作或校验指令。留空则运行期自动规划，也可点击右上角由 AI 预填草稿。
-                </p>
-                <textarea
-                  value={acceptanceCriteria}
-                  onChange={(e) => setAcceptanceCriteria(e.target.value)}
-                  placeholder="例如：&#10;点击左侧菜单「QA 自动化」&#10;检查顶部子 Tab 与用例列表正常渲染&#10;校验页面无报错与异常提示"
-                  rows={3}
-                  className="w-full bg-[#f4f4f6] focus:bg-white border border-transparent focus:border-[#e3e3e8] rounded-[5px] p-2 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none font-mono resize-none transition-all leading-relaxed"
-                />
+              <div className="p-2.5 pt-1.5 border-t border-[#f1f1f4] bg-white animate-in fade-in duration-100">
+                <div className="flex items-center justify-between text-[10px] text-[#85858d] mb-2 leading-relaxed">
+                  <span>每项为一个明确的操作或断言，支持按回车键快速新增</span>
+                  {criteriaList.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClearAllCriteria}
+                      className="text-[#85858d] hover:text-[#dc2626] transition-colors cursor-pointer"
+                    >
+                      清空
+                    </button>
+                  )}
+                </div>
+
+                {criteriaList.length === 0 ? (
+                  <div className="py-2.5 px-3 rounded-[5px] bg-[#fafafc] border border-dashed border-[#e3e3e8] text-center mb-2">
+                    <p className="text-[10.5px] text-[#85858d]">
+                      暂无用例；留空运行期将由 AI 自动推断规划，或点击下方添加
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 mb-2 max-h-[160px] overflow-y-auto pr-0.5">
+                    {criteriaList.map((criterion, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center gap-1.5 group/step bg-[#fafafc] hover:bg-[#f5f5f7] border border-[#e3e3e8] hover:border-[#d1d1d8] rounded-[5px] p-1 pl-1.5 transition-all shadow-3xs"
+                      >
+                        <span className="w-4 h-4 rounded-[3px] bg-[#ececf0] text-[#71717a] text-[9.5px] font-mono font-medium flex items-center justify-center shrink-0 select-none">
+                          {index + 1}
+                        </span>
+                        <input
+                          ref={(el) => {
+                            criteriaInputRefs.current[index] = el;
+                          }}
+                          type="text"
+                          value={criterion}
+                          onChange={(e) => handleUpdateCriteria(index, e.target.value)}
+                          onKeyDown={(e) => handleCriteriaKeyDown(index, e)}
+                          placeholder={
+                            index === 0
+                              ? '例如：打开主页面并校验核心指标渲染正常'
+                              : '例如：点击提交按钮，校验页面无报错提示'
+                          }
+                          className="flex-1 h-[25px] bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[4px] px-2 text-[11px] text-[#1c1c21] placeholder-[#85858d] outline-none transition-all shadow-3xs"
+                        />
+                        <div className="flex items-center gap-0.5 opacity-60 group-hover/step:opacity-100 transition-opacity shrink-0">
+                          <button
+                            type="button"
+                            disabled={index === 0}
+                            onClick={() => handleMoveCriteria(index, -1)}
+                            className="w-5 h-5 rounded hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed"
+                            title="上移此步"
+                          >
+                            <ArrowUp size={10.5} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={index === criteriaList.length - 1}
+                            onClick={() => handleMoveCriteria(index, 1)}
+                            className="w-5 h-5 rounded hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed"
+                            title="下移此步"
+                          >
+                            <ArrowDown size={10.5} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCriteria(index)}
+                            className="w-5 h-5 rounded hover:bg-[#fee2e2] text-[#85858d] hover:text-[#dc2626] flex items-center justify-center transition-colors cursor-pointer"
+                            title="删除此步"
+                          >
+                            <Trash2 size={10.5} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleAddCriteria}
+                  className="w-full h-[26px] rounded-[5px] border border-dashed border-[#d1d1d8] hover:border-[#4f46e5] hover:bg-[#eeedfd]/30 text-[#63636b] hover:text-[#4f46e5] text-[11px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer select-none active:scale-[0.99]"
+                >
+                  <Plus size={11} strokeWidth={2.4} />
+                  <span>添加验收用例</span>
+                </button>
               </div>
             )}
           </div>
