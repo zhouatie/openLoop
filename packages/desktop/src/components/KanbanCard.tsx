@@ -1,6 +1,7 @@
 import React, { memo, useState, useEffect, useMemo } from 'react';
 import {
   Check,
+  Copy,
   Terminal,
   Sparkles,
   Trash2,
@@ -30,6 +31,7 @@ import {
 import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
 import { resolveNodeMeta } from '../utils/nodeMeta';
+import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
 
 interface RunningNodeVisual {
   label: string;
@@ -200,6 +202,21 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
 }) => {
   const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped' | 'starting'>('checking');
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  const [idCopied, setIdCopied] = useState<boolean>(false);
+
+  const shortTaskId = useMemo(() => formatShortTaskId(task.id), [task.id]);
+
+  const handleCopyTaskId = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanCard] 点击复制任务完整 ID:', task.id);
+    }
+    const success = await copyToClipboard(task.id);
+    if (success) {
+      setIdCopied(true);
+      setTimeout(() => setIdCopied(false), 1500);
+    }
+  };
 
   const isGroup = task.kind === 'group';
   const childSubtasks = useMemo(() => {
@@ -300,12 +317,28 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
     >
       <div className="flex items-center justify-between mb-1.5 min-w-0">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span
-            className="text-[10.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[1px] rounded border border-[#ececf0] truncate max-w-[100px]"
-            title={task.id}
+          <button
+            type="button"
+            onClick={handleCopyTaskId}
+            className={`group/id inline-flex items-center gap-1 text-[10.5px] font-mono px-1.5 py-[1px] rounded border transition-all cursor-pointer shrink-0 select-none active:scale-95 ${
+              idCopied
+                ? 'bg-[#ecfdf5] text-[#059669] border-[#a7f3d0]/80'
+                : 'bg-[#f4f4f6] hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] border-[#ececf0] hover:border-[#d4d4d8]'
+            }`}
+            title={`任务编号: ${shortTaskId}\n完整 ID: ${task.id} (点击复制)`}
           >
-            {task.id}
-          </span>
+            {idCopied ? (
+              <>
+                <Check size={9.5} className="text-[#059669]" />
+                <span className="text-[#059669] text-[9.5px] font-sans font-medium">已复制</span>
+              </>
+            ) : (
+              <>
+                <span>{shortTaskId}</span>
+                <Copy size={8.5} className="text-[#a1a1aa] group-hover/id:text-[#71717a] opacity-0 group-hover/id:opacity-100 transition-opacity" />
+              </>
+            )}
+          </button>
           {isGroup && (
             <span className="flex items-center gap-1 text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded shrink-0">
               <Layers size={9.5} />
