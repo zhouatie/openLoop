@@ -460,8 +460,9 @@ qaCmd
           throw new Error(`未找到用例 ID: ${suiteId}`);
         }
         if (options.url) suite.targetUrl = options.url;
-        const { MidsceneRunner, applyQaModelEnv } = require('@openloop/core');
+        const { MidsceneRunner, applyQaModelEnv, configureQaRuntimePaths } = require('@openloop/core');
         applyQaModelEnv(store.getSettings()?.qaAutomation);
+        configureQaRuntimePaths(store.getDataDir());
         const path = require('path');
         const os = require('os');
         const runner = new MidsceneRunner({

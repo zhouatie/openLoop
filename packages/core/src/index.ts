@@ -20,6 +20,7 @@ export * from './qa/qa-driver';
 export * from './qa/qa-driver-factory';
 export * from './qa/android-device-manager';
 export * from './qa/model-env';
+export * from './qa/runtime-paths';
 export * from './automation/automation-scheduler';
 export * from './worktree/worktree-manager';
 

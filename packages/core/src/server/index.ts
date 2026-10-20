@@ -27,7 +27,9 @@ import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
+import { isQaPlatform } from '../qa/qa-driver';
 import { applyQaModelEnv } from '../qa/model-env';
+import { configureQaRuntimePaths } from '../qa/runtime-paths';
 import { WorktreeManager, TaskProcessManager, findRepoRoot } from '../worktree/worktree-manager';
 import { interpolateString } from '../executors';
 import { getAgentProviderMeta, resolveResumeCommand } from '../constants/agent-providers';
@@ -170,6 +172,8 @@ export class OpenLoopServer {
 
       // 启动时把界面配置的多模态模型参数注入进程环境（Android 视觉推理依赖）
       applyQaModelEnv(this.store.getSettings()?.qaAutomation);
+      // 把 Midscene 调试产物收拢到数据目录，避免污染工作目录并可被存储清理回收
+      configureQaRuntimePaths(this.store.getDataDir());
 
       this.httpServer.listen(this.port, this.host, () => {
         serverLogger.info(`[openLoop Core] 服务就绪，监听地址: http://${this.host}:${this.port}`);
@@ -1842,6 +1846,9 @@ export class OpenLoopServer {
         const target = body.targetUrl || body.appPackage;
         if (!body.name || !target) {
           return this.sendJson(res, 400, { error: 'name and targetUrl (or appPackage) are required' }, reqMeta);
+        }
+        if (body.platform !== undefined && !isQaPlatform(body.platform)) {
+          return this.sendJson(res, 400, { error: `不支持的测试平台: ${body.platform}` }, reqMeta);
         }
         const suite: QaSuite = {
           id: body.id || `suite_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,

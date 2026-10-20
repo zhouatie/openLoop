@@ -801,7 +801,7 @@ export class QaPlannerExecutor implements NodeExecutor {
 export class EnvPrepareExecutor implements NodeExecutor {
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, emitLog, task, variables } = ctx;
-    const platform = (node.config.platform || node.config.targetPlatform || 'web') as 'web' | 'android' | 'ios' | 'desktop';
+    const platform = node.config.platform || node.config.targetPlatform || 'web';
     const warmupTimeoutMs = node.config.warmupTimeoutMs || 30000;
 
     emitLog('system', `[现场就绪准备] 开始准备目标测试现场 (平台: ${platform.toUpperCase()})`);
@@ -923,7 +923,7 @@ export class MidsceneExecutor implements NodeExecutor {
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, emitLog, variables, task } = ctx;
-    const platform = (node.config.platform || 'web') as 'web' | 'android' | 'ios' | 'desktop';
+    const platform = node.config.platform || 'web';
 
     const rawTestUrl =
       node.config.testUrl ||

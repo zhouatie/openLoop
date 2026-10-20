@@ -37,7 +37,7 @@ export interface NodeConfig {
   
   // 环境准备 (env-prepare) 与服务拉起专用
   healthUrl?: string;
-  targetPlatform?: 'web' | 'android' | 'ios' | 'desktop';
+  targetPlatform?: QaPlatform;
   warmupTimeoutMs?: number;
   background?: boolean; // 是否作为任务关联的后台守护服务常驻
 
@@ -48,7 +48,7 @@ export interface NodeConfig {
   portBases?: Record<string, number>; // 针对具体端口变量名的起始基准端口字典，如 { webPort: 3000, corePort: 19890 }
 
   // Midscene 自动化测试专用
-  platform?: 'web' | 'android' | 'ios' | 'desktop';
+  platform?: QaPlatform;
   testUrl?: string;
   appPackage?: string;
   deviceSerial?: string;
@@ -407,7 +407,8 @@ export interface TaskWorktreeDiffResult {
 }
 
 export type QaStepType = 'action' | 'assert' | 'waitFor' | 'query';
-export type QaPlatform = 'web' | 'android' | 'ios' | 'desktop';
+/** 当前已实现的测试平台，新增平台需同时实现对应 QaDriver */
+export type QaPlatform = 'web' | 'android';
 
 export interface AndroidDeviceInfo {
   serial: string;
@@ -569,6 +570,9 @@ export interface StorageStats {
     artifactsFilesCount: number;
     attachmentsBytes: number;
     attachmentsFilesCount: number;
+    /** Midscene 运行期调试产物（截图 dump / 规划日志 / 缓存） */
+    qaTraceBytes: number;
+    qaTraceFilesCount: number;
     orphanFilesCount: number;
     orphanFilesBytes: number;
   };
@@ -581,6 +585,8 @@ export interface StorageCleanOptions {
   cleanQaRunsDays?: number;
   cleanAutomationLogsDays?: number;
   cleanOrphanFiles?: boolean;
+  /** 清理 Midscene 调试产物，默认随存储清理一并执行 */
+  cleanQaTrace?: boolean;
   vacuum?: boolean;
 }
 

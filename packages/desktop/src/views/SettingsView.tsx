@@ -1535,8 +1535,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
                 </div>
                 <div className="mt-2.5 pt-2 border-t border-[#f1f1f4] flex items-center justify-between">
-                  <span className="text-[10px] text-[#85858d]">磁盘位置</span>
-                  <span className="text-[10px] font-mono text-[#71717a]">artifacts/</span>
+                  <span className="text-[10px] text-[#85858d]">调试产物</span>
+                  <span className="text-[10px] font-mono text-[#71717a]">
+                    {formatBytes(storageStats?.disk.qaTraceBytes)} · midscene/
+                  </span>
                 </div>
               </div>
 

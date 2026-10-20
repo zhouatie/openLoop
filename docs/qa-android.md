@@ -66,6 +66,19 @@ DeepSeek 通过 Magpie 可正常识图，且 Midscene 内置 DeepSeek 专用的�
 - `POST /api/qa/devices/android/connect` — WiFi ADB 连接（`{ address }`）
 - `POST /api/qa/devices/android/disconnect` — 断开 WiFi ADB
 
+## 产物位置与清理
+
+| 产物 | 位置 | 说明 |
+| :--- | :--- | :--- |
+| 步骤截图 | `~/.openloop/artifacts/<runId>/step_N.png` | 时间线回放用，随运行记录删除 |
+| Midscene 调试产物 | `~/.openloop/midscene/` | dump、规划日志、报告，纯诊断数据 |
+| 任务附件 | `~/.openloop/attachments/` | 任务上传的图片 |
+
+Midscene 默认把调试产物写进进程工作目录的 `midscene_run/`。Core 启动时会把
+`MIDSCENE_RUN_DIR` 重定向到数据目录，避免污染仓库，并纳入存储统计。
+
+清理入口：设置 → 存储与清理。内置清理会一并删除调试产物目录。
+
 ## 执行状态语义
 
 驱动启动失败（无设备、ADB 不可用、浏览器拉起失败）时，本次运行直接判定为

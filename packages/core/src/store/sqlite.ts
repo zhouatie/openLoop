@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { getQaTraceDir } from '../qa/runtime-paths';
 import {
   Task,
   WorkflowDefinition,
@@ -2028,6 +2029,7 @@ export class SqliteStore {
     const attachmentsDir = path.join(this.dataDir, 'attachments');
     const artifactsStat = this.getDirectorySize(artifactsDir);
     const attachmentsStat = this.getDirectorySize(attachmentsDir);
+    const qaTraceStat = this.getDirectorySize(getQaTraceDir(this.dataDir));
 
     let orphanFilesCount = 0;
     let orphanFilesBytes = 0;
@@ -2077,7 +2079,7 @@ export class SqliteStore {
     }
 
     const freelistBytes = freelistCount * pageSize;
-    const reclaimableEstimateBytes = freelistBytes + orphanFilesBytes;
+    const reclaimableEstimateBytes = freelistBytes + orphanFilesBytes + qaTraceStat.totalBytes;
 
     return {
       database: {
@@ -2103,11 +2105,28 @@ export class SqliteStore {
         artifactsFilesCount: artifactsStat.fileCount,
         attachmentsBytes: attachmentsStat.totalBytes,
         attachmentsFilesCount: attachmentsStat.fileCount,
+        qaTraceBytes: qaTraceStat.totalBytes,
+        qaTraceFilesCount: qaTraceStat.fileCount,
         orphanFilesCount,
         orphanFilesBytes,
       },
       reclaimableEstimateBytes,
     };
+  }
+
+  /**
+   * 清空 Midscene 调试产物目录，返回删除的文件数
+   */
+  private cleanQaTraceDir(): number {
+    const traceDir = getQaTraceDir(this.dataDir);
+    if (!fs.existsSync(traceDir)) return 0;
+    const stat = this.getDirectorySize(traceDir);
+    try {
+      fs.rmSync(traceDir, { recursive: true, force: true });
+    } catch {
+      return 0;
+    }
+    return stat.fileCount;
   }
 
   public cleanStorage(options: StorageCleanOptions): StorageCleanResult {
@@ -2117,6 +2136,7 @@ export class SqliteStore {
     let deletedQaRuns = 0;
     let deletedAutomationLogs = 0;
     let deletedOrphanFiles = 0;
+    let deletedQaTrace = 0;
     let vacuumExecuted = false;
 
     // 1. 清理日志
@@ -2137,24 +2157,29 @@ export class SqliteStore {
       deletedAutomationLogs = this.deleteOldAutomationLogs(options.cleanAutomationLogsDays);
     }
 
-    // 4. 清理孤儿文件
+    // 4. 清理 Midscene 调试产物（纯诊断数据，不参与任何回放）
+    if (options.cleanQaTrace !== false) {
+      deletedQaTrace = this.cleanQaTraceDir();
+    }
+
+    // 5. 清理孤儿文件
     if (options.cleanOrphanFiles) {
       const orphanRes = this.cleanOrphanFiles();
       deletedOrphanFiles = orphanRes.deletedCount;
     }
 
-    // 5. 压缩与回收 SQLite 空间
+    // 6. 压缩与回收 SQLite 空间
     if (options.vacuum || (options.cleanLogsDays !== undefined && deletedLogs > 0)) {
       this.vacuum();
       vacuumExecuted = true;
     }
 
     const finalStats = this.getStorageStats();
-    const initialTotal = initialStats.database.totalSizeBytes + initialStats.disk.artifactsBytes + initialStats.disk.attachmentsBytes;
-    const finalTotal = finalStats.database.totalSizeBytes + finalStats.disk.artifactsBytes + finalStats.disk.attachmentsBytes;
+    const initialTotal = initialStats.database.totalSizeBytes + initialStats.disk.artifactsBytes + initialStats.disk.attachmentsBytes + initialStats.disk.qaTraceBytes;
+    const finalTotal = finalStats.database.totalSizeBytes + finalStats.disk.artifactsBytes + finalStats.disk.attachmentsBytes + finalStats.disk.qaTraceBytes;
     const freedBytes = Math.max(0, initialTotal - finalTotal);
 
-    storeLogger.info(`[Storage:Clean] 存储垃圾清理完成 (${Date.now() - startTime}ms): 释放 ${(freedBytes / 1024 / 1024).toFixed(2)} MB, 删除日志 ${deletedLogs} 条, 测试运行 ${deletedQaRuns} 个, 自动化日志 ${deletedAutomationLogs} 条, 孤儿文件 ${deletedOrphanFiles} 个`);
+    storeLogger.info(`[Storage:Clean] 存储垃圾清理完成 (${Date.now() - startTime}ms): 释放 ${(freedBytes / 1024 / 1024).toFixed(2)} MB, 删除日志 ${deletedLogs} 条, 测试运行 ${deletedQaRuns} 个, 自动化日志 ${deletedAutomationLogs} 条, 孤儿文件 ${deletedOrphanFiles} 个, 调试产物 ${deletedQaTrace} 个`);
 
     return {
       freedBytes,

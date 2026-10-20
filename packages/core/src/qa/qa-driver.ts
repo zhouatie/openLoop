@@ -2,6 +2,13 @@ import { Buffer } from 'node:buffer';
 import { QaPlatform } from '../types';
 export type { QaPlatform };
 
+/** 已实现驱动实现的测试平台白名单 */
+export const QA_PLATFORMS = ['web', 'android'] as const;
+
+export function isQaPlatform(value: unknown): value is QaPlatform {
+  return typeof value === 'string' && (QA_PLATFORMS as readonly string[]).includes(value);
+}
+
 export interface QaDriverOptions {
   targetUrl?: string;
   appPackage?: string;
