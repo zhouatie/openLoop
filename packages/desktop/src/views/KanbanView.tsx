@@ -673,7 +673,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const unifiedOption = isUnifiedSort ? findSortOption(firstRule) : null;
   const unifiedSortLabel = unifiedOption ? unifiedOption.shortLabel : '自定义';
 
-  const wfMap = new Map(workflows.map((w) => [w.id, w]));
+  const wfMap = useMemo(() => new Map(workflows.map((w) => [w.id, w])), [workflows]);
 
   const getDirectoryName = (dirPath: string) => {
     if (!dirPath) return '';
@@ -762,6 +762,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     });
   }, [tasks, activeWorkspaceFilter, selectedWorkflowFilter, searchTerm]);
 
+  // 缓存上一轮各泳道结果，以便未发生变化的泳道复用原数组引用，触发 KanbanLaneList 的 React.memo 跳过
+  const prevTasksByColumnRef = useRef<Record<string, Task[]>>({});
+
   // 按泳道分流并排序（单次分流 + 各列独立排序缓存）
   const tasksByColumn = useMemo(() => {
     if (import.meta.env?.DEV) {
@@ -786,12 +789,25 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       }
     }
 
+    const prevResult = prevTasksByColumnRef.current;
     const result: Record<string, Task[]> = {};
     for (const col of COLUMNS) {
       const rule = columnSortConfig[col.key] || DEFAULT_SORT_RULE;
-      result[col.key] = sortTasks(grouped[col.key] || [], rule);
+      const sorted = sortTasks(grouped[col.key] || [], rule);
+      const prevList = prevResult[col.key];
+
+      if (
+        prevList &&
+        prevList.length === sorted.length &&
+        prevList.every((item, idx) => item === sorted[idx])
+      ) {
+        result[col.key] = prevList;
+      } else {
+        result[col.key] = sorted;
+      }
     }
 
+    prevTasksByColumnRef.current = result;
     return result;
   }, [filteredTasks, columnSortConfig]);
 
@@ -1079,15 +1095,47 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
 
-  const handleApprove = async (taskId: string, approved: boolean) => {
+  const handleApprove = async (taskId: string, approved: boolean, feedback?: string) => {
+    const currentTask = tasks.find((t) => t.id === taskId);
+    if (!currentTask) return;
+
     setApprovingId(taskId);
+    if (import.meta.env?.DEV) {
+      console.log(`[KanbanView] 触发任务验收决策 [${taskId}]:`, { approved, feedback });
+    }
+
+    // 1. 立即乐观更新，卡片平滑流转，彻底避免全看板重置与数据空闪
+    const wf = wfMap.get(currentTask.workflowId);
+    const nextEdges = wf?.edges.filter((e) => e.source === currentTask.currentNodeId) || [];
+    const nextCol: KanbanColumn = approved ? (nextEdges.length > 0 ? 'in_progress' : 'done') : 'backlog';
+    const nextStatus = approved ? (nextEdges.length > 0 ? 'running' : 'completed') : 'failed';
+    const optimisticTask: Task = {
+      ...currentTask,
+      kanbanColumn: nextCol,
+      status: nextStatus,
+    };
+    onTaskUpdate?.(optimisticTask);
+    if (selectedTask?.id === taskId) {
+      setSelectedTask(optimisticTask);
+    }
+
     try {
-      await api.resumeTask(taskId, approved, approved ? 'QA 查验通过' : '验收驳回');
+      const updated = await api.resumeTask(taskId, approved, feedback || (approved ? 'QA 查验通过' : '验收驳回'));
+      if (updated && onTaskUpdate) {
+        onTaskUpdate(updated);
+      }
+      if (selectedTask?.id === taskId && updated) {
+        setSelectedTask(updated);
+      }
       toast.success(approved ? 'QA 验收已通过' : '已驳回验收');
-      onRefresh();
     } catch (e: any) {
       if (import.meta.env?.DEV) {
         console.error('[KanbanView] 审批失败:', e);
+      }
+      // 失败回滚
+      onTaskUpdate?.(currentTask);
+      if (selectedTask?.id === taskId) {
+        setSelectedTask(currentTask);
       }
       toast.error(`审批失败: ${e?.message || '未知错误'}`);
     } finally {
@@ -3497,15 +3545,19 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
           onClose={() => setVisualAcceptanceTask(null)}
           onTaskUpdated={(updated) => {
             setVisualAcceptanceTask(updated);
-            onRefresh();
+            onTaskUpdate?.(updated);
           }}
-          onApproved={async () => {
-            await onRefresh();
+          onApproved={(updated) => {
+            if (updated && onTaskUpdate) {
+              onTaskUpdate(updated);
+            }
             setVisualAcceptanceTask(null);
             setSelectedTask(null);
           }}
-          onRejected={async () => {
-            await onRefresh();
+          onRejected={(updated) => {
+            if (updated && onTaskUpdate) {
+              onTaskUpdate(updated);
+            }
             setVisualAcceptanceTask(null);
             setSelectedTask(null);
           }}

@@ -43,8 +43,8 @@ import { CodeDiffViewerModal } from '../diff/CodeDiffViewerModal';
 interface VisualAcceptanceModalProps {
   task: Task;
   onClose: () => void;
-  onApproved?: () => void;
-  onRejected?: () => void;
+  onApproved?: (updatedTask?: Task) => void;
+  onRejected?: (updatedTask?: Task) => void;
   onTaskUpdated?: (task: Task) => void;
 }
 
@@ -558,9 +558,9 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
       console.log('[VisualAcceptanceModal] 用户确认验收通过并自动合并:', task.id);
     }
     try {
-      await api.resumeTask(task.id, true, '视觉验收通过，自动合并');
+      const updated = await api.resumeTask(task.id, true, '视觉验收通过，自动合并');
       toast.success('验收通过！代码正在自动合并到本地开发分支...');
-      onApproved?.();
+      onApproved?.(updated);
       onClose();
     } catch (err: any) {
       toast.error(`验收处理失败: ${err.message}`);
@@ -576,9 +576,9 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
       console.log('[VisualAcceptanceModal] 用户点击驳回:', task.id);
     }
     try {
-      await api.resumeTask(task.id, false, '视觉验收未通过');
+      const updated = await api.resumeTask(task.id, false, '视觉验收未通过');
       toast.info('任务已驳回，临时沙箱环境已释放');
-      onRejected?.();
+      onRejected?.(updated);
       onClose();
     } catch (err: any) {
       toast.error(`驳回失败: ${err.message}`);
