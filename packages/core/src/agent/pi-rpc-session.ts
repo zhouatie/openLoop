@@ -2,7 +2,16 @@ import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import os from 'os';
 import path from 'path';
-import { SessionChatMessage, ToolExecutionRecord, TaskSessionState, Task, TaskAttachment } from '../types';
+import {
+  SessionChatMessage,
+  ToolExecutionRecord,
+  TaskSessionState,
+  Task,
+  TaskAttachment,
+  RuntimeSettingsPatch,
+  RuntimeSettingsApplyResult,
+  RuntimeSettingsApplySummary,
+} from '../types';
 import { createLogger } from '../logger';
 
 const logger = createLogger('PiRpcSession');
@@ -33,7 +42,14 @@ export class PiRpcSessionInstance extends EventEmitter {
   public isBusy: boolean = false;
   public isPaused: boolean = false;
   public active: boolean = true;
+  public thinking?: string;
+  public pendingModel?: string;
+  public modelError?: string;
 
+  private modelPattern?: string;
+  private pendingThinking?: string;
+  private modelsCache: Array<{ id: string; provider: string }> | null = null;
+  private switching = false;
   private child: ChildProcess | null = null;
   private cmdSeq = 0;
   private pendingCommands = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>();
@@ -51,6 +67,8 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.sessionId = options.sessionId;
     this.agentName = options.agentName || 'OpenLoop Agent';
     this.model = options.model;
+    this.modelPattern = options.model?.trim() || undefined;
+    this.thinking = options.thinking;
     this.onLog = options.onLog;
     this.onUpdateCallback = options.onUpdate;
     this.onFinishedCallback = options.onFinished;
@@ -363,6 +381,13 @@ export class PiRpcSessionInstance extends EventEmitter {
         }
         this.notifyUpdate();
 
+        // 本轮空闲后应用排队中的模型 / 思考强度变更
+        this.flushPendingSettings().catch((err) => {
+          logger.error(`应用排队中的运行时配置失败: ${err?.message || err}`, undefined, {
+            taskId: this.taskId,
+          });
+        });
+
         // 首次提示执行结束且没有在等待排队消息时，通知节点执行完成
         if (this.initialPromptSent && !this.executionCompleted && !record.aborted && !this.isPaused) {
           this.executionCompleted = true;
@@ -511,6 +536,170 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /**
+   * 运行时同步模型 / 思考强度（不重启进程、不丢上下文）
+   * 忙碌中或正在切换时暂存，本轮结束后由 flushPendingSettings 自动应用
+   */
+  public async applyRuntimeSettings(patch: RuntimeSettingsPatch): Promise<RuntimeSettingsApplyResult> {
+    const modelPattern = patch.model === undefined ? undefined : patch.model.trim();
+    const thinkingLevel = patch.thinking === undefined ? undefined : patch.thinking.trim();
+
+    const modelChanged = modelPattern !== undefined && modelPattern !== this.modelPattern;
+    const thinkingChanged = thinkingLevel !== undefined && thinkingLevel !== this.thinking;
+    // 未变化直接跳过，避免无谓的进程间命令
+    if (!modelChanged && !thinkingChanged) return 'applied';
+
+    const effective: RuntimeSettingsPatch = {};
+    let inheritsDefaultModel = false;
+    if (modelChanged) {
+      if (modelPattern === '') {
+        // 留空表示继承引擎默认模型，无法热切换，只能在新建会话时生效
+        inheritsDefaultModel = true;
+      } else {
+        effective.model = modelPattern;
+      }
+    }
+    if (thinkingChanged) effective.thinking = thinkingLevel;
+
+    // 仅剩下「继承默认模型」需求：不向进程下发任何命令，只标记待生效
+    if (!effective.model && !effective.thinking) {
+      this.pendingModel = '';
+      this.modelError = undefined;
+      this.notifyUpdate();
+      return 'queued';
+    }
+
+    let result: RuntimeSettingsApplyResult;
+    if (!this.active) {
+      result = 'failed';
+    } else if (this.isBusy || this.switching) {
+      this.rememberPending(effective);
+      this.notifyUpdate();
+      return 'queued';
+    } else {
+      result = await this.applySettingsPatch(effective);
+    }
+
+    if (inheritsDefaultModel) {
+      this.pendingModel = '';
+      this.notifyUpdate();
+      return result === 'failed' ? 'failed' : 'queued';
+    }
+    return result;
+  }
+
+  private rememberPending(patch: RuntimeSettingsPatch) {
+    if (patch.model !== undefined) this.pendingModel = patch.model;
+    if (patch.thinking !== undefined) this.pendingThinking = patch.thinking;
+  }
+
+  private async flushPendingSettings(): Promise<void> {
+    if (!this.pendingModel && !this.pendingThinking) return;
+    // 待生效模型为空字符串表示需继承引擎默认，只能等下次新建会话
+    const patch: RuntimeSettingsPatch = {};
+    if (this.pendingModel) patch.model = this.pendingModel;
+    if (this.pendingThinking) patch.thinking = this.pendingThinking;
+    if (!patch.model && !patch.thinking) return;
+    this.pendingModel = undefined;
+    this.pendingThinking = undefined;
+    await this.applySettingsPatch(patch);
+  }
+
+  private async applySettingsPatch(patch: RuntimeSettingsPatch): Promise<RuntimeSettingsApplyResult> {
+    this.switching = true;
+    try {
+      if (patch.model) {
+        const resolved = await this.resolveModel(patch.model);
+        if (!resolved) {
+          this.modelError = `未找到唯一匹配的模型: ${patch.model}`;
+          logger.warn(`模型切换失败，保留原模型: ${this.modelError}`, undefined, { taskId: this.taskId });
+          this.notifyUpdate();
+          return 'failed';
+        }
+        await this.sendCommandWithTimeout({ type: 'set_model', provider: resolved.provider, modelId: resolved.id });
+        this.model = `${resolved.provider}/${resolved.id}`;
+        this.modelPattern = patch.model;
+      }
+
+      if (patch.thinking) {
+        await this.sendCommandWithTimeout({ type: 'set_thinking_level', level: patch.thinking });
+        this.thinking = patch.thinking;
+      }
+
+      this.modelError = undefined;
+      this.pendingModel = undefined;
+      this.pendingThinking = undefined;
+      this.notifyUpdate();
+      logger.info(
+        `会话运行时配置已切换: 模型=${this.model || '继承默认'}, 思考强度=${this.thinking || '未设置'}`,
+        undefined,
+        { taskId: this.taskId }
+      );
+      return 'applied';
+    } catch (e: any) {
+      this.modelError = e?.message || '运行时配置切换失败';
+      logger.error(`会话运行时配置切换失败，保留原模型: ${this.modelError}`, undefined, {
+        taskId: this.taskId,
+      });
+      this.notifyUpdate();
+      return 'failed';
+    } finally {
+      this.switching = false;
+    }
+  }
+
+  private async getAvailableModels(): Promise<Array<{ id: string; provider: string }>> {
+    if (this.modelsCache) return this.modelsCache;
+    const data = await this.sendCommandWithTimeout({ type: 'get_available_models' }, 3000);
+    const models = Array.isArray(data?.models) ? data.models : [];
+    this.modelsCache = models
+      .filter((m: any) => m && typeof m.id === 'string' && typeof m.provider === 'string')
+      .map((m: any) => ({ id: m.id, provider: m.provider }));
+    return this.modelsCache;
+  }
+
+  /** 带超时的命令下发，避免进程无响应时阻塞设置保存链路 */
+  private async sendCommandWithTimeout(command: any, timeoutMs = 3000): Promise<any> {
+    let timer: any;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`命令响应超时 (${command.type})`)), timeoutMs);
+    });
+    try {
+      return await Promise.race([this.sendCommand(command), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * 将设置页的自由文本模型描述解析为 provider + modelId
+   * 匹配优先级：provider/id 精确 → id 精确 → 唯一模糊匹配；歧义时放弃，绝不猜测
+   */
+  private async resolveModel(pattern: string): Promise<{ id: string; provider: string } | null> {
+    const models = await this.getAvailableModels();
+    if (models.length === 0) return null;
+
+    // 去掉 pi CLI 支持的 :thinking 后缀，思考强度走 set_thinking_level
+    const target = pattern.split(':')[0].trim();
+    if (!target) return null;
+
+    const slashIndex = target.indexOf('/');
+    if (slashIndex > 0) {
+      const provider = target.slice(0, slashIndex);
+      const id = target.slice(slashIndex + 1);
+      const hit = models.find((m) => m.provider === provider && m.id === id);
+      if (hit) return hit;
+    }
+
+    const exact = models.filter((m) => m.id === target);
+    if (exact.length === 1) return exact[0];
+    if (exact.length > 1) return null;
+
+    const lower = target.toLowerCase();
+    const fuzzy = models.filter((m) => `${m.provider}/${m.id}`.toLowerCase().includes(lower));
+    return fuzzy.length === 1 ? fuzzy[0] : null;
+  }
+
+  /**
    * 获取当前会话状态快照
    */
   public getState(): TaskSessionState {
@@ -522,6 +711,8 @@ export class PiRpcSessionInstance extends EventEmitter {
       messages: [...this.messages],
       agentName: this.agentName,
       model: this.model,
+      pendingModel: this.pendingModel,
+      modelError: this.modelError,
       sessionId: this.sessionId,
       piSessionId: this.sessionId,
       resumeCommand: `pi --session ${this.sessionId}`,
@@ -596,6 +787,30 @@ export class PiRpcSessionManager {
 
   public getSession(taskId: string): PiRpcSessionInstance | undefined {
     return this.sessions.get(taskId);
+  }
+
+  /**
+   * 将模型 / 思考强度变更同步到所有活跃会话
+   * 并行下发，不重启进程，不阻塞设置保存
+   */
+  public async applyRuntimeSettings(patch: RuntimeSettingsPatch): Promise<RuntimeSettingsApplySummary> {
+    const sessions = [...this.sessions.values()];
+    const summary: RuntimeSettingsApplySummary = { applied: 0, queued: 0, failed: 0 };
+    if (sessions.length === 0) return summary;
+
+    const results = await Promise.allSettled(sessions.map((s) => s.applyRuntimeSettings(patch)));
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        summary[result.value] += 1;
+      } else {
+        summary.failed += 1;
+      }
+    }
+
+    logger.info(
+      `运行时配置同步完成: ${sessions.length} 个活跃会话 (已生效 ${summary.applied}, 排队 ${summary.queued}, 失败 ${summary.failed})`
+    );
+    return summary;
   }
 
   public removeSession(taskId: string) {

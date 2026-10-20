@@ -113,10 +113,28 @@ export interface TaskSessionState {
   messages: SessionChatMessage[];
   agentName?: string;
   model?: string;
+  pendingModel?: string; // 待生效模型（运行时无法立即切换时暂存）
+  modelError?: string; // 最近一次运行时模型切换的失败原因
   sessionId?: string;
   piSessionId?: string; // 兼容字段
   resumeCommand?: string;
   agentProvider?: string;
+}
+
+/** 运行时同步给活跃会话的模型/思考强度变更 */
+export interface RuntimeSettingsPatch {
+  model?: string;
+  thinking?: string;
+}
+
+/** 单个会话的运行时同步结果：applied=已生效，queued=本轮结束后生效，failed=无法切换 */
+export type RuntimeSettingsApplyResult = 'applied' | 'queued' | 'failed';
+
+/** 全局运行时同步汇总 */
+export interface RuntimeSettingsApplySummary {
+  applied: number;
+  queued: number;
+  failed: number;
 }
 
 export interface WorkflowSessionState {

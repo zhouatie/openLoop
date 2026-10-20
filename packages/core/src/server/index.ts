@@ -20,6 +20,7 @@ import {
   QaRunRecord,
   AutomationTask,
   AutomationLogRecord,
+  RuntimeSettingsApplySummary,
 } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
@@ -1606,8 +1607,22 @@ export class OpenLoopServer {
       if (pathname === '/api/settings' && (method === 'PUT' || method === 'POST')) {
         const body = await this.parseJsonBody(req);
         serverLogger.info(`[Settings:Update] 更新全局配置`, { keys: Object.keys(body) });
+        const previous = this.store.getSettings();
         const updated = this.store.updateSettings(body);
-        return this.sendJson(res, 200, updated, reqMeta);
+
+        // 仅有模型 / 思考强度变化时，才同步到已活跃的 Agent 会话（热切换，不重启进程）
+        const modelChanged = (previous.defaultModel || '') !== (updated.defaultModel || '');
+        const thinkingChanged = (previous.reasoningLevel || '') !== (updated.reasoningLevel || '');
+        let runtime: RuntimeSettingsApplySummary | undefined;
+        if (modelChanged || thinkingChanged) {
+          runtime = await PiRpcSessionManager.getInstance().applyRuntimeSettings({
+            ...(modelChanged ? { model: updated.defaultModel || '' } : {}),
+            ...(thinkingChanged ? { thinking: updated.reasoningLevel || '' } : {}),
+          });
+          serverLogger.info(`[Settings:Runtime] 已同步进行中会话`, { ...runtime });
+        }
+
+        return this.sendJson(res, 200, { ...updated, runtime }, reqMeta);
       }
 
       // AI QA Plan Generation: /api/qa/generate-plan

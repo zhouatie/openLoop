@@ -14,6 +14,7 @@ import {
   AutomationLogRecord,
   TaskWorktreeDiffResult,
   FileDiffItem,
+  RuntimeSettingsApplySummary,
 } from '@openloop/core';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
@@ -594,8 +595,10 @@ export class DesktopApiService {
     return requestJson<OpenLoopSettings>(`${BASE_URL}/api/settings`);
   }
 
-  async updateSettings(settings: Partial<OpenLoopSettings>): Promise<OpenLoopSettings> {
-    return requestJson<OpenLoopSettings>(`${BASE_URL}/api/settings`, {
+  async updateSettings(
+    settings: Partial<OpenLoopSettings>
+  ): Promise<OpenLoopSettings & { runtime?: RuntimeSettingsApplySummary }> {
+    return requestJson<OpenLoopSettings & { runtime?: RuntimeSettingsApplySummary }>(`${BASE_URL}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings),

@@ -34,6 +34,7 @@ import {
   PluginManifest,
   AgentPromptKey,
   AgentPromptTemplates,
+  RuntimeSettingsApplySummary,
 } from '@openloop/core';
 import {
   AGENT_PROVIDERS,
@@ -50,6 +51,14 @@ import {
   moveSidebarItem,
 } from '../utils/sidebarOrder';
 
+/** 将运行时同步结果转成一句可直接读懂的保存提示 */
+const describeRuntimeSync = (runtime?: RuntimeSettingsApplySummary): string => {
+  if (!runtime) return '已自动保存';
+  if (runtime.failed > 0) return `${runtime.failed} 个进行中会话切换失败`;
+  if (runtime.queued > 0) return `已保存 · ${runtime.queued} 个会话本轮结束后生效`;
+  if (runtime.applied > 0) return `已同步 ${runtime.applied} 个进行中会话`;
+  return '已自动保存';
+};
 export type SettingsTabId = 'agent' | 'prompts' | 'workspace' | 'sidebar' | 'plugins' | 'shortcuts';
 
 interface SettingsViewProps {
@@ -176,6 +185,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [activeTab, setActiveTab] = useState<SettingsTabId>(resolveInitialTab);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [saveStatusTone, setSaveStatusTone] = useState<'ok' | 'warn'>('ok');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // 快捷键状态
@@ -363,11 +373,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       ...override,
     };
     try {
-      await api.updateSettings(payload);
+      const saved = await api.updateSettings(payload);
       if (import.meta.env?.DEV) {
-        console.log('[Settings] 配置已自动持久化:', payload);
+        console.log('[Settings] 配置已自动持久化:', payload, '运行时同步结果:', saved.runtime);
       }
-      setSaveStatus('已自动保存');
+      setSaveStatus(describeRuntimeSync(saved.runtime));
+      setSaveStatusTone(saved.runtime?.failed ? 'warn' : 'ok');
       setTimeout(() => setSaveStatus(null), 1800);
     } catch (err: any) {
       if (import.meta.env?.DEV) {
@@ -623,8 +634,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <div className="flex items-center gap-2.5">
             {saveStatus && (
-              <span className="text-[11.5px] text-[#189a58] flex items-center gap-1 bg-[#eaf7ee] px-2 py-0.5 rounded-[5px] transition-all">
-                <Check size={11} className="stroke-[2.2]" />
+              <span
+                className={`text-[11.5px] flex items-center gap-1 px-2 py-0.5 rounded-[5px] transition-all ${
+                  saveStatusTone === 'warn'
+                    ? 'text-[#b45309] bg-[#fffbeb]'
+                    : 'text-[#189a58] bg-[#eaf7ee]'
+                }`}
+              >
+                {saveStatusTone === 'warn' ? (
+                  <X size={11} className="stroke-[2.4]" />
+                ) : (
+                  <Check size={11} className="stroke-[2.2]" />
+                )}
                 <span>{saveStatus}</span>
               </span>
             )}
