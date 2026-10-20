@@ -501,7 +501,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between pb-2.5 border-b border-[#ececf0] shrink-0">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-[13px] text-[#1c1c21]">新建自动化任务</h3>
+            <h3 className="font-semibold text-[13px] text-[#1c1c21]">新建任务</h3>
           </div>
           <button
             onClick={onClose}
