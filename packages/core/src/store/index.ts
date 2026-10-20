@@ -10,6 +10,9 @@ import {
   QaRunRecord,
   AutomationTask,
   AutomationLogRecord,
+  StorageStats,
+  StorageCleanOptions,
+  StorageCleanResult,
 } from '../types';
 
 export { SqliteStore };
@@ -130,6 +133,14 @@ export class Store {
     return this.sqlite.saveQaRun(run);
   }
 
+  public deleteQaRun(id: string): boolean {
+    return this.sqlite.deleteQaRun(id);
+  }
+
+  public deleteQaRuns(filter?: { suiteId?: string; olderThanDays?: number; keepLatestPerSuite?: number; runIds?: string[] }): number {
+    return this.sqlite.deleteQaRuns(filter);
+  }
+
   // Automation Tasks
   public getAutomationTasks(): AutomationTask[] {
     return this.sqlite.getAutomationTasks();
@@ -153,6 +164,31 @@ export class Store {
 
   public addAutomationLog(log: AutomationLogRecord): void {
     this.sqlite.addAutomationLog(log);
+  }
+
+  // Storage & Maintenance
+  public deleteOldLogs(olderThanDays: number, taskId?: string): number {
+    return this.sqlite.deleteOldLogs(olderThanDays, taskId);
+  }
+
+  public deleteOldAutomationLogs(olderThanDays: number, automationId?: string): number {
+    return this.sqlite.deleteOldAutomationLogs(olderThanDays, automationId);
+  }
+
+  public cleanOrphanFiles(): { deletedCount: number; freedBytes: number } {
+    return this.sqlite.cleanOrphanFiles();
+  }
+
+  public vacuum(): { beforeBytes: number; afterBytes: number; freedBytes: number } {
+    return this.sqlite.vacuum();
+  }
+
+  public getStorageStats(): StorageStats {
+    return this.sqlite.getStorageStats();
+  }
+
+  public cleanStorage(options: StorageCleanOptions): StorageCleanResult {
+    return this.sqlite.cleanStorage(options);
   }
 
   public close(): void {

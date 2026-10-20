@@ -24,6 +24,13 @@ import {
   Search,
   Target,
   Timer,
+  HardDrive,
+  Database,
+  Trash2,
+  RefreshCw,
+  Loader2,
+  Camera,
+  Terminal,
 } from 'lucide-react';
 import { api } from '../services/api';
 import {
@@ -35,7 +42,12 @@ import {
   AgentPromptKey,
   AgentPromptTemplates,
   RuntimeSettingsApplySummary,
+  StorageStats,
+  StorageCleanOptions,
+  StorageCleanResult,
+  StorageRetentionSettings,
 } from '@openloop/core';
+import { ConfirmModal } from '../components/ConfirmModal';
 import {
   AGENT_PROVIDERS,
   getAgentProviderMeta,
@@ -59,7 +71,15 @@ const describeRuntimeSync = (runtime?: RuntimeSettingsApplySummary): string => {
   if (runtime.applied > 0) return `已同步 ${runtime.applied} 个进行中会话`;
   return '已自动保存';
 };
-export type SettingsTabId = 'agent' | 'prompts' | 'workspace' | 'sidebar' | 'plugins' | 'shortcuts';
+
+const formatBytes = (bytes?: number): string => {
+  if (!bytes || bytes <= 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(i > 1 ? 2 : 1)} ${sizes[i]}`;
+};
+export type SettingsTabId = 'agent' | 'prompts' | 'workspace' | 'storage' | 'sidebar' | 'plugins' | 'shortcuts';
 
 interface SettingsViewProps {
   activeSubTab?: string;
@@ -74,6 +94,7 @@ const SETTINGS_TAB_ITEMS: { id: SettingsTabId; label: string; icon: React.ReactN
   { id: 'agent', label: '智能体驱动', icon: <Cpu size={14} strokeWidth={2} /> },
   { id: 'prompts', label: '提示词配置', icon: <Sparkles size={14} strokeWidth={2} /> },
   { id: 'workspace', label: '工作区与环境', icon: <Folder size={14} strokeWidth={2} /> },
+  { id: 'storage', label: '存储与清理', icon: <HardDrive size={14} strokeWidth={2} /> },
   { id: 'sidebar', label: '侧边栏排序', icon: <Sliders size={14} strokeWidth={2} /> },
   { id: 'plugins', label: '插件扩展', icon: <Boxes size={14} strokeWidth={2} /> },
   { id: 'shortcuts', label: '快捷键', icon: <Keyboard size={14} strokeWidth={2} /> },
@@ -212,6 +233,91 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
+  // 存储与数据维护状态
+  const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [storageRetention, setStorageRetention] = useState<StorageRetentionSettings>({
+    autoCleanEnabled: false,
+    logRetentionDays: 14,
+    qaRunRetentionCount: 10,
+    automationLogRetentionDays: 7,
+  });
+  const [cleanLogsDaysChoice, setCleanLogsDaysChoice] = useState<number>(14);
+  const [cleanQaRunsKeepChoice, setCleanQaRunsKeepChoice] = useState<number>(10);
+  const [cleanAutomationLogsChoice, setCleanAutomationLogsChoice] = useState<number>(7);
+  const [confirmCleanModal, setConfirmCleanModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    targetName?: string;
+    options: StorageCleanOptions;
+    successMsg?: string;
+  } | null>(null);
+
+  // 分类复选批量清理
+  const [selectedCleanCategories, setSelectedCleanCategories] = useState<string[]>([
+    'logs',
+    'qaRuns',
+    'orphanFiles',
+    'vacuum',
+  ]);
+
+  const allCategoryKeys = ['logs', 'qaRuns', 'automationLogs', 'orphanFiles', 'vacuum'];
+  const isAllCategoriesSelected = allCategoryKeys.length > 0 && allCategoryKeys.every((k) => selectedCleanCategories.includes(k));
+
+  const toggleSelectAllCategories = () => {
+    if (isAllCategoriesSelected) {
+      setSelectedCleanCategories([]);
+    } else {
+      setSelectedCleanCategories([...allCategoryKeys]);
+    }
+  };
+
+  const toggleCleanCategory = (key: string) => {
+    setSelectedCleanCategories((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
+  const handleBatchCleanSelected = () => {
+    if (selectedCleanCategories.length === 0) {
+      toast.error('请至少勾选一个清理分类');
+      return;
+    }
+    const opts: StorageCleanOptions = {};
+    const names: string[] = [];
+    if (selectedCleanCategories.includes('logs')) {
+      opts.cleanLogsDays = cleanLogsDaysChoice;
+      names.push(cleanLogsDaysChoice === 0 ? '全部任务执行日志' : `${cleanLogsDaysChoice} 天前任务日志`);
+    }
+    if (selectedCleanCategories.includes('qaRuns')) {
+      opts.cleanQaRunsKeepLatest = cleanQaRunsKeepChoice;
+      names.push(cleanQaRunsKeepChoice === 0 ? '全部 UI 测试截帧' : `UI 测试历史 (每用例保留 ${cleanQaRunsKeepChoice} 次)`);
+    }
+    if (selectedCleanCategories.includes('automationLogs')) {
+      opts.cleanAutomationLogsDays = cleanAutomationLogsChoice;
+      names.push(cleanAutomationLogsChoice === 0 ? '全部自动化巡检日志' : `${cleanAutomationLogsChoice} 天前巡检日志`);
+    }
+    if (selectedCleanCategories.includes('orphanFiles')) {
+      opts.cleanOrphanFiles = true;
+      names.push('孤儿残留脱钩文件');
+    }
+    if (selectedCleanCategories.includes('vacuum')) {
+      opts.vacuum = true;
+      names.push('数据库紧凑 (VACUUM)');
+    }
+
+    setConfirmCleanModal({
+      isOpen: true,
+      title: `批量清理选中的 ${selectedCleanCategories.length} 个分类项目`,
+      description: `即将批量执行所选分类的清理操作：${names.join('、')}。已删除数据与磁盘截图产物将彻底释放。`,
+      targetName: `已勾选 ${selectedCleanCategories.length} 个类别`,
+      options: opts,
+      successMsg: `分类批量清理完成！已释放磁盘存储`,
+    });
+  };
+
   // Tab 检索过滤
   const [tabSearchQuery, setTabSearchQuery] = useState('');
 
@@ -231,6 +337,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     let target: SettingsTabId = 'agent';
     if (activeSubTab.includes('prompt')) target = 'prompts';
     else if (activeSubTab.includes('plugin')) target = 'plugins';
+    else if (activeSubTab.includes('storage') || activeSubTab.includes('clean') || activeSubTab.includes('data')) target = 'storage';
     else if (activeSubTab.includes('sidebar')) target = 'sidebar';
     else if (activeSubTab.includes('general') || activeSubTab.includes('workspace')) target = 'workspace';
     else if (activeSubTab.includes('shortcut')) target = 'shortcuts';
@@ -274,6 +381,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         if (settings.reasoningLevel) setThinking(settings.reasoningLevel);
         setDefaultCwd(settings.defaultCwd || '');
         if (settings.autoSnapshot !== undefined) setAutoSnapshot(settings.autoSnapshot);
+        if (settings.storageRetention) {
+          setStorageRetention(settings.storageRetention);
+        }
         if (settings.prompts) {
           setPrompts({ ...DEFAULT_PROMPT_TEMPLATES, ...settings.prompts });
         }
@@ -517,6 +627,99 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       onUpdateSidebarOrder([]);
     }
     toast.success('已恢复侧边栏默认排序');
+  };
+
+  // ================= 存储监控与数据清理 =================
+  useEffect(() => {
+    if (activeTab === 'storage') {
+      loadStorageStats();
+    }
+  }, [activeTab]);
+
+  const loadStorageStats = async () => {
+    try {
+      setLoadingStats(true);
+      if (import.meta.env?.DEV) console.log('[Settings:Storage] 加载系统存储分布状态');
+      const stats = await api.getStorageStats();
+      setStorageStats(stats);
+    } catch (err: any) {
+      if (import.meta.env?.DEV) console.error('[Settings:Storage] 加载存储状态失败:', err);
+      toast.error('拉取存储状态失败');
+    } finally {
+      setLoadingStats(false);
+    }
+  };
+
+  const executeStorageClean = async (options: StorageCleanOptions, successMsg?: string) => {
+    try {
+      setIsCleaning(true);
+      if (import.meta.env?.DEV) console.log('[Settings:Storage] 执行存储空间清理:', options);
+      const res = await api.cleanStorage(options);
+      const freedMb = (res.freedBytes / 1024 / 1024).toFixed(2);
+      toast.success(successMsg || `优化完成：释放 ${freedMb} MB 空间`);
+      await loadStorageStats();
+    } catch (err: any) {
+      if (import.meta.env?.DEV) console.error('[Settings:Storage] 清理异常:', err);
+      toast.error(`清理失败: ${err?.message || '未知错误'}`);
+    } finally {
+      setIsCleaning(false);
+    }
+  };
+
+  const handleOneClickClean = () => {
+    executeStorageClean({
+      cleanLogsDays: 14,
+      cleanQaRunsKeepLatest: 10,
+      cleanAutomationLogsDays: 7,
+      cleanOrphanFiles: true,
+      vacuum: true,
+    }, '一键深度瘦身完成！已清理旧日志、修剪测试截帧并紧凑数据库');
+  };
+
+  const handleConfirmCleanLogs = (days: number) => {
+    setConfirmCleanModal({
+      isOpen: true,
+      title: days === 0 ? '清空全部任务执行日志' : `清理 ${days} 天前的任务日志`,
+      description: days === 0
+        ? '此操作将彻底删除所有任务的历史标准输出与错误日志，释放数据库存储。此操作不可逆。'
+        : `将删除创建时间超过 ${days} 天的所有任务历史日志，释放空间。`,
+      targetName: days === 0 ? '全部任务执行日志' : `${days} 天前历史日志`,
+      options: { cleanLogsDays: days, vacuum: true },
+      successMsg: `已清理任务日志并释放空间`,
+    });
+  };
+
+  const handleConfirmCleanQaRuns = (keepCount: number) => {
+    setConfirmCleanModal({
+      isOpen: true,
+      title: keepCount === 0 ? '清空所有 UI 自动化测试回放与截图' : `修剪 UI 自动化测试历史 (每用例保留 ${keepCount} 次)`,
+      description: keepCount === 0
+        ? '此操作将彻底删除所有 UI 自动化测试运行记录及其磁盘截图产物 (artifacts/)。'
+        : `针对每个测试套件，仅保留最新的 ${keepCount} 次执行记录与截图产物，其余历史将被删除并释放磁盘空间。`,
+      targetName: keepCount === 0 ? '全部测试回放与截图' : `每套件超过 ${keepCount} 次的历史截图`,
+      options: { cleanQaRunsKeepLatest: keepCount, vacuum: true },
+      successMsg: `已修剪测试回放并释放磁盘截图`,
+    });
+  };
+
+  const handleConfirmCleanAutomationLogs = (days: number) => {
+    setConfirmCleanModal({
+      isOpen: true,
+      title: days === 0 ? '清空所有巡检日志' : `清理 ${days} 天前的巡检日志`,
+      description: days === 0
+        ? '此操作将彻底清空所有定时自动化任务的历史巡检输出。'
+        : `将删除时间早于 ${days} 天的自动化巡检执行日志。`,
+      targetName: '自动化巡检历史记录',
+      options: { cleanAutomationLogsDays: days },
+      successMsg: `已清理自动化巡检历史`,
+    });
+  };
+
+  const handleStorageRetentionChange = (patch: Partial<StorageRetentionSettings>) => {
+    const updated = { ...storageRetention, ...patch };
+    setStorageRetention(updated);
+    handleSave({ storageRetention: updated });
+    toast.success('已保存数据生命周期维护配置');
   };
 
   // 拖拽排序处理
@@ -1079,6 +1282,476 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         )}
 
+        {/* ==================== TAB 4: 存储与数据维护 ==================== */}
+        {activeTab === 'storage' && (
+          <div className="space-y-5 animate-in fade-in duration-150">
+            {/* 顶栏控制：刷新状态与上次清理提示 */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-[13px] font-medium text-[#1c1c21]">存储监控与数据清理</div>
+                <div className="text-[11.5px] text-[#85858d] mt-0.5">
+                  监控 SQLite 数据库底座、执行日志、UI 测试截图与任务附件占用，随时清理历史垃圾
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={loadStorageStats}
+                  disabled={loadingStats}
+                  className="h-[26px] px-2.5 rounded-[6px] text-[11.5px] text-[#63636b] hover:text-[#1c1c21] bg-white hover:bg-[#f9f9fb] border border-[#e3e3e8] transition-colors flex items-center gap-1 shadow-sm cursor-pointer disabled:opacity-50"
+                  title="刷新存储统计数据"
+                >
+                  <RefreshCw size={11} className={loadingStats ? 'animate-spin' : ''} />
+                  <span>刷新统计</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 1. 顶层存储指标微网格 (Storage Overview Grid) */}
+            <div className="grid grid-cols-4 gap-3">
+              {/* SQLite 数据库 */}
+              <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-3.5 shadow-sm flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-[#85858d]">SQLite 数据库</span>
+                  <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] flex items-center justify-center text-[#63636b] border border-[#e3e3e8]/60">
+                    <Database size={11} strokeWidth={2} />
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <div className="text-[16px] font-semibold font-mono text-[#1c1c21]">
+                    {formatBytes(storageStats?.database.totalSizeBytes)}
+                  </div>
+                  <div className="text-[10.5px] text-[#85858d] mt-0.5 truncate">
+                    主库 {formatBytes(storageStats?.database.dbSizeBytes)} · WAL {formatBytes(storageStats?.database.walSizeBytes)}
+                  </div>
+                </div>
+                <div className="mt-2.5 pt-2 border-t border-[#f1f1f4] flex items-center justify-between">
+                  <span className="text-[10px] text-[#85858d]">页状态</span>
+                  {(storageStats?.database.freelistCount || 0) > 30 ? (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fffbeb] text-[#b45309] text-[10px] font-medium border border-[#fde68a]">
+                      待整理 ({storageStats?.database.freelistCount} 页)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
+                      已紧凑
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* UI 自动化截帧产物 */}
+              <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-3.5 shadow-sm flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-[#85858d]">测试截帧与报告</span>
+                  <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] flex items-center justify-center text-[#63636b] border border-[#e3e3e8]/60">
+                    <Camera size={11} strokeWidth={2} />
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <div className="text-[16px] font-semibold font-mono text-[#1c1c21]">
+                    {formatBytes(storageStats?.disk.artifactsBytes)}
+                  </div>
+                  <div className="text-[10.5px] text-[#85858d] mt-0.5 truncate">
+                    {storageStats?.counts.qaRuns || 0} 次测试回放 · {storageStats?.disk.artifactsFilesCount || 0} 个截图文件
+                  </div>
+                </div>
+                <div className="mt-2.5 pt-2 border-t border-[#f1f1f4] flex items-center justify-between">
+                  <span className="text-[10px] text-[#85858d]">磁盘位置</span>
+                  <span className="text-[10px] font-mono text-[#71717a]">artifacts/</span>
+                </div>
+              </div>
+
+              {/* 图片附件 */}
+              <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-3.5 shadow-sm flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-[#85858d]">任务图片附件</span>
+                  <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] flex items-center justify-center text-[#63636b] border border-[#e3e3e8]/60">
+                    <Folder size={11} strokeWidth={2} />
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <div className="text-[16px] font-semibold font-mono text-[#1c1c21]">
+                    {formatBytes(storageStats?.disk.attachmentsBytes)}
+                  </div>
+                  <div className="text-[10.5px] text-[#85858d] mt-0.5 truncate">
+                    {storageStats?.disk.attachmentsFilesCount || 0} 个任务上传附件
+                  </div>
+                </div>
+                <div className="mt-2.5 pt-2 border-t border-[#f1f1f4] flex items-center justify-between">
+                  <span className="text-[10px] text-[#85858d]">磁盘位置</span>
+                  <span className="text-[10px] font-mono text-[#71717a]">attachments/</span>
+                </div>
+              </div>
+
+              {/* 日志记录 */}
+              <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-3.5 shadow-sm flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-[#85858d]">历史日志总量</span>
+                  <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] flex items-center justify-center text-[#63636b] border border-[#e3e3e8]/60">
+                    <Terminal size={11} strokeWidth={2} />
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <div className="text-[16px] font-semibold font-mono text-[#1c1c21]">
+                    {((storageStats?.counts.logs || 0) + (storageStats?.counts.automationLogs || 0)).toLocaleString()} 行
+                  </div>
+                  <div className="text-[10.5px] text-[#85858d] mt-0.5 truncate">
+                    任务日志 {(storageStats?.counts.logs || 0).toLocaleString()} · 巡检 {(storageStats?.counts.automationLogs || 0).toLocaleString()}
+                  </div>
+                </div>
+                <div className="mt-2.5 pt-2 border-t border-[#f1f1f4] flex items-center justify-between">
+                  <span className="text-[10px] text-[#85858d]">索引优化</span>
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
+                    时间序 B-Tree
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. 一键深度瘦身卡片 (Hero Smart Clean) */}
+            <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-4 shadow-sm flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-[6px] bg-[#eeedfd] flex items-center justify-center text-[#4f46e5] shrink-0 border border-[#c7d2fe]/60">
+                  <Sparkles size={18} strokeWidth={2} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-[#1c1c21] flex items-center gap-2">
+                    <span>智能一键深度瘦身</span>
+                    {(storageStats?.disk.orphanFilesCount || 0) > 0 && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10px] font-medium border border-[#fecaca]/60">
+                        发现 {storageStats?.disk.orphanFilesCount} 个孤立残留文件 ({formatBytes(storageStats?.disk.orphanFilesBytes)})
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11.5px] text-[#71717a] mt-0.5 leading-relaxed">
+                    自动清理 14 天前任务日志、修剪过期的 UI 自动化截帧（各套件保留最新 10 次）、清除孤儿文件并执行 SQLite VACUUM 释放物理磁盘
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={isCleaning}
+                onClick={handleOneClickClean}
+                className="flex items-center gap-1.5 h-[30px] px-3.5 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs cursor-pointer shrink-0 disabled:opacity-50"
+              >
+                {isCleaning ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} strokeWidth={2.4} />}
+                <span>{isCleaning ? '深度瘦身整理中...' : '一键深度瘦身'}</span>
+              </button>
+            </div>
+
+            {/* 3. 分类数据管理表格 (Strict Table Grid Alignment & Multi-Category Batch Cleanup) */}
+            <div className="bg-white border border-[#e3e3e8] rounded-[8px] shadow-sm overflow-hidden flex flex-col">
+              {/* 表头（支持全选/批量清理） */}
+              <div className="h-[38px] bg-[#fafafc] border-b border-[#e3e3e8] px-4 flex items-center justify-between text-[11px] font-medium text-[#85858d] select-none">
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isAllCategoriesSelected}
+                      onChange={toggleSelectAllCategories}
+                      className="w-3.5 h-3.5 rounded border-[#c7c7cf] text-[#4f46e5] focus:ring-0 cursor-pointer"
+                    />
+                    <span className="text-[11.5px] font-semibold text-[#1c1c21]">数据类别 (支持勾选组合)</span>
+                  </label>
+                  <span className="text-[#e3e3e8]">|</span>
+                  <span className="text-[#85858d]">
+                    已勾选 <span className="font-mono font-medium text-[#1c1c21]">{selectedCleanCategories.length}</span> / {allCategoryKeys.length} 项
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {selectedCleanCategories.length > 0 && (
+                    <button
+                      type="button"
+                      disabled={isCleaning}
+                      onClick={handleBatchCleanSelected}
+                      className="h-[25px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <Trash2 size={11} />
+                      <span>批量清理所选 ({selectedCleanCategories.length})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 行列表 */}
+              <div className="divide-y divide-[#f1f1f4]">
+                {/* 任务日志 */}
+                <div className="px-4 py-2.5 flex items-center text-[12px] hover:bg-[#fafafc] transition-colors">
+                  <div className="w-[190px] shrink-0 flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedCleanCategories.includes('logs')}
+                      onChange={() => toggleCleanCategory('logs')}
+                      className="w-3.5 h-3.5 rounded border-[#c7c7cf] text-[#4f46e5] focus:ring-0 cursor-pointer"
+                    />
+                    <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60">
+                      <Terminal size={11} strokeWidth={2} />
+                    </div>
+                    <span className="font-medium text-[#1c1c21]">任务执行日志</span>
+                  </div>
+                  <div className="w-[120px] shrink-0 font-mono text-[11px] text-[#71717a]">
+                    {(storageStats?.counts.logs || 0).toLocaleString()} 行
+                  </div>
+                  <div className="flex-1 min-w-0 px-2 flex items-center gap-2">
+                    <select
+                      value={cleanLogsDaysChoice}
+                      onChange={(e) => setCleanLogsDaysChoice(Number(e.target.value))}
+                      className="h-[26px] px-2 rounded-[5px] bg-[#fafafc] border border-[#e3e3e8] text-[11.5px] text-[#1c1c21] outline-none cursor-pointer focus:border-[#4f46e5]"
+                    >
+                      <option value={7}>清理 7 天前日志</option>
+                      <option value={14}>清理 14 天前日志 (推荐)</option>
+                      <option value={30}>清理 30 天前日志</option>
+                      <option value={0}>清空全部日志记录</option>
+                    </select>
+                    <span className="text-[11px] text-[#85858d]">删除对应时间窗口前的所有任务日志</span>
+                  </div>
+                  <div className="w-[100px] shrink-0 flex items-center justify-center">
+                    <button
+                      type="button"
+                      disabled={isCleaning || (storageStats?.counts.logs || 0) === 0}
+                      onClick={() => handleConfirmCleanLogs(cleanLogsDaysChoice)}
+                      className="h-[26px] px-2.5 rounded-[5px] bg-white hover:bg-[#fef2f2] text-[#4b4b53] hover:text-[#dc2626] border border-[#e3e3e8] hover:border-[#fecaca] text-[11px] font-medium transition-all cursor-pointer shadow-2xs flex items-center gap-1 disabled:opacity-40"
+                    >
+                      <Trash2 size={11} />
+                      <span>单独清理</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* UI 自动化截图与回放 */}
+                <div className="px-4 py-2.5 flex items-center text-[12px] hover:bg-[#fafafc] transition-colors">
+                  <div className="w-[190px] shrink-0 flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedCleanCategories.includes('qaRuns')}
+                      onChange={() => toggleCleanCategory('qaRuns')}
+                      className="w-3.5 h-3.5 rounded border-[#c7c7cf] text-[#4f46e5] focus:ring-0 cursor-pointer"
+                    />
+                    <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60">
+                      <Camera size={11} strokeWidth={2} />
+                    </div>
+                    <span className="font-medium text-[#1c1c21]">UI 自动化回放与截图</span>
+                  </div>
+                  <div className="w-[120px] shrink-0 font-mono text-[11px] text-[#71717a]">
+                    {storageStats?.counts.qaRuns || 0} 次 · {formatBytes(storageStats?.disk.artifactsBytes)}
+                  </div>
+                  <div className="flex-1 min-w-0 px-2 flex items-center gap-2">
+                    <select
+                      value={cleanQaRunsKeepChoice}
+                      onChange={(e) => setCleanQaRunsKeepChoice(Number(e.target.value))}
+                      className="h-[26px] px-2 rounded-[5px] bg-[#fafafc] border border-[#e3e3e8] text-[11.5px] text-[#1c1c21] outline-none cursor-pointer focus:border-[#4f46e5]"
+                    >
+                      <option value={5}>每用例保留最新 5 次</option>
+                      <option value={10}>每用例保留最新 10 次 (推荐)</option>
+                      <option value={20}>每用例保留最新 20 次</option>
+                      <option value={0}>清空全部测试截图</option>
+                    </select>
+                    <span className="text-[11px] text-[#85858d]">级联删除超出保留次数的历史截图文件</span>
+                  </div>
+                  <div className="w-[100px] shrink-0 flex items-center justify-center">
+                    <button
+                      type="button"
+                      disabled={isCleaning || (storageStats?.counts.qaRuns || 0) === 0}
+                      onClick={() => handleConfirmCleanQaRuns(cleanQaRunsKeepChoice)}
+                      className="h-[26px] px-2.5 rounded-[5px] bg-white hover:bg-[#fef2f2] text-[#4b4b53] hover:text-[#dc2626] border border-[#e3e3e8] hover:border-[#fecaca] text-[11px] font-medium transition-all cursor-pointer shadow-2xs flex items-center gap-1 disabled:opacity-40"
+                    >
+                      <Trash2 size={11} />
+                      <span>单独修剪</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 自动化巡检历史 */}
+                <div className="px-4 py-2.5 flex items-center text-[12px] hover:bg-[#fafafc] transition-colors">
+                  <div className="w-[190px] shrink-0 flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedCleanCategories.includes('automationLogs')}
+                      onChange={() => toggleCleanCategory('automationLogs')}
+                      className="w-3.5 h-3.5 rounded border-[#c7c7cf] text-[#4f46e5] focus:ring-0 cursor-pointer"
+                    />
+                    <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60">
+                      <Timer size={11} strokeWidth={2} />
+                    </div>
+                    <span className="font-medium text-[#1c1c21]">自动化任务日志</span>
+                  </div>
+                  <div className="w-[120px] shrink-0 font-mono text-[11px] text-[#71717a]">
+                    {(storageStats?.counts.automationLogs || 0).toLocaleString()} 条
+                  </div>
+                  <div className="flex-1 min-w-0 px-2 flex items-center gap-2">
+                    <select
+                      value={cleanAutomationLogsChoice}
+                      onChange={(e) => setCleanAutomationLogsChoice(Number(e.target.value))}
+                      className="h-[26px] px-2 rounded-[5px] bg-[#fafafc] border border-[#e3e3e8] text-[11.5px] text-[#1c1c21] outline-none cursor-pointer focus:border-[#4f46e5]"
+                    >
+                      <option value={7}>清理 7 天前记录 (推荐)</option>
+                      <option value={14}>清理 14 天前记录</option>
+                      <option value={0}>清空全部巡检历史</option>
+                    </select>
+                    <span className="text-[11px] text-[#85858d]">清除周期性定时巡检触发记录</span>
+                  </div>
+                  <div className="w-[100px] shrink-0 flex items-center justify-center">
+                    <button
+                      type="button"
+                      disabled={isCleaning || (storageStats?.counts.automationLogs || 0) === 0}
+                      onClick={() => handleConfirmCleanAutomationLogs(cleanAutomationLogsChoice)}
+                      className="h-[26px] px-2.5 rounded-[5px] bg-white hover:bg-[#fef2f2] text-[#4b4b53] hover:text-[#dc2626] border border-[#e3e3e8] hover:border-[#fecaca] text-[11px] font-medium transition-all cursor-pointer shadow-2xs flex items-center gap-1 disabled:opacity-40"
+                    >
+                      <Trash2 size={11} />
+                      <span>单独清理</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 孤儿碎片与无效文件 */}
+                <div className="px-4 py-2.5 flex items-center text-[12px] hover:bg-[#fafafc] transition-colors">
+                  <div className="w-[190px] shrink-0 flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedCleanCategories.includes('orphanFiles')}
+                      onChange={() => toggleCleanCategory('orphanFiles')}
+                      className="w-3.5 h-3.5 rounded border-[#c7c7cf] text-[#4f46e5] focus:ring-0 cursor-pointer"
+                    />
+                    <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60">
+                      <Layers size={11} strokeWidth={2} />
+                    </div>
+                    <span className="font-medium text-[#1c1c21]">孤儿残留文件</span>
+                  </div>
+                  <div className="w-[120px] shrink-0 font-mono text-[11px] text-[#71717a]">
+                    {storageStats?.disk.orphanFilesCount || 0} 个 · {formatBytes(storageStats?.disk.orphanFilesBytes)}
+                  </div>
+                  <div className="flex-1 min-w-0 px-2 flex items-center gap-2">
+                    <span className="text-[11.5px] text-[#85858d]">
+                      检测并回收已被删除任务或用例脱钩的无主截图与附件
+                    </span>
+                  </div>
+                  <div className="w-[100px] shrink-0 flex items-center justify-center">
+                    <button
+                      type="button"
+                      disabled={isCleaning || (storageStats?.disk.orphanFilesCount || 0) === 0}
+                      onClick={() => executeStorageClean({ cleanOrphanFiles: true }, '孤儿残留文件已彻底清除')}
+                      className="h-[26px] px-2.5 rounded-[5px] bg-white hover:bg-[#fafafc] text-[#1c1c21] border border-[#e3e3e8] hover:border-[#b9b9c2] text-[11px] font-medium transition-all cursor-pointer shadow-2xs flex items-center gap-1 disabled:opacity-40"
+                    >
+                      <RotateCcw size={11} />
+                      <span>单独回收</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* SQLite 物理压缩 (VACUUM) */}
+                <div className="px-4 py-2.5 flex items-center text-[12px] hover:bg-[#fafafc] transition-colors">
+                  <div className="w-[190px] shrink-0 flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedCleanCategories.includes('vacuum')}
+                      onChange={() => toggleCleanCategory('vacuum')}
+                      className="w-3.5 h-3.5 rounded border-[#c7c7cf] text-[#4f46e5] focus:ring-0 cursor-pointer"
+                    />
+                    <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60">
+                      <HardDrive size={11} strokeWidth={2} />
+                    </div>
+                    <span className="font-medium text-[#1c1c21]">数据库紧凑 (VACUUM)</span>
+                  </div>
+                  <div className="w-[120px] shrink-0 font-mono text-[11px] text-[#71717a]">
+                    {storageStats?.database.freelistCount || 0} 空闲页
+                  </div>
+                  <div className="flex-1 min-w-0 px-2 flex items-center gap-2">
+                    <span className="text-[11.5px] text-[#85858d]">
+                      执行 WAL 日志截断与 SQLite VACUUM，将已删除记录的空闲数据页归还操作系统
+                    </span>
+                  </div>
+                  <div className="w-[100px] shrink-0 flex items-center justify-center">
+                    <button
+                      type="button"
+                      disabled={isCleaning}
+                      onClick={() => executeStorageClean({ vacuum: true }, '数据库已成功执行 VACUUM 紧凑优化')}
+                      className="h-[26px] px-2.5 rounded-[5px] bg-white hover:bg-[#fafafc] text-[#1c1c21] border border-[#e3e3e8] hover:border-[#b9b9c2] text-[11px] font-medium transition-all cursor-pointer shadow-2xs flex items-center gap-1 disabled:opacity-40"
+                    >
+                      <HardDrive size={11} />
+                      <span>单独紧凑</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. 自动化生命周期维护策略 (Retention Settings Card) */}
+            <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-4 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-[#ececf0] pb-3">
+                <div>
+                  <div className="text-[13px] font-medium text-[#1c1c21]">自动生命周期维护策略</div>
+                  <div className="text-[11.5px] text-[#85858d] mt-0.5">
+                    开启后 openLoop 会在后台静默修剪旧记录与截图，防止磁盘垃圾持续膨胀
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(storageRetention.autoCleanEnabled)}
+                    onChange={(e) => handleStorageRetentionChange({ autoCleanEnabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4.5 bg-[#e3e3e8] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-[#4f46e5]"></div>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-[11px] font-medium text-[#71717a] mb-1">
+                    任务日志自动保留
+                  </label>
+                  <select
+                    disabled={!storageRetention.autoCleanEnabled}
+                    value={storageRetention.logRetentionDays || 14}
+                    onChange={(e) => handleStorageRetentionChange({ logRetentionDays: Number(e.target.value) })}
+                    className="w-full h-[28px] px-2 bg-[#fafafc] border border-[#e3e3e8] rounded-[6px] text-[11.5px] text-[#1c1c21] outline-none disabled:opacity-50"
+                  >
+                    <option value={7}>保留近 7 天日志</option>
+                    <option value={14}>保留近 14 天日志</option>
+                    <option value={30}>保留近 30 天日志</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-[#71717a] mb-1">
+                    每测试用例回放保留
+                  </label>
+                  <select
+                    disabled={!storageRetention.autoCleanEnabled}
+                    value={storageRetention.qaRunRetentionCount || 10}
+                    onChange={(e) => handleStorageRetentionChange({ qaRunRetentionCount: Number(e.target.value) })}
+                    className="w-full h-[28px] px-2 bg-[#fafafc] border border-[#e3e3e8] rounded-[6px] text-[11.5px] text-[#1c1c21] outline-none disabled:opacity-50"
+                  >
+                    <option value={5}>保留最新 5 次回放</option>
+                    <option value={10}>保留最新 10 次回放</option>
+                    <option value={20}>保留最新 20 次回放</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-[#71717a] mb-1">
+                    自动化巡检记录保留
+                  </label>
+                  <select
+                    disabled={!storageRetention.autoCleanEnabled}
+                    value={storageRetention.automationLogRetentionDays || 7}
+                    onChange={(e) => handleStorageRetentionChange({ automationLogRetentionDays: Number(e.target.value) })}
+                    className="w-full h-[28px] px-2 bg-[#fafafc] border border-[#e3e3e8] rounded-[6px] text-[11.5px] text-[#1c1c21] outline-none disabled:opacity-50"
+                  >
+                    <option value={3}>保留近 3 天记录</option>
+                    <option value={7}>保留近 7 天记录</option>
+                    <option value={14}>保留近 14 天记录</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ==================== TAB 3: 侧边栏排序 ==================== */}
         {activeTab === 'sidebar' && (
           <div className="space-y-4 animate-in fade-in duration-150">
@@ -1350,6 +2023,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 清理确认弹窗 */}
+      {confirmCleanModal && confirmCleanModal.isOpen && (
+        <ConfirmModal
+          isOpen={true}
+          title={confirmCleanModal.title}
+          description={confirmCleanModal.description}
+          targetName={confirmCleanModal.targetName}
+          confirmText="确认清理"
+          cancelText="取消"
+          variant="danger"
+          loading={isCleaning}
+          onConfirm={async () => {
+            const opts = confirmCleanModal.options;
+            const msg = confirmCleanModal.successMsg;
+            setConfirmCleanModal(null);
+            await executeStorageClean(opts, msg);
+          }}
+          onClose={() => setConfirmCleanModal(null)}
+        />
+      )}
     </div>
   );
 };

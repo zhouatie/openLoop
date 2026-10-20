@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   Layers,
+  Trash2,
 } from 'lucide-react';
 import { AutomationTask, AutomationLogRecord } from '@openloop/core';
 import { api } from '../../services/api';
@@ -49,6 +50,22 @@ export const AutomationLogsDrawer: React.FC<AutomationLogsDrawerProps> = ({
     }
   };
 
+  const handleClearLogs = async () => {
+    if (!automation) return;
+    try {
+      setLoading(true);
+      await api.clearAutomationLogs({ automationId: automation.id });
+      setLogs([]);
+      setExpandedLogId(null);
+    } catch (err) {
+      if (import.meta.env?.DEV) {
+        console.error('[AutomationLogsDrawer] 清空自动化日志失败:', err);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen && automation) {
       fetchLogs();
@@ -77,6 +94,16 @@ export const AutomationLogsDrawer: React.FC<AutomationLogsDrawerProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5">
+            {logs.length > 0 && (
+              <button
+                onClick={handleClearLogs}
+                disabled={loading}
+                title="清空此任务的历史日志"
+                className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#dc2626] hover:bg-[#fef2f2] flex items-center justify-center transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
             <button
               onClick={fetchLogs}
               disabled={loading}

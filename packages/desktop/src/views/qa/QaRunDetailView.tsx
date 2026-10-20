@@ -12,6 +12,7 @@ import {
   Camera,
   Globe,
   RefreshCw,
+  Trash2,
 } from 'lucide-react';
 import { QaRunRecord, StepTimelineRecord, QaSuite } from '@openloop/core';
 import { api } from '../../services/api';
@@ -21,12 +22,14 @@ interface QaRunDetailViewProps {
   runId: string;
   onBack: () => void;
   onRerun: (suiteId: string) => void;
+  onDeleteRun?: (runId: string) => void;
 }
 
 export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
   runId,
   onBack,
   onRerun,
+  onDeleteRun,
 }) => {
   const [run, setRun] = useState<QaRunRecord | null>(null);
   const [suite, setSuite] = useState<QaSuite | null>(null);
@@ -189,10 +192,21 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
           {run.suiteId && (
             <button
               onClick={() => onRerun(run.suiteId)}
-              className="flex items-center gap-1 h-[26px] px-3 bg-[#1c1c21] hover:bg-[#2e2f36] text-[11.5px] font-medium text-white rounded-[5px] transition-all active:scale-95 shadow-xs"
+              className="flex items-center gap-1 h-[26px] px-3 bg-[#1c1c21] hover:bg-[#2e2f36] text-[11.5px] font-medium text-white rounded-[5px] transition-all active:scale-95 shadow-xs cursor-pointer"
             >
               <Play size={11} />
               <span>重新执行</span>
+            </button>
+          )}
+
+          {onDeleteRun && (
+            <button
+              onClick={() => onDeleteRun(run.id)}
+              title="删除该运行记录与截图产物"
+              className="flex items-center gap-1 h-[26px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#fef2f2] text-[11.5px] font-medium text-[#4b4b53] hover:text-[#dc2626] hover:border-[#fecaca] transition-all shadow-xs cursor-pointer"
+            >
+              <Trash2 size={11} />
+              <span>删除记录</span>
             </button>
           )}
         </div>
