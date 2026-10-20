@@ -991,7 +991,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="space-y-5 animate-in fade-in duration-150">
             <div>
               <div className="text-[11.5px] text-[#85858d] mb-1.5 px-0.5 font-normal">
-                工作区与核心守护进程
+                工作区与环境
               </div>
 
               <div className="bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
@@ -1037,34 +1037,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
                 </div>
 
-                {/* 核心守护进程地址 */}
-                <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-medium text-[#1c1c21]">核心服务地址</div>
-                    <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                      提供 RESTful 接口与 WebSocket 状态广播，数据持久化于本地 SQLite (WAL 模式)
-                    </div>
-                  </div>
-
-                  <div className="shrink-0 self-center flex items-center gap-1.5 font-mono text-[11.5px] text-[#4b4b53]">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#189a58]" />
-                      <span>http://127.0.0.1:19888</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard('http://127.0.0.1:19888', 'daemonUrl')}
-                      className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] transition-colors cursor-pointer"
-                      title="复制服务地址"
-                    >
-                      {copiedKey === 'daemonUrl' ? (
-                        <Check size={12} className="text-[#189a58]" />
-                      ) : (
-                        <Copy size={12} />
-                      )}
-                    </button>
-                  </div>
-                </div>
 
                 {/* 工作区过滤规则 */}
                 <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
