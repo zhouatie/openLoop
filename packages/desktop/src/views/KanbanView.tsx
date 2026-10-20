@@ -2862,6 +2862,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         <VisualAcceptanceModal
           task={visualAcceptanceTask}
           onClose={() => setVisualAcceptanceTask(null)}
+          onTaskUpdated={(updated) => {
+            setVisualAcceptanceTask(updated);
+            onRefresh();
+          }}
           onApproved={async () => {
             await onRefresh();
             setVisualAcceptanceTask(null);
