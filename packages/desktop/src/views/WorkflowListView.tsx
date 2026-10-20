@@ -32,8 +32,10 @@ import {
   MoreHorizontal,
   Tag as TagIcon,
   Tags as TagsIcon,
+  FileText,
 } from 'lucide-react';
-import { WorkflowDefinition, NodeType, Task } from '@openloop/core';
+import { WorkflowDefinition, NodeType, Task, WorkflowTaskTemplate } from '@openloop/core';
+import { cleanTaskTemplate } from '../utils/workflowTemplate';
 import { api } from '../services/api';
 import { EditWorkflowModal } from '../components/EditWorkflowModal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -694,11 +696,42 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
         ];
       }
 
+      let initialTaskTemplate: WorkflowTaskTemplate | undefined = undefined;
+      if (templateType === 'feature_dev') {
+        initialTaskTemplate = {
+          titlePlaceholder: '例如: 购物车结算全链路回归与截图验收',
+          descriptionTemplate: [
+            '### 需求目标',
+            '- 目标功能说明: ',
+            '- 涉及修改模块: ',
+          ].join('\n'),
+          acceptanceTemplate: [
+            '- [ ] 代码修改符合规范且自测通过',
+            '- [ ] 构建无明显报错阻断',
+          ].join('\n'),
+        };
+      } else if (templateType === 'deploy') {
+        initialTaskTemplate = {
+          titlePlaceholder: '输入应用全量构建发布说明 (如: 发布桌面端 v1.0.2 正式版)',
+          descriptionTemplate: [
+            '### 应用构建与发布说明',
+            '- 目标版本 / Tag: ',
+            '- 构建目标环境: production',
+            '- 核心改动日志: ',
+          ].join('\n'),
+          acceptanceTemplate: [
+            '- [ ] 全量编译构建无语法/打包报错',
+            '- [ ] 线上/本地健康探测接口返回 HTTP 200',
+          ].join('\n'),
+        };
+      }
+
       const newWf: WorkflowDefinition = {
         id,
         name: newTitle.trim(),
         description: newDesc.trim() || '自定义自动化编排流程',
         tags: newTags,
+        taskTemplate: initialTaskTemplate,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         nodes,
@@ -836,11 +869,13 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     name,
     description,
     tags,
+    taskTemplate,
   }: {
     id: string;
     name: string;
     description: string;
     tags?: string[];
+    taskTemplate?: WorkflowTaskTemplate;
   }) => {
     const target = workflows.find((w) => w.id === id);
     if (!target) return;
@@ -850,15 +885,17 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       name,
       description,
       tags: tags !== undefined ? tags : (target.tags || []),
+      taskTemplate: taskTemplate !== undefined ? cleanTaskTemplate(taskTemplate) : target.taskTemplate,
       updatedAt: Date.now(),
     };
 
     if (import.meta.env?.DEV) {
-      console.log('[WorkflowListView] 更新流程信息:', {
+      console.log('[WorkflowListView] 更新流程信息与任务模板:', {
         id,
         name,
         description,
         tags: updatedWf.tags,
+        hasTaskTemplate: Boolean(updatedWf.taskTemplate),
       });
     }
 
@@ -1454,11 +1491,19 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                       )}
                     </div>
 
-                    {/* 节点规模 */}
-                    <div className="w-[75px] shrink-0 text-center">
+                    {/* 节点规模与模板微标 */}
+                    <div className="w-[85px] shrink-0 text-center flex items-center justify-center gap-1">
                       <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded shrink-0">
                         {wf.nodes.length} 节点
                       </span>
+                      {(wf.taskTemplate?.descriptionTemplate || wf.taskTemplate?.acceptanceTemplate) && (
+                        <span
+                          className="w-4 h-4 rounded-[3px] bg-[#eeedfd] text-[#4f46e5] flex items-center justify-center shrink-0 border border-[#d8d6fb]/60"
+                          title="已自定义配置任务说明与提示词模板"
+                        >
+                          <FileText size={9} />
+                        </span>
+                      )}
                     </div>
 
                     {/* 更新时间 */}
@@ -1684,6 +1729,18 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     {/* 元数据行 */}
                     <div className="flex items-center gap-1.5 mt-1 text-[11px] text-[#71717a] font-sans">
                       <span>{wf.nodes.length} 节点</span>
+                      {(wf.taskTemplate?.descriptionTemplate || wf.taskTemplate?.acceptanceTemplate) && (
+                        <>
+                          <span className="text-[#d4d4d8]">·</span>
+                          <span
+                            className="inline-flex items-center gap-0.5 text-[10px] text-[#4f46e5] bg-[#eeedfd] px-1.5 py-[0.5px] rounded-[3px] border border-[#d8d6fb]/60 font-medium"
+                            title="已自定义配置任务说明与提示词模板"
+                          >
+                            <FileText size={8.5} />
+                            <span>已设模板</span>
+                          </span>
+                        </>
+                      )}
                       <span className="text-[#d4d4d8]">·</span>
                       <span className="flex items-center gap-1 whitespace-nowrap" title={new Date(wf.updatedAt || wf.createdAt).toLocaleString()}>
                         {friendlyTime}

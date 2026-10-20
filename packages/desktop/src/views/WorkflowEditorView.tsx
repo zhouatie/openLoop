@@ -66,6 +66,7 @@ import {
   Cpu,
   BookmarkPlus,
   Pin,
+  FileText,
 } from 'lucide-react';
 import {
   WorkflowDefinition,
@@ -74,7 +75,9 @@ import {
   SessionChatMessage,
   WorkflowActionPayload,
   Task,
+  WorkflowTaskTemplate,
 } from '@openloop/core';
+import { cleanTaskTemplate } from '../utils/workflowTemplate';
 import { api } from '../services/api';
 import { layoutWorkflowDag } from '../utils/dagLayout';
 import { EditWorkflowModal } from '../components/EditWorkflowModal';
@@ -568,6 +571,9 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const [workflowDefaultWorkspace, setWorkflowDefaultWorkspace] = useState(
     activeWorkflow?.defaultWorkspace || ''
   );
+  const [workflowTaskTemplate, setWorkflowTaskTemplate] = useState<WorkflowTaskTemplate | undefined>(
+    activeWorkflow?.taskTemplate
+  );
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -802,6 +808,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       setWorkflowTags(Array.isArray(activeWorkflow.tags) ? [...activeWorkflow.tags] : []);
       setWorkflowRequireWorkspace(Boolean(activeWorkflow.requireWorkspace));
       setWorkflowDefaultWorkspace(activeWorkflow.defaultWorkspace || '');
+      setWorkflowTaskTemplate(activeWorkflow.taskTemplate ? { ...activeWorkflow.taskTemplate } : undefined);
       setTitleDraft(activeWorkflow.name || '');
     }
   }, [
@@ -811,6 +818,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     activeWorkflow?.tags,
     activeWorkflow?.requireWorkspace,
     activeWorkflow?.defaultWorkspace,
+    activeWorkflow?.taskTemplate,
   ]);
 
   // 拉取 Copilot 会话历史状态
@@ -2001,22 +2009,31 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   };
 
   // 保存工作流
-  const handleSave = async (overrideName?: string, overrideDesc?: string, overrideTags?: string[]) => {
+  const handleSave = async (
+    overrideName?: string,
+    overrideDesc?: string,
+    overrideTags?: string[],
+    overrideTaskTemplate?: WorkflowTaskTemplate
+  ) => {
     if (!activeWorkflow) return;
 
     const safeOverrideName = typeof overrideName === 'string' ? overrideName : undefined;
     const safeOverrideDesc = typeof overrideDesc === 'string' ? overrideDesc : undefined;
     const safeOverrideTags = Array.isArray(overrideTags) ? overrideTags : undefined;
+    const safeOverrideTaskTemplate =
+      overrideTaskTemplate !== undefined ? overrideTaskTemplate : workflowTaskTemplate;
 
     const finalName = (safeOverrideName ?? workflowName).trim() || activeWorkflow.name;
     const finalDesc = (safeOverrideDesc ?? workflowDescription).trim();
     const finalTags = safeOverrideTags ?? workflowTags;
+    const finalTaskTemplate = cleanTaskTemplate(safeOverrideTaskTemplate);
 
     const updatedWorkflow: WorkflowDefinition = {
       ...activeWorkflow,
       name: finalName,
       description: finalDesc,
       tags: finalTags,
+      taskTemplate: finalTaskTemplate,
       requireWorkspace: workflowRequireWorkspace,
       defaultWorkspace: workflowDefaultWorkspace.trim() || undefined,
       updatedAt: Date.now(),
@@ -2037,11 +2054,12 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     };
 
     if (import.meta.env?.DEV) {
-      console.log('[WorkflowEditor] 保存工作流编排:', {
+      console.log('[WorkflowEditor] 保存工作流编排与任务模板:', {
         id: updatedWorkflow.id,
         name: updatedWorkflow.name,
         nodeCount: updatedWorkflow.nodes.length,
         edgeCount: updatedWorkflow.edges.length,
+        hasTaskTemplate: Boolean(updatedWorkflow.taskTemplate),
       });
     }
 
@@ -2050,6 +2068,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       await api.saveWorkflow(updatedWorkflow);
       setWorkflowName(finalName);
       setWorkflowDescription(finalDesc);
+      setWorkflowTaskTemplate(finalTaskTemplate);
       setSaveStatus('已保存');
       setTimeout(() => setSaveStatus(''), 2000);
       onRefresh();
@@ -4136,6 +4155,14 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                       </div>
                       <div className="flex items-center gap-1">
                         <button
+                          type="button"
+                          onClick={() => setIsEditModalOpen(true)}
+                          className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] transition-colors cursor-pointer"
+                          title="在独立弹窗中编辑工作流属性与任务模板"
+                        >
+                          <Edit3 size={12} />
+                        </button>
+                        <button
                           onClick={handleDuplicateCurrentWorkflow}
                           disabled={isDuplicating}
                           className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] transition-colors"
@@ -4239,6 +4266,129 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                       </div>
                     </div>
 
+                    {/* 任务说明与提示词模板配置 */}
+                    <div className="pt-2 border-t border-[#ececf0] space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <FileText size={12} className="text-[#4f46e5]" />
+                          <label className="text-[11.5px] font-medium text-[#1c1c21]">
+                            任务说明与提示词模板
+                          </label>
+                        </div>
+                        {workflowTaskTemplate &&
+                        (workflowTaskTemplate.titlePlaceholder ||
+                          workflowTaskTemplate.descriptionTemplate ||
+                          workflowTaskTemplate.acceptanceTemplate) ? (
+                          <span className="px-1.5 py-0.5 rounded-[4px] bg-[#eeedfd] text-[#4f46e5] text-[9.5px] font-medium border border-[#d8d6fb]/60">
+                            已配置
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-[#85858d]">未配置</span>
+                        )}
+                      </div>
+                      <p className="text-[10.5px] text-[#85858d] leading-relaxed">
+                        配置发起该流程任务时的默认标题提示、需求背景与 Agent 提示词骨架。
+                      </p>
+
+                      <div>
+                        <label className="block text-[#85858d] mb-1 font-medium text-[10.5px]">
+                          任务标题输入提示
+                        </label>
+                        <input
+                          type="text"
+                          value={workflowTaskTemplate?.titlePlaceholder || ''}
+                          onChange={(e) =>
+                            setWorkflowTaskTemplate((prev) => ({
+                              ...prev,
+                              titlePlaceholder: e.target.value,
+                            }))
+                          }
+                          placeholder="例如: 购物车结算全链路回归与截图验收"
+                          className="w-full h-[28px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[11.5px] text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5] transition-all placeholder:text-[#85858d]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[#85858d] mb-1 font-medium text-[10.5px]">
+                          任务说明与提示词骨架 (Markdown)
+                        </label>
+                        <textarea
+                          rows={4}
+                          value={workflowTaskTemplate?.descriptionTemplate || ''}
+                          onChange={(e) =>
+                            setWorkflowTaskTemplate((prev) => ({
+                              ...prev,
+                              descriptionTemplate: e.target.value,
+                            }))
+                          }
+                          placeholder="可输入默认需求描述或 Agent 提示词骨架..."
+                          className="w-full min-h-[80px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2 text-[11px] font-mono leading-relaxed text-[#1c1c21] outline-none resize-y focus:bg-white focus:border-[#4f46e5] transition-all placeholder:text-[#85858d] placeholder:font-sans"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[#85858d] mb-1 font-medium text-[10.5px]">
+                          验收标准与用例骨架 (可选)
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={workflowTaskTemplate?.acceptanceTemplate || ''}
+                          onChange={(e) =>
+                            setWorkflowTaskTemplate((prev) => ({
+                              ...prev,
+                              acceptanceTemplate: e.target.value,
+                            }))
+                          }
+                          placeholder="可输入默认验收标准清单，如:&#10;- [ ] 核心功能修改完成自测通过"
+                          className="w-full min-h-[64px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2 text-[11px] font-mono leading-relaxed text-[#1c1c21] outline-none resize-y focus:bg-white focus:border-[#4f46e5] transition-all placeholder:text-[#85858d] placeholder:font-sans"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between pt-0.5 text-[10.5px]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWorkflowTaskTemplate((prev) => ({
+                              ...prev,
+                              titlePlaceholder:
+                                prev?.titlePlaceholder ||
+                                `例如: ${workflowName.trim() || '核心需求'} 开发与验收`,
+                              descriptionTemplate:
+                                prev?.descriptionTemplate ||
+                                [
+                                  '### 需求目标',
+                                  '- 目标功能说明: ',
+                                  '- 涉及修改模块: ',
+                                  '- 关联依赖/分支: ',
+                                ].join('\n'),
+                              acceptanceTemplate:
+                                prev?.acceptanceTemplate ||
+                                [
+                                  '- [ ] 核心功能修改完成并通过本地自测',
+                                  '- [ ] 自动化测试与质量门禁无报错阻断',
+                                ].join('\n'),
+                            }));
+                          }}
+                          className="text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                        >
+                          <Sparkles size={10} />
+                          <span>填入推荐模板</span>
+                        </button>
+                        {(workflowTaskTemplate?.titlePlaceholder ||
+                          workflowTaskTemplate?.descriptionTemplate ||
+                          workflowTaskTemplate?.acceptanceTemplate) && (
+                          <button
+                            type="button"
+                            onClick={() => setWorkflowTaskTemplate(undefined)}
+                            className="text-[#85858d] hover:text-[#dc2626] flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <RotateCcw size={9.5} />
+                            <span>清空模板</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
                     <div className="bg-[#f9f9fb] border border-[#ececf0] rounded-[7px] p-2.5 space-y-1.5 text-[11px] text-[#85858d]">
                       <div className="flex items-center justify-between">
                         <span>拓扑节点数</span>
@@ -4296,13 +4446,15 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
           name: workflowName || activeWorkflow.name,
           description: workflowDescription,
           tags: workflowTags,
+          taskTemplate: workflowTaskTemplate,
         }}
         onClose={() => setIsEditModalOpen(false)}
-        onSave={async ({ name, description, tags }) => {
+        onSave={async ({ name, description, tags, taskTemplate }) => {
           setWorkflowName(name);
           setWorkflowDescription(description);
           if (tags) setWorkflowTags(tags);
-          await handleSave(name, description, tags);
+          if (taskTemplate !== undefined) setWorkflowTaskTemplate(taskTemplate);
+          await handleSave(name, description, tags, taskTemplate);
         }}
       />
 
