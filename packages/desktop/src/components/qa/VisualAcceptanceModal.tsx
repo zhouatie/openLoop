@@ -18,7 +18,10 @@ import {
   Loader2,
   RotateCcw,
   Check,
+  ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Clock,
   Layers,
   Square,
@@ -278,15 +281,52 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
     };
   }, [isPlaying, playbackSpeed, steps.length]);
 
+  // 胶片时间轴节点引用与自动居中
+  const filmstripRef = useRef<HTMLDivElement>(null);
+  const stepItemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  // 精准手动切帧至指定索引
+  const handleSeekTo = useCallback(
+    (index: number) => {
+      setIsPlaying(false);
+      const targetIndex = Math.max(0, Math.min(steps.length - 1, index));
+      if (import.meta.env?.DEV) {
+        console.log('[VisualAcceptanceModal:Scrub] 手动切帧至:', targetIndex);
+      }
+      setCurrentStepIndex(targetIndex);
+    },
+    [steps.length]
+  );
+
   const handlePrev = useCallback(() => {
     setIsPlaying(false);
-    setCurrentStepIndex((prev) => Math.max(0, prev - 1));
+    setCurrentStepIndex((prev) => {
+      const next = Math.max(0, prev - 1);
+      if (import.meta.env?.DEV && next !== prev) {
+        console.log('[VisualAcceptanceModal:Scrub] 手动切至上一帧:', next);
+      }
+      return next;
+    });
   }, []);
 
   const handleNext = useCallback(() => {
     setIsPlaying(false);
-    setCurrentStepIndex((prev) => Math.min(steps.length - 1, prev + 1));
+    setCurrentStepIndex((prev) => {
+      const next = Math.min(steps.length - 1, prev + 1);
+      if (import.meta.env?.DEV && next !== prev) {
+        console.log('[VisualAcceptanceModal:Scrub] 手动切至下一帧:', next);
+      }
+      return next;
+    });
   }, [steps.length]);
+
+  const handleSeekFirst = useCallback(() => {
+    handleSeekTo(0);
+  }, [handleSeekTo]);
+
+  const handleSeekLast = useCallback(() => {
+    handleSeekTo(steps.length - 1);
+  }, [handleSeekTo, steps.length]);
 
   const togglePlay = useCallback(() => {
     if (!isPlaying && currentStepIndex >= steps.length - 1) {
@@ -295,7 +335,60 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
     setIsPlaying((prev) => !prev);
   }, [currentStepIndex, isPlaying, steps.length]);
 
-  // 键盘快捷键监听 (方向键切帧、空格播放/暂停、ESC 关闭)
+  // 当前步变动时自动将对应的缩略图居中平滑显示
+  useEffect(() => {
+    const el = stepItemRefs.current.get(currentStepIndex);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+  }, [currentStepIndex]);
+
+  // 鼠标滚轮/触控板手势切帧（基于阻尼累加器，丝滑且防止惯性瞬跳）
+  const wheelAccumulatorRef = useRef<number>(0);
+  const lastWheelTimeRef = useRef<number>(0);
+
+  const handleViewportWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (steps.length <= 1) return;
+      // 优先取绝对值较大的方向轴 (同时支持横向双指手势与纵向滚轮)
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (Math.abs(delta) < 4) return;
+
+      const now = performance.now();
+      if (now - lastWheelTimeRef.current > 350) {
+        wheelAccumulatorRef.current = 0;
+      }
+      lastWheelTimeRef.current = now;
+
+      wheelAccumulatorRef.current += delta;
+      const THRESHOLD = 35; // 阻尼阈值
+
+      if (wheelAccumulatorRef.current >= THRESHOLD) {
+        wheelAccumulatorRef.current = 0;
+        setIsPlaying(false);
+        setCurrentStepIndex((prev) => {
+          const next = Math.min(steps.length - 1, prev + 1);
+          if (import.meta.env?.DEV && next !== prev) {
+            console.log('[VisualAcceptanceModal:Wheel] 滚轮切至下一帧:', next);
+          }
+          return next;
+        });
+      } else if (wheelAccumulatorRef.current <= -THRESHOLD) {
+        wheelAccumulatorRef.current = 0;
+        setIsPlaying(false);
+        setCurrentStepIndex((prev) => {
+          const next = Math.max(0, prev - 1);
+          if (import.meta.env?.DEV && next !== prev) {
+            console.log('[VisualAcceptanceModal:Wheel] 滚轮切至上一帧:', next);
+          }
+          return next;
+        });
+      }
+    },
+    [steps.length]
+  );
+
+  // 键盘快捷键监听 (方向键切帧、首尾帧跳转、翻页、空格播放/暂停、ESC 关闭)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -311,6 +404,18 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         handleNext();
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        handleSeekFirst();
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        handleSeekLast();
+      } else if (e.key === 'PageUp') {
+        e.preventDefault();
+        handleSeekTo(currentStepIndex - 5);
+      } else if (e.key === 'PageDown') {
+        e.preventDefault();
+        handleSeekTo(currentStepIndex + 5);
       } else if (e.key === ' ') {
         e.preventDefault();
         togglePlay();
@@ -321,7 +426,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePrev, handleNext, togglePlay, onClose]);
+  }, [handlePrev, handleNext, handleSeekFirst, handleSeekLast, handleSeekTo, currentStepIndex, togglePlay, onClose]);
 
   // 验收通过并自动合并
   const handleApproveAndMerge = async () => {
@@ -746,14 +851,14 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
         {/* 主内容区域：左侧截帧渲染 + 右侧审计抽屉 */}
         <div className="flex-1 flex min-h-0 overflow-hidden">
           {/* 左侧：截帧显示区（浅冷灰基底承载高质感白底 Mac 视窗容器） */}
-          <div className="flex-1 relative flex items-center justify-center p-5 bg-[#ebebf0] overflow-hidden">
+          <div className="flex-1 relative flex items-center justify-center p-4 bg-[#ebebf0] overflow-hidden">
             {isLoadingRun ? (
               <div className="flex flex-col items-center justify-center text-[#71717a] gap-2">
                 <Loader2 size={22} className="animate-spin text-[#1c1c21]" />
                 <span className="text-[12px]">正在加载 UI 自动化截帧序列...</span>
               </div>
             ) : imageUrl ? (
-              <div className="max-w-full max-h-full rounded-[8px] border border-[#d8d8de] bg-white shadow-[0_8px_30px_rgba(0,0,0,0.08)] flex flex-col overflow-hidden animate-in fade-in duration-100">
+              <div className="w-full h-full max-w-full max-h-full rounded-[8px] border border-[#d8d8de] bg-white shadow-[0_8px_30px_rgba(0,0,0,0.08)] flex flex-col overflow-hidden animate-in fade-in duration-100">
                 {/* 拟态原生 Mac 视窗标题栏 */}
                 <div className="h-[28px] bg-[#fafafc] border-b border-[#e3e3e8] px-3 flex items-center justify-between shrink-0 select-none">
                   <div className="flex items-center gap-1.5">
@@ -780,18 +885,57 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                     <ExternalLink size={9} className="opacity-60 group-hover:opacity-100 transition-opacity" />
                   </button>
 
-                  <div className="w-12 text-right text-[10px] font-mono text-[#85858d]">
-                    {currentStepIndex + 1}/{steps.length}
+                  <div className="flex items-center gap-2 text-[10px] font-mono text-[#85858d]">
+                    <span className="hidden sm:inline-block text-[#a1a1aa]">滚轮或 ← → 切帧</span>
+                    <span className="bg-[#f4f4f6] px-1.5 py-0.5 rounded border border-[#e3e3e8] font-medium text-[#1c1c21]">
+                      {currentStepIndex + 1}/{steps.length}
+                    </span>
                   </div>
                 </div>
 
-                {/* 截图承载视口 */}
-                <div className="relative flex items-center justify-center bg-white overflow-hidden">
+                {/* 截图承载视口 (支持悬浮切帧按钮与滚轮手势切帧) */}
+                <div
+                  className="relative flex-1 min-h-0 flex items-center justify-center bg-[#fbfbfc] overflow-hidden group/viewport"
+                  onWheel={handleViewportWheel}
+                >
                   <img
                     src={imageUrl}
                     alt={`Step ${currentStepIndex + 1}`}
-                    className="max-w-full max-h-[calc(90vh-190px)] object-contain block select-none"
+                    className="max-w-full max-h-full object-contain block select-none"
+                    decoding="async"
                   />
+
+                  {/* 悬浮上一帧切换按钮 */}
+                  {steps.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePrev();
+                      }}
+                      disabled={currentStepIndex === 0}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-[#1c1c21] shadow-md border border-[#e3e3e8] backdrop-blur-[4px] flex items-center justify-center transition-all duration-150 active:scale-95 cursor-pointer disabled:opacity-0 disabled:pointer-events-none opacity-0 group-hover/viewport:opacity-90 hover:!opacity-100"
+                      title="上一帧 (←)"
+                    >
+                      <ChevronLeft size={16} strokeWidth={2.2} />
+                    </button>
+                  )}
+
+                  {/* 悬浮下一帧切换按钮 */}
+                  {steps.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleNext();
+                      }}
+                      disabled={currentStepIndex >= steps.length - 1}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-[#1c1c21] shadow-md border border-[#e3e3e8] backdrop-blur-[4px] flex items-center justify-center transition-all duration-150 active:scale-95 cursor-pointer disabled:opacity-0 disabled:pointer-events-none opacity-0 group-hover/viewport:opacity-90 hover:!opacity-100"
+                      title="下一帧 (→)"
+                    >
+                      <ChevronRight size={16} strokeWidth={2.2} />
+                    </button>
+                  )}
 
                   {/* AI 目标区域高亮悬浮聚焦框 */}
                   {isAiOverlayVisible && currentStep?.boundingBox && (
@@ -811,6 +955,21 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                     </div>
                   )}
 
+                  {/* 当前步骤说明微胶囊 */}
+                  {currentStep && (
+                    <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 z-10 max-w-[85%] px-2.5 py-1 rounded-[5px] bg-[#1c1c21]/80 hover:bg-[#1c1c21]/95 text-white backdrop-blur-[6px] shadow-sm flex items-center gap-2 pointer-events-auto transition-all text-[11px] select-none truncate">
+                      <span className="font-mono text-[10px] text-[#a5b4fc] shrink-0 font-medium">
+                        #{currentStepIndex + 1}
+                      </span>
+                      <span className="truncate text-[#f4f4f6]">{currentStep.prompt}</span>
+                      {currentStep.status === 'passed' ? (
+                        <CheckCircle2 size={11} className="text-[#34d399] shrink-0" />
+                      ) : (
+                        <XCircle size={11} className="text-[#f87171] shrink-0" />
+                      )}
+                    </div>
+                  )}
+
                   {/* AI 正在重跑自动化测试时的半透明蒙层 */}
                   {isRerunning && (
                     <div className="absolute inset-0 z-20 bg-black/40 backdrop-blur-[2px] flex flex-col items-center justify-center text-white p-4 animate-in fade-in duration-200">
@@ -824,6 +983,96 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                     </div>
                   )}
                 </div>
+
+                {/* 底部帧胶片序列时间轴 (Filmstrip Track) */}
+                {steps.length > 0 && (
+                  <div className="h-[74px] bg-[#fafafc] border-t border-[#e3e3e8] px-3 flex items-center gap-2 shrink-0 select-none overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={handleSeekFirst}
+                      disabled={currentStepIndex === 0}
+                      className="w-6 h-6 rounded-[4px] bg-white hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] border border-[#e3e3e8] disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+                      title="跳到首帧 (Home)"
+                    >
+                      <ChevronsLeft size={12} />
+                    </button>
+
+                    <div
+                      ref={filmstripRef}
+                      className="flex-1 flex items-center gap-2 overflow-x-auto py-1 scroll-smooth"
+                      style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                    >
+                      {steps.map((st, idx) => {
+                        const isCurrent = idx === currentStepIndex;
+                        const thumbUrl = st.screenshotUrl
+                          ? api.getArtifactUrl(st.screenshotUrl)
+                          : st.screenshotRelPath
+                          ? api.getArtifactUrl(st.screenshotRelPath)
+                          : '';
+
+                        return (
+                          <div
+                            key={st.stepId || idx}
+                            ref={(el) => {
+                              if (el) stepItemRefs.current.set(idx, el);
+                              else stepItemRefs.current.delete(idx);
+                            }}
+                            onClick={() => handleSeekTo(idx)}
+                            className={`group/thumb relative w-[68px] h-[48px] rounded-[5px] shrink-0 cursor-pointer overflow-hidden transition-all duration-150 border ${
+                              isCurrent
+                                ? 'border-[#4f46e5] ring-2 ring-[#4f46e5]/30 shadow-xs scale-102 bg-white'
+                                : 'border-[#e3e3e8] bg-[#f4f4f6] opacity-70 hover:opacity-100 hover:border-[#b9b9c2]'
+                            }`}
+                            title={`第 ${idx + 1} 步: ${st.prompt}`}
+                          >
+                            {thumbUrl ? (
+                              <img
+                                src={thumbUrl}
+                                alt={`Frame ${idx + 1}`}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                                decoding="async"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center bg-[#f4f4f6] text-[#85858d] text-[9px] font-mono">
+                                无快照
+                              </div>
+                            )}
+
+                            {/* 帧号角标 */}
+                            <div className="absolute top-0 left-0 px-1 py-0.2 rounded-br-[4px] bg-black/60 backdrop-blur-[1px] text-white text-[9px] font-mono font-medium leading-none">
+                              #{idx + 1}
+                            </div>
+
+                            {/* 状态指示 */}
+                            <div className="absolute top-1 right-1">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full block ${
+                                  st.status === 'passed' ? 'bg-[#10b981]' : 'bg-[#ef4444]'
+                                }`}
+                              />
+                            </div>
+
+                            {/* 激活指示底条 */}
+                            {isCurrent && (
+                              <div className="absolute bottom-0 inset-x-0 h-[2.5px] bg-[#4f46e5]" />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSeekLast}
+                      disabled={currentStepIndex === steps.length - 1}
+                      className="w-6 h-6 rounded-[4px] bg-white hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] border border-[#e3e3e8] disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+                      title="跳到尾帧 (End)"
+                    >
+                      <ChevronsRight size={12} />
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center text-[#85858d] gap-2">
@@ -973,10 +1222,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                         return (
                           <div
                             key={st.stepId || idx}
-                            onClick={() => {
-                              setIsPlaying(false);
-                              setCurrentStepIndex(idx);
-                            }}
+                            onClick={() => handleSeekTo(idx)}
                             className={`px-2.5 py-1.5 flex items-center justify-between text-[11px] transition-colors cursor-pointer ${
                               isCurrent
                                 ? 'bg-white font-semibold text-[#1c1c21] shadow-3xs'
@@ -1209,12 +1455,22 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
         {/* 底部播放控制与【验收通过并合并】决策工具栏（高 54px，白底微边框） */}
         <div className="h-[54px] bg-white border-t border-[#e3e3e8] px-5 flex items-center justify-between gap-5 shrink-0 shadow-[0_-1px_2px_rgba(0,0,0,0.02)]">
           {/* 左侧播放控制器 */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={handleSeekFirst}
+              disabled={currentStepIndex === 0 || steps.length <= 1}
+              className="w-7 h-7 rounded-[5px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center transition-colors cursor-pointer shrink-0"
+              title="首帧 (Home)"
+            >
+              <ChevronsLeft size={13} />
+            </button>
+
             <button
               type="button"
               onClick={handlePrev}
               disabled={currentStepIndex === 0 || steps.length <= 1}
-              className="w-7 h-7 rounded-[5px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] disabled:opacity-30 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+              className="w-7 h-7 rounded-[5px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center transition-colors cursor-pointer shrink-0"
               title="上一帧 (←)"
             >
               <SkipBack size={13} />
@@ -1234,10 +1490,20 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
               type="button"
               onClick={handleNext}
               disabled={currentStepIndex === steps.length - 1 || steps.length <= 1}
-              className="w-7 h-7 rounded-[5px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] disabled:opacity-30 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+              className="w-7 h-7 rounded-[5px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center transition-colors cursor-pointer shrink-0"
               title="下一帧 (→)"
             >
               <SkipForward size={13} />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSeekLast}
+              disabled={currentStepIndex === steps.length - 1 || steps.length <= 1}
+              className="w-7 h-7 rounded-[5px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center transition-colors cursor-pointer shrink-0"
+              title="末帧 (End)"
+            >
+              <ChevronsRight size={13} />
             </button>
 
             {/* 倍速切换微胶囊 */}
@@ -1259,10 +1525,10 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
             </div>
           </div>
 
-          {/* 中间进度条拖拽 */}
+          {/* 中间进度条拖拽与百分比 */}
           <div className="flex-1 max-w-lg mx-3 flex items-center gap-3 min-w-0">
-            <span className="text-[11px] font-mono text-[#85858d] shrink-0">
-              {steps.length > 0 ? `${currentStepIndex + 1}/${steps.length}` : '0/0'}
+            <span className="text-[11px] font-mono text-[#85858d] shrink-0 font-medium">
+              {steps.length > 0 ? `${currentStepIndex + 1} / ${steps.length}` : '0/0'}
             </span>
             <input
               type="range"
@@ -1270,12 +1536,14 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
               max={Math.max(0, steps.length - 1)}
               value={currentStepIndex}
               onChange={(e) => {
-                setIsPlaying(false);
-                setCurrentStepIndex(Number(e.target.value));
+                handleSeekTo(Number(e.target.value));
               }}
               disabled={steps.length <= 1}
-              className="flex-1 accent-[#1c1c21] h-1 bg-[#e3e3e8] rounded-lg cursor-pointer"
+              className="flex-1 accent-[#1c1c21] h-1.5 bg-[#e3e3e8] rounded-lg cursor-pointer"
             />
+            <span className="hidden sm:inline-block text-[10.5px] text-[#85858d] font-mono shrink-0 whitespace-nowrap">
+              {steps.length > 0 ? `${Math.round(((currentStepIndex + 1) / steps.length) * 100)}%` : '0%'}
+            </span>
           </div>
 
           {/* 右侧核心决策按钮群 */}
