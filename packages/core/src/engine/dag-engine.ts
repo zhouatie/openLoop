@@ -328,6 +328,7 @@ export class DagEngine extends EventEmitter {
       onSessionUpdate: (state: TaskSessionState) => {
         if (!task.context) task.context = {};
         task.context.chatMessages = state.messages;
+        if (state.model) task.context.model = state.model;
         this.store.saveTask(task);
         this.emit('agent:chat_update', state);
       },

@@ -1169,6 +1169,7 @@ export class OpenLoopServer {
           isPaused: false,
           messages: task.context?.chatMessages || [],
           agentName: task.context?.agentName || 'OpenLoop Agent',
+          model: task.context?.model || settings.defaultModel || undefined,
           sessionId,
           piSessionId: sessionId,
           resumeCommand,
@@ -1316,6 +1317,7 @@ export class OpenLoopServer {
             if (currentTask) {
               if (!currentTask.context) currentTask.context = {};
               currentTask.context.chatMessages = state.messages;
+              if (state.model) currentTask.context.model = state.model;
               this.store.saveTask(currentTask);
             }
             this.broadcast({ type: 'agent:chat_update', data: state });
@@ -1671,6 +1673,7 @@ export class OpenLoopServer {
         const previous = this.store.getSettings();
         const updated = this.store.updateSettings(body);
         applyQaModelEnv(updated.qaAutomation);
+        this.broadcast({ type: 'settings:update', data: updated });
 
         // 仅有模型 / 思考强度变化时，才同步到已活跃的 Agent 会话（热切换，不重启进程）
         const modelChanged = (previous.defaultModel || '') !== (updated.defaultModel || '');
