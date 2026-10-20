@@ -34,6 +34,20 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
     },
   },
   {
+    id: 'automations',
+    name: '自动化任务',
+    version: '1.0.0',
+    description: '定时轮询 CLI 脚本、GitHub Issue 与推特消息，驱动下游流水线',
+    isBuiltin: true,
+    sidebarItem: {
+      id: 'automations',
+      title: '自动化任务',
+      icon: 'Timer',
+      order: 3,
+      path: '/automations',
+    },
+  },
+  {
     id: 'qa-automation',
     name: 'QA 自动化',
     version: '1.0.0',
@@ -43,7 +57,7 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
       id: 'qa-automation',
       title: 'QA 自动化',
       icon: 'Target',
-      order: 3,
+      order: 4,
       path: '/qa',
     },
   },
@@ -57,7 +71,7 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
       id: 'plugin-manager',
       title: '插件扩展',
       icon: 'Boxes',
-      order: 4,
+      order: 5,
       path: '/plugins',
     },
   },
@@ -69,6 +83,7 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
 export const BUILTIN_VIEW_TITLES: Record<string, string> = {
   kanban: '任务看板',
   'workflow-editor': '流程编排',
+  automations: '自动化任务',
   'qa-automation': 'QA 自动化',
   'plugin-manager': '插件扩展',
 };

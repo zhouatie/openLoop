@@ -8,6 +8,9 @@ import {
   Puzzle,
   Layers,
   Target,
+  Timer,
+  Bot,
+  Zap,
 } from 'lucide-react';
 import { PluginManifest } from '@openloop/core';
 import { useShortcuts } from '../context/ShortcutContext';
@@ -31,6 +34,9 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   Puzzle: <Puzzle size={15} strokeWidth={1.8} />,
   Layers: <Layers size={15} strokeWidth={1.8} />,
   Target: <Target size={15} strokeWidth={1.8} />,
+  Timer: <Timer size={15} strokeWidth={1.8} />,
+  Bot: <Bot size={15} strokeWidth={1.8} />,
+  Zap: <Zap size={15} strokeWidth={1.8} />,
 };
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -101,12 +107,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <Puzzle size={15} strokeWidth={1.8} />
               );
 
-            // 仅对前两项分配全局快捷键提示
+            // 对前四项核心视图分配全局快捷键提示
             const shortcutHint =
               plugin.id === 'kanban'
                 ? formatCombo('1')
                 : plugin.id === 'workflow-editor'
                 ? formatCombo('2')
+                : plugin.id === 'automations'
+                ? formatCombo('3')
+                : plugin.id === 'qa-automation'
+                ? formatCombo('4')
                 : undefined;
 
             const titleText = plugin.sidebarItem?.title || plugin.name;

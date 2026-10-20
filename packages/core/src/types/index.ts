@@ -374,4 +374,64 @@ export interface QaRunRecord {
   error?: string;
 }
 
+export type AutomationSourceType = 'cli_script' | 'github_issues' | 'twitter_query' | 'custom';
+export type AutomationActionType = 'create_task' | 'run_workflow' | 'notify_only';
+export type AutomationStatus = 'idle' | 'running' | 'success' | 'failed';
+
+export interface AutomationSourceConfig {
+  command?: string;
+  cwd?: string;
+  repo?: string;
+  githubToken?: string;
+  twitterQuery?: string;
+  endpointUrl?: string;
+  script?: string;
+  env?: Record<string, string>;
+}
+
+export interface AutomationActionConfig {
+  workflowId?: string;
+  kanbanColumn?: KanbanColumn;
+  workspace?: string;
+  titleTemplate?: string;
+  descriptionTemplate?: string;
+  autoRun?: boolean;
+}
+
+export interface AutomationTask {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  intervalSec: number;
+  sourceType: AutomationSourceType;
+  sourceConfig: AutomationSourceConfig;
+  actionType: AutomationActionType;
+  actionConfig: AutomationActionConfig;
+  lastRunAt?: number;
+  lastRunStatus?: AutomationStatus;
+  lastRunDurationMs?: number;
+  lastRunMessage?: string;
+  lastRunOutput?: string;
+  totalRuns: number;
+  successRuns: number;
+  failedRuns: number;
+  createdTaskIds?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AutomationLogRecord {
+  id: string;
+  automationId: string;
+  timestamp: number;
+  status: 'success' | 'failed';
+  durationMs: number;
+  summary: string;
+  output?: string;
+  error?: string;
+  createdTaskId?: string;
+}
+
+
 

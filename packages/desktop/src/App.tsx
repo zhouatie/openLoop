@@ -11,6 +11,7 @@ import { ToastProvider } from './components/Toast';
 import { KanbanView } from './views/KanbanView';
 import { WorkflowListView } from './views/WorkflowListView';
 import { WorkflowEditorView } from './views/WorkflowEditorView';
+import { AutomationListView } from './views/AutomationListView';
 import { QaAutomationView } from './views/QaAutomationView';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
@@ -77,6 +78,9 @@ export const AppContent: React.FC = () => {
     onNavigateWorkflows: () => {
       setActivePluginId('workflow-editor');
       setEditingWorkflowId(null);
+    },
+    onNavigateAutomations: () => {
+      setActivePluginId('automations');
     },
     onNavigateQa: () => {
       setActivePluginId('qa-automation');
@@ -347,6 +351,15 @@ export const AppContent: React.FC = () => {
             />
           )}
 
+          {activePluginId === 'automations' && (
+            <AutomationListView
+              workflows={workflows}
+              tasks={tasks}
+              onOpenTaskLogs={handleOpenTaskLogs}
+              onRefreshAll={refreshData}
+            />
+          )}
+
           {activePluginId === 'qa-automation' && (
             <QaAutomationView />
           )}
@@ -370,6 +383,7 @@ export const AppContent: React.FC = () => {
           {/* 第三方插件 */}
           {activePluginId !== 'kanban' &&
             activePluginId !== 'workflow-editor' &&
+            activePluginId !== 'automations' &&
             activePluginId !== 'qa-automation' &&
             activePluginId !== 'plugin-manager' &&
             !isSettings &&

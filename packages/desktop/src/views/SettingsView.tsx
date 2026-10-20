@@ -24,6 +24,8 @@ import {
   ShieldCheck,
   Sparkles,
   Search,
+  Target,
+  Timer,
 } from 'lucide-react';
 import { api } from '../services/api';
 import {
@@ -69,6 +71,8 @@ const SETTINGS_TAB_ITEMS: { id: SettingsTabId; label: string; icon: React.ReactN
 const SIDEBAR_ICON_MAP: Record<string, React.ReactNode> = {
   Kanban: <Layers size={14} strokeWidth={2} />,
   Workflow: <Workflow size={14} strokeWidth={2} />,
+  Timer: <Timer size={14} strokeWidth={2} />,
+  Target: <Target size={14} strokeWidth={2} />,
   Boxes: <Boxes size={14} strokeWidth={2} />,
   Cpu: <Cpu size={14} strokeWidth={2} />,
   Puzzle: <Puzzle size={14} strokeWidth={2} />,
@@ -410,9 +414,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     return getSortedSidebarPlugins(plugins, sidebarOrder);
   }, [plugins, sidebarOrder]);
 
-  // 上移某一项（禁止移动前两项固定项）
+  // 上移某一项（禁止移动前四项固定项）
   const handleMoveUp = (index: number) => {
-    if (index <= 2) return; // 索引 0, 1 不可排；索引 2 是可排项第一位，不能往上移动跨越固定项
+    if (index <= 4) return; // 索引 0, 1, 2, 3 不可排；索引 4 是可排项第一位，不能往上移动跨越固定项
     const updated = moveSidebarItem(currentSidebarPlugins, index, index - 1);
     const newOrderIds = updated.map((p) => p.id);
     if (onUpdateSidebarOrder) {
@@ -421,9 +425,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     toast.success('已更新侧边栏排序');
   };
 
-  // 下移某一项（禁止移动前两项固定项）
+  // 下移某一项（禁止移动前四项固定项）
   const handleMoveDown = (index: number) => {
-    if (index < 2 || index >= currentSidebarPlugins.length - 1) return;
+    if (index < 4 || index >= currentSidebarPlugins.length - 1) return;
     const updated = moveSidebarItem(currentSidebarPlugins, index, index + 1);
     const newOrderIds = updated.map((p) => p.id);
     if (onUpdateSidebarOrder) {
@@ -446,7 +450,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // 拖拽排序处理
   const handleDragStart = (e: React.DragEvent, index: number) => {
-    if (index < 2) {
+    if (index < 4) {
       e.preventDefault();
       return;
     }
@@ -456,7 +460,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault();
-    if (index < 2) return; // 不能拖到前两项区域
+    if (index < 4) return; // 不能拖到前四项区域
     if (dragOverIndex !== index) {
       setDragOverIndex(index);
     }
@@ -464,7 +468,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleDrop = (e: React.DragEvent, targetIndex: number) => {
     e.preventDefault();
-    if (draggingIndex === null || draggingIndex < 2 || targetIndex < 2 || draggingIndex === targetIndex) {
+    if (draggingIndex === null || draggingIndex < 4 || targetIndex < 4 || draggingIndex === targetIndex) {
       setDraggingIndex(null);
       setDragOverIndex(null);
       return;
@@ -1156,7 +1160,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             <div className="bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.02)] divide-y divide-[#ececf0]">
               {currentSidebarPlugins.map((plugin, index) => {
-                const isFixed = index < 2;
+                const isFixed = index < 4;
                 const icon =
                   (plugin.sidebarItem?.icon && SIDEBAR_ICON_MAP[plugin.sidebarItem.icon]) || (
                     <Puzzle size={14} strokeWidth={2} />
@@ -1349,7 +1353,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       打字与表单输入时单键不会被拦截
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                     <div className="flex items-center justify-between p-2.5 rounded-[7px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
                       <span className="text-[12px] text-[#4b4b53]">任务看板</span>
                       <Kbd keys={['super', '1']} size="xs" />
@@ -1357,6 +1361,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div className="flex items-center justify-between p-2.5 rounded-[7px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
                       <span className="text-[12px] text-[#4b4b53]">流程编排</span>
                       <Kbd keys={['super', '2']} size="xs" />
+                    </div>
+                    <div className="flex items-center justify-between p-2.5 rounded-[7px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                      <span className="text-[12px] text-[#4b4b53]">自动化任务</span>
+                      <Kbd keys={['super', '3']} size="xs" />
+                    </div>
+                    <div className="flex items-center justify-between p-2.5 rounded-[7px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                      <span className="text-[12px] text-[#4b4b53]">QA 自动化</span>
+                      <Kbd keys={['super', '4']} size="xs" />
                     </div>
                     <div className="flex items-center justify-between p-2.5 rounded-[7px] bg-white border border-[#e8e8ed] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
                       <span className="text-[12px] text-[#4b4b53]">系统设置</span>

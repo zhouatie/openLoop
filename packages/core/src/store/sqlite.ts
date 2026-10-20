@@ -12,6 +12,8 @@ import {
   OpenLoopSettings,
   QaSuite,
   QaRunRecord,
+  AutomationTask,
+  AutomationLogRecord,
 } from '../types';
 import { DEFAULT_PROMPT_TEMPLATES } from '../constants/prompts';
 import { createLogger } from '../logger';
@@ -149,6 +151,42 @@ export class SqliteStore {
         error TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS automation_tasks (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        enabled INTEGER NOT NULL,
+        interval_sec INTEGER NOT NULL,
+        source_type TEXT NOT NULL,
+        source_config_json TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        action_config_json TEXT NOT NULL,
+        last_run_at INTEGER,
+        last_run_status TEXT,
+        last_run_duration_ms INTEGER,
+        last_run_message TEXT,
+        last_run_output TEXT,
+        total_runs INTEGER NOT NULL,
+        success_runs INTEGER NOT NULL,
+        failed_runs INTEGER NOT NULL,
+        created_task_ids_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS automation_logs (
+        id TEXT PRIMARY KEY,
+        automation_id TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        summary TEXT NOT NULL,
+        output TEXT,
+        error TEXT,
+        created_task_id TEXT,
+        FOREIGN KEY (automation_id) REFERENCES automation_tasks(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_kanban ON tasks(kanban_column);
       CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC);
@@ -156,6 +194,7 @@ export class SqliteStore {
       CREATE INDEX IF NOT EXISTS idx_logs_task_time ON logs(task_id, timestamp ASC);
       CREATE INDEX IF NOT EXISTS idx_logs_node ON logs(task_id, node_id);
       CREATE INDEX IF NOT EXISTS idx_qa_runs_suite ON qa_runs(suite_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_automation_logs ON automation_logs(automation_id, timestamp DESC);
     `);
 
     // 增量表结构平滑迁移：为历史已有数据库的 workflows 表补齐 tags_json 字段
@@ -1732,6 +1771,141 @@ export class SqliteStore {
     updateSuiteStmt.run(run.status, run.durationMs, run.finishedAt || Date.now(), Date.now(), run.suiteId);
 
     return run;
+  }
+
+  private mapRowToAutomationTask(r: any): AutomationTask {
+    return {
+      id: r.id,
+      name: r.name,
+      description: r.description || undefined,
+      enabled: Boolean(r.enabled),
+      intervalSec: r.interval_sec,
+      sourceType: r.source_type,
+      sourceConfig: r.source_config_json ? JSON.parse(r.source_config_json) : {},
+      actionType: r.action_type,
+      actionConfig: r.action_config_json ? JSON.parse(r.action_config_json) : {},
+      lastRunAt: r.last_run_at || undefined,
+      lastRunStatus: r.last_run_status || undefined,
+      lastRunDurationMs: r.last_run_duration_ms || undefined,
+      lastRunMessage: r.last_run_message || undefined,
+      lastRunOutput: r.last_run_output || undefined,
+      totalRuns: r.total_runs || 0,
+      successRuns: r.success_runs || 0,
+      failedRuns: r.failed_runs || 0,
+      createdTaskIds: r.created_task_ids_json ? JSON.parse(r.created_task_ids_json) : [],
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  public getAutomationTasks(): AutomationTask[] {
+    const rows = this.db.prepare('SELECT * FROM automation_tasks ORDER BY updated_at DESC').all() as any[];
+    return rows.map((r) => this.mapRowToAutomationTask(r));
+  }
+
+  public getAutomationTask(id: string): AutomationTask | undefined {
+    const r = this.db.prepare('SELECT * FROM automation_tasks WHERE id = ?').get(id) as any;
+    return r ? this.mapRowToAutomationTask(r) : undefined;
+  }
+
+  public saveAutomationTask(task: AutomationTask): AutomationTask {
+    const stmt = this.db.prepare(`
+      INSERT INTO automation_tasks (
+        id, name, description, enabled, interval_sec, source_type,
+        source_config_json, action_type, action_config_json,
+        last_run_at, last_run_status, last_run_duration_ms,
+        last_run_message, last_run_output, total_runs, success_runs,
+        failed_runs, created_task_ids_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        description = excluded.description,
+        enabled = excluded.enabled,
+        interval_sec = excluded.interval_sec,
+        source_type = excluded.source_type,
+        source_config_json = excluded.source_config_json,
+        action_type = excluded.action_type,
+        action_config_json = excluded.action_config_json,
+        last_run_at = excluded.last_run_at,
+        last_run_status = excluded.last_run_status,
+        last_run_duration_ms = excluded.last_run_duration_ms,
+        last_run_message = excluded.last_run_message,
+        last_run_output = excluded.last_run_output,
+        total_runs = excluded.total_runs,
+        success_runs = excluded.success_runs,
+        failed_runs = excluded.failed_runs,
+        created_task_ids_json = excluded.created_task_ids_json,
+        updated_at = excluded.updated_at
+    `);
+
+    stmt.run(
+      task.id,
+      task.name,
+      task.description || null,
+      task.enabled ? 1 : 0,
+      task.intervalSec || 60,
+      task.sourceType,
+      JSON.stringify(task.sourceConfig || {}),
+      task.actionType,
+      JSON.stringify(task.actionConfig || {}),
+      task.lastRunAt || null,
+      task.lastRunStatus || null,
+      task.lastRunDurationMs || null,
+      task.lastRunMessage || null,
+      task.lastRunOutput || null,
+      task.totalRuns || 0,
+      task.successRuns || 0,
+      task.failedRuns || 0,
+      JSON.stringify(task.createdTaskIds || []),
+      task.createdAt || Date.now(),
+      task.updatedAt || Date.now()
+    );
+
+    return task;
+  }
+
+  public deleteAutomationTask(id: string): boolean {
+    const res = this.db.prepare('DELETE FROM automation_tasks WHERE id = ?').run(id);
+    return res.changes > 0;
+  }
+
+  public getAutomationLogs(automationId?: string, limit = 50): AutomationLogRecord[] {
+    let rows: any[];
+    if (automationId) {
+      rows = this.db.prepare('SELECT * FROM automation_logs WHERE automation_id = ? ORDER BY timestamp DESC LIMIT ?').all(automationId, limit);
+    } else {
+      rows = this.db.prepare('SELECT * FROM automation_logs ORDER BY timestamp DESC LIMIT ?').all(limit);
+    }
+    return rows.map((r) => ({
+      id: r.id,
+      automationId: r.automation_id,
+      timestamp: r.timestamp,
+      status: r.status,
+      durationMs: r.duration_ms,
+      summary: r.summary,
+      output: r.output || undefined,
+      error: r.error || undefined,
+      createdTaskId: r.created_task_id || undefined,
+    }));
+  }
+
+  public addAutomationLog(log: AutomationLogRecord): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO automation_logs (
+        id, automation_id, timestamp, status, duration_ms, summary, output, error, created_task_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      log.id,
+      log.automationId,
+      log.timestamp,
+      log.status,
+      log.durationMs,
+      log.summary,
+      log.output || null,
+      log.error || null,
+      log.createdTaskId || null
+    );
   }
 
   public close() {
