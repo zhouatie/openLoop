@@ -339,6 +339,19 @@ export class SqliteStore {
       // 忽略
     }
 
+    // 增量配置平滑迁移：历史版本曾将 defaultCwd 默认写入为 process.cwd()，旧默认启动目录重置为空
+    try {
+      const row = this.db.prepare("SELECT value_json FROM settings WHERE key = 'defaultCwd'").get() as { value_json: string } | undefined;
+      if (row) {
+        const val = JSON.parse(row.value_json);
+        if (typeof val === 'string' && (val === process.cwd() || path.resolve(val) === path.resolve(process.cwd()) || process.cwd().startsWith(val))) {
+          this.db.prepare("DELETE FROM settings WHERE key = 'defaultCwd'").run();
+        }
+      }
+    } catch {
+      // 忽略
+    }
+
     // 系统启动自愈：清理因服务崩溃/重启而残留为 running 状态的孤立任务
     this.recoverOrphanRunningTasks();
   }
@@ -1302,7 +1315,7 @@ export class SqliteStore {
       agentProvider: 'pi',
       defaultModel: '',
       reasoningLevel: 'high',
-      defaultCwd: process.cwd(),
+      defaultCwd: '',
       prompts: { ...DEFAULT_PROMPT_TEMPLATES },
     };
     for (const r of rows) {

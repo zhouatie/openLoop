@@ -262,7 +262,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         if (settings.agentProvider) setAgentProvider(getAgentProviderMeta(settings.agentProvider).id);
         if (settings.defaultModel) setModel(settings.defaultModel);
         if (settings.reasoningLevel) setThinking(settings.reasoningLevel);
-        if (settings.defaultCwd) setDefaultCwd(settings.defaultCwd);
+        setDefaultCwd(settings.defaultCwd || '');
         if (settings.autoSnapshot !== undefined) setAutoSnapshot(settings.autoSnapshot);
         if (settings.prompts) {
           setPrompts({ ...DEFAULT_PROMPT_TEMPLATES, ...settings.prompts });
@@ -381,12 +381,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     try {
       const chosen = await api.selectDirectory({ defaultPath: defaultCwd || undefined });
       if (chosen) {
+        if (import.meta.env?.DEV) {
+          console.log('[Settings] 用户选择默认工程工作区:', chosen);
+        }
         setDefaultCwd(chosen);
         await handleSave({ defaultCwd: chosen });
       }
     } catch (err) {
       console.error('选择目录失败:', err);
     }
+  };
+
+  const handleClearCwd = () => {
+    if (import.meta.env?.DEV) {
+      console.log('[Settings] 用户清空默认工程工作区 (CWD)');
+    }
+    setDefaultCwd('');
+    handleSave({ defaultCwd: '' });
   };
 
   const handleExportConfig = async () => {
@@ -994,14 +1005,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
 
                   <div className="shrink-0 self-center flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      value={defaultCwd}
-                      onChange={(e) => setDefaultCwd(e.target.value)}
-                      onBlur={() => handleSave()}
-                      placeholder="留空使用 openLoop 启动目录"
-                      className="w-64 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#85858d] outline-none shadow-sm focus:border-[#4f46e5]"
-                    />
+                    <div className="relative flex items-center">
+                      <input
+                        type="text"
+                        value={defaultCwd}
+                        onChange={(e) => setDefaultCwd(e.target.value)}
+                        onBlur={() => handleSave()}
+                        placeholder="留空使用 openLoop 启动目录"
+                        className={`w-64 h-[26px] pl-2 ${defaultCwd ? 'pr-6' : 'pr-2'} rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#85858d] outline-none shadow-sm focus:border-[#4f46e5]`}
+                      />
+                      {defaultCwd && (
+                        <button
+                          type="button"
+                          onClick={handleClearCwd}
+                          className="absolute right-1.5 p-0.5 text-[#85858d] hover:text-[#1c1c21] rounded transition-colors cursor-pointer"
+                          title="清空工作区"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
                     <button
                       type="button"
                       onClick={handleBrowseCwd}
