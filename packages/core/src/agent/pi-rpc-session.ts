@@ -273,7 +273,7 @@ export class PiRpcSessionInstance extends EventEmitter {
         } else if (ev.type === 'toolcall_start') {
           if (!this.currentAssistantMessage.tools) this.currentAssistantMessage.tools = [];
           this.currentAssistantMessage.tools.push({
-            id: ev.id,
+            id: ev.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             name: ev.toolName,
             status: 'running',
           });
@@ -283,11 +283,21 @@ export class PiRpcSessionInstance extends EventEmitter {
       }
 
       case 'tool_execution_start': {
-        if (this.currentAssistantMessage && this.currentAssistantMessage.tools) {
-          const targetTool = this.currentAssistantMessage.tools.find((t) => t.id === record.toolCallId);
-          if (targetTool) {
-            targetTool.args = record.args;
+        let targetTool: any;
+        if (this.currentAssistantMessage?.tools) {
+          targetTool = this.currentAssistantMessage.tools.find((t) => t.id === record.toolCallId);
+        }
+        if (!targetTool) {
+          for (let i = this.messages.length - 1; i >= 0; i--) {
+            const found = this.messages[i].tools?.find((t) => t.id === record.toolCallId);
+            if (found) {
+              targetTool = found;
+              break;
+            }
           }
+        }
+        if (targetTool) {
+          targetTool.args = record.args;
           this.notifyUpdate();
         }
         const toolLabel = record.toolName ? `[${record.toolName}]` : '';
@@ -297,15 +307,25 @@ export class PiRpcSessionInstance extends EventEmitter {
       }
 
       case 'tool_execution_end': {
-        let toolName = '';
-        if (this.currentAssistantMessage && this.currentAssistantMessage.tools) {
-          const targetTool = this.currentAssistantMessage.tools.find((t) => t.id === record.toolCallId);
-          if (targetTool) {
-            targetTool.result = record.result;
-            targetTool.status = record.isError ? 'error' : 'success';
-            targetTool.durationMs = record.durationMs;
-            toolName = targetTool.name;
+        let targetTool: any;
+        if (this.currentAssistantMessage?.tools) {
+          targetTool = this.currentAssistantMessage.tools.find((t) => t.id === record.toolCallId);
+        }
+        if (!targetTool) {
+          for (let i = this.messages.length - 1; i >= 0; i--) {
+            const found = this.messages[i].tools?.find((t) => t.id === record.toolCallId);
+            if (found) {
+              targetTool = found;
+              break;
+            }
           }
+        }
+        let toolName = '';
+        if (targetTool) {
+          targetTool.result = record.result;
+          targetTool.status = record.isError ? 'error' : 'success';
+          targetTool.durationMs = record.durationMs;
+          toolName = targetTool.name;
           this.notifyUpdate();
         }
         const statusText = record.isError ? '失败' : '完成';
