@@ -1045,6 +1045,22 @@ export class OpenLoopServer {
         const sessionId = task.context?.sessionId || task.context?.piSessionId || `session_${task.id}`;
         const cwd = task.context?.worktree?.worktreeDir || task.workspace || process.cwd();
         const settings = this.store.getSettings() || {};
+        const provider = getAgentProviderMeta(
+          task.context?.agentProvider || settings.agentProvider
+        ).id;
+
+        // 非 pi 引擎属于单次 CLI 独立进程，不支持内置 RPC 长连接双向聊天
+        if (provider !== 'pi') {
+          return this.sendJson(
+            res,
+            400,
+            {
+              error: `当前任务运行引擎为 [${getAgentProviderMeta(provider).label}]。双向会话仅支持内置 Pi Agent，请在终端中使用接管命令调试。`,
+              provider,
+            },
+            reqMeta
+          );
+        }
 
         serverLogger.info(`[AgentChat:AutoWakeup] 唤醒并启动 Agent 会话: ${sessionId} (CWD: ${cwd})`, undefined, { taskId });
 

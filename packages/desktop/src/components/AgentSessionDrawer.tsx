@@ -18,7 +18,7 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import { TaskSessionState, SessionChatMessage } from '@openloop/core';
-import { getDefaultResumeCommand } from '@openloop/agent-providers';
+import { getAgentProviderMeta, getDefaultResumeCommand } from '@openloop/agent-providers';
 import { api } from '../services/api';
 import { AgentMarkdown } from './AgentMarkdown';
 import { toast } from './Toast';
@@ -208,6 +208,11 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                   <h3 className="text-[13px] font-semibold text-[#1c1c21] truncate">
                     Agent 交互会话
                   </h3>
+                  {sessionState?.agentProvider && (
+                    <span className="text-[10px] font-mono px-1.5 py-[1px] rounded bg-[#f4f4f6] text-[#52525b] border border-[#e3e3e8]">
+                      {getAgentProviderMeta(sessionState.agentProvider).label}
+                    </span>
+                  )}
                   {nodeName && (
                     <span className="text-[10.5px] font-mono px-1.5 py-[1px] rounded bg-[#f1f1f4] text-[#4b4b53] border border-[#e3e3e8] truncate max-w-[160px]">
                       {nodeName}
@@ -521,53 +526,79 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
 
         {/* 贴底交互输入区 */}
         <div className="p-3 border-t border-[#ececf0] bg-white shrink-0">
-          <div className="flex items-center justify-between text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
-            <span className="flex items-center gap-1">
-              {sessionState?.isBusy ? (
-                <>
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />
-                  <span className="text-[#7c3aed] font-medium">运行中：发送可实时插话引导 (Steer)</span>
-                </>
-              ) : sessionState?.isPaused ? (
-                <span className="text-[#d97706] font-medium">会话已暂停，可输入新指令后继续</span>
-              ) : (
-                <span>可随时追加输入纠偏提示或追问</span>
-              )}
-            </span>
-            <span className="text-[10px] text-[#85858d]">
-              支持按 <kbd className="font-mono px-1 py-0.5 rounded bg-[#f1f1f4] border border-[#e3e3e8]">⌘</kbd> + <kbd className="font-mono px-1 py-0.5 rounded bg-[#f1f1f4] border border-[#e3e3e8]">Enter</kbd> 发送
-            </span>
-          </div>
+          {sessionState?.agentProvider && sessionState.agentProvider !== 'pi' ? (
+            <div className="p-3 rounded-[8px] bg-[#f9f9fb] border border-[#ececf0] flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <Terminal size={13} className="text-[#4f46e5] shrink-0" />
+                <div className="text-[11.5px] text-[#4b4b53] min-w-0">
+                  <span>当前节点由 </span>
+                  <span className="font-semibold text-[#1c1c21]">
+                    {getAgentProviderMeta(sessionState.agentProvider).label}
+                  </span>
+                  <span> 独立执行。如需交互调试，请使用上方「终端接管」。</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCopyTerminalCommand}
+                className="h-[24px] px-2.5 rounded-[5px] bg-white hover:bg-[#ececf0] text-[#1c1c21] text-[11px] font-medium border border-[#e3e3e8] shrink-0 flex items-center gap-1 transition-all shadow-2xs cursor-pointer active:scale-95"
+                title="复制终端接管命令"
+              >
+                <Copy size={11} />
+                <span>接管命令</span>
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
+                <span className="flex items-center gap-1">
+                  {sessionState?.isBusy ? (
+                    <>
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />
+                      <span className="text-[#7c3aed] font-medium">运行中：发送可实时插话引导 (Steer)</span>
+                    </>
+                  ) : sessionState?.isPaused ? (
+                    <span className="text-[#d97706] font-medium">会话已暂停，可输入新指令后继续</span>
+                  ) : (
+                    <span>可随时追加输入纠偏提示或追问</span>
+                  )}
+                </span>
+                <span className="text-[10px] text-[#85858d]">
+                  支持按 <kbd className="font-mono px-1 py-0.5 rounded bg-[#f1f1f4] border border-[#e3e3e8]">⌘</kbd> + <kbd className="font-mono px-1 py-0.5 rounded bg-[#f1f1f4] border border-[#e3e3e8]">Enter</kbd> 发送
+                </span>
+              </div>
 
-          <div className="relative flex items-end gap-2 bg-[#f9f9fb] border border-[#e3e3e8] focus-within:border-[#7c3aed] focus-within:ring-2 focus-within:ring-[#7c3aed]/15 rounded-[8px] p-2 transition-all">
-            <textarea
-              ref={textareaRef}
-              rows={2}
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                  e.preventDefault();
-                  handleSendChat();
-                }
-              }}
-              placeholder="向该 Agent 节点追加补充提示词、纠偏说明或指令..."
-              className="flex-1 bg-transparent border-0 outline-hidden text-[12px] text-[#1c1c21] placeholder-[#a1a1aa] resize-none leading-relaxed"
-            />
-            <button
-              type="button"
-              disabled={!chatInput.trim() || isSending || !taskId}
-              onClick={handleSendChat}
-              className="h-[28px] px-2.5 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 transition-all disabled:opacity-40 cursor-pointer shadow-xs shrink-0"
-            >
-              {isSending ? (
-                <Loader2 size={12} className="animate-spin" />
-              ) : (
-                <Send size={11} />
-              )}
-              <span>发送</span>
-            </button>
-          </div>
+              <div className="relative flex items-end gap-2 bg-[#f9f9fb] border border-[#e3e3e8] focus-within:border-[#7c3aed] focus-within:ring-2 focus-within:ring-[#7c3aed]/15 rounded-[8px] p-2 transition-all">
+                <textarea
+                  ref={textareaRef}
+                  rows={2}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSendChat();
+                    }
+                  }}
+                  placeholder="向该 Agent 节点追加补充提示词、纠偏说明或指令..."
+                  className="flex-1 bg-transparent border-0 outline-hidden text-[12px] text-[#1c1c21] placeholder-[#a1a1aa] resize-none leading-relaxed"
+                />
+                <button
+                  type="button"
+                  disabled={!chatInput.trim() || isSending || !taskId}
+                  onClick={handleSendChat}
+                  className="h-[28px] px-2.5 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 transition-all disabled:opacity-40 cursor-pointer shadow-xs shrink-0"
+                >
+                  {isSending ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Send size={11} />
+                  )}
+                  <span>发送</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </aside>
     </div>

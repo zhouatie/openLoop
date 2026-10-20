@@ -417,6 +417,18 @@ export class AgentExecutor implements NodeExecutor {
     const isSandbox = !resolvedCwd;
     const cwd = resolvedCwd || os.tmpdir();
 
+    // 工作区必要性强校验
+    const isWsRequired = Boolean(node.config?.requireWorkspace);
+    if (isWsRequired && !node.config.cwd && !task.workspace) {
+      const err = `[工作区未指定] Agent 节点 [${node.name || node.id}] 要求必须指定工程工作区目录，但当前任务未关联任何工作区。已终止执行。`;
+      emitLog('stderr', err);
+      return {
+        status: 'failed',
+        exitCode: 1,
+        error: err,
+      };
+    }
+
     // 2. 系统内置的终端接管指令
     const resumeCommand = resolveResumeCommand(agentProvider, sessionId);
     task.context.resumeCommand = resumeCommand;
@@ -424,20 +436,17 @@ export class AgentExecutor implements NodeExecutor {
     const model = settings.defaultModel;
     const thinking = settings.reasoningLevel || 'high';
 
+    // 统一输出工作区与终端恢复指引
+    if (isSandbox) {
+      emitLog('system', `[执行沙箱] 任务未关联本地代码工作区，在安全独立沙箱 (${cwd}) 下执行`);
+    } else {
+      emitLog('system', `[工作区 CWD] ${cwd}`);
+    }
+    emitLog('system', `[终端恢复提示] 如需在终端中交互式接管，可执行: ${resumeCommand}`);
+
     // pi 引擎走内置 RPC 会话驱动
     if (agentProvider === 'pi') {
       const prompt = buildAgentPrompt(ctx);
-
-      const isWsRequired = Boolean(node.config?.requireWorkspace);
-      if (isWsRequired && !node.config.cwd && !task.workspace) {
-        const err = `[工作区未指定] Agent 节点 [${node.name || node.id}] 要求必须指定工程工作区目录，但当前任务未关联任何工作区。已终止执行。`;
-        emitLog('stderr', err);
-        return {
-          status: 'failed',
-          exitCode: 1,
-          error: err,
-        };
-      }
 
       executorLogger.info(
         `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId} (工作区 CWD: ${cwd})`,
@@ -445,12 +454,6 @@ export class AgentExecutor implements NodeExecutor {
         { taskId: task.id, nodeId: node.id }
       );
       emitLog('system', `[Pi Agent 会话] Session ID: ${sessionId}`);
-      if (isSandbox) {
-        emitLog('system', `[执行沙箱] 任务未关联本地代码工作区，在安全独立沙箱 (${cwd}) 下执行`);
-      } else {
-        emitLog('system', `[工作区 CWD] ${cwd}`);
-      }
-      emitLog('system', `[终端恢复提示] 如需在终端中交互式接管，可执行: ${resumeCommand}`);
 
       return new Promise<ExecutionResult>((resolve) => {
         let settled = false;
@@ -546,7 +549,6 @@ export class AgentExecutor implements NodeExecutor {
     }
 
     emitLog('system', `[执行命令] ${resolvedCommand}`);
-    emitLog('system', `[终端恢复提示] 如需在终端中交互式接管，可执行: ${resumeCommand}`);
 
     const proxyNode: WorkflowNode = {
       ...node,
@@ -561,7 +563,20 @@ export class AgentExecutor implements NodeExecutor {
       },
     };
 
-    return this.cliExecutor.execute({ ...ctx, node: proxyNode });
+    const cliResult = await this.cliExecutor.execute({ ...ctx, node: proxyNode });
+    if (cliResult.status === 'success') {
+      return {
+        ...cliResult,
+        output: {
+          ...(cliResult.output || {}),
+          agentProvider,
+          sessionId,
+          piSessionId: sessionId,
+          resumeCommand,
+        },
+      };
+    }
+    return cliResult;
   }
 }
 

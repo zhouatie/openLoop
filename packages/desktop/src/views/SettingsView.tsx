@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   Copy,
   Check,
+  X,
   ChevronDown,
   RotateCcw,
   Sliders,
@@ -77,6 +78,72 @@ const SIDEBAR_ICON_MAP: Record<string, React.ReactNode> = {
   Boxes: <Boxes size={14} strokeWidth={2} />,
   Cpu: <Cpu size={14} strokeWidth={2} />,
   Puzzle: <Puzzle size={14} strokeWidth={2} />,
+};
+
+const ModelInput: React.FC<{
+  value: string;
+  onSave: (val: string) => void;
+}> = ({ value, onSave }) => {
+  const [localVal, setLocalVal] = useState(value);
+  const debounceTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    setLocalVal(value);
+  }, [value]);
+
+  const commitSave = (nextVal: string) => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    const trimmed = nextVal.trim();
+    if (trimmed !== value) {
+      if (import.meta.env?.DEV) {
+        console.log('[Settings:Model] 保存模型配置:', trimmed);
+      }
+      onSave(trimmed);
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.value;
+    setLocalVal(next);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      commitSave(next);
+    }, 600);
+  };
+
+  const handleClear = () => {
+    setLocalVal('');
+    commitSave('');
+  };
+
+  return (
+    <div className="relative shrink-0 flex items-center">
+      <input
+        type="text"
+        value={localVal}
+        onChange={handleChange}
+        onBlur={() => commitSave(localVal)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.currentTarget.blur();
+          }
+        }}
+        spellCheck={false}
+        placeholder="例如 sonnet / gpt-5-codex"
+        className="w-56 h-[26px] pl-2 pr-6 rounded-[6px] border border-[#e3e3e8] bg-white text-[11.5px] font-mono text-[#1c1c21] placeholder-[#a1a1aa] outline-none shadow-2xs transition-all hover:border-[#d0d0d7] focus:border-[#4f46e5] focus:ring-2 focus:ring-[#4f46e5]/10"
+      />
+      {localVal && (
+        <button
+          type="button"
+          onClick={handleClear}
+          className="absolute right-1.5 w-4 h-4 rounded-full text-[#a1a1aa] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-all cursor-pointer"
+          title="清空并继承引擎默认模型"
+        >
+          <X size={10} strokeWidth={2.4} />
+        </button>
+      )}
+    </div>
+  );
 };
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -597,7 +664,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <select
                     value={agentProvider}
                     onChange={(e) => handleSelectProvider(e.target.value as AgentProviderType)}
-                    className="appearance-none h-[26px] pl-2 pr-6 rounded-[6px] border border-[#e3e3e8] bg-white text-[11.5px] text-[#1c1c21] outline-none shadow-sm cursor-pointer transition-colors hover:border-[#d0d0d7] focus:border-[#4f46e5]"
+                    className="appearance-none h-[26px] pl-2.5 pr-6 rounded-[6px] border border-[#e3e3e8] bg-white text-[11.5px] font-medium text-[#1c1c21] outline-none shadow-2xs cursor-pointer transition-all hover:border-[#d0d0d7] focus:border-[#4f46e5] focus:ring-2 focus:ring-[#4f46e5]/10"
                   >
                     {AGENT_PROVIDERS.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -621,18 +688,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
                 </div>
 
-                <input
-                  type="text"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  onBlur={() => handleSave({ defaultModel: model.trim() })}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') e.currentTarget.blur();
-                  }}
-                  spellCheck={false}
-                  placeholder="例如 sonnet / gpt-5-codex"
-                  className="shrink-0 w-56 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#a1a1aa] outline-none shadow-sm focus:border-[#4f46e5]"
-                />
+                <div className="self-center">
+                  <ModelInput
+                    value={model}
+                    onSave={(val) => {
+                      setModel(val);
+                      handleSave({ defaultModel: val });
+                    }}
+                  />
+                </div>
               </div>
 
               {/* 思考强度 */}
@@ -653,9 +717,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         setThinking(level);
                         handleSave({ reasoningLevel: level });
                       }}
-                      className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer ${
+                      className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer active:scale-95 ${
                         thinking === level
-                          ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+                          ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.08)]'
                           : 'text-[#63636b] hover:text-[#1c1c21]'
                       }`}
                     >
@@ -684,9 +748,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       setAutoSnapshot(false);
                       handleSave({ autoSnapshot: false });
                     }}
-                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer ${
+                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer active:scale-95 ${
                       !autoSnapshot
-                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.08)]'
                         : 'text-[#63636b] hover:text-[#1c1c21]'
                     }`}
                   >
@@ -698,9 +762,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       setAutoSnapshot(true);
                       handleSave({ autoSnapshot: true });
                     }}
-                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer ${
+                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer active:scale-95 ${
                       autoSnapshot
-                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.08)]'
                         : 'text-[#63636b] hover:text-[#1c1c21]'
                     }`}
                   >
