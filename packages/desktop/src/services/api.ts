@@ -15,6 +15,9 @@ import {
   TaskWorktreeDiffResult,
   FileDiffItem,
   RuntimeSettingsApplySummary,
+  StorageStats,
+  StorageCleanOptions,
+  StorageCleanResult,
 } from '@openloop/core';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
@@ -796,6 +799,28 @@ export class DesktopApiService {
     return requestJson<QaRunRecord>(`${BASE_URL}/api/qa/runs/${encodeURIComponent(id)}`);
   }
 
+  async deleteQaRun(id: string): Promise<boolean> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 删除 QA 运行记录与磁盘截图产物:', id);
+    }
+    const res = await requestJson<{ success: boolean }>(`${BASE_URL}/api/qa/runs/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    return Boolean(res?.success);
+  }
+
+  async clearQaRuns(params?: { suiteId?: string; olderThanDays?: number; keepLatestPerSuite?: number; runIds?: string[] }): Promise<{ deletedCount: number }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 批量清理 QA 运行记录:', params);
+    }
+    const res = await requestJson<{ success: boolean; deletedCount: number }>(`${BASE_URL}/api/qa/runs`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params || {}),
+    });
+    return { deletedCount: res?.deletedCount || 0 };
+  }
+
   async generateQaPlan(payload: { title: string; description?: string; workspace?: string }): Promise<{ success: boolean; steps: string[]; text: string; fallback?: boolean }> {
     if (import.meta.env?.DEV) {
       console.log('[UI:QA] 请求 AI 规划验收用例:', payload);
@@ -885,6 +910,39 @@ export class DesktopApiService {
     const path = id ? `/api/automations/${encodeURIComponent(id)}/logs` : '/api/automations/all/logs';
     const res = await requestJson<AutomationLogRecord[]>(`${BASE_URL}${path}`);
     return Array.isArray(res) ? res : [];
+  }
+
+  async clearAutomationLogs(params?: { automationId?: string; olderThanDays?: number }): Promise<{ deletedCount: number }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:Automation] 清理自动化任务日志:', params);
+    }
+    const queryParts: string[] = [];
+    if (params?.automationId) queryParts.push(`automationId=${encodeURIComponent(params.automationId)}`);
+    if (params?.olderThanDays !== undefined) queryParts.push(`olderThanDays=${params.olderThanDays}`);
+    const query = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
+    const res = await requestJson<{ success: boolean; deletedCount: number }>(`${BASE_URL}/api/automations/logs${query}`, {
+      method: 'DELETE',
+    });
+    return { deletedCount: res?.deletedCount || 0 };
+  }
+
+  // ================= Storage & Maintenance API =================
+
+  async getStorageStats(): Promise<StorageStats> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:Storage] 拉取系统存储与数据分布统计');
+    }
+    return requestJson<StorageStats>(`${BASE_URL}/api/storage/stats`);
+  }
+
+  async cleanStorage(options: StorageCleanOptions): Promise<StorageCleanResult> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:Storage] 触发数据优化与垃圾清理:', options);
+    }
+    return requestJson<StorageCleanResult>(`${BASE_URL}/api/storage/clean`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    });
   }
 }
 

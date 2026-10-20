@@ -14,6 +14,9 @@ import {
   QaRunRecord,
   AutomationTask,
   AutomationLogRecord,
+  StorageStats,
+  StorageCleanOptions,
+  StorageCleanResult,
 } from '../types';
 import { DEFAULT_PROMPT_TEMPLATES } from '../constants/prompts';
 import { createLogger } from '../logger';
@@ -199,8 +202,12 @@ export class SqliteStore {
       CREATE INDEX IF NOT EXISTS idx_node_runs_task ON task_node_runs(task_id);
       CREATE INDEX IF NOT EXISTS idx_logs_task_time ON logs(task_id, timestamp ASC);
       CREATE INDEX IF NOT EXISTS idx_logs_node ON logs(task_id, node_id);
+      CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
       CREATE INDEX IF NOT EXISTS idx_qa_runs_suite ON qa_runs(suite_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_qa_runs_created ON qa_runs(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_qa_runs_task ON qa_runs(task_id);
       CREATE INDEX IF NOT EXISTS idx_automation_logs ON automation_logs(automation_id, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_automation_logs_timestamp ON automation_logs(timestamp DESC);
     `);
 
     // 增量表结构平滑迁移：为历史已有数据库的 workflows 表补齐 tags_json 字段
@@ -1184,10 +1191,42 @@ export class SqliteStore {
   }
 
   public deleteTask(taskId: string): boolean {
+    const artifactsDir = path.join(this.dataDir, 'artifacts');
+    const attachmentsDir = path.join(this.dataDir, 'attachments');
+    const cleanTaskFiles = (id: string) => {
+      // 1. 清理关联的 qa_runs 截图产物
+      const qaRows = this.db.prepare('SELECT id FROM qa_runs WHERE task_id = ?').all(id) as { id: string }[];
+      for (const qr of qaRows) {
+        const rDir = path.join(artifactsDir, qr.id);
+        if (fs.existsSync(rDir)) {
+          try { fs.rmSync(rDir, { recursive: true, force: true }); } catch {}
+        }
+      }
+      // 2. 清理 attachments_json 中的附件文件
+      const tRow = this.db.prepare('SELECT attachments_json FROM tasks WHERE id = ?').get(id) as { attachments_json?: string } | undefined;
+      if (tRow?.attachments_json) {
+        try {
+          const atts = JSON.parse(tRow.attachments_json);
+          if (Array.isArray(atts)) {
+            for (const a of atts) {
+              const fn = a.url ? path.basename(a.url) : (a.path ? path.basename(a.path) : null);
+              if (fn) {
+                const filePath = path.join(attachmentsDir, fn);
+                if (fs.existsSync(filePath)) {
+                  try { fs.unlinkSync(filePath); } catch {}
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+    };
+
     const tx = this.db.transaction((id: string) => {
       // 1. 若被删除的是任务组，级联清理其所有子任务相关数据
       const subtasks = this.db.prepare('SELECT id FROM tasks WHERE parent_task_id = ?').all(id) as { id: string }[];
       for (const sub of subtasks) {
+        cleanTaskFiles(sub.id);
         this.db.prepare('DELETE FROM logs WHERE task_id = ?').run(sub.id);
         this.db.prepare('DELETE FROM qa_runs WHERE task_id = ?').run(sub.id);
         this.db.prepare('DELETE FROM task_node_runs WHERE task_id = ?').run(sub.id);
@@ -1205,6 +1244,7 @@ export class SqliteStore {
       }
 
       // 3. 删除当前任务关联的日志、QA记录与任务记录
+      cleanTaskFiles(id);
       this.db.prepare('DELETE FROM logs WHERE task_id = ?').run(id);
       this.db.prepare('DELETE FROM qa_runs WHERE task_id = ?').run(id);
       this.db.prepare('DELETE FROM task_node_runs WHERE task_id = ?').run(id);
@@ -1442,11 +1482,112 @@ export class SqliteStore {
   }
 
   public deleteQaSuite(id: string): boolean {
+    const runs = this.db.prepare('SELECT id FROM qa_runs WHERE suite_id = ?').all(id) as { id: string }[];
+    const artifactsDir = path.join(this.dataDir, 'artifacts');
+    for (const run of runs) {
+      const runArtifactDir = path.join(artifactsDir, run.id);
+      if (fs.existsSync(runArtifactDir)) {
+        try {
+          fs.rmSync(runArtifactDir, { recursive: true, force: true });
+        } catch (e: any) {
+          storeLogger.warn(`清理 QA Run 截图产物目录失败: ${runArtifactDir}`, { error: e.message });
+        }
+      }
+    }
+    this.db.prepare('DELETE FROM qa_runs WHERE suite_id = ?').run(id);
     const res = this.db.prepare('DELETE FROM qa_suites WHERE id = ?').run(id);
     return res.changes > 0;
   }
 
   // ================= QA Execution Runs API =================
+
+  public deleteQaRun(id: string): boolean {
+    const run = this.db.prepare('SELECT id, suite_id FROM qa_runs WHERE id = ?').get(id) as { id: string; suite_id: string } | undefined;
+    if (!run) return false;
+
+    const runArtifactDir = path.join(this.dataDir, 'artifacts', id);
+    if (fs.existsSync(runArtifactDir)) {
+      try {
+        fs.rmSync(runArtifactDir, { recursive: true, force: true });
+      } catch (e: any) {
+        storeLogger.warn(`清理 QA Run 截图产物目录失败: ${runArtifactDir}`, { error: e.message });
+      }
+    }
+
+    const res = this.db.prepare('DELETE FROM qa_runs WHERE id = ?').run(id);
+
+    if (run.suite_id) {
+      const latestRun = this.db.prepare('SELECT status, duration_ms, finished_at, created_at FROM qa_runs WHERE suite_id = ? ORDER BY created_at DESC LIMIT 1').get(run.suite_id) as any;
+      if (latestRun) {
+        this.db.prepare('UPDATE qa_suites SET last_run_status = ?, last_run_duration_ms = ?, last_run_at = ?, updated_at = ? WHERE id = ?')
+          .run(latestRun.status, latestRun.duration_ms, latestRun.finished_at || latestRun.created_at, Date.now(), run.suite_id);
+      } else {
+        this.db.prepare("UPDATE qa_suites SET last_run_status = 'untested', last_run_duration_ms = NULL, last_run_at = NULL, updated_at = ? WHERE id = ?")
+          .run(Date.now(), run.suite_id);
+      }
+    }
+
+    return res.changes > 0;
+  }
+
+  public deleteQaRuns(filter?: { suiteId?: string; olderThanDays?: number; keepLatestPerSuite?: number; runIds?: string[] }): number {
+    const artifactsDir = path.join(this.dataDir, 'artifacts');
+    let deletedCount = 0;
+
+    const removeRunArtifactsAndRow = (runId: string) => {
+      const rDir = path.join(artifactsDir, runId);
+      if (fs.existsSync(rDir)) {
+        try { fs.rmSync(rDir, { recursive: true, force: true }); } catch {}
+      }
+      const r = this.db.prepare('DELETE FROM qa_runs WHERE id = ?').run(runId);
+      if (r.changes > 0) deletedCount += r.changes;
+    };
+
+    if (filter?.runIds && filter.runIds.length > 0) {
+      for (const runId of filter.runIds) {
+        removeRunArtifactsAndRow(runId);
+      }
+    } else if (filter?.keepLatestPerSuite !== undefined && filter.keepLatestPerSuite >= 0) {
+      const keepCount = filter.keepLatestPerSuite;
+      const suites = filter.suiteId
+        ? [{ id: filter.suiteId }]
+        : (this.db.prepare('SELECT DISTINCT suite_id as id FROM qa_runs').all() as { id: string }[]);
+
+      for (const s of suites) {
+        const rows = this.db.prepare('SELECT id FROM qa_runs WHERE suite_id = ? ORDER BY created_at DESC').all(s.id) as { id: string }[];
+        if (rows.length > keepCount) {
+          const toDelete = rows.slice(keepCount);
+          for (const row of toDelete) {
+            removeRunArtifactsAndRow(row.id);
+          }
+        }
+      }
+    } else if (filter?.olderThanDays !== undefined && filter.olderThanDays >= 0) {
+      const cutoff = filter.olderThanDays === 0 ? Date.now() + 1000 : Date.now() - filter.olderThanDays * 86400000;
+      let sql = 'SELECT id FROM qa_runs WHERE created_at <= ?';
+      const params: any[] = [cutoff];
+      if (filter.suiteId) {
+        sql += ' AND suite_id = ?';
+        params.push(filter.suiteId);
+      }
+      const rows = this.db.prepare(sql).all(...params) as { id: string }[];
+      for (const row of rows) {
+        removeRunArtifactsAndRow(row.id);
+      }
+    } else if (filter?.suiteId) {
+      const rows = this.db.prepare('SELECT id FROM qa_runs WHERE suite_id = ?').all(filter.suiteId) as { id: string }[];
+      for (const row of rows) {
+        removeRunArtifactsAndRow(row.id);
+      }
+    } else {
+      const rows = this.db.prepare('SELECT id FROM qa_runs').all() as { id: string }[];
+      for (const row of rows) {
+        removeRunArtifactsAndRow(row.id);
+      }
+    }
+
+    return deletedCount;
+  }
 
   public getQaRuns(suiteId?: string, taskId?: string, limit: number = 30): QaRunRecord[] {
     let rows: any[];
@@ -1674,6 +1815,318 @@ export class SqliteStore {
       log.error || null,
       log.createdTaskId || null
     );
+  }
+
+  // ================= Storage & Garbage Collection API =================
+
+  public deleteOldLogs(olderThanDays: number, taskId?: string): number {
+    const cutoff = olderThanDays > 0 ? Date.now() - olderThanDays * 86400000 : Date.now() + 1000;
+    if (taskId) {
+      const res = this.db.prepare('DELETE FROM logs WHERE task_id = ? AND timestamp <= ?').run(taskId, cutoff);
+      return res.changes;
+    }
+    const res = this.db.prepare('DELETE FROM logs WHERE timestamp <= ?').run(cutoff);
+    return res.changes;
+  }
+
+  public deleteOldAutomationLogs(olderThanDays: number, automationId?: string): number {
+    const cutoff = olderThanDays > 0 ? Date.now() - olderThanDays * 86400000 : Date.now() + 1000;
+    if (automationId) {
+      const res = this.db.prepare('DELETE FROM automation_logs WHERE automation_id = ? AND timestamp <= ?').run(automationId, cutoff);
+      return res.changes;
+    }
+    const res = this.db.prepare('DELETE FROM automation_logs WHERE timestamp <= ?').run(cutoff);
+    return res.changes;
+  }
+
+  private getDirectorySize(dirPath: string): { totalBytes: number; fileCount: number } {
+    let totalBytes = 0;
+    let fileCount = 0;
+    if (!fs.existsSync(dirPath)) return { totalBytes: 0, fileCount: 0 };
+
+    const traverse = (current: string) => {
+      try {
+        const entries = fs.readdirSync(current, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(current, entry.name);
+          if (entry.isDirectory()) {
+            traverse(fullPath);
+          } else if (entry.isFile()) {
+            fileCount++;
+            try {
+              const stat = fs.statSync(fullPath);
+              totalBytes += stat.size;
+            } catch {}
+          }
+        }
+      } catch {}
+    };
+
+    traverse(dirPath);
+    return { totalBytes, fileCount };
+  }
+
+  public cleanOrphanFiles(): { deletedCount: number; freedBytes: number } {
+    let deletedCount = 0;
+    let freedBytes = 0;
+
+    const artifactsDir = path.join(this.dataDir, 'artifacts');
+    const attachmentsDir = path.join(this.dataDir, 'attachments');
+
+    // 1. 清理未引用的 artifacts 运行目录
+    if (fs.existsSync(artifactsDir)) {
+      try {
+        const entries = fs.readdirSync(artifactsDir, { withFileTypes: true });
+        const existingRunIds = new Set(
+          (this.db.prepare('SELECT id FROM qa_runs').all() as any[]).map((r) => r.id)
+        );
+        for (const entry of entries) {
+          if (entry.isDirectory() && !existingRunIds.has(entry.name)) {
+            const subDir = path.join(artifactsDir, entry.name);
+            const dirStat = this.getDirectorySize(subDir);
+            try {
+              fs.rmSync(subDir, { recursive: true, force: true });
+              deletedCount += dirStat.fileCount;
+              freedBytes += dirStat.totalBytes;
+              storeLogger.info(`[Storage:Orphan] 清理孤儿 QA 产物目录: ${entry.name} (${(dirStat.totalBytes / 1024).toFixed(1)} KB)`);
+            } catch {}
+          }
+        }
+      } catch (e: any) {
+        storeLogger.warn(`扫描孤儿 artifacts 异常: ${e.message}`);
+      }
+    }
+
+    // 2. 清理未引用的 attachments 图片附件
+    if (fs.existsSync(attachmentsDir)) {
+      try {
+        const entries = fs.readdirSync(attachmentsDir, { withFileTypes: true });
+        const tasks = this.db.prepare('SELECT attachments_json FROM tasks WHERE attachments_json IS NOT NULL').all() as any[];
+        const referencedFilenames = new Set<string>();
+        for (const t of tasks) {
+          try {
+            const atts = JSON.parse(t.attachments_json);
+            if (Array.isArray(atts)) {
+              for (const a of atts) {
+                const fn = a.url ? path.basename(a.url) : (a.path ? path.basename(a.path) : null);
+                if (fn) referencedFilenames.add(fn);
+              }
+            }
+          } catch {}
+        }
+
+        for (const entry of entries) {
+          if (entry.isFile() && !referencedFilenames.has(entry.name)) {
+            const fPath = path.join(attachmentsDir, entry.name);
+            try {
+              const sz = fs.statSync(fPath).size;
+              fs.unlinkSync(fPath);
+              deletedCount += 1;
+              freedBytes += sz;
+              storeLogger.info(`[Storage:Orphan] 清理孤儿图片附件: ${entry.name} (${(sz / 1024).toFixed(1)} KB)`);
+            } catch {}
+          }
+        }
+      } catch (e: any) {
+        storeLogger.warn(`扫描孤儿 attachments 异常: ${e.message}`);
+      }
+    }
+
+    return { deletedCount, freedBytes };
+  }
+
+  public vacuum(): { beforeBytes: number; afterBytes: number; freedBytes: number } {
+    const walPath = `${this.dbFilePath}-wal`;
+    const getDbTotalSize = () => {
+      let size = 0;
+      try { size += fs.statSync(this.dbFilePath).size; } catch {}
+      try { if (fs.existsSync(walPath)) size += fs.statSync(walPath).size; } catch {}
+      return size;
+    };
+
+    const beforeBytes = getDbTotalSize();
+    try {
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
+      this.db.exec('VACUUM');
+      this.db.pragma('optimize');
+    } catch (e: any) {
+      storeLogger.warn(`SQLite VACUUM 优化异常: ${e.message}`);
+    }
+    const afterBytes = getDbTotalSize();
+    const freedBytes = Math.max(0, beforeBytes - afterBytes);
+    storeLogger.info(`SQLite VACUUM 优化完成: 释放空间 ${(freedBytes / 1024 / 1024).toFixed(2)} MB`);
+    return { beforeBytes, afterBytes, freedBytes };
+  }
+
+  public getStorageStats(): StorageStats {
+    const walPath = `${this.dbFilePath}-wal`;
+    const shmPath = `${this.dbFilePath}-shm`;
+
+    let dbSizeBytes = 0;
+    let walSizeBytes = 0;
+    let shmSizeBytes = 0;
+    try { dbSizeBytes = fs.statSync(this.dbFilePath).size; } catch {}
+    try { if (fs.existsSync(walPath)) walSizeBytes = fs.statSync(walPath).size; } catch {}
+    try { if (fs.existsSync(shmPath)) shmSizeBytes = fs.statSync(shmPath).size; } catch {}
+
+    let pageSize = 4096;
+    let pageCount = 0;
+    let freelistCount = 0;
+    try {
+      pageSize = Number(this.db.pragma('page_size', { simple: true }) || 4096);
+      pageCount = Number(this.db.pragma('page_count', { simple: true }) || 0);
+      freelistCount = Number(this.db.pragma('freelist_count', { simple: true }) || 0);
+    } catch {}
+
+    const countTasks = (this.db.prepare('SELECT count(*) as cnt FROM tasks').get() as any)?.cnt || 0;
+    const countTaskNodeRuns = (this.db.prepare('SELECT count(*) as cnt FROM task_node_runs').get() as any)?.cnt || 0;
+    const countLogs = (this.db.prepare('SELECT count(*) as cnt FROM logs').get() as any)?.cnt || 0;
+    const countQaSuites = (this.db.prepare('SELECT count(*) as cnt FROM qa_suites').get() as any)?.cnt || 0;
+    const countQaRuns = (this.db.prepare('SELECT count(*) as cnt FROM qa_runs').get() as any)?.cnt || 0;
+    const countAutomationTasks = (this.db.prepare('SELECT count(*) as cnt FROM automation_tasks').get() as any)?.cnt || 0;
+    const countAutomationLogs = (this.db.prepare('SELECT count(*) as cnt FROM automation_logs').get() as any)?.cnt || 0;
+
+    const artifactsDir = path.join(this.dataDir, 'artifacts');
+    const attachmentsDir = path.join(this.dataDir, 'attachments');
+    const artifactsStat = this.getDirectorySize(artifactsDir);
+    const attachmentsStat = this.getDirectorySize(attachmentsDir);
+
+    let orphanFilesCount = 0;
+    let orphanFilesBytes = 0;
+
+    if (fs.existsSync(artifactsDir)) {
+      try {
+        const dirs = fs.readdirSync(artifactsDir, { withFileTypes: true });
+        const existingRunIds = new Set(
+          (this.db.prepare('SELECT id FROM qa_runs').all() as any[]).map((r) => r.id)
+        );
+        for (const d of dirs) {
+          if (d.isDirectory() && !existingRunIds.has(d.name)) {
+            const subStat = this.getDirectorySize(path.join(artifactsDir, d.name));
+            orphanFilesCount += subStat.fileCount;
+            orphanFilesBytes += subStat.totalBytes;
+          }
+        }
+      } catch {}
+    }
+
+    if (fs.existsSync(attachmentsDir)) {
+      try {
+        const files = fs.readdirSync(attachmentsDir, { withFileTypes: true });
+        const tasks = this.db.prepare('SELECT attachments_json FROM tasks WHERE attachments_json IS NOT NULL').all() as any[];
+        const referencedFilenames = new Set<string>();
+        for (const t of tasks) {
+          try {
+            const atts = JSON.parse(t.attachments_json);
+            if (Array.isArray(atts)) {
+              for (const a of atts) {
+                const fn = a.url ? path.basename(a.url) : (a.path ? path.basename(a.path) : null);
+                if (fn) referencedFilenames.add(fn);
+              }
+            }
+          } catch {}
+        }
+        for (const f of files) {
+          if (f.isFile() && !referencedFilenames.has(f.name)) {
+            try {
+              const sz = fs.statSync(path.join(attachmentsDir, f.name)).size;
+              orphanFilesCount += 1;
+              orphanFilesBytes += sz;
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    const freelistBytes = freelistCount * pageSize;
+    const reclaimableEstimateBytes = freelistBytes + orphanFilesBytes;
+
+    return {
+      database: {
+        dbSizeBytes,
+        walSizeBytes,
+        shmSizeBytes,
+        totalSizeBytes: dbSizeBytes + walSizeBytes + shmSizeBytes,
+        pageSize,
+        pageCount,
+        freelistCount,
+      },
+      counts: {
+        tasks: countTasks,
+        taskNodeRuns: countTaskNodeRuns,
+        logs: countLogs,
+        qaSuites: countQaSuites,
+        qaRuns: countQaRuns,
+        automationTasks: countAutomationTasks,
+        automationLogs: countAutomationLogs,
+      },
+      disk: {
+        artifactsBytes: artifactsStat.totalBytes,
+        artifactsFilesCount: artifactsStat.fileCount,
+        attachmentsBytes: attachmentsStat.totalBytes,
+        attachmentsFilesCount: attachmentsStat.fileCount,
+        orphanFilesCount,
+        orphanFilesBytes,
+      },
+      reclaimableEstimateBytes,
+    };
+  }
+
+  public cleanStorage(options: StorageCleanOptions): StorageCleanResult {
+    const startTime = Date.now();
+    const initialStats = this.getStorageStats();
+    let deletedLogs = 0;
+    let deletedQaRuns = 0;
+    let deletedAutomationLogs = 0;
+    let deletedOrphanFiles = 0;
+    let vacuumExecuted = false;
+
+    // 1. 清理日志
+    if (options.cleanLogsDays !== undefined) {
+      deletedLogs = this.deleteOldLogs(options.cleanLogsDays);
+    }
+
+    // 2. 清理 QA 测试运行与截图
+    if (options.cleanQaRunsKeepLatest !== undefined) {
+      deletedQaRuns += this.deleteQaRuns({ keepLatestPerSuite: options.cleanQaRunsKeepLatest });
+    }
+    if (options.cleanQaRunsDays !== undefined) {
+      deletedQaRuns += this.deleteQaRuns({ olderThanDays: options.cleanQaRunsDays });
+    }
+
+    // 3. 清理自动化巡检日志
+    if (options.cleanAutomationLogsDays !== undefined) {
+      deletedAutomationLogs = this.deleteOldAutomationLogs(options.cleanAutomationLogsDays);
+    }
+
+    // 4. 清理孤儿文件
+    if (options.cleanOrphanFiles) {
+      const orphanRes = this.cleanOrphanFiles();
+      deletedOrphanFiles = orphanRes.deletedCount;
+    }
+
+    // 5. 压缩与回收 SQLite 空间
+    if (options.vacuum || (options.cleanLogsDays !== undefined && deletedLogs > 0)) {
+      this.vacuum();
+      vacuumExecuted = true;
+    }
+
+    const finalStats = this.getStorageStats();
+    const initialTotal = initialStats.database.totalSizeBytes + initialStats.disk.artifactsBytes + initialStats.disk.attachmentsBytes;
+    const finalTotal = finalStats.database.totalSizeBytes + finalStats.disk.artifactsBytes + finalStats.disk.attachmentsBytes;
+    const freedBytes = Math.max(0, initialTotal - finalTotal);
+
+    storeLogger.info(`[Storage:Clean] 存储垃圾清理完成 (${Date.now() - startTime}ms): 释放 ${(freedBytes / 1024 / 1024).toFixed(2)} MB, 删除日志 ${deletedLogs} 条, 测试运行 ${deletedQaRuns} 个, 自动化日志 ${deletedAutomationLogs} 条, 孤儿文件 ${deletedOrphanFiles} 个`);
+
+    return {
+      freedBytes,
+      deletedLogs,
+      deletedQaRuns,
+      deletedAutomationLogs,
+      deletedOrphanFiles,
+      vacuumExecuted,
+      durationMs: Date.now() - startTime,
+    };
   }
 
   public close() {

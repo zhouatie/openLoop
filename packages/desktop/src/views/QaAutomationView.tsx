@@ -46,6 +46,8 @@ export const QaAutomationView: React.FC = () => {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingSuite, setEditingSuite] = useState<QaSuite | null>(null);
   const [deleteTargetSuite, setDeleteTargetSuite] = useState<QaSuite | null>(null);
+  const [deleteTargetRun, setDeleteTargetRun] = useState<QaRunRecord | null>(null);
+  const [batchDeleteRunIds, setBatchDeleteRunIds] = useState<string[] | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // 实时执行弹窗
@@ -137,21 +139,56 @@ export const QaAutomationView: React.FC = () => {
   // 若处于特定任务详情页，直接渲染详情页视图
   if (selectedRunId) {
     return (
-      <QaRunDetailView
-        runId={selectedRunId}
-        onBack={() => {
-          setSelectedRunId(null);
-          loadData();
-        }}
-        onRerun={(suiteId) => {
-          const target = suites.find((s) => s.id === suiteId);
-          if (target) {
-            setActiveRunSuite(target);
-          } else {
-            toast.error('未找到对应测试用例');
-          }
-        }}
-      />
+      <>
+        <QaRunDetailView
+          runId={selectedRunId}
+          onBack={() => {
+            setSelectedRunId(null);
+            loadData();
+          }}
+          onRerun={(suiteId) => {
+            const target = suites.find((s) => s.id === suiteId);
+            if (target) {
+              setActiveRunSuite(target);
+            } else {
+              toast.error('未找到对应测试用例');
+            }
+          }}
+          onDeleteRun={(runId) => {
+            const r = runs.find((item) => item.id === runId) || ({ id: runId, suiteName: '测试运行' } as QaRunRecord);
+            setDeleteTargetRun(r);
+          }}
+        />
+
+        {deleteTargetRun && (
+          <ConfirmModal
+            isOpen={true}
+            title="删除自动化测试记录"
+            description="将从数据库彻底移除此条测试运行记录，并清理保存在磁盘上的所有视觉截帧与 HTML 报告文件。"
+            targetName={`测试 #${deleteTargetRun.id}`}
+            targetTag={deleteTargetRun.suiteName}
+            confirmText="确认删除"
+            variant="danger"
+            loading={isDeleting}
+            onConfirm={async () => {
+              if (!deleteTargetRun) return;
+              try {
+                setIsDeleting(true);
+                await api.deleteQaRun(deleteTargetRun.id);
+                toast.success('已删除测试运行记录及截图产物');
+                setDeleteTargetRun(null);
+                setSelectedRunId(null);
+                await loadData();
+              } catch (err: any) {
+                toast.error('删除测试记录失败');
+              } finally {
+                setIsDeleting(false);
+              }
+            }}
+            onClose={() => setDeleteTargetRun(null)}
+          />
+        )}
+      </>
     );
   }
 
@@ -229,6 +266,8 @@ export const QaAutomationView: React.FC = () => {
               setEditingSuite(null);
               setIsEditorOpen(true);
             }}
+            onDeleteRun={(run) => setDeleteTargetRun(run)}
+            onBatchDeleteRuns={(runIds) => setBatchDeleteRunIds(runIds)}
             onRefresh={loadData}
             isLoading={isLoading}
           />
@@ -279,7 +318,7 @@ export const QaAutomationView: React.FC = () => {
       <ConfirmModal
         isOpen={Boolean(deleteTargetSuite)}
         title="删除测试用例"
-        description={`确定要删除测试用例「${deleteTargetSuite?.name}」吗？历史运行记录仍会完整保留。`}
+        description={`确定要删除测试用例「${deleteTargetSuite?.name}」吗？关联的历史运行记录与截图产物也将一并级联清理。`}
         confirmText="确定删除"
         cancelText="取消"
         variant="danger"
@@ -287,6 +326,66 @@ export const QaAutomationView: React.FC = () => {
         onConfirm={handleConfirmDelete}
         onClose={() => setDeleteTargetSuite(null)}
       />
+
+      {/* 删除单个运行记录 Modal */}
+      {deleteTargetRun && !selectedRunId && (
+        <ConfirmModal
+          isOpen={true}
+          title="删除自动化测试记录"
+          description="将从数据库彻底移除此条测试运行记录，并清理保存在磁盘上的所有视觉截帧与 HTML 报告文件。"
+          targetName={`测试 #${deleteTargetRun.id}`}
+          targetTag={deleteTargetRun.suiteName}
+          confirmText="确认删除"
+          variant="danger"
+          loading={isDeleting}
+          onConfirm={async () => {
+            if (!deleteTargetRun) return;
+            try {
+              setIsDeleting(true);
+              await api.deleteQaRun(deleteTargetRun.id);
+              toast.success('已删除测试运行记录及截图产物');
+              setDeleteTargetRun(null);
+              await loadData();
+            } catch (err: any) {
+              toast.error('删除测试记录失败');
+            } finally {
+              setIsDeleting(false);
+            }
+          }}
+          onClose={() => setDeleteTargetRun(null)}
+        />
+      )}
+
+      {/* 批量删除测试运行记录 Modal */}
+      {batchDeleteRunIds && (
+        <ConfirmModal
+          isOpen={true}
+          title="批量删除自动化测试记录"
+          description={`确定要批量删除所选的 ${batchDeleteRunIds.length} 条测试运行记录吗？相关的测试历史回放数据与磁盘截图产物也将彻底清除，不可恢复。`}
+          targetName={`所选 ${batchDeleteRunIds.length} 项测试`}
+          confirmText="确认批量删除"
+          cancelText="取消"
+          variant="danger"
+          loading={isDeleting}
+          onConfirm={async () => {
+            if (!batchDeleteRunIds || batchDeleteRunIds.length === 0) return;
+            try {
+              setIsDeleting(true);
+              if (import.meta.env?.DEV) console.log('[QaAutomationView] 批量删除 QA 记录:', batchDeleteRunIds);
+              const res = await api.clearQaRuns({ runIds: batchDeleteRunIds });
+              toast.success(`已批量删除 ${res.deletedCount} 条测试记录与相关截图产物`);
+              setBatchDeleteRunIds(null);
+              await loadData();
+            } catch (err: any) {
+              if (import.meta.env?.DEV) console.error('[QaAutomationView] 批量删除失败:', err);
+              toast.error('批量删除测试记录失败');
+            } finally {
+              setIsDeleting(false);
+            }
+          }}
+          onClose={() => setBatchDeleteRunIds(null)}
+        />
+      )}
     </div>
   );
 };

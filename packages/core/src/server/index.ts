@@ -172,6 +172,8 @@ export class OpenLoopServer {
         this.scheduler.start().catch((err) => {
           serverLogger.error('[openLoop Core] 启动自动化任务调度器异常:', err);
         });
+        setTimeout(() => this.checkAutoStorageCleanup(), 5000);
+        setInterval(() => this.checkAutoStorageCleanup(), 6 * 3600 * 1000);
         resolve({ port: this.port, host: this.host });
       });
 
@@ -196,6 +198,36 @@ export class OpenLoopServer {
 
     if (this.httpServer) {
       await new Promise<void>((resolve) => this.httpServer?.close(() => resolve()));
+    }
+  }
+
+  private checkAutoStorageCleanup(): void {
+    try {
+      const settings = this.store.getSettings();
+      const retention = settings.storageRetention;
+      if (!retention || !retention.autoCleanEnabled) return;
+
+      const now = Date.now();
+      const lastClean = retention.lastAutoCleanAt || 0;
+      if (now - lastClean < 12 * 3600 * 1000) return;
+
+      serverLogger.info('[Storage:AutoRetention] 触发后台轻量化数据生命周期维护');
+      const res = this.store.cleanStorage({
+        cleanLogsDays: retention.logRetentionDays || 14,
+        cleanQaRunsKeepLatest: retention.qaRunRetentionCount || 10,
+        cleanAutomationLogsDays: retention.automationLogRetentionDays || 7,
+        cleanOrphanFiles: true,
+        vacuum: true,
+      });
+      this.store.updateSettings({
+        storageRetention: {
+          ...retention,
+          lastAutoCleanAt: now,
+        },
+      });
+      serverLogger.info(`[Storage:AutoRetention] 自动维护完成: 释放空间 ${(res.freedBytes / 1024 / 1024).toFixed(2)} MB`);
+    } catch (e: any) {
+      serverLogger.warn(`[Storage:AutoRetention] 自动维护异常: ${e.message}`);
     }
   }
 
@@ -841,10 +873,21 @@ export class OpenLoopServer {
             const runIdsToClean: string[] = [];
             if (target.context?.qaRunId) runIdsToClean.push(target.context.qaRunId);
             if (target.attachments) {
+              const attachmentsDir = path.join(this.store.getDataDir(), 'attachments');
               for (const att of target.attachments) {
                 const m = att.path?.match(/artifacts\/([^/\\]+)/);
                 if (m && !runIdsToClean.includes(m[1])) {
                   runIdsToClean.push(m[1]);
+                }
+                const fn = att.url ? path.basename(att.url) : (att.path ? path.basename(att.path) : null);
+                if (fn) {
+                  const filePath = path.join(attachmentsDir, fn);
+                  if (fs.existsSync(filePath)) {
+                    try {
+                      fs.unlinkSync(filePath);
+                      serverLogger.info(`[Tasks:Delete] 成功清理任务图片附件: ${filePath}`);
+                    } catch {}
+                  }
                 }
               }
             }
@@ -1810,6 +1853,34 @@ export class OpenLoopServer {
         return this.sendJson(res, 200, record, reqMeta);
       }
 
+      if (pathname.startsWith('/api/qa/runs/') && method === 'DELETE') {
+        const runId = decodeURIComponent(pathname.replace('/api/qa/runs/', ''));
+        serverLogger.info(`[QA:DeleteRun] 删除 QA 测试记录及截图产物: ${runId}`);
+        const ok = this.store.deleteQaRun(runId);
+        if (ok) {
+          this.broadcast({ type: 'qa:run_deleted', data: { id: runId } });
+        }
+        return this.sendJson(res, 200, { success: ok, id: runId }, reqMeta);
+      }
+
+      if (pathname === '/api/qa/runs' && method === 'DELETE') {
+        let body: any = {};
+        try {
+          body = await this.parseJsonBody(req);
+        } catch {}
+        const suiteId = body?.suiteId || parsedUrl.searchParams.get('suiteId') || undefined;
+        const olderThanDaysStr = body?.olderThanDays ?? parsedUrl.searchParams.get('olderThanDays');
+        const keepLatestStr = body?.keepLatestPerSuite ?? parsedUrl.searchParams.get('keepLatestPerSuite');
+        const olderThanDays = olderThanDaysStr !== undefined ? parseInt(String(olderThanDaysStr), 10) : undefined;
+        const keepLatestPerSuite = keepLatestStr !== undefined ? parseInt(String(keepLatestStr), 10) : undefined;
+        const runIds = Array.isArray(body?.runIds) ? body.runIds : undefined;
+
+        serverLogger.info(`[QA:BatchDeleteRuns] 批量清理 QA 测试记录`, { suiteId, olderThanDays, keepLatestPerSuite, runIdsCount: runIds?.length });
+        const deletedCount = this.store.deleteQaRuns({ suiteId, olderThanDays, keepLatestPerSuite, runIds });
+        this.broadcast({ type: 'qa:runs_cleared', data: { suiteId, deletedCount, runIds } });
+        return this.sendJson(res, 200, { success: true, deletedCount }, reqMeta);
+      }
+
       // Execute QA Run: /api/qa/run
       if (pathname === '/api/qa/run' && method === 'POST') {
         const body = await this.parseJsonBody(req);
@@ -1985,6 +2056,32 @@ export class OpenLoopServer {
         const deleted = this.store.deleteAutomationTask(id);
         this.broadcast({ type: 'automation:delete', data: { id } });
         return this.sendJson(res, 200, { success: deleted }, reqMeta);
+      }
+
+      // Automation Logs Deletion: DELETE /api/automations/logs
+      if (pathname === '/api/automations/logs' && method === 'DELETE') {
+        const automationId = parsedUrl.searchParams.get('automationId') || undefined;
+        const olderThanDaysStr = parsedUrl.searchParams.get('olderThanDays');
+        const olderThanDays = olderThanDaysStr ? parseInt(olderThanDaysStr, 10) : 0;
+
+        serverLogger.info(`[Automation:ClearLogs] 清理自动化日志`, { automationId, olderThanDays });
+        const deletedCount = this.store.deleteOldAutomationLogs(olderThanDays, automationId);
+        this.broadcast({ type: 'automation:logs_cleared', data: { automationId, deletedCount } });
+        return this.sendJson(res, 200, { success: true, deletedCount }, reqMeta);
+      }
+
+      // Storage & Garbage Collection: /api/storage/stats & /api/storage/clean
+      if (pathname === '/api/storage/stats' && method === 'GET') {
+        const stats = this.store.getStorageStats();
+        return this.sendJson(res, 200, stats, reqMeta);
+      }
+
+      if (pathname === '/api/storage/clean' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        serverLogger.info('[Storage:Clean] 收到存储空间优化清理指令', body);
+        const result = this.store.cleanStorage(body);
+        this.broadcast({ type: 'storage:cleaned', data: result });
+        return this.sendJson(res, 200, result, reqMeta);
       }
 
       // System Directory Dialog (Web / Fallback 支持)

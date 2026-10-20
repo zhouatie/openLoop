@@ -329,6 +329,14 @@ export interface PromptMeta {
   defaultTemplate: string;
 }
 
+export interface StorageRetentionSettings {
+  autoCleanEnabled?: boolean;
+  logRetentionDays?: number;
+  qaRunRetentionCount?: number;
+  automationLogRetentionDays?: number;
+  lastAutoCleanAt?: number;
+}
+
 export interface OpenLoopSettings {
   agentProvider?: AgentProviderType;
   // 代码智能体引擎的通用参数，对 pi / claude-code / codex / opencode 一致生效
@@ -338,6 +346,7 @@ export interface OpenLoopSettings {
   autoSnapshot?: boolean;
   shortcutSuperKey?: ShortcutSuperKey;
   prompts?: AgentPromptTemplates;
+  storageRetention?: StorageRetentionSettings;
   [key: string]: any;
 }
 
@@ -509,6 +518,56 @@ export interface AutomationLogRecord {
   error?: string;
   createdTaskId?: string;
 }
+
+export interface StorageStats {
+  database: {
+    dbSizeBytes: number;
+    walSizeBytes: number;
+    shmSizeBytes: number;
+    totalSizeBytes: number;
+    pageSize: number;
+    pageCount: number;
+    freelistCount: number;
+  };
+  counts: {
+    tasks: number;
+    taskNodeRuns: number;
+    logs: number;
+    qaSuites: number;
+    qaRuns: number;
+    automationTasks: number;
+    automationLogs: number;
+  };
+  disk: {
+    artifactsBytes: number;
+    artifactsFilesCount: number;
+    attachmentsBytes: number;
+    attachmentsFilesCount: number;
+    orphanFilesCount: number;
+    orphanFilesBytes: number;
+  };
+  reclaimableEstimateBytes: number;
+}
+
+export interface StorageCleanOptions {
+  cleanLogsDays?: number;
+  cleanQaRunsKeepLatest?: number;
+  cleanQaRunsDays?: number;
+  cleanAutomationLogsDays?: number;
+  cleanOrphanFiles?: boolean;
+  vacuum?: boolean;
+}
+
+export interface StorageCleanResult {
+  freedBytes: number;
+  deletedLogs: number;
+  deletedQaRuns: number;
+  deletedAutomationLogs: number;
+  deletedOrphanFiles: number;
+  vacuumExecuted: boolean;
+  durationMs: number;
+}
+
 
 
 

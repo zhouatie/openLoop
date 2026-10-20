@@ -9,6 +9,7 @@ import {
   Terminal,
   Activity,
   RotateCcw,
+  Trash2,
 } from 'lucide-react';
 import { QaRunRecord, QaSuite } from '@openloop/core';
 
@@ -20,6 +21,8 @@ interface QaRunsListViewProps {
   onNewSuite: () => void;
   onRefresh: () => void;
   isLoading: boolean;
+  onDeleteRun?: (run: QaRunRecord) => void;
+  onBatchDeleteRuns?: (runIds: string[]) => void;
 }
 
 export const QaRunsListView: React.FC<QaRunsListViewProps> = ({
@@ -29,10 +32,13 @@ export const QaRunsListView: React.FC<QaRunsListViewProps> = ({
   onQuickRunSuite,
   onRefresh,
   isLoading,
+  onDeleteRun,
+  onBatchDeleteRuns,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'passed' | 'failed'>('all');
   const [isRunPickerOpen, setIsRunPickerOpen] = useState(false);
+  const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(new Set());
 
   // 建立 suiteId -> suite 快速映射
   const suiteMap = useMemo(() => {
@@ -73,6 +79,30 @@ export const QaRunsListView: React.FC<QaRunsListViewProps> = ({
       return run.status === statusFilter;
     });
   }, [runs, searchQuery, statusFilter]);
+
+  const isAllFilteredSelected =
+    filteredRuns.length > 0 && filteredRuns.every((r) => selectedRunIds.has(r.id));
+
+  const toggleSelectAll = () => {
+    if (isAllFilteredSelected) {
+      setSelectedRunIds(new Set());
+    } else {
+      const next = new Set(selectedRunIds);
+      filteredRuns.forEach((r) => next.add(r.id));
+      setSelectedRunIds(next);
+    }
+  };
+
+  const toggleSelectRun = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const next = new Set(selectedRunIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedRunIds(next);
+  };
 
   const passedCount = runs.filter((r) => r.status === 'passed').length;
   const failedCount = runs.filter((r) => r.status === 'failed').length;
@@ -177,6 +207,42 @@ export const QaRunsListView: React.FC<QaRunsListViewProps> = ({
         </div>
       </div>
 
+      {/* 批量操作浮条 */}
+      {selectedRunIds.size > 0 && (
+        <div className="bg-[#eeedfd] border border-[#c7d2fe] px-3.5 py-2 rounded-[7px] flex items-center justify-between text-[12px] text-[#4338ca] shadow-2xs animate-in fade-in duration-100 select-none">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-[#3730a3]">
+              已勾选 {selectedRunIds.size} 项测试运行记录
+            </span>
+            <span className="text-[#a5b4fc]">|</span>
+            <span className="text-[11px] text-[#4f46e5]">
+              级联清理选中的数据库回放记录与磁盘截图产物
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedRunIds(new Set())}
+              className="h-[24px] px-2 rounded text-[11px] text-[#6366f1] hover:text-[#3730a3] hover:bg-white/60 cursor-pointer transition-colors"
+            >
+              取消勾选
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onBatchDeleteRuns?.(Array.from(selectedRunIds));
+                setSelectedRunIds(new Set());
+              }}
+              className="h-[26px] px-3 rounded-[5px] bg-[#dc2626] hover:bg-[#b91c1c] text-white text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+            >
+              <Trash2 size={11.5} />
+              <span>批量删除所选 ({selectedRunIds.size})</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 历史运行记录列表 (对齐流程编排与执行记录的极简高质感表格) */}
       {filteredRuns.length === 0 ? (
         <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-16 text-center shadow-sm select-none">
@@ -190,7 +256,15 @@ export const QaRunsListView: React.FC<QaRunsListViewProps> = ({
         <div className="bg-white border border-[#e3e3e8] rounded-[8px] shadow-sm overflow-hidden flex flex-col">
           {/* 规范表头 */}
           <div className="h-[34px] bg-[#fafafc] border-b border-[#e3e3e8] px-4 flex items-center text-[11px] font-medium text-[#85858d] select-none">
-            <div className="w-[220px] shrink-0">测试用例</div>
+            <div className="w-[30px] shrink-0 flex items-center">
+              <input
+                type="checkbox"
+                checked={isAllFilteredSelected}
+                onChange={toggleSelectAll}
+                className="w-3.5 h-3.5 rounded border-[#c7c7cf] text-[#4f46e5] focus:ring-0 cursor-pointer"
+              />
+            </div>
+            <div className="w-[200px] shrink-0">测试用例</div>
             <div className="w-[90px] shrink-0">任务 ID</div>
             <div className="w-[85px] shrink-0 text-center">验证结果</div>
             <div className="flex-1 min-w-0 px-3">步骤与验证说明</div>
@@ -207,15 +281,31 @@ export const QaRunsListView: React.FC<QaRunsListViewProps> = ({
               const timelineSteps = run.timeline || [];
               const latestPrompt = timelineSteps.length > 0 ? timelineSteps[timelineSteps.length - 1]?.prompt : '';
               const matchedSuite = run.suiteId ? suiteMap.get(run.suiteId) : undefined;
+              const isSelected = selectedRunIds.has(run.id);
 
               return (
                 <div
                   key={run.id}
                   onClick={() => onSelectRun(run.id)}
-                  className="group px-4 py-2.5 flex items-center text-[12px] transition-colors cursor-pointer hover:bg-[#fafafc]"
+                  className={`group px-4 py-2.5 flex items-center text-[12px] transition-colors cursor-pointer ${
+                    isSelected ? 'bg-[#f5f3ff] hover:bg-[#ede9fe]' : 'hover:bg-[#fafafc]'
+                  }`}
                 >
+                  {/* 复选框 */}
+                  <div
+                    className="w-[30px] shrink-0 flex items-center"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={(e) => toggleSelectRun(run.id, e as any)}
+                      className="w-3.5 h-3.5 rounded border-[#c7c7cf] text-[#4f46e5] focus:ring-0 cursor-pointer"
+                    />
+                  </div>
+
                   {/* 测试用例名称 */}
-                  <div className="w-[220px] shrink-0 flex items-center gap-2 pr-2">
+                  <div className="w-[200px] shrink-0 flex items-center gap-2 pr-2">
                     <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] group-hover:bg-white flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60 transition-colors">
                       <Activity size={11} strokeWidth={2} />
                     </div>
@@ -295,6 +385,17 @@ export const QaRunsListView: React.FC<QaRunsListViewProps> = ({
                         className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#4f46e5] hover:bg-[#eeedfd] flex items-center justify-center transition-all cursor-pointer"
                       >
                         <RotateCcw size={11.5} />
+                      </button>
+                    )}
+
+                    {onDeleteRun && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteRun(run)}
+                        title="删除该测试记录与截图产物"
+                        className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#dc2626] hover:bg-[#fef2f2] flex items-center justify-center transition-all cursor-pointer"
+                      >
+                        <Trash2 size={11.5} />
                       </button>
                     )}
 
