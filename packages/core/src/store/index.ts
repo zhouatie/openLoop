@@ -1,5 +1,16 @@
 import { SqliteStore } from './sqlite';
-import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, OpenLoopSettings, QaSuite, QaRunRecord } from '../types';
+import {
+  Task,
+  WorkflowDefinition,
+  LogEntry,
+  PluginManifest,
+  KanbanColumn,
+  OpenLoopSettings,
+  QaSuite,
+  QaRunRecord,
+  AutomationTask,
+  AutomationLogRecord,
+} from '../types';
 
 export { SqliteStore };
 
@@ -117,6 +128,31 @@ export class Store {
 
   public saveQaRun(run: QaRunRecord): QaRunRecord {
     return this.sqlite.saveQaRun(run);
+  }
+
+  // Automation Tasks
+  public getAutomationTasks(): AutomationTask[] {
+    return this.sqlite.getAutomationTasks();
+  }
+
+  public getAutomationTask(id: string): AutomationTask | undefined {
+    return this.sqlite.getAutomationTask(id);
+  }
+
+  public saveAutomationTask(task: AutomationTask): AutomationTask {
+    return this.sqlite.saveAutomationTask(task);
+  }
+
+  public deleteAutomationTask(id: string): boolean {
+    return this.sqlite.deleteAutomationTask(id);
+  }
+
+  public getAutomationLogs(automationId?: string, limit?: number): AutomationLogRecord[] {
+    return this.sqlite.getAutomationLogs(automationId, limit);
+  }
+
+  public addAutomationLog(log: AutomationLogRecord): void {
+    this.sqlite.addAutomationLog(log);
   }
 
   public close(): void {

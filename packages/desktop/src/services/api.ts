@@ -1,4 +1,18 @@
-import { Task, WorkflowDefinition, LogEntry, PluginManifest, TaskSessionState, OpenLoopSettings, KanbanColumn, TaskAttachment, WorkflowSessionState, QaSuite, QaRunRecord } from '@openloop/core';
+import {
+  Task,
+  WorkflowDefinition,
+  LogEntry,
+  PluginManifest,
+  TaskSessionState,
+  OpenLoopSettings,
+  KanbanColumn,
+  TaskAttachment,
+  WorkflowSessionState,
+  QaSuite,
+  QaRunRecord,
+  AutomationTask,
+  AutomationLogRecord,
+} from '@openloop/core';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
@@ -47,11 +61,13 @@ async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
       if (isDev) {
         console.warn(`[UI:API Warning] ${method} ${url} - Status: ${res.status}`, errText);
       }
+      let parsedErr: any;
       try {
-        return JSON.parse(errText);
-      } catch {
-        throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
-      }
+        parsedErr = JSON.parse(errText);
+      } catch {}
+      const errMsg =
+        parsedErr?.error || parsedErr?.message || errText || res.statusText || `HTTP ${res.status}`;
+      throw new Error(errMsg);
     }
     return await res.json();
   } catch (error: any) {
@@ -668,6 +684,72 @@ export class DesktopApiService {
     }
     clean = clean.startsWith('/') ? clean : `/${clean}`;
     return `${BASE_URL}${clean}`;
+  }
+
+  // ===== 自动化任务 (Automation Tasks) =====
+
+  async getAutomations(): Promise<AutomationTask[]> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:Automation] 获取自动化任务列表');
+    }
+    const res = await requestJson<AutomationTask[]>(`${BASE_URL}/api/automations`);
+    return Array.isArray(res) ? res : [];
+  }
+
+  async getAutomation(id: string): Promise<AutomationTask> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:Automation] 获取自动化任务详情:', id);
+    }
+    return requestJson<AutomationTask>(`${BASE_URL}/api/automations/${encodeURIComponent(id)}`);
+  }
+
+  async saveAutomation(task: Partial<AutomationTask> & { name: string }): Promise<AutomationTask> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:Automation] 保存自动化任务:', task);
+    }
+    return requestJson<AutomationTask>(`${BASE_URL}/api/automations`, {
+      method: 'POST',
+      body: JSON.stringify(task),
+    });
+  }
+
+  async deleteAutomation(id: string): Promise<boolean> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:Automation] 删除自动化任务:', id);
+    }
+    const res = await requestJson<{ success: boolean }>(`${BASE_URL}/api/automations/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    return Boolean(res?.success);
+  }
+
+  async toggleAutomation(id: string, enabled?: boolean): Promise<AutomationTask> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:Automation] 切换自动化任务启停状态:', { id, enabled });
+    }
+    return requestJson<AutomationTask>(`${BASE_URL}/api/automations/${encodeURIComponent(id)}/toggle`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  async triggerAutomation(id: string): Promise<{ success: boolean; message: string; createdTaskId?: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:Automation] 手动触发自动化任务:', id);
+    }
+    return requestJson<{ success: boolean; message: string; createdTaskId?: string }>(
+      `${BASE_URL}/api/automations/${encodeURIComponent(id)}/trigger`,
+      { method: 'POST' }
+    );
+  }
+
+  async getAutomationLogs(id?: string): Promise<AutomationLogRecord[]> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:Automation] 获取自动化任务日志, id:', id);
+    }
+    const path = id ? `/api/automations/${encodeURIComponent(id)}/logs` : '/api/automations/all/logs';
+    const res = await requestJson<AutomationLogRecord[]>(`${BASE_URL}${path}`);
+    return Array.isArray(res) ? res : [];
   }
 }
 

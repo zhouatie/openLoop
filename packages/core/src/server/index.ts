@@ -8,7 +8,19 @@ import util from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Store } from '../store';
 import { DagEngine } from '../engine/dag-engine';
-import { Task, WorkflowDefinition, PluginManifest, TaskSessionState, KanbanColumn, TaskAttachment, WorkflowSessionState, QaSuite, QaRunRecord } from '../types';
+import {
+  Task,
+  WorkflowDefinition,
+  PluginManifest,
+  TaskSessionState,
+  KanbanColumn,
+  TaskAttachment,
+  WorkflowSessionState,
+  QaSuite,
+  QaRunRecord,
+  AutomationTask,
+  AutomationLogRecord,
+} from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
@@ -16,6 +28,7 @@ import { MidsceneRunner } from '../qa/midscene-runner';
 import { WorktreeManager, TaskProcessManager, findRepoRoot } from '../worktree/worktree-manager';
 import { interpolateString } from '../executors';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
+import { AutomationScheduler } from '../automation/automation-scheduler';
 
 const serverLogger = createLogger('Server');
 
@@ -49,6 +62,7 @@ export class OpenLoopServer {
   private host: string;
   private store: Store;
   private engine: DagEngine;
+  private scheduler: AutomationScheduler;
   private httpServer?: http.Server;
   private wss?: WebSocketServer;
   private clients: Set<WebSocket> = new Set();
@@ -60,6 +74,7 @@ export class OpenLoopServer {
     this.staticDir = options.staticDir || process.env.OPENLOOP_STATIC_DIR;
     this.store = new Store(options.storeDir);
     this.engine = new DagEngine(this.store);
+    this.scheduler = new AutomationScheduler(this.store, this.engine);
 
     this.setupEngineEvents();
   }
@@ -93,6 +108,17 @@ export class OpenLoopServer {
     const copilotMgr = WorkflowCopilotManager.getInstance(this.store);
     copilotMgr.on('update', ({ workflowId, state }) => {
       this.broadcast({ type: 'workflow:chat_update', data: { workflowId, state } });
+    });
+
+    // 自动化任务调度服务事件推流广播
+    this.scheduler.on('automation:update', (data) => {
+      this.broadcast({ type: 'automation:update', data });
+    });
+    this.scheduler.on('automation:log', (data) => {
+      this.broadcast({ type: 'automation:log', data });
+    });
+    this.scheduler.on('task:new', (task) => {
+      this.broadcast({ type: 'task:new', data: task });
     });
   }
 
@@ -139,6 +165,9 @@ export class OpenLoopServer {
       this.httpServer.listen(this.port, this.host, () => {
         serverLogger.info(`[openLoop Core] 服务就绪，监听地址: http://${this.host}:${this.port}`);
         console.log(`[openLoop Core] Server listening at http://${this.host}:${this.port}`);
+        this.scheduler.start().catch((err) => {
+          serverLogger.error('[openLoop Core] 启动自动化任务调度器异常:', err);
+        });
         resolve({ port: this.port, host: this.host });
       });
 
@@ -150,6 +179,8 @@ export class OpenLoopServer {
   }
 
   public async stop(): Promise<void> {
+    this.scheduler.stop();
+
     for (const ws of this.clients) {
       ws.close();
     }
@@ -1446,6 +1477,100 @@ export class OpenLoopServer {
         }
 
         return this.sendJson(res, 200, { success: true, command: cmd, sessionId }, reqMeta);
+      }
+
+      // Automations: /api/automations
+      if (pathname === '/api/automations' && method === 'GET') {
+        const tasks = this.store.getAutomationTasks();
+        return this.sendJson(res, 200, tasks, reqMeta);
+      }
+
+      if (pathname === '/api/automations' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        if (!body.name) {
+          return this.sendJson(res, 400, { error: 'name is required' }, reqMeta);
+        }
+
+        const now = Date.now();
+        const id = body.id || `auto_${now}_${Math.random().toString(36).slice(2, 6)}`;
+        const existing = this.store.getAutomationTask(id);
+
+        const task: AutomationTask = {
+          id,
+          name: String(body.name).trim(),
+          description: body.description ? String(body.description).trim() : undefined,
+          enabled: body.enabled !== undefined ? Boolean(body.enabled) : true,
+          intervalSec: Number(body.intervalSec) || 60,
+          sourceType: body.sourceType || 'cli_script',
+          sourceConfig: body.sourceConfig || {},
+          actionType: body.actionType || 'create_task',
+          actionConfig: body.actionConfig || {},
+          lastRunAt: existing?.lastRunAt,
+          lastRunStatus: existing?.lastRunStatus,
+          lastRunDurationMs: existing?.lastRunDurationMs,
+          lastRunMessage: existing?.lastRunMessage,
+          lastRunOutput: existing?.lastRunOutput,
+          totalRuns: existing?.totalRuns || 0,
+          successRuns: existing?.successRuns || 0,
+          failedRuns: existing?.failedRuns || 0,
+          createdTaskIds: existing?.createdTaskIds || [],
+          createdAt: existing?.createdAt || now,
+          updatedAt: now,
+        };
+
+        const saved = this.store.saveAutomationTask(task);
+        this.scheduler.onTaskSaved(saved);
+        this.broadcast({ type: 'automation:update', data: saved });
+        return this.sendJson(res, 200, saved, reqMeta);
+      }
+
+      if (pathname.startsWith('/api/automations/') && pathname.endsWith('/trigger') && method === 'POST') {
+        const id = pathname.replace('/api/automations/', '').replace('/trigger', '');
+        serverLogger.info(`[API] 手动触发自动化任务: ${id}`);
+        try {
+          const result = await this.scheduler.executeTask(id, { manual: true });
+          return this.sendJson(res, 200, result, reqMeta);
+        } catch (err: any) {
+          return this.sendJson(res, 500, { success: false, error: err.message }, reqMeta);
+        }
+      }
+
+      if (pathname.startsWith('/api/automations/') && pathname.endsWith('/toggle') && method === 'POST') {
+        const id = pathname.replace('/api/automations/', '').replace('/toggle', '');
+        const body = await this.parseJsonBody(req);
+        const task = this.store.getAutomationTask(id);
+        if (!task) {
+          return this.sendJson(res, 404, { error: 'Automation task not found' }, reqMeta);
+        }
+        task.enabled = body.enabled !== undefined ? Boolean(body.enabled) : !task.enabled;
+        task.updatedAt = Date.now();
+        const saved = this.store.saveAutomationTask(task);
+        this.scheduler.onTaskSaved(saved);
+        this.broadcast({ type: 'automation:update', data: saved });
+        return this.sendJson(res, 200, saved, reqMeta);
+      }
+
+      if (pathname.startsWith('/api/automations/') && pathname.endsWith('/logs') && method === 'GET') {
+        const id = pathname.replace('/api/automations/', '').replace('/logs', '');
+        const logs = this.store.getAutomationLogs(id, 50);
+        return this.sendJson(res, 200, logs, reqMeta);
+      }
+
+      if (pathname.startsWith('/api/automations/') && method === 'GET') {
+        const id = pathname.replace('/api/automations/', '');
+        const task = this.store.getAutomationTask(id);
+        if (!task) {
+          return this.sendJson(res, 404, { error: 'Automation task not found' }, reqMeta);
+        }
+        return this.sendJson(res, 200, task, reqMeta);
+      }
+
+      if (pathname.startsWith('/api/automations/') && method === 'DELETE') {
+        const id = pathname.replace('/api/automations/', '');
+        this.scheduler.onTaskDeleted(id);
+        const deleted = this.store.deleteAutomationTask(id);
+        this.broadcast({ type: 'automation:delete', data: { id } });
+        return this.sendJson(res, 200, { success: deleted }, reqMeta);
       }
 
       // System Directory Dialog (Web / Fallback 支持)

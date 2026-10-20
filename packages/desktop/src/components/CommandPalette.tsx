@@ -4,6 +4,7 @@ import {
   Kanban,
   Workflow,
   Target,
+  Timer,
   Boxes,
   Settings,
   Plus,
@@ -98,12 +99,24 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         },
       },
       {
+        id: 'nav-automations',
+        category: '导航',
+        title: '自动化任务',
+        description: '定时轮询 CLI 脚本、GitHub Issue 与推特消息，驱动下游流水线',
+        icon: <Timer size={16} strokeWidth={1.8} className="text-[#059669]" />,
+        shortcutKeys: ['super', '3'],
+        action: () => {
+          onNavigate('automations');
+          onClose();
+        },
+      },
+      {
         id: 'nav-qa',
         category: '导航',
         title: 'QA 自动化',
         description: '基于 Midscene 多模态 AI 的 UI 自动化测试与时间轴视觉回放',
         icon: <Target size={16} strokeWidth={1.8} className="text-[#4f46e5]" />,
-        shortcutKeys: ['super', '3'],
+        shortcutKeys: ['super', '4'],
         action: () => {
           onNavigate('qa-automation');
           onClose();

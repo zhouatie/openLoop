@@ -4,6 +4,7 @@ import { useShortcuts } from '../context/ShortcutContext';
 export interface ShortcutActions {
   onNavigateKanban: () => void;
   onNavigateWorkflows: () => void;
+  onNavigateAutomations?: () => void;
   onNavigateQa?: () => void;
   onNavigateSettings: () => void;
   onOpenCreateTask: () => void;
@@ -85,12 +86,23 @@ export const useGlobalShortcuts = (actions: ShortcutActions) => {
         return;
       }
 
-      // 3. Super + 3: 导航至 QA 自动化
-      if ((key === '3' || code === 'Digit3' || code === 'Numpad3') && actionsRef.current.onNavigateQa) {
+      // 3. Super + 3: 导航至自动化任务
+      if ((key === '3' || code === 'Digit3' || code === 'Numpad3') && actionsRef.current.onNavigateAutomations) {
         e.preventDefault();
         e.stopPropagation();
         if (import.meta.env?.DEV) {
-          console.log('[Shortcut] 触发快捷键: Super + 3 -> QA 自动化', { superKey: activeSuper });
+          console.log('[Shortcut] 触发快捷键: Super + 3 -> 自动化任务', { superKey: activeSuper });
+        }
+        actionsRef.current.onNavigateAutomations();
+        return;
+      }
+
+      // 4. Super + 4: 导航至 QA 自动化
+      if ((key === '4' || code === 'Digit4' || code === 'Numpad4') && actionsRef.current.onNavigateQa) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (import.meta.env?.DEV) {
+          console.log('[Shortcut] 触发快捷键: Super + 4 -> QA 自动化', { superKey: activeSuper });
         }
         actionsRef.current.onNavigateQa();
         return;
