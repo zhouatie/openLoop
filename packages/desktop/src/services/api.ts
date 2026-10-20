@@ -250,6 +250,7 @@ export class DesktopApiService {
       workflowId?: string;
       description?: string;
       dependencies?: string[];
+      attachments?: TaskAttachment[];
     }
   ): Promise<{ success: boolean; subtask: Task; parent: Task }> {
     if (import.meta.env?.DEV) {
@@ -271,6 +272,7 @@ export class DesktopApiService {
         workflowId?: string;
         description?: string;
         dependencies?: string[];
+        attachments?: TaskAttachment[];
       }>;
       executionMode?: 'serial' | 'parallel' | 'dag';
       concurrencyLimit?: number;

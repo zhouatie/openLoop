@@ -57,6 +57,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { KanbanColumnSortDropdown } from '../components/KanbanColumnSortDropdown';
 import { NodeExecutionTimeline } from '../components/NodeExecutionTimeline';
 import { ImageLightboxModal } from '../components/ImageLightboxModal';
+import { TaskPromptArea } from '../components/TaskPromptArea';
 import { AgentMarkdown } from '../components/AgentMarkdown';
 import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
 import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
@@ -342,6 +343,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [aiPlanPreview, setAiPlanPreview] = useState<Array<{ title: string; workflowId: string; dependencies?: string[] }> | null>(null);
   const [isAddingManualSubtask, setIsAddingManualSubtask] = useState(false);
   const [manualSubtaskTitle, setManualSubtaskTitle] = useState('');
+  const [manualSubtaskDesc, setManualSubtaskDesc] = useState('');
+  const [manualSubtaskAttachments, setManualSubtaskAttachments] = useState<TaskAttachment[]>([]);
   const [manualSubtaskWorkflowId, setManualSubtaskWorkflowId] = useState('');
   const [manualSubtaskDep, setManualSubtaskDep] = useState('');
 
@@ -387,6 +390,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       setAiPlanPreview(null);
       setIsAddingManualSubtask(false);
       setManualSubtaskTitle('');
+      setManualSubtaskDesc('');
+      setManualSubtaskAttachments([]);
       setManualSubtaskWorkflowId('');
       setManualSubtaskDep('');
     }
@@ -2392,6 +2397,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                   type="button"
                                   onClick={() => {
                                     setManualSubtaskWorkflowId(curTask.workflowId);
+                                    setManualSubtaskTitle('');
+                                    setManualSubtaskDesc('');
+                                    setManualSubtaskAttachments([]);
+                                    setManualSubtaskDep('');
                                     setIsAddingManualSubtask(true);
                                   }}
                                   className="px-3.5 h-[30px] rounded-[6px] bg-white border border-[#e3e3e8] hover:bg-[#f4f4f6] text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
@@ -2509,116 +2518,166 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           )}
 
                           {/* 3. 手动添加/追加工序卡片 */}
-                          {isAddingManualSubtask && (
-                            <div className="rounded-[10px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-2.5 animate-in fade-in duration-100">
-                              <div className="flex items-center justify-between pb-1 border-b border-[#ececf0]">
-                                <span className="font-semibold text-[11.5px] text-[#1c1c21] flex items-center gap-1">
-                                  <Plus size={12} className="text-[#4f46e5]" />
-                                  <span>{groupSubtasks.length === 0 ? '添加首个拆解工序' : '追加新工序'}</span>
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setIsAddingManualSubtask(false)}
-                                  className="text-[#85858d] hover:text-[#1c1c21] cursor-pointer"
-                                >
-                                  <X size={13} />
-                                </button>
-                              </div>
+                          {isAddingManualSubtask && (() => {
+                            const manualTargetWfId = manualSubtaskWorkflowId || curTask.workflowId;
+                            const selectedManualSubtaskWf = workflows.find((wf) => wf.id === manualTargetWfId);
 
-                              <div className="space-y-2">
-                                <div>
-                                  <label className="block text-[10.5px] font-medium text-[#71717a] mb-0.5">工序目标与标题</label>
-                                  <input
-                                    type="text"
-                                    placeholder="例如: 后端鉴权接口实现与单元测试用例编写..."
-                                    value={manualSubtaskTitle}
-                                    onChange={(e) => setManualSubtaskTitle(e.target.value)}
-                                    className="w-full h-[28px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[5px] px-2 text-[11.5px] text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5]"
-                                  />
+                            const handleCancelManualSubtask = () => {
+                              setIsAddingManualSubtask(false);
+                              setManualSubtaskTitle('');
+                              setManualSubtaskDesc('');
+                              setManualSubtaskAttachments([]);
+                              setManualSubtaskDep('');
+                            };
+
+                            return (
+                              <div className="rounded-[10px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-2.5 animate-in fade-in duration-100">
+                                <div className="flex items-center justify-between pb-1 border-b border-[#ececf0]">
+                                  <span className="font-semibold text-[11.5px] text-[#1c1c21] flex items-center gap-1">
+                                    <Plus size={12} className="text-[#4f46e5]" />
+                                    <span>{groupSubtasks.length === 0 ? '添加首个拆解工序' : '追加新工序'}</span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelManualSubtask}
+                                    className="text-[#85858d] hover:text-[#1c1c21] cursor-pointer"
+                                  >
+                                    <X size={13} />
+                                  </button>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-2">
+                                <div className="space-y-2">
                                   <div>
-                                    <label className="block text-[10.5px] font-medium text-[#71717a] mb-0.5">执行流水线 (支持异构)</label>
-                                    <select
-                                      value={manualSubtaskWorkflowId || curTask.workflowId}
-                                      onChange={(e) => setManualSubtaskWorkflowId(e.target.value)}
-                                      className="w-full h-[26px] px-1.5 text-[11px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[5px] text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5]"
-                                    >
-                                      {workflows.map((wf) => (
-                                        <option key={wf.id} value={wf.id}>
-                                          {wf.name} ({wf.id})
-                                        </option>
-                                      ))}
-                                    </select>
+                                    <label className="block text-[10.5px] font-medium text-[#71717a] mb-0.5">工序目标与标题</label>
+                                    <input
+                                      type="text"
+                                      placeholder="例如: 后端鉴权接口实现与单元测试用例编写..."
+                                      value={manualSubtaskTitle}
+                                      onChange={(e) => setManualSubtaskTitle(e.target.value)}
+                                      className="w-full h-[28px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[5px] px-2 text-[11.5px] text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5]"
+                                    />
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <label className="block text-[10.5px] font-medium text-[#71717a] mb-0.5">执行流水线 (支持异构)</label>
+                                      <select
+                                        value={manualTargetWfId}
+                                        onChange={(e) => setManualSubtaskWorkflowId(e.target.value)}
+                                        className="w-full h-[26px] px-1.5 text-[11px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[5px] text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5]"
+                                      >
+                                        {workflows.map((wf) => (
+                                          <option key={wf.id} value={wf.id}>
+                                            {wf.name} ({wf.id})
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[10.5px] font-medium text-[#71717a] mb-0.5">前置依赖工序</label>
+                                      <select
+                                        value={manualSubtaskDep}
+                                        onChange={(e) => setManualSubtaskDep(e.target.value)}
+                                        className="w-full h-[26px] px-1.5 text-[11px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[5px] text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5]"
+                                      >
+                                        <option value="">(无前置依赖 · 并行拉起)</option>
+                                        {groupSubtasks.map((prev, pIdx) => (
+                                          <option key={prev.id} value={prev.id}>
+                                            依赖 #{pIdx + 1} ({prev.title.slice(0, 18)}...)
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
                                   </div>
 
                                   <div>
-                                    <label className="block text-[10.5px] font-medium text-[#71717a] mb-0.5">前置依赖工序</label>
-                                    <select
-                                      value={manualSubtaskDep}
-                                      onChange={(e) => setManualSubtaskDep(e.target.value)}
-                                      className="w-full h-[26px] px-1.5 text-[11px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[5px] text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5]"
-                                    >
-                                      <option value="">(无前置依赖 · 并行拉起)</option>
-                                      {groupSubtasks.map((prev, pIdx) => (
-                                        <option key={prev.id} value={prev.id}>
-                                          依赖 #{pIdx + 1} ({prev.title.slice(0, 18)}...)
-                                        </option>
-                                      ))}
-                                    </select>
+                                    <div className="flex items-center justify-between mb-0.5">
+                                      <label className="block text-[10.5px] font-medium text-[#71717a]">
+                                        工序说明与提示词 (支持粘贴图片)
+                                      </label>
+                                      {selectedManualSubtaskWf?.taskTemplate?.descriptionTemplate &&
+                                        manualSubtaskDesc.trim() !== selectedManualSubtaskWf.taskTemplate.descriptionTemplate.trim() && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setManualSubtaskDesc(selectedManualSubtaskWf.taskTemplate!.descriptionTemplate!);
+                                              if (import.meta.env?.DEV) {
+                                                console.log('[KanbanView:Subtasks] 手动套用工序流水线模板:', selectedManualSubtaskWf.name);
+                                              }
+                                              toast.success(`已套用「${selectedManualSubtaskWf.name}」专属模板`);
+                                            }}
+                                            className="text-[10px] text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                                            title="将说明框重置为此工序流水线的专属模板"
+                                          >
+                                            <Sparkles size={10} />
+                                            <span>套用流程模板</span>
+                                          </button>
+                                        )}
+                                    </div>
+                                    <TaskPromptArea
+                                      value={manualSubtaskDesc}
+                                      onChange={setManualSubtaskDesc}
+                                      attachments={manualSubtaskAttachments}
+                                      onAttachmentsChange={setManualSubtaskAttachments}
+                                      placeholder="工序具体背景、要求说明或传给 Agent 的 Prompt 提示词..."
+                                      rows={3}
+                                      disabled={isAddingSubtask}
+                                    />
                                   </div>
                                 </div>
-                              </div>
 
-                              <div className="flex items-center justify-end gap-2 pt-1">
-                                <button
-                                  type="button"
-                                  onClick={() => setIsAddingManualSubtask(false)}
-                                  className="px-2.5 h-[26px] rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#63636b] text-[11px] font-medium cursor-pointer"
-                                >
-                                  取消
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={!manualSubtaskTitle.trim() || isAddingSubtask}
-                                  onClick={async () => {
-                                    if (!manualSubtaskTitle.trim() || isAddingSubtask) return;
-                                    try {
-                                      setIsAddingSubtask(true);
-                                      const targetWfId = manualSubtaskWorkflowId || curTask.workflowId;
-                                      if (import.meta.env?.DEV) {
-                                        console.log('[KanbanView:Subtasks] 手动添加子工序:', {
-                                          parentId: curTask.id,
+                                <div className="flex items-center justify-end gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelManualSubtask}
+                                    className="px-2.5 h-[26px] rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#63636b] text-[11px] font-medium cursor-pointer"
+                                  >
+                                    取消
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={!manualSubtaskTitle.trim() || isAddingSubtask}
+                                    onClick={async () => {
+                                      if (!manualSubtaskTitle.trim() || isAddingSubtask) return;
+                                      try {
+                                        setIsAddingSubtask(true);
+                                        const targetWfId = manualSubtaskWorkflowId || curTask.workflowId;
+                                        if (import.meta.env?.DEV) {
+                                          console.log('[KanbanView:Subtasks] 手动添加子工序:', {
+                                            parentId: curTask.id,
+                                            title: manualSubtaskTitle.trim(),
+                                            description: manualSubtaskDesc.trim() || undefined,
+                                            attachmentsCount: manualSubtaskAttachments.length,
+                                            workflowId: targetWfId,
+                                            dependencies: manualSubtaskDep ? [manualSubtaskDep] : undefined,
+                                          });
+                                        }
+                                        await api.addSubTask(curTask.id, {
                                           title: manualSubtaskTitle.trim(),
+                                          description: manualSubtaskDesc.trim() || undefined,
+                                          attachments: manualSubtaskAttachments.length > 0 ? manualSubtaskAttachments : undefined,
                                           workflowId: targetWfId,
                                           dependencies: manualSubtaskDep ? [manualSubtaskDep] : undefined,
                                         });
+                                        handleCancelManualSubtask();
+                                        toast.success('已成功挂载工序并就地升格');
+                                        onRefresh();
+                                      } catch (err: any) {
+                                        toast.error(`添加工序失败: ${err.message}`);
+                                      } finally {
+                                        setIsAddingSubtask(false);
                                       }
-                                      await api.addSubTask(curTask.id, {
-                                        title: manualSubtaskTitle.trim(),
-                                        workflowId: targetWfId,
-                                        dependencies: manualSubtaskDep ? [manualSubtaskDep] : undefined,
-                                      });
-                                      setManualSubtaskTitle('');
-                                      setManualSubtaskDep('');
-                                      setIsAddingManualSubtask(false);
-                                      toast.success('已成功挂载工序并就地升格');
-                                      onRefresh();
-                                    } catch (err: any) {
-                                      toast.error(`添加工序失败: ${err.message}`);
-                                    } finally {
-                                      setIsAddingSubtask(false);
-                                    }
-                                  }}
-                                  className="px-3 h-[26px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 cursor-pointer shadow-xs disabled:opacity-40"
-                                >
-                                  <Plus size={11} />
-                                  <span>{isAddingSubtask ? '添加中...' : '确认添加'}</span>
-                                </button>
+                                    }}
+                                    className="px-3 h-[26px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 cursor-pointer shadow-xs disabled:opacity-40"
+                                  >
+                                    <Plus size={11} />
+                                    <span>{isAddingSubtask ? '添加中...' : '确认添加'}</span>
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          )}
+                            );
+                          })()}
 
                           {/* 4. 已有工序的概览卡片与流转链路列表 */}
                           {groupSubtasks.length > 0 && (
@@ -2693,11 +2752,22 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                                 </span>
                                               )}
                                             </div>
-                                            {/* 异构流水线微标签 */}
-                                            <div className="flex items-center gap-1 mt-0.5">
+                                            {/* 异构流水线微标签与说明/附件微徽章 */}
+                                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                               <span className="text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb]/70 px-1.5 py-[0.5px] rounded truncate max-w-[200px]">
                                                 ⚡ {stWf?.name || st.workflowId}
                                               </span>
+                                              {st.attachments && st.attachments.length > 0 && (
+                                                <span className="inline-flex items-center gap-0.5 text-[9.5px] font-medium text-[#63636b] bg-[#f4f4f6] border border-[#e3e3e8] px-1 py-[0.5px] rounded" title={`${st.attachments.length} 张图片附件`}>
+                                                  <ImageIcon size={9} />
+                                                  <span>{st.attachments.length} 图</span>
+                                                </span>
+                                              )}
+                                              {st.description && (
+                                                <span className="text-[10px] text-[#85858d] truncate max-w-[240px]" title={st.description}>
+                                                  {st.description}
+                                                </span>
+                                              )}
                                             </div>
                                           </div>
                                         </div>
@@ -2778,6 +2848,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                   type="button"
                                   onClick={() => {
                                     setManualSubtaskWorkflowId(curTask.workflowId);
+                                    setManualSubtaskTitle('');
+                                    setManualSubtaskDesc('');
+                                    setManualSubtaskAttachments([]);
+                                    setManualSubtaskDep('');
                                     setIsAddingManualSubtask(true);
                                   }}
                                   className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:text-[#4338ca] font-medium cursor-pointer"
