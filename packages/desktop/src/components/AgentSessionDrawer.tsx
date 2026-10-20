@@ -87,6 +87,8 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
 
   // 展开抽屉或切换任务时拉取会话并订阅实时推送
   useEffect(() => {
+    setExpandedThinking({});
+    setExpandedTools({});
     if (!isOpen || !taskId) {
       setSessionState(null);
       setChatInput('');
@@ -391,9 +393,12 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                     <div className="rounded-[7px] border border-[#e8e8ed] bg-white overflow-hidden text-[11px] shadow-2xs">
                       <button
                         type="button"
-                        onClick={() =>
-                          setExpandedThinking((p) => ({ ...p, [msg.id]: !p[msg.id] }))
-                        }
+                        onClick={() => {
+                          if (import.meta.env.DEV) {
+                            console.log('[AgentSessionDrawer] 切换思考过程展开:', { msgId: msg.id, current: !!expandedThinking[msg.id] });
+                          }
+                          setExpandedThinking((p) => ({ ...p, [msg.id]: !p[msg.id] }));
+                        }}
                         className="w-full px-2.5 py-1.5 flex items-center justify-between text-[#63636b] hover:bg-[#f8f8fa] transition-colors cursor-pointer"
                       >
                         <div className="flex items-center gap-1.5">
@@ -409,7 +414,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                             {msg.isThinking ? '智能体深度思考中...' : '深度思考过程'}
                           </span>
                           {msg.isThinking && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-pulse" />
                           )}
                         </div>
                         {expandedThinking[msg.id] ? (
@@ -418,7 +423,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                           <ChevronRight size={11} />
                         )}
                       </button>
-                      {(expandedThinking[msg.id] || msg.isThinking) && (
+                      {expandedThinking[msg.id] && (
                         <div className="p-2.5 border-t border-[#ececf0] bg-[#f8f9fa] font-mono text-[10.5px] text-[#4b4b53] leading-relaxed whitespace-pre-wrap max-h-[220px] overflow-y-auto">
                           {msg.thinking}
                         </div>
@@ -435,9 +440,12 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                           className="rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden text-[11px] shadow-2xs"
                         >
                           <div
-                            onClick={() =>
-                              setExpandedTools((p) => ({ ...p, [tool.id]: !p[tool.id] }))
-                            }
+                            onClick={() => {
+                              if (import.meta.env.DEV) {
+                                console.log('[AgentSessionDrawer] 切换工具输出展开:', { toolId: tool.id, toolName: tool.name });
+                              }
+                              setExpandedTools((p) => ({ ...p, [tool.id]: !p[tool.id] }));
+                            }}
                             className="px-2.5 py-1.5 flex items-center justify-between cursor-pointer hover:bg-[#f9f9fb] transition-colors"
                           >
                             <div className="flex items-center gap-1.5 truncate mr-2">
@@ -456,7 +464,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                             <div className="flex items-center gap-1 shrink-0">
                               {tool.status === 'running' ? (
                                 <span className="text-[#4f46e5] flex items-center gap-1 text-[10px]">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-ping" />
+                                  <Loader2 size={10} className="animate-spin text-[#4f46e5]" />
                                   执行中
                                 </span>
                               ) : tool.status === 'success' ? (

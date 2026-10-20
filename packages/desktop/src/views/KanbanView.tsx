@@ -375,6 +375,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   // 打开任务抽屉时同步获取最新 Session 状态
   useEffect(() => {
+    setExpandedThinking({});
+    setExpandedTools({});
     if (selectedTask) {
       api.getTaskSession(selectedTask.id)
         .then((state) => {
@@ -3123,19 +3125,25 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           {msg.thinking && (
                             <div className="rounded-[7px] border border-[#e8e8ed] bg-[#fafafc] overflow-hidden text-[11px]">
                               <button
-                                onClick={() => setExpandedThinking((p) => ({ ...p, [msg.id]: !p[msg.id] }))}
-                                className="w-full px-2.5 py-1.5 flex items-center justify-between text-[#63636b] hover:bg-[#f1f1f4] transition-colors"
+                                type="button"
+                                onClick={() => {
+                                  if (import.meta.env.DEV) {
+                                    console.log('[KanbanView:AgentChat] 切换思考过程展开:', { msgId: msg.id, current: !!expandedThinking[msg.id] });
+                                  }
+                                  setExpandedThinking((p) => ({ ...p, [msg.id]: !p[msg.id] }));
+                                }}
+                                className="w-full px-2.5 py-1.5 flex items-center justify-between text-[#63636b] hover:bg-[#f1f1f4] transition-colors cursor-pointer"
                               >
                                 <div className="flex items-center gap-1.5">
                                   <Sparkles size={11} className={msg.isThinking ? 'text-[#7c3aed] animate-spin' : 'text-[#7c3aed]'} />
                                   <span className="font-medium text-[11px]">
                                     {msg.isThinking ? '智能体深度思考中...' : '深度思考过程'}
                                   </span>
-                                  {msg.isThinking && <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />}
+                                  {msg.isThinking && <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-pulse" />}
                                 </div>
                                 {expandedThinking[msg.id] ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                               </button>
-                              {(expandedThinking[msg.id] || msg.isThinking) && (
+                              {expandedThinking[msg.id] && (
                                 <div className="p-2.5 border-t border-[#e8e8ed] bg-[#f5f5f8] font-mono text-[10.5px] text-[#63636b] leading-relaxed whitespace-pre-wrap max-h-[200px] overflow-y-auto">
                                   {msg.thinking}
                                 </div>
@@ -3149,7 +3157,12 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               {msg.tools.map((tool) => (
                                 <div key={tool.id} className="rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden text-[11px]">
                                   <div
-                                    onClick={() => setExpandedTools((p) => ({ ...p, [tool.id]: !p[tool.id] }))}
+                                    onClick={() => {
+                                      if (import.meta.env.DEV) {
+                                        console.log('[KanbanView:AgentChat] 切换工具输出展开:', { toolId: tool.id, toolName: tool.name });
+                                      }
+                                      setExpandedTools((p) => ({ ...p, [tool.id]: !p[tool.id] }));
+                                    }}
                                     className="px-2.5 py-1.5 flex items-center justify-between cursor-pointer hover:bg-[#f9f9fb] transition-colors"
                                   >
                                     <div className="flex items-center gap-1.5 truncate mr-2">
@@ -3164,7 +3177,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                     <div className="flex items-center gap-1 shrink-0">
                                       {tool.status === 'running' ? (
                                         <span className="text-[#4f46e5] flex items-center gap-1 text-[10px]">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-ping" />
+                                          <Loader2 size={10} className="animate-spin text-[#4f46e5]" />
                                           执行中
                                         </span>
                                       ) : tool.status === 'success' ? (
