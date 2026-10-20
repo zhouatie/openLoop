@@ -16,6 +16,7 @@ import {
   RefreshCw,
   ExternalLink,
   FlaskConical,
+  Cpu,
 } from 'lucide-react';
 import { TaskSessionState, SessionChatMessage } from '@openloop/core';
 import { getAgentProviderMeta, getDefaultResumeCommand } from '@openloop/agent-providers';
@@ -52,8 +53,41 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [expandedQaAttachments, setExpandedQaAttachments] = useState<Record<string, boolean>>({});
+  const [defaultModel, setDefaultModel] = useState<string>('');
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // 加载系统配置中的默认模型并监听变更
+  useEffect(() => {
+    api.getSettings()
+      .then((s) => {
+        if (s?.defaultModel) {
+          setDefaultModel(s.defaultModel);
+          if (import.meta.env?.DEV) {
+            console.log('[AgentSessionDrawer] 加载系统默认模型配置:', s.defaultModel);
+          }
+        }
+      })
+      .catch((err) => {
+        if (import.meta.env?.DEV) {
+          console.warn('[AgentSessionDrawer] 获取系统设置模型失败:', err);
+        }
+      });
+
+    const unsub = api.on('settings:update', (updated: any) => {
+      if (updated?.defaultModel !== undefined) {
+        setDefaultModel(updated.defaultModel);
+        if (import.meta.env?.DEV) {
+          console.log('[AgentSessionDrawer] 实时更新默认模型配置:', updated.defaultModel);
+        }
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const effectiveChatModel = useMemo(() => {
+    return sessionState?.model?.trim() || defaultModel?.trim() || '默认模型';
+  }, [sessionState?.model, defaultModel]);
 
   const {
     containerRef: chatScrollContainerRef,
@@ -559,21 +593,34 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
           ) : (
             <>
               <div className="flex items-center justify-between text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
-                <span className="flex items-center gap-1">
+                <span className="flex items-center gap-1 min-w-0">
                   {sessionState?.isBusy ? (
                     <>
                       <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />
-                      <span className="text-[#7c3aed] font-medium">运行中：发送可实时插话引导 (Steer)</span>
+                      <span className="text-[#7c3aed] font-medium truncate">运行中：发送可实时插话引导 (Steer)</span>
                     </>
                   ) : sessionState?.isPaused ? (
-                    <span className="text-[#d97706] font-medium">会话已暂停，可输入新指令后继续</span>
+                    <span className="text-[#d97706] font-medium truncate">会话已暂停，可输入新指令后继续</span>
                   ) : (
-                    <span>可随时追加输入纠偏提示或追问</span>
+                    <span className="truncate">可随时追加输入纠偏提示或追问</span>
                   )}
                 </span>
-                <span className="text-[10px] text-[#85858d]">
-                  支持按 <kbd className="font-mono px-1 py-0.5 rounded bg-[#f1f1f4] border border-[#e3e3e8]">⌘</kbd> + <kbd className="font-mono px-1 py-0.5 rounded bg-[#f1f1f4] border border-[#e3e3e8]">Enter</kbd> 发送
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* 当前使用的模型微胶囊 */}
+                  <div
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#71717a] hover:text-[#1c1c21] border border-[#e3e3e8] hover:border-[#d0d0d7] text-[10px] font-mono select-none transition-colors"
+                    title={`当前使用模型: ${effectiveChatModel}${sessionState?.pendingModel ? ` (待生效: ${sessionState.pendingModel})` : ''}`}
+                  >
+                    <Cpu size={10} className="text-[#85858d] shrink-0" />
+                    <span className="truncate max-w-[120px]">{effectiveChatModel}</span>
+                    {sessionState?.pendingModel && (
+                      <span className="text-[9px] text-[#d97706] shrink-0 font-sans">(切换中)</span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-[#85858d]">
+                    支持按 <kbd className="font-mono px-1 py-0.5 rounded bg-[#f1f1f4] border border-[#e3e3e8]">⌘</kbd> + <kbd className="font-mono px-1 py-0.5 rounded bg-[#f1f1f4] border border-[#e3e3e8]">Enter</kbd> 发送
+                  </span>
+                </div>
               </div>
 
               <div className="relative flex items-end gap-2 bg-[#f9f9fb] border border-[#e3e3e8] focus-within:border-[#7c3aed] focus-within:ring-2 focus-within:ring-[#7c3aed]/15 rounded-[8px] p-2 transition-all">

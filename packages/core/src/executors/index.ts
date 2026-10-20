@@ -435,6 +435,9 @@ export class AgentExecutor implements NodeExecutor {
 
     const model = settings.defaultModel;
     const thinking = settings.reasoningLevel || 'high';
+    if (model) {
+      task.context.model = model;
+    }
 
     // 统一输出工作区与终端恢复指引
     if (isSandbox) {

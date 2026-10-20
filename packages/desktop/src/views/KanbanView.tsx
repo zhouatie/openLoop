@@ -428,6 +428,45 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const currentQaRunId = activeTask?.context?.qaRunId || (activeTask?.context?.worktree as any)?.qaRunId;
   const hasQaArtifacts = Boolean(currentQaRunId);
 
+  // 系统默认模型与当前 Agent 会话生效模型
+  const [defaultModel, setDefaultModel] = useState<string>('');
+
+  useEffect(() => {
+    api.getSettings()
+      .then((s) => {
+        if (s?.defaultModel) {
+          setDefaultModel(s.defaultModel);
+          if (import.meta.env?.DEV) {
+            console.log('[UI:AgentChat] 加载系统默认模型配置:', s.defaultModel);
+          }
+        }
+      })
+      .catch((err) => {
+        if (import.meta.env?.DEV) {
+          console.warn('[UI:AgentChat] 获取系统设置模型失败:', err);
+        }
+      });
+
+    const unsub = api.on('settings:update', (updated: any) => {
+      if (updated?.defaultModel !== undefined) {
+        setDefaultModel(updated.defaultModel);
+        if (import.meta.env?.DEV) {
+          console.log('[UI:AgentChat] 实时更新默认模型配置:', updated.defaultModel);
+        }
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const effectiveChatModel = useMemo(() => {
+    return (
+      sessionState?.model?.trim() ||
+      (activeTask?.context?.model as string)?.trim() ||
+      defaultModel?.trim() ||
+      '默认模型'
+    );
+  }, [sessionState?.model, activeTask?.context?.model, defaultModel]);
+
   const uploadChatFiles = async (files: File[]) => {
     const imageFiles = files.filter((f) => f.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
@@ -3500,8 +3539,20 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2">
+                        {/* 当前使用的模型微胶囊 */}
+                        <div
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#71717a] hover:text-[#1c1c21] border border-[#e3e3e8] hover:border-[#d0d0d7] text-[10px] font-mono select-none transition-colors shrink-0"
+                          title={`当前使用模型: ${effectiveChatModel}${sessionState?.pendingModel ? ` (待生效: ${sessionState.pendingModel})` : ''}`}
+                        >
+                          <Cpu size={10} className="text-[#85858d] shrink-0" />
+                          <span className="truncate max-w-[120px]">{effectiveChatModel}</span>
+                          {sessionState?.pendingModel && (
+                            <span className="text-[9px] text-[#d97706] shrink-0 font-sans">(切换中)</span>
+                          )}
+                        </div>
+
                         {chatInput.length > 0 && (
-                          <span className="text-[10px] text-[#85858d] font-mono">
+                          <span className="text-[10px] text-[#85858d] font-mono shrink-0">
                             {chatInput.length} 字
                           </span>
                         )}
