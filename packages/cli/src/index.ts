@@ -509,8 +509,8 @@ qaCmd
 // 快捷一键执行工作流命令
 program
   .command('run [args...]')
-  .description('快捷触发流水线执行（支持自然语言 Prompt，例如: openloop run febase "部署应用到预发 211"）')
-  .option('-w, --workflow <id>', '指定工作流 ID (如: wf_febase_app_deploy)')
+  .description('快捷触发流水线执行（支持指定流水线名称或自然语言 Prompt，例如: openloop run "构建并部署应用"）')
+  .option('-w, --workflow <id>', '指定工作流 ID (如: wf_app_build_deploy)')
   .option('-f, --follow', '实时跟随并打印执行日志', true)
   .action(async (args: string[], options) => {
     try {
@@ -539,14 +539,14 @@ program
           prompt = match.name;
         } else {
           prompt = args.join(' ');
-          if (/部署|febase|发布|build|deploy/i.test(prompt)) {
-            selectedWorkflow = workflows.find((w) => w.id === 'wf_febase_app_deploy') || workflows[0];
+          if (/部署|发布|build|deploy/i.test(prompt)) {
+            selectedWorkflow = workflows.find((w) => w.id === 'wf_app_build_deploy') || workflows[0];
           } else {
             selectedWorkflow = workflows[0];
           }
         }
       } else {
-        selectedWorkflow = workflows.find((w) => w.id === 'wf_febase_app_deploy') || workflows[0];
+        selectedWorkflow = workflows.find((w) => w.id === 'wf_app_build_deploy') || workflows[0];
         prompt = selectedWorkflow ? `执行 ${selectedWorkflow.name}` : '';
       }
 
@@ -567,7 +567,7 @@ program
       try {
         task = await client.createTask({
           workflowId: selectedWorkflow.id,
-          title: prompt.slice(0, 80),
+          title: prompt.length > 200 ? prompt.slice(0, 197) + '...' : prompt,
           description: prompt,
           kanbanColumn: 'in_progress',
           autoRun: true,
@@ -580,7 +580,7 @@ program
 
         task = store.saveTask({
           id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          title: prompt.slice(0, 80),
+          title: prompt.length > 200 ? prompt.slice(0, 197) + '...' : prompt,
           description: prompt,
           workflowId: selectedWorkflow.id,
           status: 'running',

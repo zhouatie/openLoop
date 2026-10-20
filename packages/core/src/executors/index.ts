@@ -147,6 +147,8 @@ export class CliCommandExecutor implements NodeExecutor {
           ...node.config.env,
           TASK_ID: ctx.task.id,
           NODE_ID: node.id,
+          TASK_TITLE: ctx.task.title,
+          TASK_DESCRIPTION: ctx.task.description || '',
           TASK_WORKSPACE: ctx.task.workspace || cwd,
         },
       });
@@ -274,25 +276,34 @@ export class CliCommandExecutor implements NodeExecutor {
       const handleExit = (code: number | null) => {
         const duration = Date.now() - startTime;
         if (code === 0) {
-          // 智能感知：检测是否生成了工作区环境变量文件 (如 Raven 初始化时动态生成的目录)
+          // 通用工作区感知：检测是否生成了工作区环境变量文件 (支持任务导出的 OPENLOOP_WORKSPACE 或 WORKSPACE)
           try {
-            const envFile = '/tmp/openloop-raven-env.sh';
-            if (fs.existsSync(envFile)) {
+            const wsFile = path.join(os.tmpdir(), `openloop-workspace-${ctx.task.id}.txt`);
+            const envFile = path.join(os.tmpdir(), `openloop-env-${ctx.task.id}.sh`);
+            let detectedWs: string | undefined;
+
+            if (fs.existsSync(wsFile)) {
+              detectedWs = fs.readFileSync(wsFile, 'utf-8').trim();
+              try { fs.unlinkSync(wsFile); } catch {}
+            } else if (fs.existsSync(envFile)) {
               const content = fs.readFileSync(envFile, 'utf-8');
-              const wsMatch = content.match(/export RAVEN_WORKSPACE=["']?([^"'\n\r]+)["']?/);
-              if (wsMatch && wsMatch[1] && fs.existsSync(wsMatch[1].trim())) {
-                const detectedWs = wsMatch[1].trim();
-                if (!ctx.task.workspace || ctx.task.workspace !== detectedWs) {
-                  ctx.task.workspace = detectedWs;
-                  if (ctx.store?.saveTask) {
-                    ctx.store.saveTask(ctx.task);
-                  }
-                  executorLogger.info(`[CLI] 自动同步任务工作区目录至: ${detectedWs}`, undefined, {
-                    taskId: ctx.task.id,
-                    nodeId: node.id,
-                  });
-                  emitLog('system', `[工作区自动绑定] 任务工作区已同步切换为: ${detectedWs}`);
+              const wsMatch = content.match(/export (?:OPENLOOP_WORKSPACE|TASK_WORKSPACE|WORKSPACE)=["']?([^"'\n\r]+)["']?/i);
+              if (wsMatch && wsMatch[1]) {
+                detectedWs = wsMatch[1].trim();
+              }
+            }
+
+            if (detectedWs && fs.existsSync(detectedWs)) {
+              if (!ctx.task.workspace || ctx.task.workspace !== detectedWs) {
+                ctx.task.workspace = detectedWs;
+                if (ctx.store?.saveTask) {
+                  ctx.store.saveTask(ctx.task);
                 }
+                executorLogger.info(`[CLI] 自动同步任务工作区目录至: ${detectedWs}`, undefined, {
+                  taskId: ctx.task.id,
+                  nodeId: node.id,
+                });
+                emitLog('system', `[工作区自动绑定] 任务工作区已同步切换为: ${detectedWs}`);
               }
             }
           } catch (e) {

@@ -83,11 +83,11 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     () => workflows.find((w) => w.id === workflowId) || workflows[0],
     [workflows, workflowId]
   );
-  const isRavenWorkflow = currentWf?.id === 'wf_raven_business_dev';
 
-  const isCurrentWfWsRequired = !isRavenWorkflow && Boolean(
+  const isCurrentWfWsRequired = Boolean(
     currentWf?.requireWorkspace ||
     currentWf?.nodes?.some((node) => {
+      if (node.config?.requireWorkspace) return true;
       if (node.type === 'cli') {
         const cmd = node.config?.command?.toLowerCase() || '';
         const hasGit = cmd.includes('git commit') || cmd.includes('git push') || cmd.includes('git add');
@@ -490,9 +490,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               required
               placeholder={
                 currentWf?.taskTemplate?.titlePlaceholder ||
-                (isRavenWorkflow
-                  ? '输入 Overmind 工单号或需求标题 (如: OMMUSIC-3825400 或 前端优质作者反馈链路)'
-                  : '例如: 购物车结算全链路回归与截图验收')
+                '例如: 购物车结算全链路回归与截图验收'
               }
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -516,8 +514,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               <span className={`text-[10px] ${isCurrentWfWsRequired ? 'text-[#dc2626] font-medium' : 'text-[#85858d]'}`}>
                 {workspace
                   ? '已关联独立工程'
-                  : isRavenWorkflow
-                  ? '可留空，首个节点将自动根据工单号在 ~/raven/active 快速建区'
                   : isCurrentWfWsRequired
                   ? '此流程必须手动选择工程根目录'
                   : '非必选；未关联时在独立沙箱执行'}
@@ -527,9 +523,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               value={workspace}
               onChange={setWorkspace}
               placeholder={
-                isRavenWorkflow
-                  ? '可选；若留空则自动根据工单号建区，或直接选择 ~/raven/active 现有工作区'
-                  : isCurrentWfWsRequired
+                isCurrentWfWsRequired
                   ? '必须选择该任务执行所需的本地代码工程根目录...'
                   : '选择工程工作区 (点击下拉或右侧打开访达)...'
               }

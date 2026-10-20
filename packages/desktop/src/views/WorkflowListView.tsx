@@ -379,7 +379,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           badgeBorder: 'border-[#e3e3e8]',
         };
       }
-      const isDeploy = name.includes('部署') || step.id === 'node_cli_deploy' || cmd.includes('deploy.sh') || cmd.includes('mws febase');
+      const isDeploy = name.includes('部署') || step.id === 'node_cli_deploy' || cmd.includes('deploy.sh');
       if (isDeploy) {
         return {
           label: '部署',
@@ -466,10 +466,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     let icon = <Workflow size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
     let tag = '通用编排';
 
-    if (wf.id.includes('raven') || wf.name.includes('Raven')) {
-      icon = <GitBranch size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
-      tag = '业务研发';
-    } else if (nodeTypes.has('agent')) {
+    if (nodeTypes.has('agent')) {
       icon = <Bot size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
       tag = 'AI Agent';
     } else if (nodeTypes.has('midscene')) {

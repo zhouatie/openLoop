@@ -249,17 +249,13 @@ export class SqliteStore {
       // 检查并增量补齐/更新内置核心工作流
       this.saveWorkflow(this.getAppDeployWorkflowDefinition());
       this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
-      this.saveWorkflow(this.getFebaseDeployWorkflowDefinition());
       this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
-      this.saveWorkflow(this.getRavenBusinessDevWorkflowDefinition());
     }
 
-    // 平滑补齐或迁移标签数据 (除了 FEBase/Raven 流水线保留「工作」tag 之外，其他流水线去掉「工作」tag)
+    // 平滑补齐或迁移标签数据
     try {
       const defaultTagMap: Record<string, string[]> = {
-        wf_raven_business_dev: ['工作', '研发', 'Raven', 'FEBase', 'Overmind'],
         wf_agent_feature_dev: ['研发', 'AI Agent'],
-        wf_febase_app_deploy: ['工作', '部署', 'FEBase'],
         wf_worktree_auto_dev_qa_merge: ['研发', '沙箱', 'QA'],
         wf_app_build_deploy: ['部署', '构建', 'CI/CD'],
         wf_auto_dev_qa: ['研发', '测试', 'AI Agent'],
@@ -290,23 +286,6 @@ export class SqliteStore {
         if (!hasTagsSource && defaultTagMap[row.id]) {
           tags = defaultTagMap[row.id];
           hasTagsSource = true;
-        }
-
-        // 业务规则：除了 FEBase/Raven 流水线需要工作 tag 之外，其他的流水线去掉工作 tag
-        const isWorkAllowed =
-          row.id === 'wf_febase_app_deploy' ||
-          row.id === 'wf_raven_business_dev' ||
-          (typeof row.name === 'string' &&
-            (row.name.toLowerCase().includes('febase') || row.name.toLowerCase().includes('raven')));
-
-        if (isWorkAllowed) {
-          if (!tags.includes('工作')) {
-            tags = ['工作', ...tags];
-          }
-        } else {
-          if (tags.includes('工作')) {
-            tags = tags.filter((t) => t !== '工作');
-          }
         }
 
         let varsObj: any = null;
@@ -357,312 +336,6 @@ export class SqliteStore {
     } catch (e) {
       console.warn('[SqliteStore] recoverOrphanRunningTasks error:', e);
     }
-  }
-
-  private getRavenBusinessDevWorkflowDefinition(): WorkflowDefinition {
-    return {
-      id: 'wf_raven_business_dev',
-      name: 'Raven 业务需求全流程开发流水线',
-      description: '面向公司实际业务研发的一站式全流程流水线：Overmind 需求建区 (raven new) -> SDD 方案与任务设计 (/sdd-new-change) -> AI 自动化编码 (/sdd-continue-change) -> 本地服务就绪验证 -> 多端分流部署 (FEBase / Overmind) -> QA 验收与发版门禁',
-      tags: ['工作', '研发', 'Raven', 'FEBase', 'Overmind'],
-      taskTemplate: {
-        titlePlaceholder: '输入工单号或需求标题 (如: OMMUSIC-3825400 或 前端优质作者反馈链路)',
-        descriptionTemplate: [
-          '### 1. 需求与设计规范',
-          '- Overmind 工单号 / PRD: ',
-          '- Figma 视觉稿链接: ',
-          '',
-          '### 2. 核心功能范围',
-          '- [ ] ',
-          '- [ ] ',
-          '',
-          '### 3. 多端与工程范围',
-          '- 涉及端: [FEBase 前端 / 客户端 RN / 服务端]',
-          '- 重点关注: ',
-        ].join('\n'),
-        acceptanceTemplate: [
-          '- [ ] 视觉走查与交互细节完整还原 Figma 设计',
-          '- [ ] 核心业务路径冒烟与异常流自测通过',
-          '- [ ] 多端分流部署构建成功，体验包生成正常',
-        ].join('\n'),
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      nodes: [
-        {
-          id: 'node_raven_init',
-          name: '1. 需求工作区初始化 (raven new)',
-          type: 'cli',
-          position: { x: 100, y: 150 },
-          config: {
-            command: [
-              'echo "=== [Phase 1] Raven 需求工作区自动化准备 ==="',
-              'TASK_TITLE="{{task.title}}"',
-              'TASK_DESC="{{task.description}}"',
-              'TASK_WS="{{task.workspace}}"',
-              'ISSUE_KEY=$(echo "$TASK_TITLE $TASK_DESC $TASK_WS" | grep -o -E "(OMMUSIC|DUBHE|MUSIC)-[0-9]+" | head -n 1)',
-              'if [ -n "$ISSUE_KEY" ]; then',
-              '  echo "[Raven Init] 检测到 Overmind 工单号: $ISSUE_KEY"',
-              'else',
-              '  echo "[Raven Init] 未在输入中匹配到标准工单号，将使用现有工作区"',
-              'fi',
-              'TARGET_DIR=""',
-              'if [ -n "$TASK_WS" ] && [ -f "$TASK_WS/manifest.yaml" ]; then',
-              '  TARGET_DIR="$TASK_WS"',
-              '  echo "[Raven Init] 当前指定的任务工作区已包含有效 manifest.yaml: $TARGET_DIR"',
-              'elif [ -n "$ISSUE_KEY" ]; then',
-              '  FOUND_DIR=$(find ~/raven/active -maxdepth 1 -name "*$ISSUE_KEY*" 2>/dev/null | head -n 1)',
-              '  if [ -n "$FOUND_DIR" ] && [ -f "$FOUND_DIR/manifest.yaml" ]; then',
-              '    TARGET_DIR="$FOUND_DIR"',
-              '    echo "[Raven Init] 在本地发现已有匹配工作区: $TARGET_DIR"',
-              '  fi',
-              'fi',
-              'if [ -z "$TARGET_DIR" ]; then',
-              '  if [ -n "$ISSUE_KEY" ]; then',
-              '    echo "[Raven Init] 正在通过 raven new 自动化拉取 Overmind 工单并初始化工作区..."',
-              '    raven new "$ISSUE_KEY" --yes || raven new "$ISSUE_KEY" --yes --agent-bootstrap || true',
-              '    FOUND_DIR=$(find ~/raven/active -maxdepth 1 -name "*$ISSUE_KEY*" 2>/dev/null | head -n 1)',
-              '    if [ -n "$FOUND_DIR" ]; then TARGET_DIR="$FOUND_DIR"; fi',
-              '  else',
-              '    TARGET_DIR="$(pwd)"',
-              '  fi',
-              'fi',
-              'echo "export RAVEN_WORKSPACE=\\"$TARGET_DIR\\"" > /tmp/openloop-raven-env.sh',
-              'echo "export RAVEN_ISSUE_KEY=\\"$ISSUE_KEY\\"" >> /tmp/openloop-raven-env.sh',
-              'echo "[Raven Init] 工作区已就绪: $TARGET_DIR"',
-              'if [ -f "$TARGET_DIR/manifest.yaml" ]; then head -n 25 "$TARGET_DIR/manifest.yaml"; fi',
-            ].join('\n'),
-            timeoutSec: 180,
-          },
-        },
-        {
-          id: 'node_sdd_spec_init',
-          name: '2. SDD 需求方案设计与任务初始化',
-          type: 'agent',
-          position: { x: 440, y: 150 },
-          config: {
-            agentName: 'Raven SDD Architect',
-            prompt: `你正在进行 Raven SDD 需求方案设计与开发前准备。
-任务需求：{{task.title}}
-详细说明：{{task.description}}
-
-【执行指引】
-1. 首先检查需求工作区中的 manifest.yaml，确认本期需求对应的工单号、涉及的平台（如 febase/ios/android/harmony）及子仓库。
-2. 运行 /sdd-explore 或 /sdd-new-change 进入需求探索与方案设计：
-   - 梳理业务背景与技术实现路径；
-   - 明确需要改动的子工程（例如 febase 下的 rn-community-* 等）；
-   - 设计并生成 proposal.md、design.md 与 tasks.md 任务拆解清单。
-3. 检查生成的变更规范文件，确认改动范围最小化且逻辑闭环。
-4. 输出方案设计摘要与待执行 tasks 清单，供下一阶段编码执行。`,
-            timeoutSec: 600,
-          },
-        },
-        {
-          id: 'node_sdd_coding',
-          name: '3. SDD 业务代码自动化开发与自测',
-          type: 'agent',
-          position: { x: 780, y: 150 },
-          config: {
-            agentName: 'Raven SDD Coder',
-            prompt: `你正在执行 SDD 变更代码的具体实现。
-任务需求：{{task.title}}
-详细说明：{{task.description}}
-
-【执行指引】
-1. 读取上一阶段生成的 ravenspec/changes/**/tasks.md 任务清单。
-2. 运行 /sdd-continue-change 或 /sdd-apply-change，按计划在对应的仓库 worktree 中编写和修改代码。
-3. 遵循各端架构规范（如大前端组件规范、状态管理、日志打点）：
-   - 严格遵循简约整洁原则，避免过度设计；
-   - 补充必要的单元测试或本地自测验证。
-4. 开发完成后，更新 tasks.md 状态，并对改动文件进行 git diff / status 核对。
-5. 输出修改摘要与变更文件列表。`,
-            timeoutSec: 1200,
-          },
-        },
-        {
-          id: 'node_local_env_verify',
-          name: '4. 本地服务启动与验证',
-          type: 'cli',
-          position: { x: 1120, y: 150 },
-          config: {
-            command: [
-              'echo "=== [Phase 4] 本地开发服务拉起与功能验证 ==="',
-              'if [ -f /tmp/openloop-raven-env.sh ]; then source /tmp/openloop-raven-env.sh; fi',
-              'WS="${RAVEN_WORKSPACE:-{{task.workspace}}}"',
-              'if [ -n "$WS" ] && [ -d "$WS" ]; then cd "$WS"; fi',
-              'echo "[Verify] 当前工作区: $(pwd)"',
-              'FE_PROJECT=$(find febase -maxdepth 2 -name "package.json" 2>/dev/null | head -n 1 | xargs -r dirname)',
-              'if [ -n "$FE_PROJECT" ] && [ -d "$FE_PROJECT" ]; then',
-              '  echo "[Verify] 发现前端工程: $FE_PROJECT，执行基础依赖与构建预检..."',
-              '  (cd "$FE_PROJECT" && if grep -q \'"build"\' package.json; then echo "[Verify] package.json 脚本正常"; fi)',
-              '  echo "[Verify] 如需在终端启动实时本地服务，可执行: chitu dev 或 pnpm start"',
-              'else',
-              '  echo "[Verify] 工作区环境检测正常，代码文件完整无缺失"',
-              'fi',
-            ].join('\n'),
-            timeoutSec: 180,
-          },
-        },
-        {
-          id: 'node_febase_sub_pipeline',
-          name: '5a. FEBase 部署支线 (子流水线)',
-          type: 'sub-workflow',
-          position: { x: 1460, y: 80 },
-          config: {
-            subWorkflowId: 'wf_febase_app_deploy',
-            inheritContext: true,
-            timeoutSec: 300,
-          },
-        },
-        {
-          id: 'node_overmind_client_deploy',
-          name: '5b. 客户端/服务端 Overmind 部署支线',
-          type: 'cli',
-          position: { x: 1460, y: 260 },
-          config: {
-            command: [
-              'echo "=== [Phase 5b] 客户端与服务端 Overmind 部署支线 ==="',
-              'if [ -f /tmp/openloop-raven-env.sh ]; then source /tmp/openloop-raven-env.sh; fi',
-              'WS="${RAVEN_WORKSPACE:-{{task.workspace}}}"',
-              'ISSUE="${RAVEN_ISSUE_KEY:-{{task.title}}}"',
-              'echo "[Deploy:Overmind] 目标工作区: $WS, 关联工单: $ISSUE"',
-              'if which raven >/dev/null 2>&1; then',
-              '  echo "[Deploy:Overmind] 正在通过 raven deploy 检查与触发构建..."',
-              '  raven deploy status 2>/dev/null || echo "[Deploy:Overmind] 环境就绪，待构建触发"',
-              'else',
-              '  echo "[Deploy:Overmind] 本地未安装 raven 工具链，跳过客户端触发"',
-              'fi',
-            ].join('\n'),
-            timeoutSec: 300,
-          },
-        },
-        {
-          id: 'node_qa_gate',
-          name: '6. QA 验收与发版门禁',
-          type: 'qa-approval',
-          position: { x: 1820, y: 170 },
-          config: {
-            approvalPrompt: '业务需求已完成编码与多端分支部署！请 QA 查验对应环境体验包与界面交互，确认功能验收无误后点击【验收通过】。',
-            checklist: [
-              'FEBase / Overmind 部署发布单处于就绪或成功状态',
-              '本地与测试环境功能主流程验证通过',
-              '涉及的多端分支代码均已自测并通过语法/格式校验',
-              '无阻断性缺陷与严重性能异常',
-            ],
-          },
-        },
-      ],
-      edges: [
-        { id: 'e_init_to_spec', source: 'node_raven_init', target: 'node_sdd_spec_init' },
-        { id: 'e_spec_to_code', source: 'node_sdd_spec_init', target: 'node_sdd_coding' },
-        { id: 'e_code_to_verify', source: 'node_sdd_coding', target: 'node_local_env_verify' },
-        { id: 'e_verify_to_febase', source: 'node_local_env_verify', target: 'node_febase_sub_pipeline' },
-        { id: 'e_verify_to_om', source: 'node_local_env_verify', target: 'node_overmind_client_deploy' },
-        { id: 'e_febase_to_qa', source: 'node_febase_sub_pipeline', target: 'node_qa_gate' },
-        { id: 'e_om_to_qa', source: 'node_overmind_client_deploy', target: 'node_qa_gate' },
-      ],
-    };
-  }
-
-  private getFebaseDeployWorkflowDefinition(): WorkflowDefinition {
-    return {
-      id: 'wf_febase_app_deploy',
-      name: 'FEBase 应用智能编排与部署流水线',
-      description: 'AI Agent 驱动的极简部署编排流水线：Agent 智能校验 Prompt 充足性并锁定发布单（信息不足自动终止） -> 原生 mws CLI 分配环境 -> 原生 mws CLI 触发云端打包',
-      tags: ['工作', '部署', 'FEBase'],
-      taskTemplate: {
-        titlePlaceholder: '输入发布说明 (如: 部署 rn-lyric-share-page 至 PRETEST 环境)',
-        descriptionTemplate: [
-          '### FEBase 发布信息',
-          '- 目标应用名 (appName): ',
-          '- 代码分支 (branch): ',
-          '- 目标环境 (envType & domain): PRETEST / 211',
-          '- 变更说明: ',
-        ].join('\n'),
-        acceptanceTemplate: [
-          '- [ ] 发布单构建打包状态为成功',
-          '- [ ] 对应测试域名访问正常，无静态资源 404',
-        ].join('\n'),
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      nodes: [
-        {
-          id: 'node_agent_parse',
-          name: 'AI 智能校验需求与锁定单据',
-          type: 'agent',
-          position: { x: 100, y: 150 },
-          config: {
-            agentName: 'Pi Agent',
-            prompt: `请分析本次部署任务的需求内容：
-任务名称: {{task.title}}
-任务描述: {{task.description}}
-
-【关键前置规则：信息充足性校验与任务终止机制】
-在执行任何部署操作前，必须首先检查需求是否提供了全部必要信息：
-1. 必需要素核查：
-   - 目标应用名 (appName)：如 rn-lyric-share-page
-   - 代码分支 (branch)：如 feat/OMMUSIC-3825654
-   - 目标环境类型与域名/数字编号 (envType & domain)：如 PRETEST 或 TEST，以及 211 或 qa-test211.pretest.igame.163.com
-2. 若上述信息存在缺失或语义不明确（例如未提供分支或未指定环境）：
-   - 严禁自行猜测或随意默认参数！
-   - 执行清理指令：rm -f /tmp/openloop-febase-env.sh
-   - 将具体终止原因写入中止文件：echo "【部署中止】Prompt 提供的信息不充足！缺失要素: <具体列出缺失项>。请补充后重新发起。" > /tmp/openloop_abort_{{task.id}}
-   - 在日志中清晰打印错误原因，立即结束执行。
-3. 若信息完整充足：
-   - 确保清理旧中止文件：rm -f /tmp/openloop_abort_{{task.id}}
-   - 调用 mws 命令检索应用 (mws febase app-search --env online --json '{"keyword":"<appName>"}') 获取 appId。
-   - 调用 mws 命令获取该分支对应的活跃发布单 (mws febase sprint-list --env online --json '{"appId":<appId>,"engineStatus":"running"}') 获取 sprintId（如无活跃发布单则通过 sprint-create 创建）。
-   - 将解析出的结构化参数写入临时环境变量文件 /tmp/openloop-febase-env.sh：
-     export FEBASE_APP_ID="<appId>"
-     export FEBASE_SPRINT_ID="<sprintId>"
-     export FEBASE_ENV_TYPE="<envType>"
-     export FEBASE_ENV_NAME="<envName>"
-   - 打印解析确认摘要供下游 CLI 节点流转。`,
-          },
-        },
-        {
-          id: 'node_cli_env',
-          name: 'CLI 环境绑定与域名就绪',
-          type: 'cli',
-          position: { x: 480, y: 150 },
-          config: {
-            command: 'if [ ! -f /tmp/openloop-febase-env.sh ]; then echo "[ERROR] 前置参数校验未通过，缺少部署环境变量文件，任务终止！" >&2; exit 1; fi && source /tmp/openloop-febase-env.sh && if [ -z "$FEBASE_APP_ID" ] || [ -z "$FEBASE_SPRINT_ID" ] || [ -z "$FEBASE_ENV_NAME" ]; then echo "[ERROR] 部署参数不完整，任务终止！" >&2; exit 1; fi && echo "[FEBase] 正在为发布单 Sprint $FEBASE_SPRINT_ID 绑定环境 $FEBASE_ENV_NAME ($FEBASE_ENV_TYPE)..." && mws febase sprint-env-create --env online --json "{\\"appId\\":$FEBASE_APP_ID,\\"sprintId\\":$FEBASE_SPRINT_ID,\\"envType\\":\\"$FEBASE_ENV_TYPE\\",\\"envName\\":\\"$FEBASE_ENV_NAME\\"}" || true',
-            timeoutSec: 60,
-          },
-        },
-        {
-          id: 'node_cli_deploy',
-          name: 'CLI 触发云端打包部署',
-          type: 'cli',
-          position: { x: 860, y: 150 },
-          config: {
-            command:
-              'if [ ! -f /tmp/openloop-febase-env.sh ]; then echo "[ERROR] 缺少部署环境变量文件，任务终止！" >&2; exit 1; fi && source /tmp/openloop-febase-env.sh && echo "[FEBase] 正在触发云端 Tekton 打包构建 (App: $FEBASE_APP_ID, Sprint: $FEBASE_SPRINT_ID, Env: $FEBASE_ENV_NAME)..." && (' +
-              'DEPLOY_OUTPUT=$(mws febase sprint-deploy --env online --json "{\\"appId\\":$FEBASE_APP_ID,\\"sprintId\\":$FEBASE_SPRINT_ID,\\"env\\":\\"$FEBASE_ENV_TYPE\\",\\"envName\\":\\"$FEBASE_ENV_NAME\\"}" 2>&1); ' +
-              'DEPLOY_STATUS=$?; ' +
-              'echo "$DEPLOY_OUTPUT"; ' +
-              'if [ $DEPLOY_STATUS -eq 0 ]; then echo "[FEBase] 部署指令触发成功！" && exit 0; fi; ' +
-              'echo "[FEBase] 部署网关返回异常或网络抖动，正在复核云端实际就绪状态..."; ' +
-              'sleep 2; ' +
-              'STATUS_CHECK=$(mws febase deploy-envs-status --env online --json "{\\"appId\\":$FEBASE_APP_ID,\\"sprintId\\":$FEBASE_SPRINT_ID,\\"env\\":\\"$FEBASE_ENV_TYPE\\"}" 2>&1); ' +
-              'if echo "$STATUS_CHECK" | grep -q "$FEBASE_ENV_NAME"; then ' +
-              'echo "[FEBase] 复核通过：已在云端检测到目标域名 $FEBASE_ENV_NAME 的流水线任务，任务判定为成功！"; ' +
-              'echo "$STATUS_CHECK" | grep "$FEBASE_ENV_NAME"; ' +
-              'exit 0; ' +
-              'fi; ' +
-              'echo "[FEBase] 二次复核未就绪，重试一次部署触发..."; ' +
-              'mws febase sprint-deploy --env online --json "{\\"appId\\":$FEBASE_APP_ID,\\"sprintId\\":$FEBASE_SPRINT_ID,\\"env\\":\\"$FEBASE_ENV_TYPE\\",\\"envName\\":\\"$FEBASE_ENV_NAME\\"}"; ' +
-              ')',
-            timeoutSec: 120,
-          },
-        },
-      ],
-      edges: [
-        { id: 'e_parse_to_env', source: 'node_agent_parse', target: 'node_cli_env' },
-        { id: 'e_env_to_deploy', source: 'node_cli_env', target: 'node_cli_deploy' },
-      ],
-    };
   }
 
   private getAppDeployWorkflowDefinition(): WorkflowDefinition {
@@ -1031,10 +704,8 @@ export class SqliteStore {
     this.saveWorkflow(defaultWorkflow);
 
     // 预置通用研发流水线
-    this.saveWorkflow(this.getRavenBusinessDevWorkflowDefinition());
     this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
     this.saveWorkflow(this.getAppDeployWorkflowDefinition());
-    this.saveWorkflow(this.getFebaseDeployWorkflowDefinition());
     this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
 
     // 预置插件

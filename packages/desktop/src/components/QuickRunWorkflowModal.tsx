@@ -34,7 +34,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
   onNavigateKanban,
   onNavigateRuns,
 }) => {
-  const defaultWfId = workflows.find((w) => w.id.includes('febase'))?.id || workflows[0]?.id || '';
+  const defaultWfId = workflows[0]?.id || '';
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(defaultWfId);
   const [prompt, setPrompt] = useState<string>('');
   const [isRunning, setIsRunning] = useState<boolean>(false);
