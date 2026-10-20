@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { LogTerminalDrawer } from './components/LogTerminalDrawer';
@@ -284,6 +284,15 @@ export const AppContent: React.FC = () => {
     });
   };
 
+  // 看板仅展示看板管理任务，排除快捷运行(shortcut)与调试运行(debug)等纯流水线执行记录
+  const kanbanTasks = useMemo(() => {
+    const list = tasks.filter((t) => t.triggerSource !== 'shortcut' && t.triggerSource !== 'debug');
+    if (import.meta.env?.DEV) {
+      console.log('[App] 过滤看板有效任务列表:', { total: tasks.length, kanban: list.length });
+    }
+    return list;
+  }, [tasks]);
+
   const currentPlugin = plugins.find((p) => p.id === activePluginId);
   const isSettings = activePluginId.startsWith('settings') || activePluginId === 'plugin-manager';
   const category = isSettings ? '设置' : '功能';
@@ -350,7 +359,7 @@ export const AppContent: React.FC = () => {
         <main className="flex-1 relative overflow-hidden bg-[#f4f4f6]">
           {activePluginId === 'kanban' && (
             <KanbanView
-              tasks={tasks}
+              tasks={kanbanTasks}
               workflows={workflows}
               onOpenTaskLogs={handleOpenTaskLogs}
               onRefresh={refreshData}

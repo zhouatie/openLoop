@@ -693,6 +693,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const availableWorkspaces = useMemo(() => {
     const set = new Set<string>();
     tasks.forEach((t) => {
+      if (t.triggerSource === 'shortcut' || t.triggerSource === 'debug') return;
       if (t.workspace && t.workspace.trim()) {
         set.add(t.workspace.trim());
       }
@@ -724,6 +725,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   // 先对项目工作区进行过滤，供工作流计数联动使用
   const workspaceFilteredTasks = useMemo(() => {
     return tasks.filter((t) => {
+      if (t.triggerSource === 'shortcut' || t.triggerSource === 'debug') return false;
       if (activeWorkspaceFilter === 'none') {
         return !t.workspace || !t.workspace.trim();
       }
@@ -736,6 +738,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   const filteredTasks = useMemo(() => {
     return tasks.filter((t) => {
+      // 排除非看板任务（快捷运行 shortcut 与流程调试 debug 等流水线即时执行实例，仅在调用记录中呈现）
+      if (t.triggerSource === 'shortcut' || t.triggerSource === 'debug') {
+        return false;
+      }
+
       // 0. 子工序默认收纳在所属任务组卡片内展示，不作为独立顶级卡片铺满泳道 (除非输入搜索词搜索命中)
       if (t.parentTaskId && !searchTerm) {
         return false;
