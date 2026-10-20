@@ -25,6 +25,8 @@ export interface PiRpcSessionOptions {
   model?: string;
   thinking?: string;
   tools?: string;
+  /** 关闭全部工具，仅进行纯文本推理（一次性规划场景） */
+  disableTools?: boolean;
   cwd?: string;
   env?: Record<string, string>;
   initialPrompt: string;
@@ -91,6 +93,9 @@ export class PiRpcSessionInstance extends EventEmitter {
     }
     if (options.tools && options.tools.trim()) {
       args.push('--tools', options.tools.trim());
+    }
+    if (options.disableTools) {
+      args.push('--no-tools');
     }
 
     const cwd = options.cwd || os.tmpdir();
@@ -651,10 +656,11 @@ export class PiRpcSessionInstance extends EventEmitter {
     if (this.modelsCache) return this.modelsCache;
     const data = await this.sendCommandWithTimeout({ type: 'get_available_models' }, 3000);
     const models = Array.isArray(data?.models) ? data.models : [];
-    this.modelsCache = models
+    const resolved = models
       .filter((m: any) => m && typeof m.id === 'string' && typeof m.provider === 'string')
       .map((m: any) => ({ id: m.id, provider: m.provider }));
-    return this.modelsCache;
+    this.modelsCache = resolved;
+    return resolved;
   }
 
   /** 带超时的命令下发，避免进程无响应时阻塞设置保存链路 */

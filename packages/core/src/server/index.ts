@@ -32,7 +32,7 @@ import { getAgentProviderMeta, resolveResumeCommand } from '../constants/agent-p
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 import { AutomationScheduler } from '../automation/automation-scheduler';
 import { WorkflowRecommender } from '../engine/workflow-recommender';
-import { TaskDecomposer } from '../engine/task-decomposer';
+import { SubtaskPlanner } from '../agent/subtask-planner';
 
 const serverLogger = createLogger('Server');
 
@@ -1009,7 +1009,16 @@ export class OpenLoopServer {
         if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
 
         const allWorkflows = this.store.getWorkflows();
-        const plan = TaskDecomposer.getInstance().planSubtasks(task, allWorkflows);
+        const plan = await SubtaskPlanner.plan(this.store, task, allWorkflows);
+        if (!plan) {
+          serverLogger.warn(`[Tasks:PlanSubtasks] 任务 ${taskId} 的 AI 工序规划未产出有效方案`);
+          return this.sendJson(
+            res,
+            502,
+            { error: 'AI 工序规划失败，请重试或手动添加工序' },
+            reqMeta
+          );
+        }
         serverLogger.info(`[Tasks:PlanSubtasks] 为任务 ${taskId} 规划子工序方案:`, plan);
         return this.sendJson(res, 200, { success: true, plan }, reqMeta);
       }
