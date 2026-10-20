@@ -256,6 +256,8 @@ export class DesktopApiService {
       title?: string;
       description?: string;
       workflowId?: string;
+      acceptanceCriteria?: string;
+      qaInstructions?: string[];
       context?: Record<string, any>;
       kanbanColumn?: KanbanColumn;
       workspace?: string;

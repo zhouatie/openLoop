@@ -22,6 +22,13 @@ import {
   Clock,
   Layers,
   Square,
+  Edit3,
+  Plus,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  Target,
+  Undo2,
 } from 'lucide-react';
 import { Task, QaRunRecord, StepTimelineRecord, WorktreeContextInfo } from '@openloop/core';
 import { api } from '../../services/api';
@@ -32,6 +39,7 @@ interface VisualAcceptanceModalProps {
   onClose: () => void;
   onApproved?: () => void;
   onRejected?: () => void;
+  onTaskUpdated?: (task: Task) => void;
 }
 
 export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
@@ -39,11 +47,23 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   onClose,
   onApproved,
   onRejected,
+  onTaskUpdated,
 }) => {
+  const [currentTask, setCurrentTask] = useState<Task>(task);
   const [run, setRun] = useState<QaRunRecord | null>(null);
   const [isLoadingRun, setIsLoadingRun] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isRerunning, setIsRerunning] = useState<boolean>(false);
+
+  // 抽屉视图切换：'audit' (回放审计) | 'editor' (用例编辑)
+  const [activeDrawerTab, setActiveDrawerTab] = useState<'audit' | 'editor'>('audit');
+
+  // 用例编辑状态
+  const [instructions, setInstructions] = useState<string[]>([]);
+  const [rawTextMode, setRawTextMode] = useState<boolean>(false);
+  const [rawInstructionsText, setRawInstructionsText] = useState<string>('');
+  const [isCaseDirty, setIsCaseDirty] = useState<boolean>(false);
+  const [isSavingCase, setIsSavingCase] = useState<boolean>(false);
 
   // 播放器状态
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -55,8 +75,13 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped'>('checking');
   const [isStartingSandbox, setIsStartingSandbox] = useState<boolean>(false);
 
-  const worktree: WorktreeContextInfo | undefined = task.context?.worktree;
-  const qaRunId = task.context?.qaRunId || (worktree as any)?.qaRunId;
+  const worktree: WorktreeContextInfo | undefined = currentTask.context?.worktree;
+  const qaRunId = currentTask.context?.qaRunId || (worktree as any)?.qaRunId;
+
+  // 同步外部 task 属性变更
+  useEffect(() => {
+    setCurrentTask(task);
+  }, [task]);
 
   // 探测沙箱靶机在线状态
   useEffect(() => {
@@ -334,30 +359,205 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
     }
   };
 
-  // 重新跑测试
-  const handleRerunTest = async () => {
+  // 初始化/同步测试用例步骤列表
+  useEffect(() => {
+    if (isCaseDirty) return;
+    let initialList: string[] = [];
+    if (Array.isArray(currentTask.context?.qaInstructions) && currentTask.context.qaInstructions.length > 0) {
+      initialList = [...currentTask.context.qaInstructions];
+    } else if (Array.isArray(currentTask.context?.qaPlan?.steps) && currentTask.context.qaPlan.steps.length > 0) {
+      initialList = [...currentTask.context.qaPlan.steps];
+    } else if (run?.timeline && run.timeline.length > 0) {
+      initialList = run.timeline.map((s) => s.prompt).filter(Boolean);
+    } else if (steps.length > 0) {
+      initialList = steps.map((s) => s.prompt).filter(Boolean);
+    } else {
+      initialList = [
+        '等待页面完全加载，检查首屏主视觉元素',
+        '定位核心交互按钮并触发点击',
+        '校验页面无报错与异常提示',
+      ];
+    }
+    setInstructions(initialList);
+    setRawInstructionsText(initialList.join('\n'));
+  }, [currentTask, run, steps, isCaseDirty]);
+
+  const handleUpdateStepText = (index: number, newText: string) => {
+    setIsCaseDirty(true);
+    setInstructions((prev) => {
+      const next = [...prev];
+      next[index] = newText;
+      return next;
+    });
+  };
+
+  const handleAddStep = () => {
+    setIsCaseDirty(true);
+    setInstructions((prev) => [...prev, '']);
+  };
+
+  const handleRemoveStep = (index: number) => {
+    setIsCaseDirty(true);
+    setInstructions((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleMoveStep = (index: number, direction: -1 | 1) => {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= instructions.length) return;
+    setIsCaseDirty(true);
+    setInstructions((prev) => {
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[targetIndex];
+      next[targetIndex] = temp;
+      return next;
+    });
+  };
+
+  const handleResetInstructions = () => {
+    let originalList: string[] = [];
+    if (Array.isArray(currentTask.context?.qaInstructions) && currentTask.context.qaInstructions.length > 0) {
+      originalList = [...currentTask.context.qaInstructions];
+    } else if (Array.isArray(currentTask.context?.qaPlan?.steps) && currentTask.context.qaPlan.steps.length > 0) {
+      originalList = [...currentTask.context.qaPlan.steps];
+    } else if (run?.timeline && run.timeline.length > 0) {
+      originalList = run.timeline.map((s) => s.prompt).filter(Boolean);
+    } else {
+      originalList = steps.map((s) => s.prompt).filter(Boolean);
+    }
+    setInstructions(originalList);
+    setRawInstructionsText(originalList.join('\n'));
+    setIsCaseDirty(false);
+    toast.info('已恢复原始用例步骤');
+  };
+
+  const getCleanInstructions = (): string[] => {
+    if (rawTextMode) {
+      return rawInstructionsText
+        .split('\n')
+        .map((l) => l.replace(/^[-*•\d.]+\s*/, '').trim())
+        .filter(Boolean);
+    }
+    return instructions.map((s) => s.trim()).filter(Boolean);
+  };
+
+  const handleSaveInstructionsOnly = async () => {
+    const cleanList = getCleanInstructions();
+    if (cleanList.length === 0) {
+      toast.warning('用例至少需要包含 1 个有效步骤');
+      return;
+    }
+    setIsSavingCase(true);
+    if (import.meta.env?.DEV) {
+      console.log('[VisualAcceptanceModal] 保存编辑后的用例:', { taskId: currentTask.id, steps: cleanList });
+    }
+    try {
+      const updated = await api.updateTask(currentTask.id, {
+        qaInstructions: cleanList,
+        context: {
+          qaInstructions: cleanList,
+          qaPlan: {
+            role: '用户定制验收用例',
+            createdAt: Date.now(),
+            steps: cleanList,
+          },
+        },
+      });
+      setCurrentTask(updated);
+      setInstructions(cleanList);
+      setRawInstructionsText(cleanList.join('\n'));
+      setIsCaseDirty(false);
+      onTaskUpdated?.(updated);
+      toast.success('用例修改已保存');
+    } catch (err: any) {
+      toast.error(`保存用例失败: ${err.message}`);
+    } finally {
+      setIsSavingCase(false);
+    }
+  };
+
+  // 重新跑测试 (支持传入最新编辑用例)
+  const handleRerunTest = async (overrideInstructions?: string[]) => {
     if (isRerunning || isSubmitting) return;
     try {
       setIsRerunning(true);
-      const testNodeId = 'node_qa_test';
-      if (import.meta.env?.DEV) {
-        console.log('[VisualAcceptanceModal] 触发重跑 QA 自动化测试:', { taskId: task.id, testNodeId });
+
+      // 1. 如果用例有修改或显式传入新用例，先持久化最新用例
+      const targetInstructions = overrideInstructions || (isCaseDirty ? getCleanInstructions() : null);
+      if (targetInstructions && targetInstructions.length > 0) {
+        if (import.meta.env?.DEV) {
+          console.log('[VisualAcceptanceModal] 重跑前自动同步最新用例:', { taskId: currentTask.id, steps: targetInstructions });
+        }
+        try {
+          const updated = await api.updateTask(currentTask.id, {
+            qaInstructions: targetInstructions,
+            context: {
+              qaInstructions: targetInstructions,
+              qaPlan: {
+                role: '用户定制验收用例',
+                createdAt: Date.now(),
+                steps: targetInstructions,
+              },
+            },
+          });
+          setCurrentTask(updated);
+          setInstructions(targetInstructions);
+          setRawInstructionsText(targetInstructions.join('\n'));
+          setIsCaseDirty(false);
+          onTaskUpdated?.(updated);
+        } catch (e: any) {
+          if (import.meta.env?.DEV) console.warn('[VisualAcceptanceModal] 保存用例告警:', e);
+        }
       }
-      await api.retryNode(task.id, testNodeId);
-      toast.info('已重新启动 QA 自动化测试与动态截帧...');
+
+      // 2. 探活或启动靶机沙箱
+      if (sandboxStatus === 'stopped' && currentTask.context?.worktree) {
+        try {
+          if (import.meta.env?.DEV) console.log('[VisualAcceptanceModal] 靶机离线，自动唤醒靶机...');
+          const sbRes = await api.startTaskSandbox(currentTask.id);
+          if (sbRes.success || sbRes.status === 'running') {
+            setSandboxStatus('running');
+          }
+        } catch (sbErr) {
+          if (import.meta.env?.DEV) console.warn('[VisualAcceptanceModal] 尝试拉起靶机告警:', sbErr);
+        }
+      }
+
+      // 3. 动态寻找 QA 测试节点 ID
+      const testNodeId = (() => {
+        const nr = currentTask.nodeRuns || {};
+        const keys = Object.keys(nr);
+        const match = keys.find((k) => k === 'node_qa_test' || k === 'node_midscene_test' || k.includes('qa') || k.includes('midscene'));
+        return match || 'node_qa_test';
+      })();
+
+      if (import.meta.env?.DEV) {
+        console.log('[VisualAcceptanceModal] 触发重跑 QA 自动化测试:', { taskId: currentTask.id, testNodeId });
+      }
+
+      const prevQaRunId = currentTask.context?.qaRunId;
+      await api.retryNode(currentTask.id, testNodeId);
+      toast.info('已重新启动 QA 自动化测试，AI 正在走查执行...');
 
       let pollCount = 0;
       const pollInterval = setInterval(async () => {
         pollCount++;
         try {
-          const latestTask = await api.getTask(task.id);
+          const latestTask = await api.getTask(currentTask.id);
           const qaRunIdNew = latestTask.context?.qaRunId;
           const testNodeStatus = latestTask.nodeRuns?.[testNodeId]?.status;
+          const taskStatus = latestTask.status;
 
-          if (testNodeStatus === 'completed' || latestTask.status === 'waiting_approval') {
+          const isNodeFinished = testNodeStatus === 'success' || testNodeStatus === 'failed';
+          const isTaskWaiting = taskStatus === 'waiting_approval' || taskStatus === 'failed';
+          const isNewRunGenerated = Boolean(qaRunIdNew && qaRunIdNew !== prevQaRunId);
+
+          if ((isNodeFinished || isTaskWaiting) && (isNewRunGenerated || pollCount >= 3)) {
             clearInterval(pollInterval);
             setIsRerunning(false);
-            toast.success('自动化测试已完成，最新截帧已就绪');
+            setCurrentTask(latestTask);
+            onTaskUpdated?.(latestTask);
+
             if (qaRunIdNew) {
               const res = await api.getQaRunById(qaRunIdNew);
               if (res) {
@@ -365,17 +565,36 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                 setCurrentStepIndex(0);
               }
             }
+
+            if (testNodeStatus === 'failed' || taskStatus === 'failed') {
+              toast.warning('测试执行完毕，部分断言未通过，请查看执行截帧与报错');
+            } else {
+              toast.success('自动化测试已完成，最新截帧已就绪！');
+            }
+            setActiveDrawerTab('audit');
+            return;
           }
         } catch {}
-        if (pollCount > 40) {
+
+        if (pollCount > 60) {
           clearInterval(pollInterval);
           setIsRerunning(false);
+          toast.warning('测试执行轮询超时，请稍后刷新重试');
         }
       }, 1500);
     } catch (err: any) {
       toast.error(`重新跑测试失败: ${err.message}`);
       setIsRerunning(false);
     }
+  };
+
+  const handleSaveAndRerun = async () => {
+    const cleanList = getCleanInstructions();
+    if (cleanList.length === 0) {
+      toast.warning('用例至少需要包含 1 个有效步骤');
+      return;
+    }
+    await handleRerunTest(cleanList);
   };
 
   const isPassed = run ? run.status === 'passed' : true;
@@ -591,6 +810,19 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                       </div>
                     </div>
                   )}
+
+                  {/* AI 正在重跑自动化测试时的半透明蒙层 */}
+                  {isRerunning && (
+                    <div className="absolute inset-0 z-20 bg-black/40 backdrop-blur-[2px] flex flex-col items-center justify-center text-white p-4 animate-in fade-in duration-200">
+                      <div className="px-4 py-3 bg-[#18181b]/95 border border-[#3f3f46] rounded-[10px] shadow-2xl flex items-center gap-3 max-w-sm">
+                        <Loader2 size={18} className="animate-spin text-[#818cf8] shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-semibold text-white tracking-tight">AI 正在按新用例执行自动化测试...</div>
+                          <div className="text-[10.5px] text-[#a1a1aa] truncate mt-0.5">操控靶机浏览器走查交互与捕获动态截帧</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -601,114 +833,376 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
             )}
           </div>
 
-          {/* 右侧：审计与步骤详情抽屉（白底、规范卡片式排版） */}
-          <div className="w-[330px] bg-white border-l border-[#e3e3e8] flex flex-col shrink-0 select-none">
-            {/* 顶栏：当前步骤与状态 */}
-            <div className="h-[42px] px-4 border-b border-[#e3e3e8] flex items-center justify-between shrink-0 bg-[#fafafc]">
-              <span className="text-[11px] font-medium text-[#71717a]">
-                步骤 {steps.length > 0 ? `${currentStepIndex + 1} / ${steps.length}` : '0'}
-              </span>
+          {/* 右侧：审计与用例编辑抽屉 */}
+          <div className="w-[350px] bg-white border-l border-[#e3e3e8] flex flex-col shrink-0 select-none">
+            {/* 顶栏：Tab 切换与状态微徽标 */}
+            <div className="h-[44px] px-3.5 border-b border-[#e3e3e8] flex items-center justify-between shrink-0 bg-[#fafafc]">
+              <div className="flex items-center bg-[#ececf0] p-0.5 rounded-[6px] border border-[#e3e3e8]/60">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (import.meta.env?.DEV) console.log('[VisualAcceptanceModal] 切换至回放审计');
+                    setActiveDrawerTab('audit');
+                  }}
+                  className={`px-2.5 py-1 rounded-[4px] text-[11px] font-medium transition-all cursor-pointer ${
+                    activeDrawerTab === 'audit'
+                      ? 'bg-white text-[#1c1c21] shadow-2xs font-semibold'
+                      : 'text-[#71717a] hover:text-[#1c1c21]'
+                  }`}
+                >
+                  回放审计
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (import.meta.env?.DEV) console.log('[VisualAcceptanceModal] 切换至用例编辑');
+                    setActiveDrawerTab('editor');
+                  }}
+                  className={`px-2.5 py-1 rounded-[4px] text-[11px] font-medium transition-all flex items-center gap-1 cursor-pointer ${
+                    activeDrawerTab === 'editor'
+                      ? 'bg-white text-[#1c1c21] shadow-2xs font-semibold'
+                      : 'text-[#71717a] hover:text-[#1c1c21]'
+                  }`}
+                >
+                  <Edit3 size={10} />
+                  <span>用例编辑</span>
+                  {instructions.length > 0 && (
+                    <span className="font-mono text-[9px] px-1 py-0.2 rounded bg-[#e3e3e8] text-[#52525b]">
+                      {instructions.length}
+                    </span>
+                  )}
+                  {isCaseDirty && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" title="有未保存修改" />
+                  )}
+                </button>
+              </div>
 
-              {currentStep?.status === 'passed' ? (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
-                  <CheckCircle2 size={10} strokeWidth={2.2} />
-                  <span>PASSED</span>
-                </span>
+              {activeDrawerTab === 'audit' ? (
+                currentStep?.status === 'passed' ? (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
+                    <CheckCircle2 size={10} strokeWidth={2.2} />
+                    <span>PASSED</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10px] font-medium border border-[#fecaca]/60">
+                    <XCircle size={10} strokeWidth={2.2} />
+                    <span>FAILED</span>
+                  </span>
+                )
               ) : (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10px] font-medium border border-[#fecaca]/60">
-                  <XCircle size={10} strokeWidth={2.2} />
-                  <span>FAILED</span>
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {isCaseDirty && (
+                    <button
+                      type="button"
+                      onClick={handleResetInstructions}
+                      className="text-[10px] text-[#71717a] hover:text-[#1c1c21] flex items-center gap-0.5 cursor-pointer px-1.5 py-0.5 rounded hover:bg-[#ececf0] transition-colors"
+                      title="放弃修改，恢复原始用例"
+                    >
+                      <Undo2 size={10} />
+                      <span>重置</span>
+                    </button>
+                  )}
+                  <span className="text-[10.5px] font-mono text-[#85858d]">
+                    {instructions.length} 步
+                  </span>
+                </div>
               )}
             </div>
 
-            {/* 滚动详情卡片 */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-[12px]">
-              {/* 卡片 1: 当前操作指令 */}
-              <div>
-                <label className="text-[11px] font-medium text-[#71717a] block mb-1">
-                  当前操作指令
-                </label>
-                <div className="bg-[#f4f4f6] text-[#1c1c21] p-2.5 rounded-[6px] border border-[#e3e3e8] leading-relaxed text-[11.5px] font-medium">
-                  {currentStep?.prompt || '等待执行指令'}
+            {/* 滚动内容区域 */}
+            {activeDrawerTab === 'audit' ? (
+              <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-[12px]">
+                {/* 卡片 1: 当前操作指令 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-medium text-[#71717a]">
+                      当前操作指令 ({steps.length > 0 ? `步骤 ${currentStepIndex + 1}/${steps.length}` : '0'})
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (import.meta.env?.DEV) console.log('[VisualAcceptanceModal] 从操作指令直达用例编辑');
+                        setActiveDrawerTab('editor');
+                      }}
+                      className="text-[10.5px] text-[#4f46e5] hover:text-[#4338ca] font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                      title="编辑测试用例指令"
+                    >
+                      <Edit3 size={10} />
+                      <span>编辑用例</span>
+                    </button>
+                  </div>
+                  <div className="bg-[#f4f4f6] text-[#1c1c21] p-2.5 rounded-[6px] border border-[#e3e3e8] leading-relaxed text-[11.5px] font-medium">
+                    {currentStep?.prompt || '等待执行指令'}
+                  </div>
                 </div>
-              </div>
 
-              {/* 卡片 2: AI 动作判定与分析 */}
-              <div>
-                <label className="text-[11px] font-medium text-[#71717a] block mb-1 flex items-center gap-1">
-                  <Sparkles size={11} className="text-[#4f46e5]" />
-                  AI 动作判定与分析
-                </label>
-                <div className="bg-[#fafafc] text-[#4b4b54] border border-[#e3e3e8] p-2.5 rounded-[6px] leading-relaxed text-[11.5px]">
-                  {currentStep?.thought || '无头浏览器已定位页面状态，操作与断言通过。'}
-                </div>
-              </div>
-
-              {/* 卡片 3: 执行时间轴轻量列表 (支持秒级点选直达) */}
-              {steps.length > 0 && (
+                {/* 卡片 2: AI 动作判定与分析 */}
                 <div>
                   <label className="text-[11px] font-medium text-[#71717a] block mb-1 flex items-center gap-1">
-                    <Layers size={11} className="text-[#63636b]" />
-                    执行时间轴 ({steps.length} 步)
+                    <Sparkles size={11} className="text-[#4f46e5]" />
+                    AI 动作判定与分析
                   </label>
-                  <div className="bg-[#fafafc] border border-[#e3e3e8] rounded-[6px] divide-y divide-[#f1f1f4] max-h-[140px] overflow-y-auto">
-                    {steps.map((st, idx) => {
-                      const isCurrent = idx === currentStepIndex;
-                      return (
-                        <div
-                          key={st.stepId || idx}
-                          onClick={() => {
-                            setIsPlaying(false);
-                            setCurrentStepIndex(idx);
-                          }}
-                          className={`px-2.5 py-1.5 flex items-center justify-between text-[11px] transition-colors cursor-pointer ${
-                            isCurrent
-                              ? 'bg-white font-semibold text-[#1c1c21] shadow-3xs'
-                              : 'text-[#63636b] hover:bg-white hover:text-[#1c1c21]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-1.5 truncate">
-                            <span className="font-mono text-[10px] text-[#85858d] w-3.5">
-                              #{idx + 1}
-                            </span>
-                            <span className="truncate">{st.prompt}</span>
-                          </div>
-                          {st.status === 'passed' ? (
-                            <Check size={11} className="text-[#059669] shrink-0" />
-                          ) : (
-                            <XCircle size={11} className="text-[#dc2626] shrink-0" />
-                          )}
-                        </div>
-                      );
-                    })}
+                  <div className="bg-[#fafafc] text-[#4b4b54] border border-[#e3e3e8] p-2.5 rounded-[6px] leading-relaxed text-[11.5px]">
+                    {currentStep?.thought || '无头浏览器已定位页面状态，操作与断言通过。'}
                   </div>
                 </div>
-              )}
 
-              {/* 卡片 4: 本次迭代变更文件（严格去除 node_modules 软链） */}
-              {cleanChangedFiles.length > 0 && (
-                <div>
-                  <label className="text-[11px] font-medium text-[#71717a] block mb-1 flex items-center justify-between">
-                    <span className="flex items-center gap-1">
-                      <FileCode2 size={11} className="text-[#63636b]" />
-                      变更代码文件 ({cleanChangedFiles.length})
-                    </span>
-                    {worktree?.diffSummary && (
-                      <span className="text-[10px] font-mono text-[#85858d]">{worktree.diffSummary}</span>
-                    )}
-                  </label>
-                  <div className="bg-[#fafafc] border border-[#e3e3e8] rounded-[6px] p-2 space-y-1 max-h-[140px] overflow-y-auto font-mono text-[11px] text-[#4b4b54]">
-                    {cleanChangedFiles.map((file, i) => (
-                      <div key={i} className="truncate hover:text-[#1c1c21] flex items-center gap-1.5" title={file}>
-                        <span className="w-1 h-1 rounded-full bg-[#1c1c21] shrink-0" />
-                        <span className="truncate">{file}</span>
-                      </div>
-                    ))}
+                {/* 卡片 3: 执行时间轴轻量列表 (支持秒级点选直达) */}
+                {steps.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-medium text-[#71717a] flex items-center gap-1">
+                        <Layers size={11} className="text-[#63636b]" />
+                        执行时间轴 ({steps.length} 步)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (import.meta.env?.DEV) console.log('[VisualAcceptanceModal] 从时间轴直达用例编辑');
+                          setActiveDrawerTab('editor');
+                        }}
+                        className="text-[10px] text-[#4f46e5] hover:text-[#4338ca] font-medium flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <Edit3 size={9.5} />
+                        <span>编辑用例</span>
+                      </button>
+                    </div>
+                    <div className="bg-[#fafafc] border border-[#e3e3e8] rounded-[6px] divide-y divide-[#f1f1f4] max-h-[140px] overflow-y-auto">
+                      {steps.map((st, idx) => {
+                        const isCurrent = idx === currentStepIndex;
+                        return (
+                          <div
+                            key={st.stepId || idx}
+                            onClick={() => {
+                              setIsPlaying(false);
+                              setCurrentStepIndex(idx);
+                            }}
+                            className={`px-2.5 py-1.5 flex items-center justify-between text-[11px] transition-colors cursor-pointer ${
+                              isCurrent
+                                ? 'bg-white font-semibold text-[#1c1c21] shadow-3xs'
+                                : 'text-[#63636b] hover:bg-white hover:text-[#1c1c21]'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 truncate">
+                              <span className="font-mono text-[10px] text-[#85858d] w-3.5">
+                                #{idx + 1}
+                              </span>
+                              <span className="truncate">{st.prompt}</span>
+                            </div>
+                            {st.status === 'passed' ? (
+                              <Check size={11} className="text-[#059669] shrink-0" />
+                            ) : (
+                              <XCircle size={11} className="text-[#dc2626] shrink-0" />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
+                )}
+
+                {/* 卡片 4: 本次迭代变更文件（严格去除 node_modules 软链） */}
+                {cleanChangedFiles.length > 0 && (
+                  <div>
+                    <label className="text-[11px] font-medium text-[#71717a] block mb-1 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <FileCode2 size={11} className="text-[#63636b]" />
+                        变更代码文件 ({cleanChangedFiles.length})
+                      </span>
+                      {worktree?.diffSummary && (
+                        <span className="text-[10px] font-mono text-[#85858d]">{worktree.diffSummary}</span>
+                      )}
+                    </label>
+                    <div className="bg-[#fafafc] border border-[#e3e3e8] rounded-[6px] p-2 space-y-1 max-h-[140px] overflow-y-auto font-mono text-[11px] text-[#4b4b54]">
+                      {cleanChangedFiles.map((file, i) => (
+                        <div key={i} className="truncate hover:text-[#1c1c21] flex items-center gap-1.5" title={file}>
+                          <span className="w-1 h-1 rounded-full bg-[#1c1c21] shrink-0" />
+                          <span className="truncate">{file}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col min-h-0 p-3.5 space-y-3">
+                {/* 模式切换与提示 */}
+                <div className="flex items-center justify-between text-[11px] pb-2 border-b border-[#f1f1f4] shrink-0">
+                  <div className="flex items-center gap-1.5 text-[#63636b]">
+                    <Target size={12} className="text-[#4f46e5]" />
+                    <span className="font-medium text-[#1c1c21]">验收步骤列表</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!rawTextMode) {
+                        setRawInstructionsText(instructions.join('\n'));
+                      } else {
+                        const parsed = rawInstructionsText
+                          .split('\n')
+                          .map((l) => l.replace(/^[-*•\d.]+\s*/, '').trim())
+                          .filter(Boolean);
+                        setInstructions(parsed.length > 0 ? parsed : ['等待页面完全加载，检查首屏主视觉元素']);
+                      }
+                      setRawTextMode(!rawTextMode);
+                    }}
+                    className="text-[10.5px] text-[#4f46e5] hover:text-[#4338ca] font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    {rawTextMode ? '切换为步骤卡片' : '切换为多行文本'}
+                  </button>
                 </div>
-              )}
-            </div>
+
+                {/* 编辑主区域 */}
+                <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
+                  {rawTextMode ? (
+                    <div className="space-y-1.5 h-full flex flex-col">
+                      <p className="text-[10.5px] text-[#85858d] leading-relaxed">
+                        每行一条自然语言操作或断言指令。AI 浏览器 Agent 将严格按序执行测试与截帧。
+                      </p>
+                      <textarea
+                        value={rawInstructionsText}
+                        onChange={(e) => {
+                          setRawInstructionsText(e.target.value);
+                          setIsCaseDirty(true);
+                        }}
+                        onKeyDown={(e) => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSaveAndRerun();
+                          }
+                        }}
+                        rows={10}
+                        placeholder="例如：&#10;等待页面完全加载，检查首屏主视觉元素&#10;定位核心交互按钮并触发点击&#10;校验页面无报错与异常提示"
+                        className="w-full flex-1 bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[6px] p-2.5 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none font-mono resize-none transition-all leading-relaxed shadow-3xs"
+                      />
+                      <span className="text-[10px] text-[#a1a1aa] font-mono">
+                        快捷键: ⌘+Enter / Ctrl+Enter 立即保存并让 AI 重跑
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {instructions.map((inst, idx) => {
+                        const isAssert =
+                          inst.includes('检查') ||
+                          inst.includes('校验') ||
+                          inst.includes('验证') ||
+                          inst.includes('是否') ||
+                          inst.includes('断言');
+                        return (
+                          <div
+                            key={idx}
+                            className="p-2.5 rounded-[6px] bg-[#fafafc] border border-[#e3e3e8] hover:border-[#c7d2fe] transition-all group/step space-y-1.5 shadow-3xs"
+                          >
+                            <div className="flex items-center justify-between text-[10.5px]">
+                              <span className="font-mono font-medium text-[#71717a] flex items-center gap-1.5">
+                                <span className="w-4 h-4 rounded-[3px] bg-[#ececf0] text-[#1c1c21] text-[9.5px] font-bold flex items-center justify-center">
+                                  {idx + 1}
+                                </span>
+                                <span
+                                  className={`text-[9.5px] px-1 py-0.2 rounded font-medium ${
+                                    isAssert
+                                      ? 'bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe]/50'
+                                      : 'bg-[#f4f4f6] text-[#52525b] border border-[#e3e3e8]'
+                                  }`}
+                                >
+                                  {isAssert ? '断言判定' : '动作执行'}
+                                </span>
+                              </span>
+                              <div className="flex items-center gap-1 opacity-60 group-hover/step:opacity-100 transition-opacity">
+                                {idx > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveStep(idx, -1)}
+                                    className="w-5 h-5 rounded hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer"
+                                    title="上移此步"
+                                  >
+                                    <ArrowUp size={10.5} />
+                                  </button>
+                                )}
+                                {idx < instructions.length - 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveStep(idx, 1)}
+                                    className="w-5 h-5 rounded hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer"
+                                    title="下移此步"
+                                  >
+                                    <ArrowDown size={10.5} />
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveStep(idx)}
+                                  className="w-5 h-5 rounded hover:bg-[#fee2e2] text-[#85858d] hover:text-[#dc2626] flex items-center justify-center transition-colors cursor-pointer"
+                                  title="删除此步"
+                                >
+                                  <Trash2 size={10.5} />
+                                </button>
+                              </div>
+                            </div>
+
+                            <textarea
+                              value={inst}
+                              onChange={(e) => handleUpdateStepText(idx, e.target.value)}
+                              onKeyDown={(e) => {
+                                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSaveAndRerun();
+                                }
+                              }}
+                              rows={2}
+                              placeholder="输入自然语言测试步骤或断言指令..."
+                              className="w-full bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[4px] p-2 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none resize-none transition-all leading-relaxed shadow-3xs"
+                            />
+                          </div>
+                        );
+                      })}
+
+                      {/* 添加步骤 */}
+                      <button
+                        type="button"
+                        onClick={handleAddStep}
+                        className="w-full h-[30px] rounded-[6px] border border-dashed border-[#d1d1d6] hover:border-[#4f46e5] hover:bg-[#eeedfd]/40 text-[#63636b] hover:text-[#4f46e5] text-[11px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                      >
+                        <Plus size={11} strokeWidth={2.4} />
+                        <span>添加用例步骤</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 用例编辑抽屉底部操作条 */}
+                <div className="pt-2.5 border-t border-[#f1f1f4] flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    disabled={isSavingCase || isRerunning}
+                    onClick={handleSaveInstructionsOnly}
+                    className="flex-1 h-[30px] rounded-[6px] bg-white hover:bg-[#fafafc] border border-[#e3e3e8] text-[#1c1c21] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-3xs disabled:opacity-50"
+                  >
+                    <Check size={11} strokeWidth={2.2} />
+                    <span>{isSavingCase ? '保存中...' : '仅保存用例'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSavingCase || isRerunning}
+                    onClick={handleSaveAndRerun}
+                    className="flex-1 h-[30px] rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+                    title="保存用例并让 AI 重新执行自动化测试 (⌘+Enter)"
+                  >
+                    {isRerunning ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin text-white" />
+                        <span>AI 测试中...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={12} className="text-[#a5b4fc]" />
+                        <span>让 AI 重新跑</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -789,12 +1283,12 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
             <button
               type="button"
               disabled={isSubmitting || isRerunning}
-              onClick={handleRerunTest}
+              onClick={() => handleRerunTest()}
               className="h-[30px] px-3 rounded-[6px] bg-white hover:bg-[#fafafc] border border-[#e3e3e8] text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-2xs cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
-              title="在靶机中重新执行自动化测试与截帧"
+              title="按当前测试用例重新执行自动化测试与截帧"
             >
               <RotateCcw size={12} className={isRerunning ? 'animate-spin shrink-0' : 'shrink-0'} />
-              <span className="whitespace-nowrap">{isRerunning ? '测试中...' : '重新跑测试'}</span>
+              <span className="whitespace-nowrap">{isRerunning ? '测试执行中...' : '重新跑测试'}</span>
             </button>
 
             <button
