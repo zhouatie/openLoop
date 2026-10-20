@@ -78,6 +78,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [criteriaList, setCriteriaList] = useState<string[]>([]);
   const [isCriteriaOpen, setIsCriteriaOpen] = useState(false);
   const [isGeneratingQa, setIsGeneratingQa] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const focusIndexRef = useRef<number | null>(null);
   const criteriaInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
@@ -184,6 +185,19 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       }
     }
   }, [isOpen, defaultColumn]);
+
+  // 弹窗打开后默认让任务名称输入框聚焦
+  useEffect(() => {
+    if (isOpen) {
+      if (import.meta.env?.DEV) {
+        console.log('[CreateTaskModal] 弹窗已打开，聚焦任务名称输入框');
+      }
+      const timer = setTimeout(() => {
+        titleInputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
 
   // 弹窗关闭时重置表单为纯净空状态（新建任务不默认预填模板内容）
   useEffect(() => {
@@ -620,7 +634,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               任务名称
             </label>
             <input
+              ref={titleInputRef}
               type="text"
+              autoFocus
               required
               placeholder={
                 currentWf?.taskTemplate?.titlePlaceholder || '例如: 购物车结算全链路回归与截图验收'
