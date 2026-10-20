@@ -444,14 +444,14 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
     switch (source) {
       case 'shortcut':
         return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef3c7] text-[#92400e] text-[10px] font-medium border border-[#fde68a] shrink-0">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef3c7] text-[#92400e] text-[10px] font-medium border border-[#fde68a] shrink-0 whitespace-nowrap">
             <Zap size={10} className="fill-current text-[#d97706]" />
             <span>快捷键</span>
           </span>
         );
       case 'debug':
         return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#e0e7ff] text-[#3730a3] text-[10px] font-medium border border-[#c7d2fe] shrink-0">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#e0e7ff] text-[#3730a3] text-[10px] font-medium border border-[#c7d2fe] shrink-0 whitespace-nowrap">
             <Play size={9} className="fill-current text-[#4f46e5]" />
             <span>手动调试</span>
           </span>
@@ -459,7 +459,7 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
       case 'kanban':
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f1f1f4] text-[#4b4b53] text-[10px] font-medium border border-[#e3e3e8] shrink-0">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f1f1f4] text-[#4b4b53] text-[10px] font-medium border border-[#e3e3e8] shrink-0 whitespace-nowrap">
             <LayoutGrid size={9} />
             <span>看板任务</span>
           </span>
@@ -472,42 +472,42 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
     switch (status) {
       case 'running':
         return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#eff6ff] text-[#1d4ed8] text-[11px] font-medium border border-[#bfdbfe]">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#eff6ff] text-[#1d4ed8] text-[11px] font-medium border border-[#bfdbfe] whitespace-nowrap shrink-0">
             <Loader2 size={11} className="animate-spin text-[#2563eb]" />
             <span>执行中</span>
           </span>
         );
       case 'pending':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#f4f4f6] text-[#71717a] text-[11px] font-medium border border-[#e3e3e8]">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#f4f4f6] text-[#71717a] text-[11px] font-medium border border-[#e3e3e8] whitespace-nowrap shrink-0">
             <Clock size={10} className="text-[#85858d]" />
             <span>待执行</span>
           </span>
         );
       case 'completed':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#f0fdf4] text-[#15803d] text-[11px] font-medium border border-[#bbf7d0]">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#f0fdf4] text-[#15803d] text-[11px] font-medium border border-[#bbf7d0] whitespace-nowrap shrink-0">
             <CheckCircle2 size={11} className="text-[#16a34a]" />
             <span>成功</span>
           </span>
         );
       case 'failed':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#fef2f2] text-[#b91c1c] text-[11px] font-medium border border-[#fecaca]">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#fef2f2] text-[#b91c1c] text-[11px] font-medium border border-[#fecaca] whitespace-nowrap shrink-0">
             <XCircle size={11} className="text-[#dc2626]" />
             <span>失败</span>
           </span>
         );
       case 'cancelled':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#fffbeb] text-[#b45309] text-[11px] font-medium border border-[#fde68a]">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#fffbeb] text-[#b45309] text-[11px] font-medium border border-[#fde68a] whitespace-nowrap shrink-0">
             <AlertCircle size={11} className="text-[#d97706]" />
             <span>已中止</span>
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#f4f4f6] text-[#71717a] text-[11px] font-medium">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#f4f4f6] text-[#71717a] text-[11px] font-medium whitespace-nowrap shrink-0">
             <span>{status}</span>
           </span>
         );
@@ -1019,7 +1019,7 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
 
       {/* 右侧滑出式执行详情与实时观测抽屉 (Detail Drawer) */}
       {activeTaskId && activeTaskDetail && (
-        <div className="fixed inset-y-0 right-0 w-[540px] bg-white border-l border-[#e3e3e8] shadow-2xl z-40 flex flex-col animate-in slide-in-from-right-4 duration-150 select-text">
+        <div className="fixed inset-y-0 right-0 w-full sm:w-[580px] md:w-[620px] max-w-[95vw] bg-white border-l border-[#e3e3e8] shadow-2xl z-40 flex flex-col animate-in slide-in-from-right-4 duration-150 select-text">
           {/* 抽屉头部 */}
           <div className="h-[48px] border-b border-[#e3e3e8] px-4 bg-[#fafafc] flex items-center justify-between shrink-0 select-none">
             <div className="flex items-center gap-2 min-w-0">
@@ -1045,10 +1045,10 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                 <button
                   type="button"
                   onClick={() => onSelectWorkflow(activeWfInfo.workflow!.id)}
-                  className="flex items-center gap-1 h-[26px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[11px] text-[#4b4b53] hover:text-[#1c1c21] transition-all cursor-pointer"
+                  className="flex items-center gap-1 h-[26px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[11px] text-[#4b4b53] hover:text-[#1c1c21] transition-all cursor-pointer whitespace-nowrap shrink-0"
                   title="在编排画布中打开该工作流"
                 >
-                  <Workflow size={11} />
+                  <Workflow size={11} className="shrink-0" />
                   <span>打开流程画布</span>
                 </button>
               )}
@@ -1057,7 +1057,7 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
               <button
                 type="button"
                 onClick={handleCloseDetail}
-                className="w-[26px] h-[26px] rounded-[5px] text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-all cursor-pointer"
+                className="w-[26px] h-[26px] rounded-[5px] text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-all cursor-pointer shrink-0"
                 title="关闭抽屉 (Escape)"
               >
                 <X size={15} />
@@ -1066,26 +1066,26 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
           </div>
 
           {/* 抽屉快捷操作与状态摘要栏 */}
-          <div className="px-4 py-2.5 bg-[#f9f9fb] border-b border-[#e3e3e8] flex items-center justify-between text-[11px] select-none">
-            <div className="flex items-center gap-2">
+          <div className="px-4 py-2.5 bg-[#f9f9fb] border-b border-[#e3e3e8] flex items-center justify-between text-[11px] select-none gap-2 overflow-x-auto">
+            <div className="flex items-center gap-2 whitespace-nowrap shrink-0 min-w-0">
               {renderTriggerBadge(activeTaskDetail.triggerSource)}
-              <span className="text-[#85858d]">
+              <span className="text-[#85858d] whitespace-nowrap">
                 耗时 <span className="font-mono text-[#1c1c21] font-medium">{getTaskDurationStr(activeTaskDetail)}</span>
               </span>
               <span className="text-[#85858d]">·</span>
-              <span className="text-[#85858d]">{new Date(activeTaskDetail.createdAt).toLocaleTimeString()}</span>
+              <span className="text-[#85858d] whitespace-nowrap font-mono">{new Date(activeTaskDetail.createdAt).toLocaleTimeString()}</span>
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
               {hasAgentNode && (
                 <button
                   type="button"
                   onClick={() => handleOpenAgentSession(activeTaskDetail.id)}
-                  className="flex items-center gap-1 h-[24px] px-2 rounded-[4px] bg-[#eeedfd] border border-[#d8d6fb] hover:bg-[#e0e7ff] text-[10.5px] font-medium text-[#7c3aed] transition-all cursor-pointer shadow-2xs"
+                  className="flex items-center gap-1 h-[24px] px-2 rounded-[4px] bg-[#eeedfd] border border-[#d8d6fb] hover:bg-[#e0e7ff] text-[10.5px] font-medium text-[#7c3aed] transition-all cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
                   title="查看该任务的 Agent 交互会话、深度思考与工具调用"
                 >
-                  <Bot size={11} className="text-[#7c3aed]" />
-                  <span>Agent 会话</span>
+                  <Bot size={11} className="text-[#7c3aed] shrink-0" />
+                  <span className="whitespace-nowrap">Agent 会话</span>
                 </button>
               )}
 
@@ -1093,10 +1093,10 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                 type="button"
                 onClick={() => handleRerun(activeTaskDetail)}
                 disabled={isRerunningId === activeTaskDetail.id || activeTaskDetail.status === 'running'}
-                className="flex items-center gap-1 h-[24px] px-2 rounded-[4px] bg-white border border-[#e3e3e8] hover:bg-[#f1f1f4] text-[10.5px] font-medium text-[#1c1c21] transition-all cursor-pointer disabled:opacity-40 shadow-2xs"
+                className="flex items-center gap-1 h-[24px] px-2 rounded-[4px] bg-white border border-[#e3e3e8] hover:bg-[#f1f1f4] text-[10.5px] font-medium text-[#1c1c21] transition-all cursor-pointer disabled:opacity-40 shadow-2xs whitespace-nowrap shrink-0"
               >
-                <RotateCcw size={10.5} className={isRerunningId === activeTaskDetail.id ? 'animate-spin' : ''} />
-                <span>再次运行</span>
+                <RotateCcw size={10.5} className={`shrink-0 ${isRerunningId === activeTaskDetail.id ? 'animate-spin' : ''}`} />
+                <span className="whitespace-nowrap">再次运行</span>
               </button>
 
               {(activeTaskDetail.status === 'running' || activeTaskDetail.status === 'pending') && (
@@ -1104,10 +1104,10 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                   type="button"
                   onClick={() => handleCancelTask(activeTaskDetail)}
                   disabled={isCancellingId === activeTaskDetail.id}
-                  className="flex items-center gap-1 h-[24px] px-2 rounded-[4px] bg-[#fef2f2] border border-[#fecaca] hover:bg-[#fee2e2] text-[10.5px] font-medium text-[#dc2626] transition-all cursor-pointer"
+                  className="flex items-center gap-1 h-[24px] px-2 rounded-[4px] bg-[#fef2f2] border border-[#fecaca] hover:bg-[#fee2e2] text-[10.5px] font-medium text-[#dc2626] transition-all cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  <Square size={10} className="fill-current" />
-                  <span>终止执行</span>
+                  <Square size={10} className="fill-current shrink-0" />
+                  <span className="whitespace-nowrap">终止执行</span>
                 </button>
               )}
             </div>
@@ -1117,10 +1117,10 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {/* 需求 Prompt 与输入描述 */}
             <div className="bg-[#fafafc] border border-[#e3e3e8] rounded-[6px] p-3 space-y-1">
-              <div className="flex items-center justify-between text-[11px] font-medium text-[#63636b]">
-                <span>调用需求 / Prompt</span>
+              <div className="flex items-center justify-between text-[11px] font-medium text-[#63636b] gap-2">
+                <span className="shrink-0">调用需求 / Prompt</span>
                 {activeTaskDetail.workspace && (
-                  <span className="text-[10px] font-mono text-[#85858d]">
+                  <span className="text-[10px] font-mono text-[#85858d] truncate" title={activeTaskDetail.workspace}>
                     工程: {activeTaskDetail.workspace}
                   </span>
                 )}
