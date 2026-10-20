@@ -70,7 +70,7 @@ export class TaskDecomposer {
     const parallelKeywords = ['并行', '同时', '独立执行', '分别测试', '多端同步'];
     const isParallelIntended = parallelKeywords.some((kw) => fullText.includes(kw));
 
-    if (import.meta.env?.DEV) {
+    if (process.env.NODE_ENV !== 'production') {
       logger.info(`[TaskDecomposer] 分析任务 "${title}":`, {
         hasExplicitSteps,
         matchedKeywords,

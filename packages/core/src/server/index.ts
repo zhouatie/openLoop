@@ -1516,7 +1516,7 @@ export class OpenLoopServer {
         const workspace = (body.workspace || '').trim();
 
         const workflows = this.store.getWorkflows();
-        const recommendations = WorkflowRecommender.recommend(workflows, { title, description, workspace });
+        const recommendations = WorkflowRecommender.recommend(workflows, { title, workspace });
         return this.sendJson(res, 200, {
           success: true,
           recommendations,

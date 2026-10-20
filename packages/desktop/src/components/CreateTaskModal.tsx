@@ -98,8 +98,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   });
 
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const lastAutoTemplateRef = useRef<string>('');
-  const lastAutoAcceptanceRef = useRef<string>('');
 
   const currentWf = useMemo(
     () => workflows.find((w) => w.id === workflowId) || workflows[0],
@@ -172,28 +170,18 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   }, [isOpen, defaultColumn]);
 
-  // 响应 workflow 切换，智能自动填充模板
+  // 弹窗关闭时重置表单为纯净空状态（新建任务不默认预填模板内容）
   useEffect(() => {
-    if (!isOpen || !currentWf) return;
-
-    const tplDesc = currentWf.taskTemplate?.descriptionTemplate || '';
-    const tplAcc = currentWf.taskTemplate?.acceptanceTemplate || '';
-
-    // 描述框：如果当前为空，或等于上一个自动填充的模版，则无缝更新为当前流程的模版
-    if (!description.trim() || description === lastAutoTemplateRef.current) {
-      setDescription(tplDesc);
-      lastAutoTemplateRef.current = tplDesc;
+    if (!isOpen) {
+      setTitle('');
+      setDescription('');
+      setAcceptanceCriteria('');
+      setIsCriteriaOpen(false);
+      setAttachments([]);
+      setWorkflowSearch('');
+      setIsDropdownOpen(false);
     }
-
-    // 验收标准：如果当前为空，或等于上一个自动填充的模版
-    if (!acceptanceCriteria.trim() || acceptanceCriteria === lastAutoAcceptanceRef.current) {
-      setAcceptanceCriteria(tplAcc);
-      lastAutoAcceptanceRef.current = tplAcc;
-      if (tplAcc.trim()) {
-        setIsCriteriaOpen(true);
-      }
-    }
-  }, [workflowId, isOpen, currentWf]);
+  }, [isOpen]);
 
   // 按 Esc 键优先关闭下拉菜单，再关闭整个弹窗
   useEffect(() => {
@@ -452,8 +440,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       setAttachments([]);
       setWorkflowSearch('');
       setIsDropdownOpen(false);
-      lastAutoTemplateRef.current = '';
-      lastAutoAcceptanceRef.current = '';
       onClose();
     } finally {
       setLoading(false);
@@ -711,7 +697,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     type="button"
                     onClick={() => {
                       setDescription(currentWf.taskTemplate!.descriptionTemplate!);
-                      lastAutoTemplateRef.current = currentWf.taskTemplate!.descriptionTemplate!;
+                      if (import.meta.env?.DEV) {
+                        console.log('[CreateTaskModal] 手动套用工作流说明模板:', currentWf.name);
+                      }
                       toast.success(`已套用「${currentWf.name}」专属模板`);
                     }}
                     className="text-[10px] text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-1 cursor-pointer font-medium"
@@ -750,10 +738,13 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   acceptanceCriteria.trim() !== currentWf.taskTemplate.acceptanceTemplate.trim() && (
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setAcceptanceCriteria(currentWf.taskTemplate!.acceptanceTemplate!);
-                        lastAutoAcceptanceRef.current = currentWf.taskTemplate!.acceptanceTemplate!;
                         setIsCriteriaOpen(true);
+                        if (import.meta.env?.DEV) {
+                          console.log('[CreateTaskModal] 手动套用工作流验收模板:', currentWf.name);
+                        }
                         toast.success('已应用流程验收标准模板');
                       }}
                       className="h-[19px] px-1.5 rounded-[4px] bg-white hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
