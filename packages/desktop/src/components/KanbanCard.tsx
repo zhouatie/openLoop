@@ -212,6 +212,11 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   const groupTotalCount = childSubtasks.length || task.subTaskIds?.length || 0;
   const groupProgressPct = groupTotalCount > 0 ? Math.round((groupCompletedCount / groupTotalCount) * 100) : (task.status === 'completed' ? 100 : 0);
 
+  const runningSub = useMemo(() => {
+    return childSubtasks.find((s) => s.status === 'running');
+  }, [childSubtasks]);
+  const runningSubIndex = runningSub ? childSubtasks.findIndex((s) => s.id === runningSub.id) : -1;
+
   // 当任务处于待人工门禁时，按需探活沙箱靶机状态
   useEffect(() => {
     let active = true;
@@ -424,6 +429,18 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
         )}
       </div>
 
+      {/* 任务组：正在执行中的子工序呼吸态通知 */}
+      {isGroup && runningSub && (
+        <div className="flex items-center gap-1.5 py-1 px-2 rounded-[5px] bg-[#eff6ff] border border-[#bfdbfe]/60 text-[#1d4ed8] text-[10.5px] font-medium my-1.5 animate-fadeIn">
+          <Loader2 size={10.5} className="animate-spin text-[#2563eb] shrink-0" />
+          <span className="shrink-0 font-mono text-[#2563eb]">#{runningSubIndex + 1}</span>
+          <span className="truncate flex-1 font-normal text-[#1e40af]">{runningSub.title}</span>
+          <span className="shrink-0 font-mono text-[9px] bg-[#dbeafe] text-[#1e40af] px-1 py-[0.5px] rounded border border-[#bfdbfe]">
+            {workflows.find((w) => w.id === runningSub.workflowId)?.name || runningSub.workflowId}
+          </span>
+        </div>
+      )}
+
       {/* 任务组子工序卡片式折叠列表 */}
       {isGroup && childSubtasks.length > 0 && (
         <div className="my-2 border border-[#ececf0] rounded-[6px] bg-[#fafafc] overflow-hidden">
@@ -498,9 +515,14 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                       <span className="font-mono text-[9.5px] text-[#85858d] shrink-0">
                         #{idx + 1}
                       </span>
-                      <span className="text-[11px] text-[#1c1c21] truncate font-medium group-hover/sub:text-[#4f46e5]">
-                        {st.title}
-                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] text-[#1c1c21] truncate font-medium group-hover/sub:text-[#4f46e5]">
+                          {st.title}
+                        </div>
+                        <div className="text-[9.5px] text-[#85858d] truncate mt-0.5">
+                          ⚡ {workflows.find((w) => w.id === st.workflowId)?.name || st.workflowId}
+                        </div>
+                      </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {statusBadge}

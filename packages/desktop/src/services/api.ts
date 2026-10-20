@@ -262,6 +262,74 @@ export class DesktopApiService {
     });
   }
 
+  async batchAddSubTasks(
+    parentId: string,
+    params: {
+      subtasks: Array<{
+        id?: string;
+        title: string;
+        workflowId?: string;
+        description?: string;
+        dependencies?: string[];
+      }>;
+      executionMode?: 'serial' | 'parallel' | 'dag';
+      concurrencyLimit?: number;
+    }
+  ): Promise<{ success: boolean; subtasks: Task[]; parent: Task }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 为任务组 [${parentId}] 批量追加子工序:`, params);
+    }
+    return requestJson<{ success: boolean; subtasks: Task[]; parent: Task }>(
+      `${BASE_URL}/api/tasks/${parentId}/subtasks/batch`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      }
+    );
+  }
+
+  async planSubtasks(taskId: string): Promise<{
+    success: boolean;
+    plan: {
+      shouldDecompose: boolean;
+      reason?: string;
+      executionMode?: 'serial' | 'parallel' | 'dag';
+      concurrencyLimit?: number;
+      subtasks?: Array<{
+        title: string;
+        workflowId?: string;
+        dependencies?: string[];
+      }>;
+    };
+  }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 请求 AI 规划任务 [${taskId}] 的工序方案`);
+    }
+    return requestJson<{ success: boolean; plan: any }>(
+      `${BASE_URL}/api/tasks/${taskId}/plan-subtasks`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  async deleteSubTask(
+    parentId: string,
+    subId: string
+  ): Promise<{ success: boolean; parent: Task }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 从任务组 [${parentId}] 移除子工序 [${subId}]`);
+    }
+    return requestJson<{ success: boolean; parent: Task }>(
+      `${BASE_URL}/api/tasks/${parentId}/subtasks/${subId}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  }
+
   async recommendWorkflow(params: { title: string; description?: string; workspace?: string }): Promise<{
     success: boolean;
     recommendations: Array<{

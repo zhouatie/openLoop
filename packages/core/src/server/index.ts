@@ -31,6 +31,7 @@ import { getAgentProviderMeta, resolveResumeCommand } from '../constants/agent-p
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 import { AutomationScheduler } from '../automation/automation-scheduler';
 import { WorkflowRecommender } from '../engine/workflow-recommender';
+import { TaskDecomposer } from '../engine/task-decomposer';
 
 const serverLogger = createLogger('Server');
 
@@ -793,63 +794,83 @@ export class OpenLoopServer {
         serverLogger.info(`[Tasks:Delete] 接收到任务全链路删除请求: ${taskId}`, undefined, { taskId });
         const existingTask = this.store.getTask(taskId);
 
+        // 收集需要级联清理的任务清单（包含父任务与所有子任务）
+        const subtaskIds = existingTask?.subTaskIds || [];
+        const allTargetTasks: Task[] = [];
+        if (existingTask) allTargetTasks.push(existingTask);
+        for (const subId of subtaskIds) {
+          const sub = this.store.getTask(subId);
+          if (sub) allTargetTasks.push(sub);
+        }
+
         // 1. 中止可能正在执行的 DAG 引擎与子进程
         try {
           this.engine.cancelTask(taskId).catch(() => {});
         } catch {}
 
-        // 2. 释放并关闭关联的 Pi RPC 会话
-        try {
-          PiRpcSessionManager.getInstance().removeSession(taskId);
-        } catch {}
+        // 2. 级联释放所有目标任务的运行时资源（Pi 会话、Worktree 分支、靶机沙箱端口、磁盘产物）
+        for (const target of allTargetTasks) {
+          try {
+            PiRpcSessionManager.getInstance().removeSession(target.id);
+          } catch {}
 
-        // 3. 安全清理 Worktree 物理目录、临时分支与沙箱靶机进程
-        try {
-          let repoRoot = process.cwd();
-          if (existingTask?.workspace) {
-            repoRoot = existingTask.workspace.includes('.worktrees')
-              ? path.dirname(path.dirname(existingTask.workspace))
-              : existingTask.workspace;
+          try {
+            TaskProcessManager.stopAll(target.id);
+            if (target.context?.worktree?.webPort) {
+              WorktreeManager.getInstance().killPortIfBusy(target.context.worktree.webPort);
+            }
+            WorktreeManager.unregisterTaskPorts(target.id);
+          } catch {}
+
+          try {
+            let repoRoot = process.cwd();
+            if (target.workspace) {
+              repoRoot = target.workspace.includes('.worktrees')
+                ? path.dirname(path.dirname(target.workspace))
+                : target.workspace;
+            }
+            await WorktreeManager.getInstance().cleanupTaskWorktree(repoRoot, target.id);
+          } catch (wtErr: any) {
+            serverLogger.warn(`[Tasks:Delete] 清理 Worktree 告警 (${target.id}): ${wtErr.message}`);
           }
-          await WorktreeManager.getInstance().cleanupTaskWorktree(repoRoot, taskId);
-        } catch (wtErr: any) {
-          serverLogger.warn(`[Tasks:Delete] 清理 Worktree 告警: ${wtErr.message}`);
-        }
 
-        // 4. 清理磁盘上该任务关联的 QA 快照、动图与 artifacts 产物目录
-        try {
-          const dataDir = path.join(os.homedir(), '.openloop', 'artifacts');
-          const runIdsToClean: string[] = [];
-          if (existingTask?.context?.qaRunId) runIdsToClean.push(existingTask.context.qaRunId);
-          if (existingTask?.attachments) {
-            for (const att of existingTask.attachments) {
-              const m = att.path?.match(/artifacts\/([^/\\]+)/);
-              if (m && !runIdsToClean.includes(m[1])) {
-                runIdsToClean.push(m[1]);
+          try {
+            const dataDir = path.join(os.homedir(), '.openloop', 'artifacts');
+            const runIdsToClean: string[] = [];
+            if (target.context?.qaRunId) runIdsToClean.push(target.context.qaRunId);
+            if (target.attachments) {
+              for (const att of target.attachments) {
+                const m = att.path?.match(/artifacts\/([^/\\]+)/);
+                if (m && !runIdsToClean.includes(m[1])) {
+                  runIdsToClean.push(m[1]);
+                }
               }
             }
-          }
-          const taskQaRuns = this.store.getQaRuns(undefined, taskId);
-          for (const qr of taskQaRuns) {
-            if (!runIdsToClean.includes(qr.id)) {
-              runIdsToClean.push(qr.id);
+            const taskQaRuns = this.store.getQaRuns(undefined, target.id);
+            for (const qr of taskQaRuns) {
+              if (!runIdsToClean.includes(qr.id)) {
+                runIdsToClean.push(qr.id);
+              }
             }
-          }
-          for (const rId of runIdsToClean) {
-            const rDir = path.join(dataDir, rId);
-            if (fs.existsSync(rDir)) {
-              fs.rmSync(rDir, { recursive: true, force: true });
-              serverLogger.info(`[Tasks:Delete] 成功清理磁盘产物目录: ${rDir}`);
+            for (const rId of runIdsToClean) {
+              const rDir = path.join(dataDir, rId);
+              if (fs.existsSync(rDir)) {
+                fs.rmSync(rDir, { recursive: true, force: true });
+                serverLogger.info(`[Tasks:Delete] 成功清理磁盘产物目录: ${rDir}`);
+              }
             }
+          } catch (cleanErr: any) {
+            serverLogger.warn(`[Tasks:Delete] 清理磁盘产物告警 (${target.id}): ${cleanErr.message}`);
           }
-        } catch (cleanErr: any) {
-          serverLogger.warn(`[Tasks:Delete] 清理磁盘产物告警: ${cleanErr.message}`);
         }
 
-        // 5. 级联删除数据库记录 (tasks, logs, qa_runs)
+        // 3. 级联删除数据库记录 (tasks, logs, qa_runs, task_node_runs)
         const deleted = this.store.deleteTask(taskId);
         if (deleted) {
           this.broadcast({ type: 'task:update', data: { id: taskId, deleted: true } });
+          for (const subId of subtaskIds) {
+            this.broadcast({ type: 'task:update', data: { id: subId, deleted: true } });
+          }
           return this.sendJson(res, 200, { success: true, id: taskId }, reqMeta);
         }
         return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
@@ -899,6 +920,126 @@ export class OpenLoopServer {
 
         serverLogger.info(`[Tasks:AddSubtask] 成功为任务组 ${parent.id} 添加子任务: ${childTask.id} (${childTask.title})`);
         return this.sendJson(res, 201, { success: true, subtask: childTask, parent }, reqMeta);
+      }
+
+      // Batch Add Subtasks to Task/Group: POST /api/tasks/:id/subtasks/batch
+      const taskBatchSubtasksMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/subtasks\/batch$/);
+      if (taskBatchSubtasksMatch && method === 'POST') {
+        const parentId = taskBatchSubtasksMatch[1];
+        const parent = this.store.getTask(parentId);
+        if (!parent) return this.sendJson(res, 404, { error: 'Parent task not found' }, reqMeta);
+
+        const body = await this.parseJsonBody(req);
+        const { subtasks: rawSubtasks, executionMode, concurrencyLimit } = body;
+
+        if (!Array.isArray(rawSubtasks) || rawSubtasks.length === 0) {
+          return this.sendJson(res, 400, { error: 'subtasks array is required' }, reqMeta);
+        }
+
+        const createdList: Task[] = [];
+        const currentSubTaskIds = [...(parent.subTaskIds || [])];
+        const tempIdToRealId = new Map<string, string>();
+
+        for (let i = 0; i < rawSubtasks.length; i++) {
+          const raw = rawSubtasks[i];
+          const newSubId = `task_sub_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
+          if (raw.id) tempIdToRealId.set(raw.id, newSubId);
+          tempIdToRealId.set(`sub_${i + 1}`, newSubId);
+          tempIdToRealId.set(String(i), newSubId);
+          currentSubTaskIds.push(newSubId);
+        }
+
+        for (let i = 0; i < rawSubtasks.length; i++) {
+          const raw = rawSubtasks[i];
+          const realId = currentSubTaskIds[currentSubTaskIds.length - rawSubtasks.length + i];
+          const mappedDeps = (raw.dependencies || [])
+            .map((d: string) => tempIdToRealId.get(d) || d)
+            .filter((d: string) => currentSubTaskIds.includes(d));
+
+          const childTask: Task = {
+            id: realId,
+            title: raw.title || `子工序 #${currentSubTaskIds.length - rawSubtasks.length + i + 1}`,
+            description: raw.description || parent.description,
+            workflowId: raw.workflowId || parent.workflowId,
+            status: 'pending',
+            kanbanColumn: parent.kanbanColumn,
+            workspace: parent.workspace,
+            triggerSource: parent.triggerSource,
+            kind: 'subtask',
+            parentTaskId: parent.id,
+            dependencies: mappedDeps.length > 0 ? mappedDeps : undefined,
+            createdAt: Date.now() + i,
+            updatedAt: Date.now() + i,
+            nodeRuns: {},
+            context: {
+              ...(raw.context || {}),
+              parentTaskId: parent.id,
+            },
+          };
+
+          this.store.saveTask(childTask);
+          createdList.push(childTask);
+        }
+
+        parent.kind = 'group';
+        parent.subTaskIds = currentSubTaskIds;
+        if (executionMode) parent.executionMode = executionMode;
+        if (typeof concurrencyLimit === 'number') parent.concurrencyLimit = concurrencyLimit;
+        parent.updatedAt = Date.now();
+        this.store.saveTask(parent);
+
+        for (const child of createdList) {
+          this.broadcast({ type: 'task:new', data: child });
+        }
+        this.broadcast({ type: 'task:update', data: parent });
+
+        serverLogger.info(`[Tasks:BatchSubtasks] 成功为任务组 ${parent.id} 批量添加 ${createdList.length} 个子工序`);
+        return this.sendJson(res, 201, { success: true, subtasks: createdList, parent }, reqMeta);
+      }
+
+      // AI Plan Subtasks for Task: POST /api/tasks/:id/plan-subtasks
+      const taskPlanSubtasksMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/plan-subtasks$/);
+      if (taskPlanSubtasksMatch && method === 'POST') {
+        const taskId = taskPlanSubtasksMatch[1];
+        const task = this.store.getTask(taskId);
+        if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
+
+        const allWorkflows = this.store.getWorkflows();
+        const plan = TaskDecomposer.getInstance().planSubtasks(task, allWorkflows);
+        serverLogger.info(`[Tasks:PlanSubtasks] 为任务 ${taskId} 规划子工序方案:`, plan);
+        return this.sendJson(res, 200, { success: true, plan }, reqMeta);
+      }
+
+      // Delete Subtask: DELETE /api/tasks/:id/subtasks/:subId
+      const taskDeleteSubtaskMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/subtasks\/([a-zA-Z0-9_-]+)$/);
+      if (taskDeleteSubtaskMatch && method === 'DELETE') {
+        const parentId = taskDeleteSubtaskMatch[1];
+        const subId = taskDeleteSubtaskMatch[2];
+        const parent = this.store.getTask(parentId);
+        if (!parent) return this.sendJson(res, 404, { error: 'Parent task not found' }, reqMeta);
+
+        const subtask = this.store.getTask(subId);
+        if (!subtask) return this.sendJson(res, 404, { error: 'Subtask not found' }, reqMeta);
+
+        if (subtask.status === 'running') {
+          return this.sendJson(res, 400, { error: 'Cannot delete a running subtask' }, reqMeta);
+        }
+
+        // 从父任务 subTaskIds 中移除
+        parent.subTaskIds = (parent.subTaskIds || []).filter((id) => id !== subId);
+        if (parent.subTaskIds.length === 0) {
+          parent.kind = 'single';
+        }
+        parent.updatedAt = Date.now();
+        this.store.saveTask(parent);
+
+        // 删除子任务
+        this.store.deleteTask(subId);
+        this.broadcast({ type: 'task:delete', data: { id: subId } });
+        this.broadcast({ type: 'task:update', data: parent });
+
+        serverLogger.info(`[Tasks:DeleteSubtask] 成功从任务 ${parent.id} 移除子工序 ${subId}`);
+        return this.sendJson(res, 200, { success: true, parent }, reqMeta);
       }
 
       // Task run: /api/tasks/:id/run
