@@ -8,6 +8,7 @@ const INCREMENT_BATCH_SIZE = 30;
 
 export interface KanbanLaneListProps {
   tasks: Task[];
+  allTasks?: Task[];
   workflows: WorkflowDefinition[];
   wfMap: Map<string, WorkflowDefinition>;
   selectedTaskId?: string;
@@ -30,6 +31,7 @@ export interface KanbanLaneListProps {
 
 const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
   tasks,
+  allTasks,
   workflows,
   wfMap,
   selectedTaskId,
@@ -91,6 +93,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
         <KanbanCard
           key={task.id}
           task={task}
+          allTasks={allTasks || tasks}
           workflow={wfMap.get(task.workflowId)}
           workflows={workflows}
           isSelected={selectedTaskId === task.id}

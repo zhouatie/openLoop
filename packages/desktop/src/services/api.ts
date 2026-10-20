@@ -222,11 +222,62 @@ export class DesktopApiService {
     workspace?: string;
     attachments?: TaskAttachment[];
     triggerSource?: 'shortcut' | 'debug' | 'kanban' | 'api' | 'manual';
+    kind?: 'single' | 'group' | 'subtask';
+    parentTaskId?: string;
+    subTaskIds?: string[];
+    dependencies?: string[];
+    executionMode?: 'serial' | 'parallel' | 'dag';
+    concurrencyLimit?: number;
+    autoDecompose?: boolean;
+    subtasks?: Array<{ id?: string; title: string; workflowId?: string; description?: string; dependencies?: string[] }>;
   }): Promise<Task> {
     if (import.meta.env?.DEV) {
-      console.log('[UI:API] 创建新任务:', params);
+      console.log('[UI:API] 创建新任务/任务组:', params);
     }
     return requestJson<Task>(`${BASE_URL}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+  }
+
+  async addSubTask(
+    parentId: string,
+    params: {
+      title: string;
+      workflowId?: string;
+      description?: string;
+      dependencies?: string[];
+    }
+  ): Promise<{ success: boolean; subtask: Task; parent: Task }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 为任务组 [${parentId}] 添加子任务:`, params);
+    }
+    return requestJson<{ success: boolean; subtask: Task; parent: Task }>(`${BASE_URL}/api/tasks/${parentId}/subtasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+  }
+
+  async recommendWorkflow(params: { title: string; description?: string; workspace?: string }): Promise<{
+    success: boolean;
+    recommendations: Array<{
+      workflowId: string;
+      workflowName: string;
+      score: number;
+      reason: string;
+      matchHighlights: string[];
+    }>;
+    topRecommendation: {
+      workflowId: string;
+      workflowName: string;
+      score: number;
+      reason: string;
+      matchHighlights: string[];
+    } | null;
+  }> {
+    return requestJson(`${BASE_URL}/api/recommend-workflow`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),

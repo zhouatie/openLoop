@@ -15,8 +15,10 @@ import {
   Clock,
   Search,
   Loader2,
+  Plus,
 } from 'lucide-react';
-import { WorkflowDefinition, NodeType, KanbanColumn, TaskAttachment } from '@openloop/core';
+import type { WorkflowDefinition, NodeType, KanbanColumn, TaskAttachment } from '@openloop/core';
+import { WorkflowRecommender } from '../utils/workflowRecommender';
 import { WorkspacePicker } from './WorkspacePicker';
 import { TaskPromptArea } from './TaskPromptArea';
 import { toast } from './Toast';
@@ -42,6 +44,11 @@ interface CreateTaskModalProps {
     kanbanColumn?: KanbanColumn;
     workspace?: string;
     attachments?: TaskAttachment[];
+    kind?: 'single' | 'group' | 'subtask';
+    executionMode?: 'serial' | 'parallel' | 'dag';
+    concurrencyLimit?: number;
+    autoDecompose?: boolean;
+    subtasks?: Array<{ id?: string; title: string; workflowId?: string; description?: string; dependencies?: string[] }>;
   }) => Promise<void>;
 }
 
@@ -66,6 +73,21 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [workflowSearch, setWorkflowSearch] = useState('');
+  
+  // AI 自主工序编排与流水线推荐状态
+  const [autoDecompose, setAutoDecompose] = useState(true);
+  const [userManuallySelectedWf, setUserManuallySelectedWf] = useState(false);
+
+  // 毫秒级根据用户键入的任务标题计算流水线推荐 (只依赖 title 与 workspace，绝不依赖 description 模板)
+  const recommendations = useMemo(() => {
+    return WorkflowRecommender.recommend(workflows, {
+      title,
+      workspace,
+    });
+  }, [workflows, title, workspace]);
+
+  const topRecommendation = recommendations[0] || null;
+
   const [recentWorkflowIds, setRecentWorkflowIds] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY_RECENT_WORKFLOWS);
@@ -233,6 +255,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
   const handleSelectWorkflow = (wf: WorkflowDefinition) => {
     setWorkflowId(wf.id);
+    setUserManuallySelectedWf(true);
     setIsDropdownOpen(false);
     setWorkflowSearch('');
     if (import.meta.env?.DEV) {
@@ -242,6 +265,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
   const renderWorkflowItem = (wf: WorkflowDefinition, isRecentBadge = false) => {
     const isSelected = wf.id === currentWf?.id;
+    const isRecommended = topRecommendation?.workflowId === wf.id && topRecommendation.score >= 30;
 
     return (
       <div
@@ -265,14 +289,20 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="font-medium text-[12.5px] text-[#1c1c21] truncate">
                 {wf.name}
               </span>
               <span className="text-[9.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1 py-[0.5px] rounded">
                 {wf.id}
               </span>
-              {isRecentBadge && (
+              {isRecommended && (
+                <span className="px-1.5 py-[0.5px] rounded-[3px] text-[9px] font-semibold bg-[#eeedfd] text-[#4f46e5] border border-[#d8d6fb] shrink-0 flex items-center gap-0.5">
+                  <Sparkles size={8.5} />
+                  <span>AI 推荐</span>
+                </span>
+              )}
+              {isRecentBadge && !isRecommended && (
                 <span className="px-1.5 py-[0.5px] rounded-[3px] text-[9px] font-semibold bg-[#eeedfd] text-[#4f46e5] border border-[#d8d6fb]/60 shrink-0">
                   Recent
                 </span>
@@ -374,6 +404,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         workspace: trimmedWorkspace || '未指定(留空)',
         acceptanceCriteria: acceptanceCriteria.trim() || undefined,
         autoRun,
+        autoDecompose,
       });
     }
     try {
@@ -386,6 +417,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         kanbanColumn,
         workspace: trimmedWorkspace || undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
+        kind: 'single',
+        autoDecompose,
       });
 
       // 保存本地记忆与 LRU 最近使用列表
@@ -464,33 +497,31 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100">
-      <div className="w-[440px] bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.14)] text-[#1c1c21]">
+      <div className="w-[465px] max-h-[92vh] flex flex-col bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.14)] text-[#1c1c21] transition-all duration-200 overflow-hidden">
         {/* 顶部标题栏 */}
-        <div className="flex items-center justify-between pb-2.5 border-b border-[#ececf0]">
+        <div className="flex items-center justify-between pb-2.5 border-b border-[#ececf0] shrink-0">
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-[13px] text-[#1c1c21]">新建自动化任务</h3>
-            <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1 py-[0.5px] rounded">
-              Task Setup
-            </span>
           </div>
           <button
             onClick={onClose}
-            className="w-5 h-5 rounded-[4px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-colors"
+            className="w-5 h-5 rounded-[4px] flex items-center justify-center text-[#85858d] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-colors cursor-pointer"
           >
             <X size={14} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-3 space-y-2.5 text-[11.5px]">
+        <form onSubmit={handleSubmit} className="mt-3 space-y-2.5 text-[11.5px] overflow-y-auto pr-1 flex-1">
           {/* 任务名称 */}
           <div>
-            <label className="block text-[11px] font-medium text-[#63636b] mb-1">任务名称</label>
+            <label className="block text-[11px] font-medium text-[#63636b] mb-1">
+              任务名称
+            </label>
             <input
               type="text"
               required
               placeholder={
-                currentWf?.taskTemplate?.titlePlaceholder ||
-                '例如: 购物车结算全链路回归与截图验收'
+                currentWf?.taskTemplate?.titlePlaceholder || '例如: 购物车结算全链路回归与截图验收'
               }
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -533,9 +564,27 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           {/* 关联自动化流程 (单行紧凑下拉) */}
           <div className="relative" ref={dropdownRef}>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-[11px] font-medium text-[#63636b]">关联自动化流程</label>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <label className="text-[11px] font-medium text-[#63636b] shrink-0">关联自动化流程</label>
+                {topRecommendation && topRecommendation.score >= 20 && topRecommendation.workflowId !== workflowId && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setWorkflowId(topRecommendation.workflowId);
+                      setUserManuallySelectedWf(true);
+                      toast.success(`已切换为推荐流程: ${topRecommendation.workflowName}`);
+                    }}
+                    className="inline-flex items-center gap-1 text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] hover:bg-[#e0defc] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded animate-fadeIn cursor-pointer shrink-0 truncate max-w-[240px] transition-colors"
+                    title={`${topRecommendation.reason} (点击一键采纳此流程)`}
+                  >
+                    <Sparkles size={9} className="shrink-0" />
+                    <span className="truncate">推荐: {topRecommendation.workflowName}</span>
+                  </button>
+                )}
+              </div>
               {currentWf && (
-                <span className="text-[10px] font-mono text-[#85858d]">
+                <span className="text-[10px] font-mono text-[#85858d] shrink-0">
                   {currentWf.nodes.length} 节点 · {currentWf.edges.length} 连线
                 </span>
               )}
@@ -754,6 +803,23 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                 />
               </div>
             )}
+          </div>
+
+          {/* 自适应智能工序编排微开关 */}
+          <div className="flex items-center justify-between py-1.5 px-2.5 rounded-[6px] bg-[#fafafc] border border-[#ececf0]">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-[#4b4b53] hover:text-[#1c1c21]">
+              <input
+                type="checkbox"
+                checked={autoDecompose}
+                onChange={(e) => setAutoDecompose(e.target.checked)}
+                className="w-3.5 h-3.5 rounded border-[#c8c8d0] text-[#1c1c21] focus:ring-0 focus:ring-offset-0 cursor-pointer accent-[#1c1c21]"
+              />
+              <span className="flex items-center gap-1">
+                <Sparkles size={11} className="text-[#4f46e5]" />
+                <span>复杂任务由 AI 自主拆解与编排多工序（自适应串并行任务组）</span>
+              </span>
+            </label>
+            <span className="text-[10px] text-[#85858d]">自适应</span>
           </div>
 
           {/* 紧凑单行：初始泳道分段切换 (Segmented Control) 与 立即调度 Switch */}

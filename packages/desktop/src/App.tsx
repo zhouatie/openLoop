@@ -227,9 +227,14 @@ export const AppContent: React.FC = () => {
     kanbanColumn?: KanbanColumn;
     workspace?: string;
     attachments?: TaskAttachment[];
+    kind?: 'single' | 'group' | 'subtask';
+    executionMode?: 'serial' | 'parallel' | 'dag';
+    concurrencyLimit?: number;
+    autoDecompose?: boolean;
+    subtasks?: Array<{ id?: string; title: string; workflowId?: string; description?: string; dependencies?: string[] }>;
   }) => {
     if (import.meta.env?.DEV) {
-      console.log('[App] 创建任务请求:', params);
+      console.log('[App] 创建任务/任务组请求:', params);
     }
     await api.createTask({
       ...params,

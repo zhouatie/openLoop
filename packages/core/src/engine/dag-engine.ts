@@ -7,6 +7,7 @@ import { ExecutorRegistry, ExecutionContext } from '../executors';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
+import { TaskDecomposer } from './task-decomposer';
 
 const dagLogger = createLogger('Engine:DAG');
 
@@ -90,10 +91,86 @@ export class DagEngine extends EventEmitter {
       throw new Error(`Task ${taskId} not found`);
     }
 
+    // 若当前任务为「任务组」，分流至任务组拓扑调度器
+    if (task.kind === 'group') {
+      return this.runTaskGroup(task);
+    }
+
     const workflow = this.store.getWorkflow(task.workflowId);
     if (!workflow) {
       dagLogger.error(`启动任务失败: 关联工作流 ${task.workflowId} 未找到`, undefined, { taskId });
       throw new Error(`Workflow ${task.workflowId} not found`);
+    }
+
+    // 智能工序自适应评估：若允许自动拆解，AI/启发式评估是否需要原地升格为任务组 (串行/并行/DAG)
+    if (!task.parentTaskId && task.kind !== 'subtask' && task.autoDecompose !== false) {
+      const allWorkflows = this.store.getWorkflows();
+      const plan = TaskDecomposer.getInstance().analyze(task, workflow, allWorkflows);
+      if (plan.shouldDecompose && plan.subtasks && plan.subtasks.length >= 2) {
+        dagLogger.info(
+          `任务 ${taskId} 经评估属于复合需求，就地升格为任务组: ${plan.reason} (工序数: ${plan.subtasks.length}, 模式: ${plan.executionMode})`,
+          undefined,
+          { taskId }
+        );
+        this.log(
+          task.id,
+          'SYSTEM',
+          'system',
+          `✨ [AI 智能工序编排] 识别到该任务为多工序复合需求，已自动拆解为 ${plan.subtasks.length} 个工序 (${
+            plan.executionMode === 'parallel' ? '全并行并发' : plan.executionMode === 'dag' ? 'DAG 拓扑' : '串行顺序推进'
+          })`
+        );
+
+        // 升格当前任务
+        task.kind = 'group';
+        task.executionMode = plan.executionMode || 'serial';
+        task.concurrencyLimit = plan.concurrencyLimit || 3;
+        task.status = 'running';
+        task.kanbanColumn = 'in_progress';
+
+        const subTaskIds: string[] = [];
+        const subIdMap = new Map<string, string>();
+
+        for (let i = 0; i < plan.subtasks.length; i++) {
+          const subTaskId = `task_${Date.now()}_sub_${i + 1}_${Math.random().toString(36).substring(2, 6)}`;
+          subIdMap.set(`sub_${i + 1}`, subTaskId);
+          subTaskIds.push(subTaskId);
+        }
+
+        for (let i = 0; i < plan.subtasks.length; i++) {
+          const p = plan.subtasks[i];
+          const subTaskId = subTaskIds[i];
+          const resolvedDeps = (p.dependencies || [])
+            .map((dep) => subIdMap.get(dep) || dep)
+            .filter((d) => subTaskIds.includes(d));
+
+          const subtask: Task = {
+            id: subTaskId,
+            title: p.title,
+            description: p.description || task.description,
+            workflowId: p.workflowId || task.workflowId,
+            status: 'pending',
+            kanbanColumn: 'in_progress',
+            workspace: task.workspace,
+            parentTaskId: task.id,
+            dependencies: resolvedDeps,
+            kind: 'subtask',
+            createdAt: Date.now() + i,
+            updatedAt: Date.now() + i,
+            nodeRuns: {},
+            context: { ...task.context, parentTaskId: task.id },
+          };
+          this.store.saveTask(subtask);
+          this.emit('task:create', subtask);
+        }
+
+        task.subTaskIds = subTaskIds;
+        this.store.saveTask(task);
+        this.emit('task:update', task);
+
+        // 无缝由任务组拓扑调度器接管子工序推进
+        return this.runTaskGroup(task);
+      }
     }
 
     if (this.runningTasks.has(taskId)) {
@@ -1011,6 +1088,220 @@ export class DagEngine extends EventEmitter {
   }
 
   /**
+   * 启动任务组 (Task Group) 执行：支持串行、并行与 DAG 依赖拓扑调度
+   */
+  async runTaskGroup(taskGroup: Task): Promise<void> {
+    const groupId = taskGroup.id;
+    if (this.runningTasks.has(groupId)) {
+      if (taskGroup.status === 'failed' || taskGroup.status === 'cancelled' || taskGroup.status === 'completed') {
+        dagLogger.info(`任务组 ${groupId} 处于终态 (${taskGroup.status})，清理残留运行锁并重新执行`, undefined, { taskId: groupId });
+        this.runningTasks.delete(groupId);
+        this.abortControllers.delete(groupId);
+      } else {
+        dagLogger.warn(`任务组 ${groupId} 已经在运行中，忽略重复启动请求`, undefined, { taskId: groupId });
+        return;
+      }
+    }
+
+    const subTaskIds = taskGroup.subTaskIds || [];
+    if (subTaskIds.length === 0) {
+      dagLogger.warn(`任务组 ${groupId} 未包含任何子任务，自动标记为已完成`, undefined, { taskId: groupId });
+      taskGroup.status = 'completed';
+      taskGroup.kanbanColumn = 'done';
+      this.store.saveTask(taskGroup);
+      this.emit('task:update', taskGroup);
+      return;
+    }
+
+    this.runningTasks.add(groupId);
+    const abortController = new AbortController();
+    this.abortControllers.set(groupId, abortController);
+
+    taskGroup.status = 'running';
+    taskGroup.kanbanColumn = 'in_progress';
+    if (!taskGroup.context) taskGroup.context = {};
+    taskGroup.context.groupProgress = {
+      completed: 0,
+      failed: 0,
+      total: subTaskIds.length,
+    };
+    this.store.saveTask(taskGroup);
+    this.emit('task:update', taskGroup);
+
+    const mode = taskGroup.executionMode || 'serial';
+    const limit = Math.max(1, taskGroup.concurrencyLimit || (mode === 'serial' ? 1 : 3));
+    dagLogger.info(
+      `[TaskGroup] 启动任务组 [${taskGroup.title}] (模式: ${mode}, 子任务数: ${subTaskIds.length}, 并发限制: ${limit})`,
+      undefined,
+      { taskId: groupId }
+    );
+    this.log(groupId, 'GROUP', 'system', `========== 启动任务组 [${taskGroup.title}] (模式: ${mode}, 子任务数: ${subTaskIds.length}) ==========`);
+
+    // 构建有效子任务依赖图
+    const subtasks = subTaskIds
+      .map((id) => this.store.getTask(id))
+      .filter(Boolean) as Task[];
+
+    // 默认继承父任务的工作区 (若子任务未明确指定)
+    for (const sub of subtasks) {
+      if (!sub.workspace && taskGroup.workspace) {
+        sub.workspace = taskGroup.workspace;
+        this.store.saveTask(sub);
+      }
+    }
+
+    // 依赖映射
+    const effectiveDeps = new Map<string, Set<string>>();
+    for (let i = 0; i < subtasks.length; i++) {
+      const sub = subtasks[i];
+      const deps = new Set<string>();
+      if (mode === 'serial') {
+        if (i > 0) deps.add(subtasks[i - 1].id);
+      } else if (mode === 'parallel') {
+        // 无依赖，直接并行
+      } else {
+        // DAG 自定义模式
+        if (Array.isArray(sub.dependencies)) {
+          for (const depId of sub.dependencies) {
+            deps.add(depId);
+          }
+        }
+      }
+      effectiveDeps.set(sub.id, deps);
+    }
+
+    const completed = new Set<string>();
+    const failed = new Set<string>();
+    const running = new Set<string>();
+
+    // 调度循环 Promise 控制器
+    return new Promise<void>((resolve, reject) => {
+      let isSettled = false;
+
+      const finishGroup = (finalStatus: 'completed' | 'failed' | 'cancelled') => {
+        if (isSettled) return;
+        isSettled = true;
+
+        this.runningTasks.delete(groupId);
+        this.abortControllers.delete(groupId);
+
+        const currentGroup = this.store.getTask(groupId) || taskGroup;
+        currentGroup.status = finalStatus;
+        currentGroup.kanbanColumn = finalStatus === 'completed' ? 'done' : 'backlog';
+        currentGroup.context = {
+          ...(currentGroup.context || {}),
+          groupProgress: {
+            completed: completed.size,
+            failed: failed.size,
+            total: subtasks.length,
+          },
+        };
+        this.store.saveTask(currentGroup);
+        this.emit('task:update', currentGroup);
+
+        this.log(
+          groupId,
+          'GROUP',
+          finalStatus === 'completed' ? 'system' : 'stderr',
+          `========== 任务组执行结束: ${finalStatus.toUpperCase()} (成功: ${completed.size}, 失败: ${failed.size}, 总计: ${subtasks.length}) ==========`
+        );
+
+        if (finalStatus === 'failed') {
+          reject(new Error(`任务组执行异常，存在失败的子任务`));
+        } else {
+          resolve();
+        }
+      };
+
+      const checkAndPump = () => {
+        if (isSettled) return;
+
+        if (abortController.signal.aborted) {
+          finishGroup('cancelled');
+          return;
+        }
+
+        // 检查是否全部完成
+        if (completed.size === subtasks.length) {
+          finishGroup('completed');
+          return;
+        }
+
+        // 检查是否有失败且没有其他正在执行的任务
+        if (failed.size > 0 && running.size === 0) {
+          finishGroup('failed');
+          return;
+        }
+
+        // 如果已经有失败发生，不再调度新的子任务，等待运行中的子任务退出
+        if (failed.size > 0) {
+          return;
+        }
+
+        // 挑选就绪可调度的子任务
+        for (const sub of subtasks) {
+          if (running.size >= limit) break;
+          if (completed.has(sub.id) || failed.has(sub.id) || running.has(sub.id)) continue;
+
+          // 检查该子任务的所有前置依赖是否都已成功
+          const requiredDeps = effectiveDeps.get(sub.id) || new Set();
+          const allDepsSatisfied = Array.from(requiredDeps).every((depId) => completed.has(depId));
+          if (!allDepsSatisfied) continue;
+
+          // 入池启动
+          running.add(sub.id);
+          this.log(groupId, 'GROUP', 'system', `>>> 唤醒子任务 [${sub.title}] (${sub.id}) 并发执行`);
+
+          this.runTask(sub.id)
+            .then(() => {
+              running.delete(sub.id);
+              const freshSub = this.store.getTask(sub.id);
+              if (freshSub && freshSub.status === 'completed') {
+                completed.add(sub.id);
+                this.log(groupId, 'GROUP', 'system', `✓ 子任务 [${sub.title}] 执行完成 (进度: ${completed.size}/${subtasks.length})`);
+              } else {
+                failed.add(sub.id);
+                this.log(groupId, 'GROUP', 'stderr', `✗ 子任务 [${sub.title}] 执行非成功状态: ${freshSub?.status}`);
+              }
+              // 同步更新父任务上下文进度
+              const currentGroup = this.store.getTask(groupId) || taskGroup;
+              if (!currentGroup.context) currentGroup.context = {};
+              currentGroup.context.groupProgress = {
+                completed: completed.size,
+                failed: failed.size,
+                total: subtasks.length,
+              };
+              this.store.saveTask(currentGroup);
+              this.emit('task:update', currentGroup);
+
+              checkAndPump();
+            })
+            .catch((err) => {
+              running.delete(sub.id);
+              failed.add(sub.id);
+              this.log(groupId, 'GROUP', 'stderr', `✗ 子任务 [${sub.title}] 调度异常: ${err.message}`);
+
+              const currentGroup = this.store.getTask(groupId) || taskGroup;
+              if (!currentGroup.context) currentGroup.context = {};
+              currentGroup.context.groupProgress = {
+                completed: completed.size,
+                failed: failed.size,
+                total: subtasks.length,
+              };
+              this.store.saveTask(currentGroup);
+              this.emit('task:update', currentGroup);
+
+              checkAndPump();
+            });
+        }
+      };
+
+      // 启动初始批次
+      checkAndPump();
+    });
+  }
+
+  /**
    * 终止正在运行的任务
    */
   async cancelTask(taskId: string): Promise<Task> {
@@ -1018,6 +1309,20 @@ export class DagEngine extends EventEmitter {
     const task = this.store.getTask(taskId);
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
+    }
+
+    // 0. 若为任务组，级联取消其所有正在运行的子任务
+    if (task.kind === 'group' && Array.isArray(task.subTaskIds)) {
+      dagLogger.warn(`级联终止任务组 ${taskId} 下属子任务: [${task.subTaskIds.join(', ')}]`, undefined, { taskId });
+      for (const subId of task.subTaskIds) {
+        if (this.runningTasks.has(subId)) {
+          try {
+            await this.cancelTask(subId);
+          } catch (e: any) {
+            dagLogger.warn(`级联终止子任务 ${subId} 告警: ${e.message}`, undefined, { taskId: subId });
+          }
+        }
+      }
     }
 
     // 1. 触发任务级 AbortController 与 Pi RPC 终止

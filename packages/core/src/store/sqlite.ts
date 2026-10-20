@@ -74,6 +74,12 @@ export class SqliteStore {
         workspace TEXT,
         attachments_json TEXT,
         trigger_source TEXT,
+        kind TEXT DEFAULT 'single',
+        parent_task_id TEXT,
+        sub_task_ids_json TEXT,
+        dependencies_json TEXT,
+        execution_mode TEXT,
+        concurrency_limit INTEGER DEFAULT 3,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
@@ -232,10 +238,35 @@ export class SqliteStore {
       // 字段已存在，忽略
     }
 
+    // 增量表结构平滑迁移：任务组 (Task Group) 架构扩展字段
+    try {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN kind TEXT DEFAULT 'single'");
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN parent_task_id TEXT');
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN sub_task_ids_json TEXT');
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN dependencies_json TEXT');
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN execution_mode TEXT');
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN concurrency_limit INTEGER DEFAULT 3');
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN auto_decompose INTEGER DEFAULT 1');
+    } catch {}
+
     try {
       this.db.exec(`
         CREATE INDEX IF NOT EXISTS idx_tasks_workflow_created ON tasks(workflow_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_tasks_trigger_source ON tasks(trigger_source);
+        CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_task_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_kind ON tasks(kind);
       `);
     } catch {
       // 忽略
@@ -968,6 +999,13 @@ export class SqliteStore {
         workspace: tr.workspace || undefined,
         attachments: tr.attachments_json ? JSON.parse(tr.attachments_json) : undefined,
         triggerSource: tr.trigger_source || parsedContext?.triggerSource || 'kanban',
+        kind: tr.kind || 'single',
+        parentTaskId: tr.parent_task_id || undefined,
+        subTaskIds: tr.sub_task_ids_json ? JSON.parse(tr.sub_task_ids_json) : undefined,
+        dependencies: tr.dependencies_json ? JSON.parse(tr.dependencies_json) : undefined,
+        executionMode: tr.execution_mode || undefined,
+        concurrencyLimit: typeof tr.concurrency_limit === 'number' ? tr.concurrency_limit : undefined,
+        autoDecompose: tr.auto_decompose !== null && tr.auto_decompose !== undefined ? Boolean(tr.auto_decompose) : true,
         createdAt: tr.created_at,
         updatedAt: tr.updated_at,
         nodeRuns: runsByTask.get(tr.id) || {},
@@ -1009,6 +1047,13 @@ export class SqliteStore {
       workspace: tr.workspace || undefined,
       attachments: tr.attachments_json ? JSON.parse(tr.attachments_json) : undefined,
       triggerSource: tr.trigger_source || parsedContext?.triggerSource || 'kanban',
+      kind: tr.kind || 'single',
+      parentTaskId: tr.parent_task_id || undefined,
+      subTaskIds: tr.sub_task_ids_json ? JSON.parse(tr.sub_task_ids_json) : undefined,
+      dependencies: tr.dependencies_json ? JSON.parse(tr.dependencies_json) : undefined,
+      executionMode: tr.execution_mode || undefined,
+      concurrencyLimit: typeof tr.concurrency_limit === 'number' ? tr.concurrency_limit : undefined,
+      autoDecompose: tr.auto_decompose !== null && tr.auto_decompose !== undefined ? Boolean(tr.auto_decompose) : true,
       createdAt: tr.created_at,
       updatedAt: tr.updated_at,
       nodeRuns,
@@ -1020,8 +1065,13 @@ export class SqliteStore {
     if (!task.createdAt) task.createdAt = task.updatedAt;
 
     const upsertTask = this.db.prepare(`
-      INSERT INTO tasks (id, title, description, workflow_id, status, kanban_column, current_node_id, context_json, workspace, attachments_json, trigger_source, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (
+        id, title, description, workflow_id, status, kanban_column,
+        current_node_id, context_json, workspace, attachments_json, trigger_source,
+        kind, parent_task_id, sub_task_ids_json, dependencies_json, execution_mode, concurrency_limit, auto_decompose,
+        created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         description = excluded.description,
@@ -1033,6 +1083,13 @@ export class SqliteStore {
         workspace = excluded.workspace,
         attachments_json = excluded.attachments_json,
         trigger_source = excluded.trigger_source,
+        kind = excluded.kind,
+        parent_task_id = excluded.parent_task_id,
+        sub_task_ids_json = excluded.sub_task_ids_json,
+        dependencies_json = excluded.dependencies_json,
+        execution_mode = excluded.execution_mode,
+        concurrency_limit = excluded.concurrency_limit,
+        auto_decompose = excluded.auto_decompose,
         updated_at = excluded.updated_at
     `);
 
@@ -1063,6 +1120,13 @@ export class SqliteStore {
         task.workspace || null,
         task.attachments && task.attachments.length > 0 ? JSON.stringify(task.attachments) : null,
         task.triggerSource || task.context?.triggerSource || 'kanban',
+        task.kind || 'single',
+        task.parentTaskId || null,
+        task.subTaskIds && task.subTaskIds.length > 0 ? JSON.stringify(task.subTaskIds) : null,
+        task.dependencies && task.dependencies.length > 0 ? JSON.stringify(task.dependencies) : null,
+        task.executionMode || null,
+        typeof task.concurrencyLimit === 'number' ? task.concurrencyLimit : 3,
+        task.autoDecompose !== false ? 1 : 0,
         task.createdAt,
         task.updatedAt
       );
@@ -1108,8 +1172,29 @@ export class SqliteStore {
 
   public deleteTask(taskId: string): boolean {
     const tx = this.db.transaction((id: string) => {
+      // 1. 若被删除的是任务组，级联清理其所有子任务相关数据
+      const subtasks = this.db.prepare('SELECT id FROM tasks WHERE parent_task_id = ?').all(id) as { id: string }[];
+      for (const sub of subtasks) {
+        this.db.prepare('DELETE FROM logs WHERE task_id = ?').run(sub.id);
+        this.db.prepare('DELETE FROM qa_runs WHERE task_id = ?').run(sub.id);
+        this.db.prepare('DELETE FROM task_node_runs WHERE task_id = ?').run(sub.id);
+        this.db.prepare('DELETE FROM tasks WHERE id = ?').run(sub.id);
+      }
+
+      // 2. 若被删除的是子任务，从其父任务组的 subTaskIds 中解绑
+      const currentTask = this.db.prepare('SELECT parent_task_id FROM tasks WHERE id = ?').get(id) as { parent_task_id?: string } | undefined;
+      if (currentTask?.parent_task_id) {
+        const parent = this.getTask(currentTask.parent_task_id);
+        if (parent && parent.subTaskIds) {
+          parent.subTaskIds = parent.subTaskIds.filter((sid) => sid !== id);
+          this.saveTask(parent);
+        }
+      }
+
+      // 3. 删除当前任务关联的日志、QA记录与任务记录
       this.db.prepare('DELETE FROM logs WHERE task_id = ?').run(id);
       this.db.prepare('DELETE FROM qa_runs WHERE task_id = ?').run(id);
+      this.db.prepare('DELETE FROM task_node_runs WHERE task_id = ?').run(id);
       const info = this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
       return info.changes > 0;
     });

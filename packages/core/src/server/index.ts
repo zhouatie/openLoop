@@ -29,6 +29,7 @@ import { WorktreeManager, TaskProcessManager, findRepoRoot } from '../worktree/w
 import { interpolateString } from '../executors';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 import { AutomationScheduler } from '../automation/automation-scheduler';
+import { WorkflowRecommender } from '../engine/workflow-recommender';
 
 const serverLogger = createLogger('Server');
 
@@ -540,7 +541,24 @@ export class OpenLoopServer {
 
       if (pathname === '/api/tasks' && method === 'POST') {
         const body = await this.parseJsonBody(req);
-        const { title, workflowId, description, context, autoRun, kanbanColumn, workspace, attachments, triggerSource } = body;
+        const {
+          title,
+          workflowId,
+          description,
+          context,
+          autoRun,
+          kanbanColumn,
+          workspace,
+          attachments,
+          triggerSource,
+          kind = 'single',
+          parentTaskId,
+          subTaskIds,
+          dependencies,
+          executionMode,
+          concurrencyLimit,
+          subtasks,
+        } = body;
         
         if (!workflowId) {
           return this.sendJson(res, 400, { error: 'workflowId is required' }, reqMeta);
@@ -563,9 +581,69 @@ export class OpenLoopServer {
           }
         }
 
+        const isGroup = kind === 'group' || (Array.isArray(subtasks) && subtasks.length > 0);
+        const groupId = `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+        // 如果携带了批量子任务，原子化创建子任务并构建拓扑
+        const createdSubtasks: Task[] = [];
+        const finalSubTaskIds: string[] = Array.isArray(subTaskIds) ? [...subTaskIds] : [];
+
+        if (Array.isArray(subtasks) && subtasks.length > 0) {
+          // 建立临时索引映射，支持子任务间通过客户端 index/tempId 建立依赖
+          const tempIdToRealId = new Map<string, string>();
+          for (let i = 0; i < subtasks.length; i++) {
+            const rawSub = subtasks[i];
+            const subRealId = `task_sub_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
+            if (rawSub.id) tempIdToRealId.set(rawSub.id, subRealId);
+            tempIdToRealId.set(String(i), subRealId);
+            finalSubTaskIds.push(subRealId);
+          }
+
+          for (let i = 0; i < subtasks.length; i++) {
+            const rawSub = subtasks[i];
+            const realId = finalSubTaskIds[i];
+
+            // 映射子任务依赖
+            const mappedDeps: string[] = [];
+            if (Array.isArray(rawSub.dependencies)) {
+              for (const dep of rawSub.dependencies) {
+                if (tempIdToRealId.has(dep)) {
+                  mappedDeps.push(tempIdToRealId.get(dep)!);
+                } else {
+                  mappedDeps.push(dep);
+                }
+              }
+            }
+
+            const childTask: Task = {
+              id: realId,
+              title: rawSub.title || `子工序 #${i + 1}`,
+              description: rawSub.description || '',
+              workflowId: rawSub.workflowId || workflowId,
+              status: 'pending',
+              kanbanColumn: validColumn,
+              workspace: (rawSub.workspace || workspace) ? String(rawSub.workspace || workspace).trim() : undefined,
+              triggerSource: triggerSource || (context && context.triggerSource) || 'kanban',
+              kind: 'subtask',
+              parentTaskId: groupId,
+              dependencies: mappedDeps.length > 0 ? mappedDeps : undefined,
+              createdAt: Date.now() + i,
+              updatedAt: Date.now() + i,
+              nodeRuns: {},
+              context: {
+                ...(rawSub.context || {}),
+                parentTaskId: groupId,
+              },
+            };
+
+            this.store.saveTask(childTask);
+            createdSubtasks.push(childTask);
+          }
+        }
+
         const task: Task = {
-          id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          title: title || `自动化任务 #${Date.now()}`,
+          id: groupId,
+          title: title || (isGroup ? `任务组 #${Date.now()}` : `自动化任务 #${Date.now()}`),
           description: description || '',
           attachments: Array.isArray(attachments) ? attachments : undefined,
           workflowId,
@@ -573,6 +651,13 @@ export class OpenLoopServer {
           kanbanColumn: validColumn,
           workspace: workspace ? String(workspace).trim() : undefined,
           triggerSource: triggerSource || (context && context.triggerSource) || 'kanban',
+          kind: isGroup ? 'group' : kind,
+          parentTaskId: parentTaskId || undefined,
+          subTaskIds: isGroup ? finalSubTaskIds : undefined,
+          dependencies: Array.isArray(dependencies) ? dependencies : undefined,
+          executionMode: executionMode || (isGroup ? 'serial' : undefined),
+          concurrencyLimit: typeof concurrencyLimit === 'number' ? concurrencyLimit : (isGroup ? 3 : undefined),
+          autoDecompose: body.autoDecompose !== undefined ? Boolean(body.autoDecompose) : true,
           createdAt: Date.now(),
           updatedAt: Date.now(),
           nodeRuns: {},
@@ -580,13 +665,16 @@ export class OpenLoopServer {
         };
 
         serverLogger.info(
-          `[Tasks:Create] 创建新任务: "${task.title}" (ID: ${task.id}, Workflow: ${workflowId}, Trigger: ${task.triggerSource}, Column: ${task.kanbanColumn}, Workspace: ${task.workspace || '未指定'}, AutoRun: ${shouldAutoRun})`,
+          `[Tasks:Create] 创建新任务: "${task.title}" (ID: ${task.id}, Kind: ${task.kind}, Subtasks: ${finalSubTaskIds.length}, Workflow: ${workflowId}, AutoRun: ${shouldAutoRun})`,
           { context: task.context, workspace: task.workspace, triggerSource: task.triggerSource },
           { taskId: task.id }
         );
 
         this.store.saveTask(task);
         this.broadcast({ type: 'task:new', data: task });
+        for (const child of createdSubtasks) {
+          this.broadcast({ type: 'task:new', data: child });
+        }
 
         if (shouldAutoRun) {
           serverLogger.info(`[Tasks:AutoRun] 异步启动任务调度: ${task.id}`, undefined, { taskId: task.id });
@@ -615,10 +703,31 @@ export class OpenLoopServer {
         const existing = this.store.getTask(taskId);
         if (!existing) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
         const body = await this.parseJsonBody(req);
-        const { title, description, workflowId, context, kanbanColumn, workspace, attachments, triggerSource } = body;
+        const {
+          title,
+          description,
+          workflowId,
+          context,
+          kanbanColumn,
+          workspace,
+          attachments,
+          triggerSource,
+          kind,
+          parentTaskId,
+          subTaskIds,
+          dependencies,
+          executionMode,
+          concurrencyLimit,
+        } = body;
         if (title !== undefined) existing.title = title.trim();
         if (description !== undefined) existing.description = description.trim();
         if (triggerSource !== undefined) existing.triggerSource = triggerSource;
+        if (kind !== undefined) existing.kind = kind;
+        if (parentTaskId !== undefined) existing.parentTaskId = parentTaskId || undefined;
+        if (subTaskIds !== undefined) existing.subTaskIds = Array.isArray(subTaskIds) ? subTaskIds : undefined;
+        if (dependencies !== undefined) existing.dependencies = Array.isArray(dependencies) ? dependencies : undefined;
+        if (executionMode !== undefined) existing.executionMode = executionMode;
+        if (concurrencyLimit !== undefined) existing.concurrencyLimit = typeof concurrencyLimit === 'number' ? concurrencyLimit : 3;
         if (attachments !== undefined) {
           existing.attachments = Array.isArray(attachments) ? attachments : [];
         }
@@ -743,6 +852,52 @@ export class OpenLoopServer {
           return this.sendJson(res, 200, { success: true, id: taskId }, reqMeta);
         }
         return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
+      }
+
+      // Add Subtask to Task/Group: POST /api/tasks/:id/subtasks
+      const taskAddSubtaskMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/subtasks$/);
+      if (taskAddSubtaskMatch && method === 'POST') {
+        const parentId = taskAddSubtaskMatch[1];
+        const parent = this.store.getTask(parentId);
+        if (!parent) return this.sendJson(res, 404, { error: 'Parent task not found' }, reqMeta);
+
+        const body = await this.parseJsonBody(req);
+        const { title, workflowId, description, dependencies } = body;
+        const subId = `task_sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+        const childTask: Task = {
+          id: subId,
+          title: title || `子工序 #${(parent.subTaskIds?.length || 0) + 1}`,
+          description: description || '',
+          workflowId: workflowId || parent.workflowId,
+          status: 'pending',
+          kanbanColumn: parent.kanbanColumn,
+          workspace: parent.workspace,
+          triggerSource: parent.triggerSource,
+          kind: 'subtask',
+          parentTaskId: parent.id,
+          dependencies: Array.isArray(dependencies) ? dependencies : undefined,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          nodeRuns: {},
+          context: {
+            parentTaskId: parent.id,
+          },
+        };
+
+        // 升级父任务为 group 并挂载子任务 ID
+        parent.kind = 'group';
+        parent.subTaskIds = [...(parent.subTaskIds || []), subId];
+        parent.updatedAt = Date.now();
+
+        this.store.saveTask(childTask);
+        this.store.saveTask(parent);
+
+        this.broadcast({ type: 'task:new', data: childTask });
+        this.broadcast({ type: 'task:update', data: parent });
+
+        serverLogger.info(`[Tasks:AddSubtask] 成功为任务组 ${parent.id} 添加子任务: ${childTask.id} (${childTask.title})`);
+        return this.sendJson(res, 201, { success: true, subtask: childTask, parent }, reqMeta);
       }
 
       // Task run: /api/tasks/:id/run
@@ -1351,6 +1506,22 @@ export class OpenLoopServer {
             fallback: true,
           }, reqMeta);
         }
+      }
+
+      // 智能流水线推荐: POST /api/recommend-workflow
+      if (pathname === '/api/recommend-workflow' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const title = (body.title || '').trim();
+        const description = (body.description || '').trim();
+        const workspace = (body.workspace || '').trim();
+
+        const workflows = this.store.getWorkflows();
+        const recommendations = WorkflowRecommender.recommend(workflows, { title, description, workspace });
+        return this.sendJson(res, 200, {
+          success: true,
+          recommendations,
+          topRecommendation: recommendations[0] || null,
+        }, reqMeta);
       }
 
       // QA Automation Suites: /api/qa/suites

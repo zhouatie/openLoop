@@ -1,4 +1,4 @@
-import React, { memo, useState, useEffect } from 'react';
+import React, { memo, useState, useEffect, useMemo } from 'react';
 import {
   Check,
   Terminal,
@@ -22,6 +22,10 @@ import {
   Loader2,
   Globe,
   ExternalLink,
+  ChevronRight,
+  ChevronDown,
+  Clock,
+  CheckCircle2,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
@@ -153,6 +157,7 @@ export interface KanbanCardProps {
   task: Task;
   workflow?: WorkflowDefinition;
   workflows: WorkflowDefinition[];
+  allTasks?: Task[];
   isSelected?: boolean;
   isCancelling?: boolean;
   isMoving?: boolean;
@@ -175,6 +180,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   task,
   workflow,
   workflows,
+  allTasks,
   isSelected,
   isCancelling,
   isMoving,
@@ -193,6 +199,18 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   onApprove,
 }) => {
   const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped' | 'starting'>('checking');
+  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+
+  const isGroup = task.kind === 'group';
+  const childSubtasks = useMemo(() => {
+    if (!isGroup || !Array.isArray(task.subTaskIds) || !allTasks) return [];
+    const taskMap = new Map(allTasks.map((t) => [t.id, t]));
+    return task.subTaskIds.map((id) => taskMap.get(id)).filter(Boolean) as Task[];
+  }, [isGroup, task.subTaskIds, allTasks]);
+
+  const groupCompletedCount = childSubtasks.filter((s) => s.status === 'completed').length;
+  const groupTotalCount = childSubtasks.length || task.subTaskIds?.length || 0;
+  const groupProgressPct = groupTotalCount > 0 ? Math.round((groupCompletedCount / groupTotalCount) * 100) : (task.status === 'completed' ? 100 : 0);
 
   // 当任务处于待人工门禁时，按需探活沙箱靶机状态
   useEffect(() => {
@@ -283,6 +301,14 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
           >
             {task.id}
           </span>
+          {isGroup && (
+            <span className="flex items-center gap-1 text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded shrink-0">
+              <Layers size={9.5} />
+              <span>
+                任务组 · {task.executionMode === 'parallel' ? '并行' : task.executionMode === 'dag' ? '拓扑' : '串行'}
+              </span>
+            </span>
+          )}
           {task.kanbanColumn === 'inbox' && (
             <span className="flex items-center gap-1 text-[9.5px] font-medium text-[#6366f1] bg-[#f5f5ff] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded shrink-0">
               <Lightbulb size={9.5} />
@@ -397,6 +423,106 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
           </>
         )}
       </div>
+
+      {/* 任务组子工序卡片式折叠列表 */}
+      {isGroup && childSubtasks.length > 0 && (
+        <div className="my-2 border border-[#ececf0] rounded-[6px] bg-[#fafafc] overflow-hidden">
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+            className="px-2 py-1.5 flex items-center justify-between text-[11px] text-[#63636b] hover:text-[#1c1c21] cursor-pointer bg-white transition-colors select-none"
+          >
+            <div className="flex items-center gap-1.5">
+              <ChevronRight
+                size={11.5}
+                className={`transition-transform duration-150 text-[#85858d] ${isExpanded ? 'rotate-90' : ''}`}
+              />
+              <span className="font-medium text-[11px] text-[#1c1c21]">
+                子工序进度 ({groupCompletedCount}/{groupTotalCount})
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] text-[#4f46e5] font-medium">
+                {groupProgressPct}%
+              </span>
+              <span className="text-[10px] text-[#85858d]">
+                {isExpanded ? '收起' : '展开'}
+              </span>
+            </div>
+          </div>
+
+          {isExpanded && (
+            <div className="p-1.5 space-y-1 border-t border-[#ececf0] bg-[#fafafc]">
+              {childSubtasks.map((st, idx) => {
+                let statusBadge = (
+                  <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#f4f4f6] text-[#71717a] text-[9.5px] font-medium border border-[#e3e3e8]">
+                    <Clock size={8.5} />
+                    <span>PENDING</span>
+                  </span>
+                );
+                if (st.status === 'running') {
+                  statusBadge = (
+                    <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#eff6ff] text-[#2563eb] text-[9.5px] font-medium border border-[#bfdbfe]/60">
+                      <Loader2 size={8.5} className="animate-spin" />
+                      <span>RUNNING</span>
+                    </span>
+                  );
+                } else if (st.status === 'completed') {
+                  statusBadge = (
+                    <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#ecfdf5] text-[#059669] text-[9.5px] font-medium border border-[#a7f3d0]/60">
+                      <CheckCircle2 size={8.5} />
+                      <span>PASSED</span>
+                    </span>
+                  );
+                } else if (st.status === 'failed') {
+                  statusBadge = (
+                    <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#fef2f2] text-[#dc2626] text-[9.5px] font-medium border border-[#fecaca]/60">
+                      <AlertCircle size={8.5} />
+                      <span>FAILED</span>
+                    </span>
+                  );
+                }
+
+                return (
+                  <div
+                    key={st.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect(st);
+                    }}
+                    className="flex items-center justify-between gap-1.5 px-1.5 py-1 rounded-[5px] bg-white border border-[#ececf0] hover:border-[#d8d6fb] transition-all cursor-pointer group/sub"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <span className="font-mono text-[9.5px] text-[#85858d] shrink-0">
+                        #{idx + 1}
+                      </span>
+                      <span className="text-[11px] text-[#1c1c21] truncate font-medium group-hover/sub:text-[#4f46e5]">
+                        {st.title}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {statusBadge}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenLogs(st.id);
+                        }}
+                        className="w-5 h-5 rounded hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#1c1c21] flex items-center justify-center transition-colors"
+                        title="查看子工序实时日志"
+                      >
+                        <Terminal size={10} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 未启动任务：卡片内一键启动按钮 */}
       {task.status === 'pending' && (
@@ -686,7 +812,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
       <div className="pt-1.5 border-t border-[#ececf0] flex items-center justify-between text-[10.5px] text-[#85858d]">
         <div className="flex items-center gap-1.5">
           <span>
-            节点 {displayCompleted}/{displayTotal}
+            {isGroup ? `工序 ${groupCompletedCount}/${groupTotalCount}` : `节点 ${displayCompleted}/${displayTotal}`}
           </span>
           {task.attachments && task.attachments.length > 0 && (
             <span
@@ -708,10 +834,10 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                   ? 'bg-[#d64545]'
                   : 'bg-[#1c1c21]'
               }`}
-              style={{ width: `${progressPct}%` }}
+              style={{ width: `${isGroup ? groupProgressPct : progressPct}%` }}
             />
           </div>
-          <span className="font-mono">{progressPct}%</span>
+          <span className="font-mono">{isGroup ? groupProgressPct : progressPct}%</span>
         </div>
       </div>
     </div>
@@ -722,6 +848,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
 export const KanbanCard = memo(KanbanCardComponent, (prev, next) => {
   return (
     prev.task === next.task &&
+    prev.allTasks === next.allTasks &&
     prev.workflow === next.workflow &&
     prev.isSelected === next.isSelected &&
     prev.isCancelling === next.isCancelling &&

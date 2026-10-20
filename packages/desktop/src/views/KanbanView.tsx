@@ -334,7 +334,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
 
   // 任务侧边栏 Tab 与 Agent 会话实时交互状态
-  const [drawerTab, setDrawerTab] = useState<'overview' | 'session'>('overview');
+  const [drawerTab, setDrawerTab] = useState<'overview' | 'subtasks' | 'session'>('overview');
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [isAddingSubtask, setIsAddingSubtask] = useState(false);
   const [sessionState, setSessionState] = useState<TaskSessionState | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [isSendingChat, setIsSendingChat] = useState(false);
@@ -711,6 +713,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   const filteredTasks = useMemo(() => {
     return tasks.filter((t) => {
+      // 0. 子工序默认收纳在所属任务组卡片内展示，不作为独立顶级卡片铺满泳道 (除非输入搜索词搜索命中)
+      if (t.parentTaskId && !searchTerm) {
+        return false;
+      }
+
       // 1. 工程项目过滤
       if (activeWorkspaceFilter === 'none') {
         if (t.workspace && t.workspace.trim()) return false;
@@ -1666,6 +1673,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     ) : (
                       <KanbanLaneList
                         tasks={colTasks}
+                        allTasks={tasks}
                         workflows={workflows}
                         wfMap={wfMap}
                         selectedTaskId={selectedTask?.id}
@@ -1811,7 +1819,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     {curTask.title}
                   </h3>
 
-                  {/* 抽屉 Segmented Control 双 Tab 切换 */}
+                  {/* 抽屉 Segmented Control 多 Tab 切换 */}
                   <div className="flex items-center p-0.5 rounded-[6px] bg-[#f1f1f4] border border-[#e3e3e8]">
                     <button
                       onClick={() => setDrawerTab('overview')}
@@ -1824,6 +1832,22 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       <Layers size={12} />
                       <span>任务概览</span>
                     </button>
+                    {(curTask.kind === 'group' || (curTask.subTaskIds && curTask.subTaskIds.length > 0)) && (
+                      <button
+                        onClick={() => setDrawerTab('subtasks')}
+                        className={`flex-1 h-[26px] rounded-[4px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                          drawerTab === 'subtasks'
+                            ? 'bg-white text-[#4f46e5] shadow-sm font-semibold'
+                            : 'text-[#63636b] hover:text-[#1c1c21]'
+                        }`}
+                      >
+                        <Layers size={12} className="text-[#4f46e5]" />
+                        <span>子工序编排</span>
+                        <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded-full bg-[#eeedfd] text-[#4f46e5] font-semibold">
+                          {(curTask.subTaskIds || []).length}
+                        </span>
+                      </button>
+                    )}
                     <button
                       onClick={() => setDrawerTab('session')}
                       className={`flex-1 h-[26px] rounded-[4px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all relative cursor-pointer ${
@@ -2294,7 +2318,201 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   </>
                 )}
 
-            {/* TAB 2: Agent 实时会话与双向交互 */}
+                {/* TAB 2: 任务组子工序编排与拓扑 */}
+                {drawerTab === 'subtasks' && (
+                  <div className="flex-1 p-5 overflow-y-auto space-y-3.5 text-[12px]">
+                    {(() => {
+                      const groupSubtasks = (curTask.subTaskIds || [])
+                        .map((id) => tasks.find((t) => t.id === id))
+                        .filter(Boolean) as Task[];
+                      const groupPassed = groupSubtasks.filter((s) => s.status === 'completed').length;
+                      const groupTotal = groupSubtasks.length;
+                      const groupPct = groupTotal > 0 ? Math.round((groupPassed / groupTotal) * 100) : 0;
+                      const modeLabel =
+                        curTask.executionMode === 'parallel'
+                          ? '全并行并发执行'
+                          : curTask.executionMode === 'dag'
+                          ? 'DAG 自定义依赖拓扑'
+                          : '串行顺序执行 (A -> B -> C)';
+
+                      return (
+                        <>
+                          {/* 编排概览规格卡片 */}
+                          <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-medium text-[#71717a] flex items-center gap-1.5">
+                                <Layers size={12} className="text-[#4f46e5]" />
+                                <span>编排模式与并发池</span>
+                              </span>
+                              <span className="text-[10.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-2 py-0.5 rounded-[4px]">
+                                {modeLabel}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-between text-[11px] text-[#63636b] pt-1">
+                              <span>工序完成度: {groupPassed} / {groupTotal} ({groupPct}%)</span>
+                              <span className="font-mono text-[10px] text-[#85858d]">
+                                并发上限: {curTask.concurrencyLimit || (curTask.executionMode === 'serial' ? 1 : 3)}
+                              </span>
+                            </div>
+
+                            <div className="w-full bg-[#f4f4f6] rounded-full h-[4px] overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-[#4f46e5] transition-all duration-300"
+                                style={{ width: `${groupPct}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* 子工序拓扑流程列表 */}
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between px-0.5">
+                              <h4 className="text-[11px] font-semibold text-[#1c1c21] tracking-tight">
+                                工序流转链路 ({groupSubtasks.length})
+                              </h4>
+                              {curTask.status === 'pending' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRunTask(curTask.id)}
+                                  className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:underline font-medium cursor-pointer"
+                                >
+                                  <Play size={10} className="fill-current" />
+                                  <span>启动整组流水线</span>
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="space-y-1.5">
+                              {groupSubtasks.map((st, idx) => {
+                                const stStatus = getTaskStatusInfo(st);
+                                const stWf = wfMap.get(st.workflowId);
+
+                                return (
+                                  <div
+                                    key={st.id}
+                                    className="bg-white border border-[#e3e3e8] rounded-[7px] p-2.5 shadow-2xs hover:border-[#b9b9c2] transition-all flex items-center justify-between gap-2"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                                      <span className="font-mono text-[10px] font-medium text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded shrink-0">
+                                        #{idx + 1}
+                                      </span>
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="text-[12px] font-medium text-[#1c1c21] truncate">
+                                            {st.title}
+                                          </span>
+                                          {st.dependencies && st.dependencies.length > 0 && (
+                                            <span className="text-[9.5px] font-mono text-[#63636b] bg-[#f4f4f7] px-1 py-[0.5px] rounded border border-[#ececf0] shrink-0">
+                                              依赖 #{groupSubtasks.findIndex((p) => p.id === st.dependencies![0]) + 1 || 1}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="text-[10.5px] text-[#85858d] truncate mt-0.5">
+                                          {stWf?.name || st.workflowId}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <span
+                                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] font-medium border ${stStatus.badgeClass}`}
+                                      >
+                                        <span className={`w-1.5 h-1.5 rounded-full ${stStatus.dotClass}`} />
+                                        <span>{stStatus.label}</span>
+                                      </span>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => onOpenTaskLogs(st.id)}
+                                        className="h-[24px] w-[24px] rounded-[4px] border border-[#e3e3e8] hover:bg-[#f4f4f6] text-[#63636b] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer"
+                                        title="查看工序运行日志"
+                                      >
+                                        <Terminal size={11} />
+                                      </button>
+
+                                      {st.status !== 'running' && (
+                                        <button
+                                          type="button"
+                                          disabled={runningTaskId === st.id}
+                                          onClick={() => handleRunTask(st.id)}
+                                          className="h-[24px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10.5px] font-medium flex items-center gap-1 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                                          title="单独运行此工序"
+                                        >
+                                          <Play size={9} strokeWidth={2.4} />
+                                          <span>单跑</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* 动态追加新工序 */}
+                          <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3 shadow-sm space-y-2">
+                            <span className="text-[11px] font-medium text-[#1c1c21] block">
+                              向当前任务组追加新工序
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                placeholder="输入新子工序目标与需求，按回车添加..."
+                                value={newSubtaskTitle}
+                                onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                                onKeyDown={async (e) => {
+                                  if (e.key === 'Enter' && newSubtaskTitle.trim() && !isAddingSubtask) {
+                                    e.preventDefault();
+                                    try {
+                                      setIsAddingSubtask(true);
+                                      await api.addSubTask(curTask.id, {
+                                        title: newSubtaskTitle.trim(),
+                                      });
+                                      setNewSubtaskTitle('');
+                                      toast.success('已成功追加新工序');
+                                      onRefresh();
+                                    } catch (err: any) {
+                                      toast.error(`追加工序失败: ${err.message}`);
+                                    } finally {
+                                      setIsAddingSubtask(false);
+                                    }
+                                  }
+                                }}
+                                className="flex-1 h-[28px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[5px] px-2 text-[11.5px] text-[#1c1c21] outline-none placeholder-[#a1a1aa] focus:bg-white focus:border-[#4f46e5]"
+                              />
+                              <button
+                                type="button"
+                                disabled={!newSubtaskTitle.trim() || isAddingSubtask}
+                                onClick={async () => {
+                                  if (!newSubtaskTitle.trim() || isAddingSubtask) return;
+                                  try {
+                                    setIsAddingSubtask(true);
+                                    await api.addSubTask(curTask.id, {
+                                      title: newSubtaskTitle.trim(),
+                                    });
+                                    setNewSubtaskTitle('');
+                                    toast.success('已成功追加新工序');
+                                    onRefresh();
+                                  } catch (err: any) {
+                                    toast.error(`追加工序失败: ${err.message}`);
+                                  } finally {
+                                    setIsAddingSubtask(false);
+                                  }
+                                }}
+                                className="h-[28px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 transition-all disabled:opacity-40 cursor-pointer shadow-xs"
+                              >
+                                <Plus size={11} />
+                                <span>追加</span>
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+
+            {/* TAB 3: Agent 实时会话与双向交互 */}
             {drawerTab === 'session' && (
               <div className="flex-1 flex flex-col min-h-0 pt-3">
                 {/* 顶部感知与控制条 */}

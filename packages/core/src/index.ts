@@ -8,6 +8,8 @@ export {
 export * from './store';
 export * from './executors';
 export * from './engine/dag-engine';
+export * from './engine/task-decomposer';
+export * from './engine/workflow-recommender';
 export * from './agent/pi-rpc-session';
 export * from './agent/workflow-copilot';
 export * from './server';
