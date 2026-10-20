@@ -5,6 +5,7 @@ import {
   Workflow,
   ChevronDown,
   Check,
+  Copy,
   Lock,
   AlertCircle,
   Inbox,
@@ -15,6 +16,7 @@ import { Task, WorkflowDefinition, KanbanColumn, TaskAttachment } from '@openloo
 import { WorkspacePicker } from './WorkspacePicker';
 import { TaskPromptArea } from './TaskPromptArea';
 import { toast } from './Toast';
+import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
 
 interface EditTaskModalProps {
   isOpen: boolean;
@@ -46,6 +48,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const [workspace, setWorkspace] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [idCopied, setIdCopied] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -146,11 +149,33 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
       <div className="w-[440px] bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.14)] text-[#1c1c21]">
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between pb-2.5 border-b border-[#ececf0]">
-          <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-[13px] text-[#1c1c21]">编辑任务信息</h3>
-            <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-[0.5px] rounded">
-              {task.id}
-            </span>
+          <div className="flex items-center gap-2 min-w-0">
+            <h3 className="font-semibold text-[13px] text-[#1c1c21] shrink-0">编辑任务信息</h3>
+            <button
+              type="button"
+              onClick={async () => {
+                if (import.meta.env?.DEV) console.log('[EditTaskModal] 点击复制任务 ID:', task.id);
+                const ok = await copyToClipboard(task.id);
+                if (ok) {
+                  setIdCopied(true);
+                  toast.success('任务 ID 已复制');
+                  setTimeout(() => setIdCopied(false), 1500);
+                }
+              }}
+              className={`group/id inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-[0.5px] rounded border transition-all cursor-pointer shrink-0 select-none active:scale-95 ${
+                idCopied
+                  ? 'bg-[#ecfdf5] text-[#059669] border-[#a7f3d0]/80'
+                  : 'bg-[#f4f4f6] hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] border-[#ececf0]'
+              }`}
+              title={`任务编号: ${formatShortTaskId(task.id)}\n完整任务 ID: ${task.id} (点击复制)`}
+            >
+              <span>{formatShortTaskId(task.id)}</span>
+              {idCopied ? (
+                <Check size={9} className="text-[#059669]" />
+              ) : (
+                <Copy size={8.5} className="text-[#a1a1aa] group-hover/id:text-[#71717a] opacity-0 group-hover/id:opacity-100 transition-opacity" />
+              )}
+            </button>
           </div>
           <button
             onClick={onClose}

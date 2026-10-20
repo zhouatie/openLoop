@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Check,
+  Copy,
   X,
   FileImage,
   Terminal,
@@ -63,6 +64,7 @@ import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
 import { KanbanLaneList } from '../components/KanbanLaneList';
 import { toast } from '../components/Toast';
 import { resolveNodeMeta } from '../utils/nodeMeta';
+import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 import {
   ColumnSortRule,
@@ -334,6 +336,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   // 任务侧边栏 Tab 与 Agent 会话实时交互状态
   const [drawerTab, setDrawerTab] = useState<'overview' | 'subtasks' | 'session'>('overview');
+  const [drawerIdCopied, setDrawerIdCopied] = useState(false);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [isAddingSubtask, setIsAddingSubtask] = useState(false);
   
@@ -1780,15 +1783,43 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                 {/* 抽屉顶部头部 Header */}
                 <div className="px-5 pt-4 pb-3 border-b border-[#ececf0] bg-white shrink-0 space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="font-mono text-[10.5px] font-medium text-[#71717a] bg-[#f4f4f6] border border-[#e3e3e8] px-1.5 py-0.5 rounded-[4px] shrink-0 select-all"
-                        title={curTask.id}
+                    <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 点击复制完整任务 ID:', curTask.id);
+                          const success = await copyToClipboard(curTask.id);
+                          if (success) {
+                            setDrawerIdCopied(true);
+                            toast.success('任务 ID 已复制到剪贴板');
+                            setTimeout(() => setDrawerIdCopied(false), 1500);
+                          }
+                        }}
+                        className={`group/drawer-id inline-flex items-center gap-1.5 font-mono text-[11px] px-2 py-0.5 rounded-[5px] border transition-all cursor-pointer shrink-0 select-none active:scale-95 ${
+                          drawerIdCopied
+                            ? 'bg-[#ecfdf5] text-[#059669] border-[#a7f3d0]/80'
+                            : 'bg-[#f4f4f6] hover:bg-[#ececf0] text-[#52525b] hover:text-[#1c1c21] border-[#e3e3e8] hover:border-[#d4d4d8]'
+                        }`}
+                        title={`任务编号: ${formatShortTaskId(curTask.id)}\n完整任务 ID: ${curTask.id} (点击复制)`}
                       >
-                        {curTask.id.length > 18 ? `${curTask.id.slice(0, 16)}...` : curTask.id}
-                      </span>
+                        <span className="font-semibold text-[#4f46e5] text-[10.5px]">
+                          {formatShortTaskId(curTask.id)}
+                        </span>
+                        <span className="text-[#c2c2c9]">·</span>
+                        <span className="select-all tracking-tight font-medium text-[#1c1c21] truncate max-w-[220px]">
+                          {curTask.id}
+                        </span>
+                        {drawerIdCopied ? (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] text-[#059669] font-sans font-medium ml-0.5">
+                            <Check size={11} className="text-[#059669] shrink-0" />
+                            <span>已复制</span>
+                          </span>
+                        ) : (
+                          <Copy size={10.5} className="text-[#85858d] group-hover/drawer-id:text-[#1c1c21] shrink-0 transition-colors ml-0.5" />
+                        )}
+                      </button>
                       <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] text-[10.5px] font-medium border ${statusInfo.badgeClass}`}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] text-[10.5px] font-medium border shrink-0 ${statusInfo.badgeClass}`}
                       >
                         <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dotClass}`} />
                         <span>{statusInfo.label}</span>
