@@ -2947,6 +2947,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                   onClick={async () => {
                                     try {
                                       setIsPlanningAi(true);
+                                      if (import.meta.env?.DEV) {
+                                        console.log('[KanbanView:Subtasks] 请求 AI 继续规划工序:', curTask.id);
+                                      }
                                       const res = await api.planSubtasks(curTask.id);
                                       if (res.plan?.subtasks && res.plan.subtasks.length > 0) {
                                         setAiPlanPreview(
