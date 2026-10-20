@@ -22,7 +22,6 @@ import {
   FileText,
   RefreshCw,
   GitBranch,
-  Copy,
   ArrowUpDown,
   Square,
   MessageSquare,
@@ -51,6 +50,7 @@ import {
   Eye,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage, TaskAttachment } from '@openloop/core';
+import { getAgentProviderMeta } from '@openloop/agent-providers';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -254,7 +254,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [copiedSession, setCopiedSession] = useState(false);
   const [visualAcceptanceTask, setVisualAcceptanceTask] = useState<Task | null>(null);
 
   // 项目工程级别筛选
@@ -1976,48 +1975,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             )}
                           </div>
                         </div>
-
-                        {/* Agent 会话凭证与接管 */}
-                        {curTask.context?.piSessionId && (
-                          <div className="pt-2.5 border-t border-[#f1f1f4] flex items-center justify-between gap-2 text-[11px]">
-                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                              <Terminal size={12} className="text-[#4f46e5] shrink-0" />
-                              <span className="text-[10.5px] text-[#71717a] shrink-0">Agent会话:</span>
-                              <code
-                                className="font-mono text-[10.5px] text-[#374151] bg-[#f4f4f6] px-1.5 py-0.5 rounded-[4px] border border-[#e3e3e8] truncate select-all"
-                                title={curTask.context.piSessionId}
-                              >
-                                pi --session {curTask.context.piSessionId}
-                              </code>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                onClick={() => {
-                                  if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 复制 Pi 会话凭证:', curTask.context?.piSessionId);
-                                  navigator.clipboard.writeText(`pi --session ${curTask.context?.piSessionId}`);
-                                  setCopiedSession(true);
-                                  setTimeout(() => setCopiedSession(false), 2000);
-                                }}
-                                className="h-[22px] px-2 rounded-[4px] bg-[#f4f4f6] hover:bg-[#ececf0] text-[#4b4b53] hover:text-[#1c1c21] text-[10.5px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
-                                title="复制终端接管命令"
-                              >
-                                {copiedSession ? <Check size={10} className="text-[#059669]" /> : <Copy size={10} />}
-                                <span>{copiedSession ? '已复制' : '复制'}</span>
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 恢复终端打开:', curTask.id);
-                                  handleResumeTerminal(curTask.id);
-                                }}
-                                className="h-[22px] px-2 rounded-[4px] bg-[#eeedfd] hover:bg-[#e0e0fc] text-[#4f46e5] text-[10.5px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
-                                title="在系统原生终端接管会话"
-                              >
-                                <ExternalLink size={10} />
-                                <span>终端打开</span>
-                              </button>
-                            </div>
-                          </div>
-                        )}
                       </div>
 
                       {/* 模块 2: 任务需求与说明 */}
@@ -2520,14 +2477,14 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-2 h-2 rounded-full bg-[#7c3aed] inline-block shrink-0" />
                     <span className="text-[11.5px] font-semibold text-[#1c1c21] truncate">
-                      {sessionState?.agentName || 'Pi Coding Agent'}
+                      {sessionState?.agentName || getAgentProviderMeta(curTask.context?.agentProvider).label}
                     </span>
-                    {curTask.context?.piSessionId && (
+                    {(curTask.context?.sessionId || curTask.context?.piSessionId) && (
                       <span
                         className="text-[10px] font-mono text-[#85858d] bg-white px-1.5 py-0.5 rounded border border-[#e3e3e8] truncate max-w-[130px]"
-                        title={curTask.context.piSessionId}
+                        title={curTask.context?.sessionId || curTask.context?.piSessionId}
                       >
-                        {curTask.context.piSessionId}
+                        {curTask.context?.sessionId || curTask.context?.piSessionId}
                       </span>
                     )}
                   </div>

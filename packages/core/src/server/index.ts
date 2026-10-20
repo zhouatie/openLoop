@@ -27,6 +27,7 @@ import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { WorktreeManager, TaskProcessManager, findRepoRoot } from '../worktree/worktree-manager';
 import { interpolateString } from '../executors';
+import { getAgentProviderMeta, resolveResumeCommand } from '../constants/agent-providers';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 import { AutomationScheduler } from '../automation/automation-scheduler';
 import { WorkflowRecommender } from '../engine/workflow-recommender';
@@ -933,9 +934,25 @@ export class OpenLoopServer {
         const task = this.store.getTask(taskId);
         if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
 
+        const settings = this.store.getSettings() || {};
+        const sessionId =
+          task.context?.sessionId ||
+          task.context?.piSessionId ||
+          `session_${task.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        const provider = getAgentProviderMeta(
+          task.context?.agentProvider || settings.agentProvider
+        ).id;
+        const resumeCommand =
+          task.context?.resumeCommand || resolveResumeCommand(provider, sessionId);
+
         const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
         if (rpcSession) {
-          return this.sendJson(res, 200, rpcSession.getState(), reqMeta);
+          return this.sendJson(
+            res,
+            200,
+            { ...rpcSession.getState(), sessionId, resumeCommand },
+            reqMeta
+          );
         }
 
         // 无常驻 RPC 进程时，从持久化 context 中读取历史消息
@@ -945,8 +962,11 @@ export class OpenLoopServer {
           isBusy: task.status === 'running',
           isPaused: false,
           messages: task.context?.chatMessages || [],
-          agentName: 'OpenLoop Agent',
-          piSessionId: task.context?.piSessionId,
+          agentName: task.context?.agentName || 'OpenLoop Agent',
+          sessionId,
+          piSessionId: sessionId,
+          resumeCommand,
+          agentProvider: provider,
         };
         return this.sendJson(res, 200, historicalState, reqMeta);
       }
@@ -1022,9 +1042,9 @@ export class OpenLoopServer {
         }
 
         // 若当前无活跃会话，立即自动拉起/唤醒 Agent RPC 会话，响应用户追加指令
-        const sessionId = task.context?.piSessionId || `session_${task.id}`;
+        const sessionId = task.context?.sessionId || task.context?.piSessionId || `session_${task.id}`;
         const cwd = task.context?.worktree?.worktreeDir || task.workspace || process.cwd();
-        const settings = this.store.getSettings();
+        const settings = this.store.getSettings() || {};
 
         serverLogger.info(`[AgentChat:AutoWakeup] 唤醒并启动 Agent 会话: ${sessionId} (CWD: ${cwd})`, undefined, { taskId });
 
@@ -1053,9 +1073,8 @@ export class OpenLoopServer {
           taskDescription: task.description,
           sessionId,
           agentName: 'OpenLoop Agent',
-          model: settings.piModel,
-          thinking: settings.piThinking,
-          tools: settings.piTools,
+          model: settings.defaultModel,
+          thinking: settings.reasoningLevel || 'high',
           cwd,
           initialPrompt: enrichedMessage,
           onLog: (stream, message) => {
@@ -1445,7 +1464,7 @@ export class OpenLoopServer {
               taskTitle: `[QA 快速规划] ${title}`,
               sessionId,
               agentName: '资深 QA 工程师',
-              model: settings.piModel,
+              model: settings.defaultModel,
               thinking: 'off',
               cwd,
               initialPrompt: rolePrompt,
@@ -1632,19 +1651,28 @@ export class OpenLoopServer {
         const task = this.store.getTask(taskId);
         if (!task) return this.sendJson(res, 404, { error: 'Task Not Found' }, reqMeta);
 
+        const settings = this.store.getSettings() || {};
         const sessionId =
+          task.context?.sessionId ||
           task.context?.piSessionId ||
           `session_${task.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-        const cmd = `pi --session ${sessionId}`;
+        const workspace = task.context?.worktree?.worktreeDir || task.workspace || process.cwd();
+        const provider = getAgentProviderMeta(
+          task.context?.agentProvider || settings.agentProvider
+        ).id;
+
+        const cmd = task.context?.resumeCommand || resolveResumeCommand(provider, sessionId);
 
         serverLogger.info(
           `[Tasks:ResumeTerminal] 唤起外部终端接管交互: ${taskId}, Session: ${sessionId}`,
-          { command: cmd },
+          { command: cmd, workspace },
           { taskId }
         );
 
         if (process.platform === 'darwin') {
-          spawn('osascript', ['-e', `tell application "Terminal" to do script "${cmd}"`, '-e', 'tell application "Terminal" to activate'], { detached: true });
+          const terminalScript = workspace ? `cd "${workspace.replace(/"/g, '\\"')}" && ${cmd}` : cmd;
+          const escaped = terminalScript.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+          spawn('osascript', ['-e', `tell application "Terminal" to do script "${escaped}"`, '-e', 'tell application "Terminal" to activate'], { detached: true });
         }
 
         return this.sendJson(res, 200, { success: true, command: cmd, sessionId }, reqMeta);

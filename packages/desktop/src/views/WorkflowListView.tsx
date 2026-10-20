@@ -563,7 +563,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
             type: 'agent' as NodeType,
             position: { x: 100, y: 150 },
             config: {
-              agentName: 'Pi Coding Agent',
+              agentName: '代码智能体',
               prompt: '请根据需求完成代码修改与自测：\n需求：{{task.title}}\n详细说明：{{task.description}}\n请保持工程代码整洁与类型严谨。',
               timeoutSec: 600,
             },

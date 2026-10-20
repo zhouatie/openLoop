@@ -17,7 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@openloop/agent-providers": ["../core/src/constants/agent-providers.ts"]
     }
   },
   "include": ["src"]

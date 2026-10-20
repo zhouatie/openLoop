@@ -537,7 +537,7 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
   // 判断当前选中的任务是否包含 Agent 节点
   const hasAgentNode = useMemo(() => {
     if (!activeTaskDetail) return false;
-    if (activeTaskDetail.context?.piSessionId) return true;
+    if (activeTaskDetail.context?.sessionId || activeTaskDetail.context?.piSessionId) return true;
     if (activeWfInfo?.workflow?.nodes?.some((n) => n.type === 'agent')) return true;
     const runs = Object.keys(activeTaskDetail.nodeRuns || {});
     return runs.some((nodeId) => {

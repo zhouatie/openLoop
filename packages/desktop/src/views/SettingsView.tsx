@@ -1,11 +1,8 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
-  Globe,
   Copy,
   Check,
-  ExternalLink,
   ChevronDown,
-  Terminal,
   RotateCcw,
   Sliders,
   Folder,
@@ -31,12 +28,16 @@ import { api } from '../services/api';
 import {
   OpenLoopSettings,
   AgentProviderType,
-  PiThinkingLevel,
+  ThinkingLevel,
   ShortcutSuperKey,
   PluginManifest,
   AgentPromptKey,
   AgentPromptTemplates,
 } from '@openloop/core';
+import {
+  AGENT_PROVIDERS,
+  getAgentProviderMeta,
+} from '@openloop/agent-providers';
 import { PROMPT_METAS, DEFAULT_PROMPT_TEMPLATES } from '../constants/prompts';
 import { useShortcuts } from '../context/ShortcutContext';
 import { Kbd } from '../components/Kbd';
@@ -115,13 +116,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // 表单状态
   const [agentProvider, setAgentProvider] = useState<AgentProviderType>('pi');
-  const [piModel, setPiModel] = useState('');
-  const [piThinking, setPiThinking] = useState<PiThinkingLevel>('medium');
-  const [piTools, setPiTools] = useState('read,bash,edit,write,grep,find');
+  const [model, setModel] = useState('');
+  const [thinking, setThinking] = useState<ThinkingLevel>('high');
   const [defaultCwd, setDefaultCwd] = useState('');
   const [autoSnapshot, setAutoSnapshot] = useState(true);
-  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
-  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   // 提示词状态
   const [prompts, setPrompts] = useState<AgentPromptTemplates>({ ...DEFAULT_PROMPT_TEMPLATES });
@@ -176,16 +174,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     loadSettings();
   }, []);
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
-        setIsModelDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   const handleTabChange = (tabId: SettingsTabId) => {
     if (import.meta.env?.DEV) {
       console.log('[Settings] 切换设置选项卡:', { from: activeTab, to: tabId });
@@ -204,10 +192,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setLoading(true);
       const settings = await api.getSettings();
       if (settings) {
-        if (settings.agentProvider) setAgentProvider(settings.agentProvider);
-        if (settings.piModel !== undefined) setPiModel(settings.piModel);
-        if (settings.piThinking) setPiThinking(settings.piThinking);
-        if (settings.piTools) setPiTools(settings.piTools);
+        if (settings.agentProvider) setAgentProvider(getAgentProviderMeta(settings.agentProvider).id);
+        if (settings.defaultModel) setModel(settings.defaultModel);
+        if (settings.reasoningLevel) setThinking(settings.reasoningLevel);
         if (settings.defaultCwd) setDefaultCwd(settings.defaultCwd);
         if (settings.autoSnapshot !== undefined) setAutoSnapshot(settings.autoSnapshot);
         if (settings.prompts) {
@@ -302,9 +289,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleSave = async (override?: Partial<OpenLoopSettings>) => {
     const payload: OpenLoopSettings = {
       agentProvider,
-      piModel,
-      piThinking,
-      piTools,
+      defaultModel: model.trim(),
+      reasoningLevel: thinking,
       defaultCwd,
       autoSnapshot,
       ...override,
@@ -355,9 +341,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const configToExport: OpenLoopSettings = {
         ...baseSettings,
         agentProvider,
-        piModel,
-        piThinking,
-        piTools,
+        defaultModel: model.trim(),
+        reasoningLevel: thinking,
         defaultCwd,
         autoSnapshot,
         shortcutSuperKey: superKey,
@@ -398,16 +383,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const presetModels = [
-    { label: 'Claude 3.7 Sonnet', value: 'sonnet' },
-    { label: 'Gemini 3.6 Flash', value: 'gemini-3.6-flash' },
-    { label: 'GPT-4o', value: 'gpt-4o' },
-    { label: 'DeepSeek R1 Reasoner', value: 'deepseek-reasoner' },
-  ];
-
-  const currentModelDisplay = piModel
-    ? presetModels.find((m) => m.value === piModel)?.label || piModel
-    : '自动 · 继承 Pi 本地配置';
+  const handleSelectProvider = (providerId: AgentProviderType) => {
+    if (import.meta.env?.DEV) {
+      console.log('[Settings:Agent] 切换代码智能体:', { from: agentProvider, to: providerId });
+    }
+    setAgentProvider(providerId);
+    handleSave({ agentProvider: providerId });
+  };
 
   // 计算当前排好序的侧边栏插件清单
   const currentSidebarPlugins = useMemo(() => {
@@ -601,251 +583,132 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             {/* ==================== TAB 1: 智能体驱动 ==================== */}
         {activeTab === 'agent' && (
           <div className="space-y-5 animate-in fade-in duration-150">
-            {/* 智能体底层驱动 */}
-            <div>
-              <div className="text-[11.5px] text-[#85858d] mb-1.5 px-0.5 font-normal">
-                代码智能体引擎
+            <div className="bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+              {/* 代码智能体 */}
+              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium text-[#1c1c21]">代码智能体</div>
+                  <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                    执行任务的代码智能体引擎，模型与思考强度对所有引擎共用
+                  </div>
+                </div>
+
+                <div className="relative shrink-0 self-center">
+                  <select
+                    value={agentProvider}
+                    onChange={(e) => handleSelectProvider(e.target.value as AgentProviderType)}
+                    className="appearance-none h-[26px] pl-2 pr-6 rounded-[6px] border border-[#e3e3e8] bg-white text-[11.5px] text-[#1c1c21] outline-none shadow-sm cursor-pointer transition-colors hover:border-[#d0d0d7] focus:border-[#4f46e5]"
+                  >
+                    {AGENT_PROVIDERS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    size={11}
+                    className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[#85858d]"
+                  />
+                </div>
               </div>
 
-              <div className="bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                {/* 默认智能体驱动 */}
-                <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-medium text-[#1c1c21]">默认代码智能体</div>
-                    <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                      流水线执行代码实现、单元自测时的底层驱动；选用 Pi Agent 时将通过本地 Pi CLI 自动派发独立会话
-                    </div>
+              {/* 模型 */}
+              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium text-[#1c1c21]">模型</div>
+                  <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                    所有引擎共用同一个模型配置，留空则继承引擎自身默认模型
                   </div>
+                </div>
 
-                  <div className="inline-flex p-[2px] rounded-[7px] bg-[#e6e6eb] shrink-0 self-center">
+                <input
+                  type="text"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  onBlur={() => handleSave({ defaultModel: model.trim() })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur();
+                  }}
+                  spellCheck={false}
+                  placeholder="例如 sonnet / gpt-5-codex"
+                  className="shrink-0 w-56 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#a1a1aa] outline-none shadow-sm focus:border-[#4f46e5]"
+                />
+              </div>
+
+              {/* 思考强度 */}
+              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium text-[#1c1c21]">思考强度</div>
+                  <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                    控制模型在执行复杂代码实现与测试逻辑时的深度推理程度
+                  </div>
+                </div>
+
+                <div className="inline-flex p-[2px] rounded-[7px] bg-[#e6e6eb] shrink-0 self-center">
+                  {(['off', 'low', 'medium', 'high'] as const).map((level) => (
                     <button
+                      key={level}
                       type="button"
                       onClick={() => {
-                        setAgentProvider('pi');
-                        handleSave({ agentProvider: 'pi' });
+                        setThinking(level);
+                        handleSave({ reasoningLevel: level });
                       }}
                       className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer ${
-                        agentProvider === 'pi'
+                        thinking === level
                           ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
                           : 'text-[#63636b] hover:text-[#1c1c21]'
                       }`}
                     >
-                      Pi Agent (推荐)
+                      {level === 'off' && '关闭'}
+                      {level === 'low' && '轻量'}
+                      {level === 'medium' && '均衡'}
+                      {level === 'high' && '深度'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAgentProvider('custom-cli');
-                        handleSave({ agentProvider: 'custom-cli' });
-                      }}
-                      className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer ${
-                        agentProvider === 'custom-cli'
-                          ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
-                          : 'text-[#63636b] hover:text-[#1c1c21]'
-                      }`}
-                    >
-                      自定义 CLI 脚本
-                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 编辑前快照 */}
+              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium text-[#1c1c21]">编辑前代码快照备份</div>
+                  <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                    智能体在修改代码前自动建立本地工作区备份，确保任务异常时随时可回滚
                   </div>
                 </div>
 
-                {/* 终端会话恢复命令 */}
-                <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-medium text-[#1c1c21]">终端会话交互恢复</div>
-                    <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                      为每个任务派发唯一的 Session ID，在系统终端中随时可通过 pi resume 交互式接管并继续讨论
-                    </div>
-                  </div>
-
-                  <div className="shrink-0 self-center flex items-center gap-1.5 font-mono text-[11.5px] text-[#4b4b53]">
-                    <span>pi --session &lt;sessionId&gt;</span>
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard('pi --session session_<taskId>', 'resumeCmd')}
-                      className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] transition-colors cursor-pointer"
-                      title="复制恢复命令格式"
-                    >
-                      {copiedKey === 'resumeCmd' ? (
-                        <Check size={12} className="text-[#189a58]" />
-                      ) : (
-                        <Copy size={12} />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 会话终端 */}
-                <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-medium text-[#1c1c21]">交互终端程序</div>
-                    <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                      在看板点击「在终端打开」时默认唤起的宿主系统终端程序
-                    </div>
-                  </div>
-
-                  <div className="shrink-0 self-center">
-                    <span className="text-[11.5px] text-[#4b4b53] font-mono bg-[#f1f1f4] border border-[#e3e3e8] px-2.5 py-1 rounded-[5px]">
-                      macOS Terminal / iTerm
-                    </span>
-                  </div>
+                <div className="inline-flex p-[2px] rounded-[7px] bg-[#e6e6eb] shrink-0 self-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAutoSnapshot(false);
+                      handleSave({ autoSnapshot: false });
+                    }}
+                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer ${
+                      !autoSnapshot
+                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    关闭
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAutoSnapshot(true);
+                      handleSave({ autoSnapshot: true });
+                    }}
+                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer ${
+                      autoSnapshot
+                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    开启
+                  </button>
                 </div>
               </div>
             </div>
-
-            {/* Pi Agent 配置 */}
-            {agentProvider === 'pi' && (
-              <div>
-                <div className="text-[11.5px] text-[#85858d] mb-1.5 px-0.5 font-normal">
-                  Pi Agent 参数配置
-                </div>
-
-                <div className="bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                  {/* 模型选择 */}
-                  <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-medium text-[#1c1c21]">智能体模型</div>
-                      <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                        任务执行调用的基础大语言模型，留空则自动继承本地 Pi CLI 默认模型
-                      </div>
-                    </div>
-
-                    <div className="shrink-0 self-center flex items-center gap-1.5 relative">
-                      <div className="relative">
-                        <div className="h-[26px] px-2.5 rounded-[13px] bg-[#f1f1f4] hover:bg-[#e9e9ee] border border-[#e3e3e8] text-[11.5px] text-[#1c1c21] flex items-center gap-1.5 transition-all shadow-sm">
-                          <Globe size={12} className="text-[#4f46e5]" />
-                          <span className="max-w-[180px] truncate">{currentModelDisplay}</span>
-                          <ChevronDown size={11} className="text-[#85858d]" />
-                        </div>
-                        <select
-                          value={piModel}
-                          onChange={(e) => {
-                            setPiModel(e.target.value);
-                            handleSave({ piModel: e.target.value });
-                          }}
-                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-[12px]"
-                          title="切换智能体模型"
-                        >
-                          <option value="">自动 · 继承 Pi 本地配置</option>
-                          {presetModels.map((m) => (
-                            <option key={m.value} value={m.value}>
-                              {m.label} ({m.value})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPiModel('');
-                          handleSave({ piModel: '' });
-                        }}
-                        className="h-[26px] px-2 rounded-[13px] bg-[#f1f1f4] hover:bg-[#e9e9ee] border border-[#e3e3e8] text-[11px] text-[#63636b] hover:text-[#1c1c21] transition-all cursor-pointer"
-                        title="重置为默认模型"
-                      >
-                        默认
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 思考推理级别 */}
-                  <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-medium text-[#1c1c21]">思考推理级别</div>
-                      <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                        控制模型在执行复杂代码实现与测试逻辑时的深度推理程度 (--thinking)
-                      </div>
-                    </div>
-
-                    <div className="inline-flex p-[2px] rounded-[7px] bg-[#e6e6eb] shrink-0 self-center">
-                      {(['off', 'low', 'medium', 'high'] as const).map((level) => (
-                        <button
-                          key={level}
-                          type="button"
-                          onClick={() => {
-                            setPiThinking(level);
-                            handleSave({ piThinking: level });
-                          }}
-                          className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer ${
-                            piThinking === level
-                              ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
-                              : 'text-[#63636b] hover:text-[#1c1c21]'
-                          }`}
-                        >
-                          {level === 'off' && '关闭'}
-                          {level === 'low' && '轻量'}
-                          {level === 'medium' && '均衡'}
-                          {level === 'high' && '深度'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 内置工具调用白名单 */}
-                  <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-medium text-[#1c1c21]">内置工具权限 (--tools)</div>
-                      <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                        允许智能体在任务工作区直接调用的核心工具集，如 read, bash, edit, write, grep, find
-                      </div>
-                    </div>
-
-                    <div className="shrink-0 self-center">
-                      <input
-                        type="text"
-                        value={piTools}
-                        onChange={(e) => setPiTools(e.target.value)}
-                        onBlur={() => handleSave()}
-                        placeholder="read,bash,edit,write,grep,find"
-                        className="w-56 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#85858d] outline-none shadow-sm focus:border-[#4f46e5]"
-                      />
-                    </div>
-                  </div>
-
-                  {/* 代码编辑快照备份 */}
-                  <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-medium text-[#1c1c21]">编辑前代码快照备份</div>
-                      <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                        智能体在修改代码前自动建立本地工作区备份，确保任务异常时随时可回滚
-                      </div>
-                    </div>
-
-                    <div className="inline-flex p-[2px] rounded-[7px] bg-[#e6e6eb] shrink-0 self-center">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAutoSnapshot(false);
-                          handleSave({ autoSnapshot: false });
-                        }}
-                        className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer ${
-                          !autoSnapshot
-                            ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
-                            : 'text-[#63636b] hover:text-[#1c1c21]'
-                        }`}
-                      >
-                        关闭
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAutoSnapshot(true);
-                          handleSave({ autoSnapshot: true });
-                        }}
-                        className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer ${
-                          autoSnapshot
-                            ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
-                            : 'text-[#63636b] hover:text-[#1c1c21]'
-                        }`}
-                      >
-                        开启
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
 

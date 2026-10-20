@@ -18,6 +18,7 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import { TaskSessionState, SessionChatMessage } from '@openloop/core';
+import { getDefaultResumeCommand } from '@openloop/agent-providers';
 import { api } from '../services/api';
 import { AgentMarkdown } from './AgentMarkdown';
 import { toast } from './Toast';
@@ -167,15 +168,15 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
 
   // 解析出真实生效的 Session ID
   const effectiveSessionId =
-    sessionState?.piSessionId ||
-    (sessionState as any)?.sessionId ||
-    (taskId ? `session_${taskId}` : '');
+    sessionState?.sessionId || sessionState?.piSessionId || (taskId ? `session_${taskId}` : '');
 
   // 复制终端接管命令
   const handleCopyTerminalCommand = () => {
     const sid = effectiveSessionId;
     if (!sid) return;
-    const cmd = workspace ? `cd "${workspace}" && pi --session ${sid}` : `pi --session ${sid}`;
+    const baseCmd =
+      sessionState?.resumeCommand || getDefaultResumeCommand(sessionState?.agentProvider, sid);
+    const cmd = workspace ? `cd "${workspace}" && ${baseCmd}` : baseCmd;
     navigator.clipboard.writeText(cmd);
     toast('已复制终端接管指令: ' + cmd, 'success');
   };

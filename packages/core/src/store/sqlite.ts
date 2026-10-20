@@ -1300,9 +1300,8 @@ export class SqliteStore {
     const rows = this.db.prepare('SELECT key, value_json FROM settings').all() as any[];
     const result: OpenLoopSettings = {
       agentProvider: 'pi',
-      piModel: '',
-      piThinking: 'medium',
-      piTools: '',
+      defaultModel: '',
+      reasoningLevel: 'high',
       defaultCwd: process.cwd(),
       prompts: { ...DEFAULT_PROMPT_TEMPLATES },
     };

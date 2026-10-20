@@ -6,6 +6,11 @@ import { WorkflowNode, WorkflowDefinition, Task, LogEntry, NodeRun, TaskSessionS
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
+import {
+  getAgentProviderMeta,
+  resolveResumeCommand,
+  resolveRunCommand,
+} from '../constants/agent-providers';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 
@@ -339,6 +344,49 @@ export class CliCommandExecutor implements NodeExecutor {
   }
 }
 
+// 组装 Agent 节点执行 Prompt (多重变量兜底、需求模板包裹与附件路径注入)
+export function buildAgentPrompt(ctx: ExecutionContext): string {
+  const { node, task, variables = {}, settings = {} } = ctx;
+  const rawPrompt =
+    node.config.prompt ||
+    task.description ||
+    node.config.command ||
+    `请完成任务 [${task.title}] 的代码实现并进行必要验证。`;
+
+  let prompt = interpolateString(rawPrompt, {
+    task: {
+      id: task.id,
+      title: task.title,
+      description: task.description || '',
+      workflowId: task.workflowId,
+    },
+    ...variables,
+  });
+
+  // 兜底保障：确保 Prompt 中始终包含具体的任务标题与详细说明，防止模板插值留白
+  if (!prompt.includes(task.title)) {
+    const wrapTemplate = getEffectivePrompt('agentNodeRequirement', settings.prompts);
+    prompt = renderPromptTemplate(wrapTemplate, {
+      task: {
+        id: task.id,
+        title: task.title,
+        description: task.description || '无详细说明',
+        prompt,
+      },
+    });
+  }
+
+  // 若任务附带图片附件，注入本地物理文件路径提示，使 Agent 能够直接通过文件工具进行多模态视觉感知
+  if (task.attachments && task.attachments.length > 0) {
+    const attList = task.attachments
+      .map((att, i) => `  ${i + 1}. [${att.name}] (大小: ${(att.size / 1024).toFixed(1)} KB, 本地绝对路径: "${att.path}")`)
+      .join('\n');
+    prompt += `\n\n【任务关联参考截图/附件】\n用户为此任务附带了以下图片资源，你可以直接通过本地工具读取这些路径以分析 UI 或报错：\n${attList}`;
+  }
+
+  return prompt;
+}
+
 // 真实 AI Agent 节点执行器，支持通过 pi agent 或自定义 CLI 驱动
 export class AgentExecutor implements NodeExecutor {
   private cliExecutor = new CliCommandExecutor();
@@ -346,7 +394,7 @@ export class AgentExecutor implements NodeExecutor {
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, task, emitLog, settings = {} } = ctx;
     const agentName = node.config.agentName || 'OpenLoop Agent';
-    const agentProvider = settings.agentProvider || 'pi';
+    const agentProvider = getAgentProviderMeta(settings.agentProvider).id;
 
     executorLogger.info(
       `[Agent] 激活 Agent [${agentName}] (驱动: ${agentProvider})`,
@@ -355,68 +403,30 @@ export class AgentExecutor implements NodeExecutor {
     );
     emitLog('system', `[Agent 节点] 激活: ${agentName} (驱动模式: ${agentProvider})`);
 
-    // 若配置了 pi agent 驱动
+    // 1. 获取或生成唯一的持久化会话标识
+    const sessionId =
+      task.context?.sessionId ||
+      task.context?.piSessionId ||
+      `session_${task.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+    if (!task.context) task.context = {};
+    task.context.sessionId = sessionId;
+    task.context.piSessionId = sessionId;
+    task.context.agentProvider = agentProvider;
+
+    const resolvedCwd = resolveWorkingDir(node.config.cwd || task.workspace);
+    const isSandbox = !resolvedCwd;
+    const cwd = resolvedCwd || os.tmpdir();
+
+    // 2. 系统内置的终端接管指令
+    const resumeCommand = resolveResumeCommand(agentProvider, sessionId);
+    task.context.resumeCommand = resumeCommand;
+
+    const model = settings.defaultModel;
+    const thinking = settings.reasoningLevel || 'high';
+
+    // pi 引擎走内置 RPC 会话驱动
     if (agentProvider === 'pi') {
-      // 1. 获取或生成唯一的持久化会话标识
-      const sessionId =
-        task.context?.piSessionId ||
-        `session_${task.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-      if (!task.context) task.context = {};
-      task.context.piSessionId = sessionId;
-
-      // 2. 提取并组装 Prompt (多重变量兜底与需求注入)
-      const rawPrompt =
-        node.config.prompt ||
-        task.description ||
-        node.config.command ||
-        `请完成任务 [${task.title}] 的代码实现并进行必要验证。`;
-      
-      let prompt = interpolateString(rawPrompt, {
-        task: {
-          id: task.id,
-          title: task.title,
-          description: task.description || '',
-          workflowId: task.workflowId,
-        },
-        ...ctx.variables,
-      });
-
-      // 兜底保障：确保 Prompt 中始终包含具体的任务标题与详细说明，防止模板插值留白
-      if (!prompt.includes(task.title)) {
-        const wrapTemplate = getEffectivePrompt('agentNodeRequirement', settings.prompts);
-        prompt = renderPromptTemplate(wrapTemplate, {
-          task: {
-            id: task.id,
-            title: task.title,
-            description: task.description || '无详细说明',
-            prompt,
-          },
-        });
-      }
-
-      // 若任务附带图片附件，注入本地物理文件路径提示，使 Agent 能够直接通过文件工具进行多模态视觉感知
-      if (task.attachments && task.attachments.length > 0) {
-        const attList = task.attachments
-          .map((att, i) => `  ${i + 1}. [${att.name}] (大小: ${(att.size / 1024).toFixed(1)} KB, 本地绝对路径: "${att.path}")`)
-          .join('\n');
-        prompt += `\n\n【任务关联参考截图/附件】\n用户为此任务附带了以下图片资源，你可以直接通过本地工具读取这些路径以分析 UI 或报错：\n${attList}`;
-      }
-
-      // 3. 构建 pi CLI 执行命令
-      const args: string[] = [
-        `--session-id "${sessionId}"`,
-        `--name "openLoop: ${task.title.replace(/"/g, '\\"')}"`,
-      ];
-
-      if (settings.piModel && String(settings.piModel).trim()) {
-        args.push(`--model "${String(settings.piModel).trim()}"`);
-      }
-      if (settings.piThinking && settings.piThinking !== 'off') {
-        args.push(`--thinking ${settings.piThinking}`);
-      }
-      if (settings.piTools && String(settings.piTools).trim()) {
-        args.push(`--tools "${String(settings.piTools).trim()}"`);
-      }
+      const prompt = buildAgentPrompt(ctx);
 
       const isWsRequired = Boolean(node.config?.requireWorkspace);
       if (isWsRequired && !node.config.cwd && !task.workspace) {
@@ -429,10 +439,6 @@ export class AgentExecutor implements NodeExecutor {
         };
       }
 
-      const resolvedCwd = resolveWorkingDir(node.config.cwd || task.workspace);
-      const isSandbox = !resolvedCwd;
-      const cwd = resolvedCwd || os.tmpdir();
-
       executorLogger.info(
         `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId} (工作区 CWD: ${cwd})`,
         { promptPreview: prompt.length > 200 ? prompt.slice(0, 200) + '...' : prompt, workspace: task.workspace },
@@ -444,7 +450,7 @@ export class AgentExecutor implements NodeExecutor {
       } else {
         emitLog('system', `[工作区 CWD] ${cwd}`);
       }
-      emitLog('system', `[终端恢复提示] 如需在终端中交互式接管，可执行: pi --session ${sessionId}`);
+      emitLog('system', `[终端恢复提示] 如需在终端中交互式接管，可执行: ${resumeCommand}`);
 
       return new Promise<ExecutionResult>((resolve) => {
         let settled = false;
@@ -460,9 +466,8 @@ export class AgentExecutor implements NodeExecutor {
           taskDescription: task.description,
           sessionId,
           agentName,
-          model: settings.piModel,
-          thinking: settings.piThinking,
-          tools: settings.piTools,
+          model,
+          thinking,
           cwd,
           initialPrompt: prompt,
           onLog: emitLog,
@@ -493,9 +498,10 @@ export class AgentExecutor implements NodeExecutor {
                 status: 'success',
                 exitCode: 0,
                 output: {
-                  agentProvider: 'pi',
+                  agentProvider,
+                  sessionId,
                   piSessionId: sessionId,
-                  resumeCommand: `pi --session ${sessionId}`,
+                  resumeCommand,
                 },
               });
             }
@@ -524,9 +530,13 @@ export class AgentExecutor implements NodeExecutor {
       });
     }
 
-    if (!node.config.command) {
-      const err = `[Agent 节点 ${node.id}] 未配置 Agent 执行 CLI 命令 (例如 openloop-agent, pi 或自定义脚本)`;
-      executorLogger.error(`[Agent] 未配置执行 CLI 命令`, undefined, { taskId: task.id, nodeId: node.id });
+    // 其他引擎：使用节点自定义命令，否则使用系统内置的引擎命令
+    const resolvedCommand =
+      node.config.command || resolveRunCommand(agentProvider, buildAgentPrompt(ctx), model);
+
+    if (!resolvedCommand) {
+      const err = `[Agent 节点 ${node.id}] 引擎 [${agentProvider}] 没有内置执行命令，请在节点中填写自定义命令。`;
+      executorLogger.error(`[Agent] 缺少执行命令`, undefined, { taskId: task.id, nodeId: node.id });
       emitLog('stderr', err);
       return {
         status: 'failed',
@@ -535,7 +545,23 @@ export class AgentExecutor implements NodeExecutor {
       };
     }
 
-    return this.cliExecutor.execute(ctx);
+    emitLog('system', `[执行命令] ${resolvedCommand}`);
+    emitLog('system', `[终端恢复提示] 如需在终端中交互式接管，可执行: ${resumeCommand}`);
+
+    const proxyNode: WorkflowNode = {
+      ...node,
+      config: {
+        ...node.config,
+        command: resolvedCommand,
+        env: {
+          ...node.config.env,
+          OPENLOOP_SESSION_ID: sessionId,
+          OPENLOOP_TASK_ID: task.id,
+        },
+      },
+    };
+
+    return this.cliExecutor.execute({ ...ctx, node: proxyNode });
   }
 }
 
@@ -640,7 +666,7 @@ export class QaPlannerExecutor implements NodeExecutor {
           taskTitle: `[QA 用例设计] ${title}`,
           sessionId: qaSessionId,
           agentName: '资深 QA 工程师',
-          model: settings.piModel,
+          model: settings.defaultModel,
           thinking: 'off', // QA 规划用例无需长思考，极速产出
           cwd,
           initialPrompt: rolePrompt,

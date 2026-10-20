@@ -502,7 +502,10 @@ export class PiRpcSessionInstance extends EventEmitter {
       messages: [...this.messages],
       agentName: this.agentName,
       model: this.model,
+      sessionId: this.sessionId,
       piSessionId: this.sessionId,
+      resumeCommand: `pi --session ${this.sessionId}`,
+      agentProvider: 'pi',
     };
   }
 

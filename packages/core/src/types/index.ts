@@ -113,7 +113,10 @@ export interface TaskSessionState {
   messages: SessionChatMessage[];
   agentName?: string;
   model?: string;
-  piSessionId?: string;
+  sessionId?: string;
+  piSessionId?: string; // 兼容字段
+  resumeCommand?: string;
+  agentProvider?: string;
 }
 
 export interface WorkflowSessionState {
@@ -284,9 +287,9 @@ export interface PluginManifest {
   }>;
 }
 
-export type AgentProviderType = 'pi' | 'custom-cli';
+export type AgentProviderType = 'pi' | 'claude-code' | 'codex' | 'opencode';
 
-export type PiThinkingLevel = 'off' | 'low' | 'medium' | 'high';
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high';
 
 export type ShortcutSuperKey = 'Control' | 'Meta' | 'Alt';
 
@@ -310,9 +313,9 @@ export interface PromptMeta {
 
 export interface OpenLoopSettings {
   agentProvider?: AgentProviderType;
-  piModel?: string;
-  piThinking?: PiThinkingLevel;
-  piTools?: string;
+  // 代码智能体引擎的通用参数，对 pi / claude-code / codex / opencode 一致生效
+  defaultModel?: string;
+  reasoningLevel?: ThinkingLevel;
   defaultCwd?: string;
   autoSnapshot?: boolean;
   shortcutSuperKey?: ShortcutSuperKey;

@@ -8,6 +8,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // 复用 core 的引擎元数据（纯 TS 常量，无 node 依赖），避免前端重复维护一份
+      '@openloop/agent-providers': path.resolve(__dirname, '../core/src/constants/agent-providers.ts'),
     },
   },
   server: {
