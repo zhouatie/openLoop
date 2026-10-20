@@ -1211,9 +1211,12 @@ export class QaApprovalExecutor implements NodeExecutor {
     if (task.context?.worktree?.worktreeDir) {
       try {
         const wtManager = WorktreeManager.getInstance();
-        const diffInfo = wtManager.getWorktreeDiff(task.context.worktree.worktreeDir);
+        const diffInfo = wtManager.getWorktreeDiff(task.context.worktree.worktreeDir, task.context.worktree.baseBranch);
         task.context.worktree.changedFiles = diffInfo.changedFiles;
         task.context.worktree.diffSummary = diffInfo.diffSummary;
+        if (diffInfo.diffResult) {
+          task.context.worktree.diffResult = diffInfo.diffResult;
+        }
         
         emitLog('system', `[Worktree 沙箱状态] 分支: ${task.context.worktree.branchName}, 靶机: ${task.context.worktree.targetUrl}`);
         emitLog('system', `[代码变更统计] ${diffInfo.diffSummary || (diffInfo.changedFiles.length + ' 个文件修改')}`);

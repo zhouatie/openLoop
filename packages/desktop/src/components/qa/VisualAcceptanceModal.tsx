@@ -27,15 +27,18 @@ import {
   Square,
   Edit3,
   Plus,
+  Minus,
   Trash2,
   ArrowUp,
   ArrowDown,
   Target,
   Undo2,
+  GitCommitHorizontal,
 } from 'lucide-react';
-import { Task, QaRunRecord, StepTimelineRecord, WorktreeContextInfo } from '@openloop/core';
+import { Task, QaRunRecord, StepTimelineRecord, WorktreeContextInfo, TaskWorktreeDiffResult } from '@openloop/core';
 import { api } from '../../services/api';
 import { toast } from '../Toast';
+import { CodeDiffViewerModal } from '../diff/CodeDiffViewerModal';
 
 interface VisualAcceptanceModalProps {
   task: Task;
@@ -43,6 +46,58 @@ interface VisualAcceptanceModalProps {
   onApproved?: () => void;
   onRejected?: () => void;
   onTaskUpdated?: (task: Task) => void;
+}
+
+// 解析 git diff --stat 摘要信息，以在离线或旧接口降级下也能呈现精准的增删徽章
+function parseGitDiffSummary(rawSummary?: string) {
+  if (!rawSummary) {
+    return {
+      fileStats: new Map<string, { additions: number; deletions: number }>(),
+      totalAdd: 0,
+      totalDel: 0,
+      totalFiles: 0,
+    };
+  }
+  const fileStats = new Map<string, { additions: number; deletions: number }>();
+  let totalAdd = 0;
+  let totalDel = 0;
+  let totalFiles = 0;
+
+  for (const rawLine of rawSummary.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.includes('changed') || line.includes('insertion') || line.includes('deletion')) {
+      const fileMatch = line.match(/(\d+)\s+files?\s+changed/);
+      const addMatch = line.match(/(\d+)\s+insertions?/);
+      const delMatch = line.match(/(\d+)\s+deletions?/);
+      if (fileMatch) totalFiles = parseInt(fileMatch[1], 10);
+      if (addMatch) totalAdd = parseInt(addMatch[1], 10);
+      if (delMatch) totalDel = parseInt(delMatch[1], 10);
+      continue;
+    }
+    const parts = line.split('|');
+    if (parts.length >= 2) {
+      const filePath = parts[0].trim();
+      const changePart = parts[1].trim();
+      const numMatch = changePart.match(/^(\d+)\s*(.*)$/);
+      if (numMatch) {
+        const total = parseInt(numMatch[1], 10);
+        const signs = numMatch[2] || '';
+        const plusCount = (signs.match(/\+/g) || []).length;
+        const minusCount = (signs.match(/-/g) || []).length;
+        let additions = 0;
+        let deletions = 0;
+        if (plusCount + minusCount > 0) {
+          additions = Math.round(total * (plusCount / (plusCount + minusCount)));
+          deletions = total - additions;
+        } else {
+          additions = total;
+        }
+        fileStats.set(filePath, { additions, deletions });
+      }
+    }
+  }
+  return { fileStats, totalAdd, totalDel, totalFiles };
 }
 
 export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
@@ -78,13 +133,46 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped'>('checking');
   const [isStartingSandbox, setIsStartingSandbox] = useState<boolean>(false);
 
+  // 代码变更 Diff 与审查模态框状态
+  const [diffResult, setDiffResult] = useState<TaskWorktreeDiffResult | null>(null);
+  const [isLoadingDiff, setIsLoadingDiff] = useState<boolean>(false);
+  const [diffError, setDiffError] = useState<string | null>(null);
+  const [isDiffModalOpen, setIsDiffModalOpen] = useState<boolean>(false);
+  const [diffModalInitialFile, setDiffModalInitialFile] = useState<string | undefined>(undefined);
+
   const worktree: WorktreeContextInfo | undefined = currentTask.context?.worktree;
   const qaRunId = currentTask.context?.qaRunId || (worktree as any)?.qaRunId;
 
   // 同步外部 task 属性变更
   useEffect(() => {
     setCurrentTask(task);
+    if (task.context?.worktree?.diffResult) {
+      setDiffResult(task.context.worktree.diffResult);
+    }
   }, [task]);
+
+  // 异步获取最新的代码 Diff 详情与增删统计
+  const fetchTaskDiff = useCallback(async () => {
+    if (!currentTask.id || !currentTask.context?.worktree) return;
+    setIsLoadingDiff(true);
+    setDiffError(null);
+    if (import.meta.env?.DEV) console.log(`[VisualAcceptanceModal:Diff] 异步拉取任务 [${currentTask.id}] 代码 Diff 详情`);
+    try {
+      const res = await api.getTaskWorktreeDiff(currentTask.id);
+      if (res && res.hasWorktree) {
+        setDiffResult(res);
+      }
+    } catch (err: any) {
+      if (import.meta.env?.DEV) console.warn('[VisualAcceptanceModal:Diff] 异步拉取 Diff 告警 (优雅降级):', err);
+      setDiffError(err.message || '获取代码变更 Diff 失败');
+    } finally {
+      setIsLoadingDiff(false);
+    }
+  }, [currentTask.id, currentTask.context?.worktree]);
+
+  useEffect(() => {
+    fetchTaskDiff();
+  }, [fetchTaskDiff]);
 
   // 探测沙箱靶机在线状态
   useEffect(() => {
@@ -234,6 +322,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
       if (!file) return false;
       const f = file.trim();
       if (
+        f.endsWith('/') ||
         f.includes('node_modules') ||
         f.startsWith('.worktrees') ||
         f.startsWith('.openloop') ||
@@ -245,6 +334,40 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
       return true;
     });
   }, [worktree?.changedFiles]);
+
+  // 解析历史与上下文中的 diffSummary，用于接口未生效时的无缝优雅降级
+  const fallbackSummary = useMemo(() => {
+    return parseGitDiffSummary(worktree?.diffSummary);
+  }, [worktree?.diffSummary]);
+
+  // 统一结构化改动文件列表（优先采用实时 diffResult，降级兜底采用 cleanChangedFiles + diffSummary 统计）
+  const unifiedChangedFiles = useMemo(() => {
+    if (diffResult && diffResult.files && diffResult.files.length > 0) {
+      return diffResult.files;
+    }
+    return cleanChangedFiles.map((file) => {
+      let additions = 0;
+      let deletions = 0;
+      for (const [pattern, stat] of fallbackSummary.fileStats.entries()) {
+        const cleanPattern = pattern.replace(/^\.\.\.\//, '');
+        if (file === pattern || file.endsWith(cleanPattern)) {
+          additions = stat.additions;
+          deletions = stat.deletions;
+          break;
+        }
+      }
+      return {
+        file,
+        status: 'modified' as const,
+        additions,
+        deletions,
+        diff: '',
+      };
+    });
+  }, [diffResult, cleanChangedFiles, fallbackSummary]);
+
+  const totalInsertions = diffResult?.summary?.insertions ?? fallbackSummary.totalAdd;
+  const totalDeletions = diffResult?.summary?.deletions ?? fallbackSummary.totalDel;
 
   const currentStep: StepTimelineRecord | undefined = steps[currentStepIndex];
 
@@ -1247,25 +1370,98 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                   </div>
                 )}
 
-                {/* 卡片 4: 本次迭代变更文件（严格去除 node_modules 软链） */}
-                {cleanChangedFiles.length > 0 && (
+                {/* 卡片 4: 本次迭代变更文件（极致优雅代码变更审计与 Diff 审查直达） */}
+                {unifiedChangedFiles.length > 0 && (
                   <div>
-                    <label className="text-[11px] font-medium text-[#71717a] block mb-1 flex items-center justify-between">
-                      <span className="flex items-center gap-1">
-                        <FileCode2 size={11} className="text-[#63636b]" />
-                        变更代码文件 ({cleanChangedFiles.length})
-                      </span>
-                      {worktree?.diffSummary && (
-                        <span className="text-[10px] font-mono text-[#85858d]">{worktree.diffSummary}</span>
-                      )}
-                    </label>
-                    <div className="bg-[#fafafc] border border-[#e3e3e8] rounded-[6px] p-2 space-y-1 max-h-[140px] overflow-y-auto font-mono text-[11px] text-[#4b4b54]">
-                      {cleanChangedFiles.map((file, i) => (
-                        <div key={i} className="truncate hover:text-[#1c1c21] flex items-center gap-1.5" title={file}>
-                          <span className="w-1 h-1 rounded-full bg-[#1c1c21] shrink-0" />
-                          <span className="truncate">{file}</span>
-                        </div>
-                      ))}
+                    <div className="flex items-center justify-between mb-1.5 gap-2 select-none">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <GitCommitHorizontal size={12} className="text-[#63636b] shrink-0" />
+                        <span className="text-[11px] font-medium text-[#71717a] shrink-0">
+                          变更代码文件
+                        </span>
+                        <span className="font-mono text-[9.5px] px-1 py-0.2 rounded bg-[#f4f4f6] text-[#52525b] border border-[#e3e3e8] shrink-0">
+                          {unifiedChangedFiles.length}
+                        </span>
+                        {totalInsertions > 0 && (
+                          <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded-[3px] bg-[#ecfdf5] text-[#059669] text-[9.5px] font-mono font-medium border border-[#a7f3d0]/60 shrink-0">
+                            <Plus size={8} strokeWidth={2.4} />
+                            <span>{totalInsertions}</span>
+                          </span>
+                        )}
+                        {totalDeletions > 0 && (
+                          <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded-[3px] bg-[#fef2f2] text-[#dc2626] text-[9.5px] font-mono font-medium border border-[#fecaca]/60 shrink-0">
+                            <Minus size={8} strokeWidth={2.4} />
+                            <span>{totalDeletions}</span>
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (import.meta.env?.DEV) console.log('[VisualAcceptanceModal] 打开完整代码 Diff 审查');
+                          setDiffModalInitialFile(undefined);
+                          setIsDiffModalOpen(true);
+                        }}
+                        className="text-[10px] text-[#4f46e5] hover:text-[#4338ca] hover:bg-[#eeedfd] px-1.5 py-0.5 rounded-[4px] font-medium flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                        title="查看完整代码 Diff"
+                      >
+                        <Eye size={10} />
+                        <span>查看 Diff</span>
+                      </button>
+                    </div>
+
+                    <div className="bg-white border border-[#e3e3e8] rounded-[6px] divide-y divide-[#f1f1f4] max-h-[150px] overflow-y-auto shadow-3xs">
+                      {unifiedChangedFiles.map((item, i) => {
+                        const parts = item.file.split('/');
+                        const fileName = parts.pop() || item.file;
+                        const fileDir = parts.length > 0 ? parts.join('/') + '/' : '';
+
+                        return (
+                          <div
+                            key={item.file || i}
+                            onClick={() => {
+                              if (import.meta.env?.DEV) console.log(`[VisualAcceptanceModal] 点击文件直达 Diff: ${item.file}`);
+                              setDiffModalInitialFile(item.file);
+                              setIsDiffModalOpen(true);
+                            }}
+                            className="group px-2.5 py-1.5 flex items-center justify-between text-[11px] hover:bg-[#fafafc] transition-colors cursor-pointer select-none"
+                            title={`点击查看 ${item.file} 的代码 Diff`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0 pr-2">
+                              <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] group-hover:bg-white flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60 group-hover:border-[#e3e3e8] transition-colors">
+                                <FileCode2 size={11} strokeWidth={2} />
+                              </div>
+                              <div className="truncate flex items-baseline gap-1 min-w-0">
+                                <span className="font-medium text-[#1c1c21] group-hover:text-[#4f46e5] transition-colors truncate">
+                                  {fileName}
+                                </span>
+                                {fileDir && (
+                                  <span className="font-mono text-[9.5px] text-[#85858d] truncate">
+                                    {fileDir}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {(item.additions > 0 || item.deletions > 0) && (
+                                <div className="flex items-center gap-1 font-mono text-[9.5px]">
+                                  {item.additions > 0 && (
+                                    <span className="text-[#059669]">+{item.additions}</span>
+                                  )}
+                                  {item.deletions > 0 && (
+                                    <span className="text-[#dc2626]">-{item.deletions}</span>
+                                  )}
+                                </div>
+                              )}
+                              <div className="w-4 h-4 rounded text-[#85858d] group-hover:text-[#4f46e5] flex items-center justify-center opacity-40 group-hover:opacity-100 transition-opacity">
+                                <ChevronRight size={11} />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1589,6 +1785,31 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 代码变更审查模态框 (Diff Review) */}
+      {isDiffModalOpen && (
+        <CodeDiffViewerModal
+          diffResult={
+            diffResult || {
+              hasWorktree: Boolean(worktree?.worktreeDir),
+              branchName: worktree?.branchName,
+              baseBranch: worktree?.baseBranch,
+              summary: {
+                filesChanged: unifiedChangedFiles.length,
+                insertions: totalInsertions,
+                deletions: totalDeletions,
+              },
+              files: unifiedChangedFiles,
+            }
+          }
+          taskTitle={currentTask.title}
+          initialFile={diffModalInitialFile}
+          isLoading={isLoadingDiff}
+          error={diffError}
+          onRetry={fetchTaskDiff}
+          onClose={() => setIsDiffModalOpen(false)}
+        />
+      )}
     </div>
   );
 };

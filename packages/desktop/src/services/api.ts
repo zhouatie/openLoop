@@ -12,6 +12,8 @@ import {
   QaRunRecord,
   AutomationTask,
   AutomationLogRecord,
+  TaskWorktreeDiffResult,
+  FileDiffItem,
 } from '@openloop/core';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
@@ -446,6 +448,13 @@ export class DesktopApiService {
     return requestJson<{ status: 'running' | 'stopped' | 'none'; port?: number; targetUrl?: string }>(
       `${BASE_URL}/api/tasks/${id}/sandbox/status`
     );
+  }
+
+  async getTaskWorktreeDiff(id: string): Promise<TaskWorktreeDiffResult> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 获取任务 [${id}] 的完整代码 Diff 与变更统计`);
+    }
+    return requestJson<TaskWorktreeDiffResult>(`${BASE_URL}/api/tasks/${id}/diff`);
   }
 
   async startTaskSandbox(id: string): Promise<{ success: boolean; status: string; port?: number; targetUrl?: string; message?: string }> {

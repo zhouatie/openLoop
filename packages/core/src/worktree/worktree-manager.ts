@@ -3,7 +3,7 @@ import path from 'path';
 import net from 'net';
 import http from 'http';
 import { spawn, execSync, ChildProcess } from 'child_process';
-import { WorktreeContextInfo } from '../types';
+import { WorktreeContextInfo, FileDiffItem, TaskWorktreeDiffResult } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
@@ -435,43 +435,266 @@ export class WorktreeManager {
   }
 
   /**
+   * 结构化获取 Worktree 相比主分支的代码修改详情与完整 Diff
+   */
+  public getWorktreeDiffDetail(worktreeDir: string, baseBranch?: string): TaskWorktreeDiffResult {
+    if (!fs.existsSync(worktreeDir)) {
+      return {
+        hasWorktree: false,
+        summary: { filesChanged: 0, insertions: 0, deletions: 0, rawStat: '' },
+        files: [],
+      };
+    }
+
+    try {
+      // 1. 获取当前分支名
+      let branchName = '';
+      try {
+        branchName = execSync('git rev-parse --abbrev-ref HEAD', { cwd: worktreeDir, encoding: 'utf-8' }).trim();
+      } catch {}
+
+      // 2. 确定比较基线祖先 commit
+      let baseCommit = '';
+      if (baseBranch && baseBranch !== 'HEAD' && baseBranch !== branchName) {
+        try {
+          baseCommit = execSync(`git merge-base HEAD "${baseBranch}"`, { cwd: worktreeDir, encoding: 'utf-8' }).trim();
+        } catch {}
+      }
+      if (!baseCommit) {
+        for (const candidate of ['main', 'master', 'origin/main', 'origin/master', 'HEAD~1']) {
+          try {
+            baseCommit = execSync(`git merge-base HEAD "${candidate}"`, { cwd: worktreeDir, encoding: 'utf-8' }).trim();
+            if (baseCommit) break;
+          } catch {}
+        }
+      }
+      if (!baseCommit) {
+        baseCommit = 'HEAD';
+      }
+
+      // 3. 临时对未跟踪文件添加 intent-to-add 以便在 diff 中识别新文件
+      let addedIntent = false;
+      try {
+        const untrackedStatus = execSync('git status --porcelain', { cwd: worktreeDir, encoding: 'utf-8' });
+        if (untrackedStatus.includes('??')) {
+          execSync('git add -N .', { cwd: worktreeDir, stdio: 'ignore' });
+          addedIntent = true;
+        }
+      } catch {}
+
+      const excludeArgs = [
+        `":(exclude)*node_modules*"`,
+        `":(exclude)*.worktrees*"`,
+        `":(exclude)*.openloop*"`,
+        `":(exclude)*.openloop-store*"`,
+        `":(exclude)*dist*"`,
+        `":(exclude)*dist-electron*"`,
+      ].join(' ');
+
+      try {
+        // 4. 读取 numstat 获取每个文件的修改统计
+        const numstatMap = new Map<string, { additions: number; deletions: number; isBinary: boolean }>();
+        try {
+          const numstatOut = execSync(`git diff --numstat ${baseCommit} -- . ${excludeArgs}`, {
+            cwd: worktreeDir,
+            encoding: 'utf-8',
+          });
+          const numstatLines = numstatOut.split('\n').filter((l) => Boolean(l.trim()));
+          for (const line of numstatLines) {
+            const parts = line.split('\t');
+            if (parts.length >= 3) {
+              const addStr = parts[0].trim();
+              const delStr = parts[1].trim();
+              const rawFilePath = parts.slice(2).join('\t').trim();
+              // 兼容重命名语法 {old => new}
+              let targetPath = rawFilePath;
+              if (rawFilePath.includes(' => ')) {
+                const renameMatch = rawFilePath.match(/(?:\{.*? => (.*?)\}|.*? => (.*))/);
+                if (renameMatch) {
+                  targetPath = (renameMatch[1] || renameMatch[2] || rawFilePath).replace(/[{}]/g, '');
+                }
+              }
+              const isBinary = addStr === '-' || delStr === '-';
+              numstatMap.set(targetPath, {
+                additions: isBinary ? 0 : parseInt(addStr, 10) || 0,
+                deletions: isBinary ? 0 : parseInt(delStr, 10) || 0,
+                isBinary,
+              });
+            }
+          }
+        } catch (e: any) {
+          logger.warn(`[getWorktreeDiffDetail] 读取 numstat 告警: ${e.message}`);
+        }
+
+        // 5. 读取 raw diff stat
+        let rawStat = '';
+        try {
+          rawStat = execSync(`git diff --stat ${baseCommit} -- . ${excludeArgs}`, {
+            cwd: worktreeDir,
+            encoding: 'utf-8',
+          }).trim();
+        } catch {}
+
+        // 6. 读取完整 unified diff 并按文件切分
+        let fullDiff = '';
+        try {
+          fullDiff = execSync(`git diff -U3 ${baseCommit} -- . ${excludeArgs}`, {
+            cwd: worktreeDir,
+            encoding: 'utf-8',
+            maxBuffer: 15 * 1024 * 1024,
+          });
+        } catch (e: any) {
+          logger.warn(`[getWorktreeDiffDetail] 读取完整 diff 告警: ${e.message}`);
+        }
+
+        const files: FileDiffItem[] = [];
+        const processedFiles = new Set<string>();
+
+        if (fullDiff.trim()) {
+          const chunks = fullDiff.split(/^diff --git /m);
+          for (const chunk of chunks) {
+            if (!chunk.trim()) continue;
+            const fullChunk = 'diff --git ' + chunk;
+            const headerMatch = chunk.match(/^a\/(.+?)\s+b\/(.+?)(?:\r?\n|$)/);
+            if (!headerMatch) continue;
+
+            const oldPath = headerMatch[1];
+            const newPath = headerMatch[2];
+            const file = newPath || oldPath;
+
+            // 过滤忽略目录
+            if (
+              file.includes('node_modules') ||
+              file.startsWith('.worktrees') ||
+              file.startsWith('.openloop') ||
+              file.includes('.openloop-store') ||
+              file.includes('/dist/') ||
+              file.includes('/dist-electron/')
+            ) {
+              continue;
+            }
+
+            let status: FileDiffItem['status'] = 'modified';
+            if (chunk.includes('new file mode')) {
+              status = 'added';
+            } else if (chunk.includes('deleted file mode')) {
+              status = 'deleted';
+            } else if (chunk.includes('similarity index') || chunk.includes('rename from')) {
+              status = 'renamed';
+            }
+
+            const stat = numstatMap.get(file) || { additions: 0, deletions: 0, isBinary: false };
+            let additions = stat.additions;
+            let deletions = stat.deletions;
+
+            // 如果 numstat 没匹配上，从 chunk 中手动计算
+            if (additions === 0 && deletions === 0 && !stat.isBinary) {
+              const lines = chunk.split('\n');
+              for (const l of lines) {
+                if (l.startsWith('+') && !l.startsWith('+++')) additions++;
+                else if (l.startsWith('-') && !l.startsWith('---')) deletions++;
+              }
+            }
+
+            files.push({
+              file,
+              oldPath: status === 'renamed' ? oldPath : undefined,
+              status,
+              additions,
+              deletions,
+              diff: fullChunk,
+              isBinary: stat.isBinary,
+            });
+            processedFiles.add(file);
+          }
+        }
+
+        // 7. 处理二进制或未在 unified diff 包含但存在改动的文件
+        numstatMap.forEach((stat, file) => {
+          if (!processedFiles.has(file)) {
+            if (
+              file.includes('node_modules') ||
+              file.startsWith('.worktrees') ||
+              file.startsWith('.openloop') ||
+              file.includes('.openloop-store') ||
+              file.includes('/dist/') ||
+              file.includes('/dist-electron/')
+            ) {
+              return;
+            }
+            files.push({
+              file,
+              status: stat.additions > 0 && stat.deletions === 0 ? 'added' : 'modified',
+              additions: stat.additions,
+              deletions: stat.deletions,
+              diff: stat.isBinary ? `[二进制文件变更: ${file}]` : '',
+              isBinary: stat.isBinary,
+            });
+            processedFiles.add(file);
+          }
+        });
+
+        const totalAdditions = files.reduce((acc, f) => acc + f.additions, 0);
+        const totalDeletions = files.reduce((acc, f) => acc + f.deletions, 0);
+
+        return {
+          hasWorktree: true,
+          worktreeDir,
+          branchName,
+          baseBranch,
+          summary: {
+            filesChanged: files.length,
+            insertions: totalAdditions,
+            deletions: totalDeletions,
+            rawStat,
+          },
+          files,
+        };
+      } finally {
+        if (addedIntent) {
+          try {
+            execSync('git reset', { cwd: worktreeDir, stdio: 'ignore' });
+          } catch {}
+        }
+      }
+    } catch (err: any) {
+      logger.error(`[getWorktreeDiffDetail] 获取 diff 失败: ${err.message}`, err);
+      return {
+        hasWorktree: true,
+        worktreeDir,
+        summary: { filesChanged: 0, insertions: 0, deletions: 0, rawStat: '' },
+        files: [],
+      };
+    }
+  }
+
+  /**
    * 获取 Worktree 相比主分支的代码修改与统计（通用 git diff 审计）
    */
-  public getWorktreeDiff(worktreeDir: string): { changedFiles: string[]; diffSummary: string } {
+  public getWorktreeDiff(worktreeDir: string, baseBranch?: string): { changedFiles: string[]; diffSummary: string; diffResult?: TaskWorktreeDiffResult } {
     if (!fs.existsSync(worktreeDir)) {
       return { changedFiles: [], diffSummary: '0 files' };
     }
     try {
-      const statusOut = execSync('git status --porcelain', { cwd: worktreeDir, encoding: 'utf-8' });
-      const changedFiles = statusOut
-        .split('\n')
-        .filter((l) => Boolean(l.trim()))
-        .map((l) => {
-          const m = l.match(/^.{2}\s+(.*)$/);
-          return m ? m[1].trim() : l.slice(3).trim();
-        })
-        .filter((file) => {
-          // 严格排除软链、依赖目录与系统临时产物
-          if (
-            file.includes('node_modules') ||
-            file.startsWith('.worktrees') ||
-            file.startsWith('.openloop') ||
-            file.includes('.openloop-store') ||
-            file.endsWith('/dist')
-          ) {
-            return false;
-          }
-          return true;
-        });
-
+      const detail = this.getWorktreeDiffDetail(worktreeDir, baseBranch);
+      const changedFiles = detail.files.map((f) => f.file);
+      
+      // 生成优雅紧凑的单行统计，严禁包含多行或复杂管道破坏 UI 布局
       let diffSummary = '';
-      try {
-        diffSummary = execSync('git diff --stat HEAD -- . ":(exclude)*node_modules*"', { cwd: worktreeDir, encoding: 'utf-8' }).trim();
-      } catch {
-        diffSummary = `${changedFiles.length} files changed`;
+      if (detail.files.length > 0) {
+        const ins = detail.summary.insertions;
+        const dels = detail.summary.deletions;
+        const count = detail.files.length;
+        diffSummary = `+${ins} / -${dels} (${count} 个文件)`;
+      } else {
+        diffSummary = '无文件变更';
       }
 
-      return { changedFiles, diffSummary };
+      return {
+        changedFiles,
+        diffSummary,
+        diffResult: detail,
+      };
     } catch {
       return { changedFiles: [], diffSummary: '' };
     }

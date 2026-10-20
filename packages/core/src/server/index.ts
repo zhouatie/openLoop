@@ -1224,6 +1224,37 @@ export class OpenLoopServer {
         }
       }
 
+      // Task diff: /api/tasks/:id/diff
+      const taskDiffMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/diff$/);
+      if (taskDiffMatch && method === 'GET') {
+        const taskId = taskDiffMatch[1];
+        const task = this.store.getTask(taskId);
+        if (!task || !task.context?.worktree?.worktreeDir) {
+          return this.sendJson(
+            res,
+            200,
+            {
+              hasWorktree: false,
+              summary: { filesChanged: 0, insertions: 0, deletions: 0, rawStat: '' },
+              files: [],
+            },
+            reqMeta
+          );
+        }
+
+        try {
+          const wt = task.context.worktree;
+          const diffResult = WorktreeManager.getInstance().getWorktreeDiffDetail(
+            wt.worktreeDir,
+            wt.baseBranch
+          );
+          return this.sendJson(res, 200, diffResult, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[Tasks:Diff] 获取 Diff 失败: ${err.message}`, err, { taskId });
+          return this.sendJson(res, 500, { error: err.message }, reqMeta);
+        }
+      }
+
       // Sandbox status: /api/tasks/:id/sandbox/status
       const taskSandboxStatusMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/sandbox\/status$/);
       if (taskSandboxStatusMatch && method === 'GET') {

@@ -333,6 +333,7 @@ export interface WorktreeContextInfo {
   targetUrl: string;
   changedFiles?: string[];
   diffSummary?: string;
+  diffResult?: TaskWorktreeDiffResult;
   qaRunId?: string;
   conflictResolution?: {
     baseBranch: string;
@@ -340,6 +341,30 @@ export interface WorktreeContextInfo {
     resolvedAt: number;
     summary?: string;
   };
+}
+
+export interface FileDiffItem {
+  file: string;
+  oldPath?: string;
+  status: 'modified' | 'added' | 'deleted' | 'renamed';
+  additions: number;
+  deletions: number;
+  diff: string;
+  isBinary?: boolean;
+}
+
+export interface TaskWorktreeDiffResult {
+  hasWorktree: boolean;
+  worktreeDir?: string;
+  branchName?: string;
+  baseBranch?: string;
+  summary: {
+    filesChanged: number;
+    insertions: number;
+    deletions: number;
+    rawStat?: string;
+  };
+  files: FileDiffItem[];
 }
 
 export type QaStepType = 'action' | 'assert' | 'waitFor' | 'query';

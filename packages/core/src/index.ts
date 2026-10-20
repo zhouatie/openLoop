@@ -19,5 +19,6 @@ export * from './qa/midscene-runner';
 export * from './qa/qa-driver';
 export * from './qa/qa-driver-factory';
 export * from './automation/automation-scheduler';
+export * from './worktree/worktree-manager';
 
 
