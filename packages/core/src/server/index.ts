@@ -621,6 +621,7 @@ export class OpenLoopServer {
               id: realId,
               title: rawSub.title || `子工序 #${i + 1}`,
               description: rawSub.description || '',
+              attachments: Array.isArray(rawSub.attachments) ? rawSub.attachments : undefined,
               workflowId: rawSub.workflowId || workflowId,
               status: 'pending',
               kanbanColumn: validColumn,
@@ -884,13 +885,14 @@ export class OpenLoopServer {
         if (!parent) return this.sendJson(res, 404, { error: 'Parent task not found' }, reqMeta);
 
         const body = await this.parseJsonBody(req);
-        const { title, workflowId, description, dependencies } = body;
+        const { title, workflowId, description, dependencies, attachments } = body;
         const subId = `task_sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
         const childTask: Task = {
           id: subId,
           title: title || `子工序 #${(parent.subTaskIds?.length || 0) + 1}`,
           description: description || '',
+          attachments: Array.isArray(attachments) ? attachments : undefined,
           workflowId: workflowId || parent.workflowId,
           status: 'pending',
           kanbanColumn: parent.kanbanColumn,
@@ -960,6 +962,7 @@ export class OpenLoopServer {
             id: realId,
             title: raw.title || `子工序 #${currentSubTaskIds.length - rawSubtasks.length + i + 1}`,
             description: raw.description || parent.description,
+            attachments: Array.isArray(raw.attachments) ? raw.attachments : undefined,
             workflowId: raw.workflowId || parent.workflowId,
             status: 'pending',
             kanbanColumn: parent.kanbanColumn,
