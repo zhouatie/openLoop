@@ -144,6 +144,13 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
         triggerSource: 'shortcut',
       });
 
+      if (import.meta.env?.DEV) {
+        console.log('[QuickRun] 快捷流水线已触发执行 (来源 shortcut, 仅计入流水线调用记录):', {
+          taskId: task.id,
+          workflowId: activeWorkflow.id,
+        });
+      }
+
       setActiveTask(task);
       onTaskCreated?.(task);
 
@@ -446,18 +453,6 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
                       className="text-[10px] text-[#4f46e5] hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
                     >
                       在执行记录中查看 <ExternalLink size={9} />
-                    </button>
-                  )}
-                  {activeTask && onNavigateKanban && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onNavigateKanban();
-                        onClose();
-                      }}
-                      className="text-[10px] text-[#63636b] hover:text-[#1c1c21] hover:underline flex items-center gap-0.5 cursor-pointer"
-                    >
-                      在看板查看 <ExternalLink size={9} />
                     </button>
                   )}
                 </div>
