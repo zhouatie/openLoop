@@ -160,8 +160,26 @@ export interface WorkflowEdge {
 
 export interface WorkflowTaskTemplate {
   titlePlaceholder?: string;       // 任务标题输入指引
-  descriptionTemplate?: string;    // 默认需求与上下文描述 Markdown 骨架模板
+  descriptionTemplate?: string;    // 默认需求与上下文描述 Markdown 骨架模板 (任务说明与提示词模板)
   acceptanceTemplate?: string;     // 默认验收标准与用例骨架模板
+}
+
+/**
+ * 清理与归一化工作流关联的任务模板，去除纯空字段；全空时返回 undefined
+ */
+export function cleanTaskTemplate(tpl?: WorkflowTaskTemplate): WorkflowTaskTemplate | undefined {
+  if (!tpl) return undefined;
+  const titlePlaceholder = tpl.titlePlaceholder?.trim() || undefined;
+  const descriptionTemplate = tpl.descriptionTemplate?.trim() ? tpl.descriptionTemplate : undefined;
+  const acceptanceTemplate = tpl.acceptanceTemplate?.trim() ? tpl.acceptanceTemplate : undefined;
+  if (!titlePlaceholder && !descriptionTemplate && !acceptanceTemplate) {
+    return undefined;
+  }
+  return {
+    ...(titlePlaceholder ? { titlePlaceholder } : {}),
+    ...(descriptionTemplate ? { descriptionTemplate } : {}),
+    ...(acceptanceTemplate ? { acceptanceTemplate } : {}),
+  };
 }
 
 export interface WorkflowDefinition {

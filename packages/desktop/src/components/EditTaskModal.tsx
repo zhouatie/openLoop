@@ -9,10 +9,12 @@ import {
   AlertCircle,
   Inbox,
   ListTodo,
+  Sparkles,
 } from 'lucide-react';
 import { Task, WorkflowDefinition, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { WorkspacePicker } from './WorkspacePicker';
 import { TaskPromptArea } from './TaskPromptArea';
+import { toast } from './Toast';
 
 interface EditTaskModalProps {
   isOpen: boolean;
@@ -182,7 +184,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
             <input
               type="text"
               required
-              placeholder="请输入任务名称"
+              placeholder={currentWf?.taskTemplate?.titlePlaceholder || '请输入任务名称'}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="w-full h-[30px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2.5 text-[12px] text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all"
@@ -327,16 +329,36 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
 
           {/* 任务描述与上下文 */}
           <div>
-            <label className="block text-[11px] font-medium text-[#63636b] mb-1">
-              任务说明与提示词 (可选)
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-medium text-[#63636b]">
+                任务说明与提示词 (可选)
+              </label>
+              {currentWf?.taskTemplate?.descriptionTemplate &&
+                description.trim() !== currentWf.taskTemplate.descriptionTemplate.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDescription(currentWf.taskTemplate!.descriptionTemplate!);
+                      if (import.meta.env?.DEV) {
+                        console.log('[EditTaskModal] 用户套用流程专属模板:', currentWf.name);
+                      }
+                      toast.success(`已套用「${currentWf.name}」专属模板`);
+                    }}
+                    className="text-[10px] text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                    title="将说明框重置为当前流水线的专属结构化模板"
+                  >
+                    <Sparkles size={10} />
+                    <span>套用流程模板</span>
+                  </button>
+                )}
+            </div>
             <TaskPromptArea
               value={description}
               onChange={setDescription}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               disabled={loading}
-              rows={2}
+              rows={3}
             />
           </div>
 
