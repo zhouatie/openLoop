@@ -1,10 +1,11 @@
 import { Buffer } from 'node:buffer';
-
-export type QaPlatform = 'web' | 'android' | 'ios' | 'desktop';
+import { QaPlatform } from '../types';
+export type { QaPlatform };
 
 export interface QaDriverOptions {
   targetUrl?: string;
   appPackage?: string;
+  deviceSerial?: string;
   headless?: boolean;
   viewport?: { width: number; height: number };
   timeoutMs?: number;
@@ -36,6 +37,14 @@ export interface QaDriver {
    * 执行断言步骤（如校验文本、校验无错误覆盖等）
    */
   executeAssert(prompt: string): Promise<QaStepExecutionResult>;
+  /**
+   * 执行智能等待步骤（仅支持多模态推理的驱动实现）
+   */
+  executeWaitFor?(prompt: string): Promise<QaStepExecutionResult>;
+  /**
+   * 返回驱动实际绑定的目标设备标识（如 Android 设备序列号）
+   */
+  getActiveDeviceSerial?(): string;
   /**
    * 截取当前设备/视口屏幕
    */

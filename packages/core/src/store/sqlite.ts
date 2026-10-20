@@ -268,6 +268,23 @@ export class SqliteStore {
       this.db.exec('ALTER TABLE tasks ADD COLUMN auto_decompose INTEGER DEFAULT 1');
     } catch {}
 
+    // 增量表结构平滑迁移：QA 跨端平台 (Android/Web) 扩展字段
+    try {
+      this.db.exec("ALTER TABLE qa_suites ADD COLUMN platform TEXT DEFAULT 'web'");
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE qa_suites ADD COLUMN app_package TEXT');
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE qa_suites ADD COLUMN device_serial TEXT');
+    } catch {}
+    try {
+      this.db.exec("ALTER TABLE qa_runs ADD COLUMN platform TEXT DEFAULT 'web'");
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE qa_runs ADD COLUMN device_serial TEXT');
+    } catch {}
+
     try {
       this.db.exec(`
         CREATE INDEX IF NOT EXISTS idx_tasks_workflow_created ON tasks(workflow_id, created_at DESC);
@@ -1406,7 +1423,10 @@ export class SqliteStore {
       id: r.id,
       name: r.name,
       description: r.description || undefined,
+      platform: r.platform || 'web',
       targetUrl: r.target_url,
+      appPackage: r.app_package || undefined,
+      deviceSerial: r.device_serial || undefined,
       viewport: r.viewport_json ? JSON.parse(r.viewport_json) : undefined,
       steps: JSON.parse(r.steps_json),
       tags: r.tags_json ? JSON.parse(r.tags_json) : undefined,
@@ -1425,7 +1445,10 @@ export class SqliteStore {
       id: r.id,
       name: r.name,
       description: r.description || undefined,
+      platform: r.platform || 'web',
       targetUrl: r.target_url,
+      appPackage: r.app_package || undefined,
+      deviceSerial: r.device_serial || undefined,
       viewport: r.viewport_json ? JSON.parse(r.viewport_json) : undefined,
       steps: JSON.parse(r.steps_json),
       tags: r.tags_json ? JSON.parse(r.tags_json) : undefined,
@@ -1441,19 +1464,23 @@ export class SqliteStore {
     const now = Date.now();
     const suiteToSave: QaSuite = {
       ...suite,
+      platform: suite.platform || 'web',
       updatedAt: now,
       createdAt: suite.createdAt || now,
     };
 
     const stmt = this.db.prepare(`
       INSERT INTO qa_suites (
-        id, name, description, target_url, viewport_json, steps_json,
+        id, name, description, platform, target_url, app_package, device_serial, viewport_json, steps_json,
         tags_json, created_at, updated_at, last_run_status, last_run_duration_ms, last_run_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
+        platform = excluded.platform,
         target_url = excluded.target_url,
+        app_package = excluded.app_package,
+        device_serial = excluded.device_serial,
         viewport_json = excluded.viewport_json,
         steps_json = excluded.steps_json,
         tags_json = excluded.tags_json,
@@ -1467,13 +1494,16 @@ export class SqliteStore {
       suiteToSave.id,
       suiteToSave.name,
       suiteToSave.description || '',
+      suiteToSave.platform || 'web',
       suiteToSave.targetUrl,
+      suiteToSave.appPackage || null,
+      suiteToSave.deviceSerial || null,
       suiteToSave.viewport ? JSON.stringify(suiteToSave.viewport) : null,
       JSON.stringify(suiteToSave.steps || []),
       suiteToSave.tags ? JSON.stringify(suiteToSave.tags) : null,
       suiteToSave.createdAt,
       suiteToSave.updatedAt,
-      suiteToSave.lastRunStatus || 'untested',
+      suiteToSave.lastRunStatus || null,
       suiteToSave.lastRunDurationMs || null,
       suiteToSave.lastRunAt || null
     );
@@ -1605,6 +1635,8 @@ export class SqliteStore {
       id: r.id,
       suiteId: r.suite_id,
       suiteName: r.suite_name,
+      platform: r.platform || 'web',
+      deviceSerial: r.device_serial || undefined,
       taskId: r.task_id || undefined,
       status: r.status,
       totalSteps: r.total_steps,
@@ -1625,6 +1657,8 @@ export class SqliteStore {
       id: r.id,
       suiteId: r.suite_id,
       suiteName: r.suite_name,
+      platform: r.platform || 'web',
+      deviceSerial: r.device_serial || undefined,
       taskId: r.task_id || undefined,
       status: r.status,
       totalSteps: r.total_steps,
@@ -1641,11 +1675,13 @@ export class SqliteStore {
   public saveQaRun(run: QaRunRecord): QaRunRecord {
     const stmt = this.db.prepare(`
       INSERT INTO qa_runs (
-        id, suite_id, suite_name, task_id, status, total_steps, passed_steps,
+        id, suite_id, suite_name, platform, device_serial, task_id, status, total_steps, passed_steps,
         duration_ms, timeline_json, report_rel_path, created_at, finished_at, error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status = excluded.status,
+        platform = COALESCE(excluded.platform, qa_runs.platform),
+        device_serial = COALESCE(excluded.device_serial, qa_runs.device_serial),
         total_steps = excluded.total_steps,
         passed_steps = excluded.passed_steps,
         duration_ms = excluded.duration_ms,
@@ -1659,6 +1695,8 @@ export class SqliteStore {
       run.id,
       run.suiteId,
       run.suiteName,
+      run.platform || 'web',
+      run.deviceSerial || null,
       run.taskId || null,
       run.status,
       run.totalSteps,

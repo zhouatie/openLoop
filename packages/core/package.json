@@ -10,6 +10,7 @@
     "start": "node --watch dist/server-cli.js"
   },
   "dependencies": {
+    "@midscene/android": "^1.16.0",
     "better-sqlite3": "^13.0.3",
     "ws": "^8.18.0"
   },

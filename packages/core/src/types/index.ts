@@ -51,6 +51,7 @@ export interface NodeConfig {
   platform?: 'web' | 'android' | 'ios' | 'desktop';
   testUrl?: string;
   appPackage?: string;
+  deviceSerial?: string;
   initialRoute?: string;
   suiteId?: string;
   instructions?: string[];
@@ -347,7 +348,18 @@ export interface OpenLoopSettings {
   shortcutSuperKey?: ShortcutSuperKey;
   prompts?: AgentPromptTemplates;
   storageRetention?: StorageRetentionSettings;
+  qaAutomation?: QaAutomationSettings;
   [key: string]: any;
+}
+
+/**
+ * UI 自动化测试的多模态视觉模型配置（Android 端视觉推理需要）
+ */
+export interface QaAutomationSettings {
+  modelBaseUrl?: string;
+  modelApiKey?: string;
+  modelName?: string;
+  modelFamily?: string;
 }
 
 export interface WorktreeContextInfo {
@@ -395,6 +407,15 @@ export interface TaskWorktreeDiffResult {
 }
 
 export type QaStepType = 'action' | 'assert' | 'waitFor' | 'query';
+export type QaPlatform = 'web' | 'android' | 'ios' | 'desktop';
+
+export interface AndroidDeviceInfo {
+  serial: string;
+  model: string;
+  version?: string;
+  status: 'device' | 'offline' | 'unauthorized';
+  isEmulator: boolean;
+}
 
 export interface QaStep {
   id: string;
@@ -408,7 +429,10 @@ export interface QaSuite {
   id: string;
   name: string;
   description?: string;
+  platform?: QaPlatform;
   targetUrl: string;
+  appPackage?: string;
+  deviceSerial?: string;
   viewport?: {
     width: number;
     height: number;
@@ -447,6 +471,8 @@ export interface QaRunRecord {
   id: string;
   suiteId: string;
   suiteName: string;
+  platform?: QaPlatform;
+  deviceSerial?: string;
   taskId?: string;
   status: 'running' | 'passed' | 'failed';
   totalSteps: number;

@@ -1033,7 +1033,10 @@ export class MidsceneExecutor implements NodeExecutor {
       const suite: QaSuite = {
         id: suiteId,
         name: `任务验收: ${task.title.slice(0, 30)}`,
+        platform,
         targetUrl: testUrl,
+        appPackage: platform === 'android' ? (node.config.appPackage || testUrl) : undefined,
+        deviceSerial: node.config.deviceSerial,
         steps,
         createdAt: Date.now(),
         updatedAt: Date.now(),

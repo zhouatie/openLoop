@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Play, CheckCircle2, XCircle, Loader2, Eye, Terminal } from 'lucide-react';
+import { X, Play, CheckCircle2, XCircle, Loader2, Eye, Terminal, Smartphone, Globe } from 'lucide-react';
 import { QaSuite, QaRunRecord } from '@openloop/core';
 import { api } from '../../services/api';
 
@@ -14,13 +14,18 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
   onClose,
   onOpenReplay,
 }) => {
+  const isAndroid = suite.platform === 'android';
   const [isRunning, setIsRunning] = useState(true);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [runRecord, setRunRecord] = useState<QaRunRecord | null>(null);
   const [logs, setLogs] = useState<string[]>([
     `[Core:Daemon] 正在连接 openLoop 核心调度服务...`,
-    `[Midscene:Env] 正在初始化无头浏览器视口 (${suite.viewport?.width || 1280}x${suite.viewport?.height || 800})...`,
-    `[Midscene:Nav] 打开目标地址: ${suite.targetUrl}`,
+    isAndroid
+      ? `[Midscene:Android] 正在连接 Android 设备/模拟器 (${suite.deviceSerial || '自动探测'})...`
+      : `[Midscene:Web] 正在初始化无头浏览器视口 (${suite.viewport?.width || 1280}x${suite.viewport?.height || 800})...`,
+    isAndroid
+      ? `[Midscene:Launch] 唤醒设备并拉起目标应用: ${suite.appPackage || suite.targetUrl}`
+      : `[Midscene:Nav] 打开目标地址: ${suite.targetUrl}`,
   ]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -31,13 +36,41 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
     return () => clearInterval(timer);
   }, []);
 
+  // 监听 WebSocket 实时步骤推进事件
+  useEffect(() => {
+    const unsubStart = api.on('qa:step_start', (data: any) => {
+      if (data && (data.suiteId === suite.id || !data.suiteId)) {
+        setCurrentStepIndex(data.stepIndex);
+        setLogs((prev) => [
+          ...prev,
+          `[Midscene:Step #${data.stepIndex + 1}] 开始执行: ${data.step?.prompt || ''}`,
+        ]);
+      }
+    });
+
+    const unsubFinish = api.on('qa:step_finish', (data: any) => {
+      if (data && (data.suiteId === suite.id || !data.suiteId)) {
+        const statusText = data.record?.status === 'passed' ? '✔ 验证通过' : '✖ 验证失败';
+        setLogs((prev) => [
+          ...prev,
+          `[Midscene:Step #${data.stepIndex + 1}] ${statusText} (${data.record?.durationMs || 0}ms)`,
+        ]);
+      }
+    });
+
+    return () => {
+      unsubStart();
+      unsubFinish();
+    };
+  }, [suite.id]);
+
   useEffect(() => {
     let isCancelled = false;
 
     const execute = async () => {
       try {
         if (import.meta.env?.DEV) {
-          console.log('[QaLiveRunModal] 发起测试执行:', { suiteId: suite.id, targetUrl: suite.targetUrl });
+          console.log('[QaLiveRunModal] 发起测试执行:', { suiteId: suite.id, platform: suite.platform });
         }
         setLogs((prev) => [...prev, `[Midscene:AI] 启动多模态视觉推理执行流 (共 ${suite.steps.length} 步)...`]);
 
@@ -88,11 +121,17 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
               <Play size={13} />
             </div>
             <div>
-              <h3 className="text-[13px] font-semibold text-[#1c1c21]">
-                {suite.name} · 执行中
-              </h3>
-              <p className="text-[11px] text-[#85858d] font-mono">
-                {suite.targetUrl} · 耗时: {elapsedSeconds}s
+              <div className="flex items-center gap-1.5">
+                <h3 className="text-[13px] font-semibold text-[#1c1c21]">
+                  {suite.name} · 执行中
+                </h3>
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-[4px] bg-[#f4f4f5] text-[#52525b] text-[10px] font-medium border border-[#e3e3e8]">
+                  {isAndroid ? <Smartphone size={10} /> : <Globe size={10} />}
+                  <span>{isAndroid ? 'Android' : 'Web'}</span>
+                </span>
+              </div>
+              <p className="text-[11px] text-[#85858d] font-mono mt-0.5">
+                {isAndroid ? (suite.appPackage || suite.targetUrl) : suite.targetUrl} · 耗时: {elapsedSeconds}s
               </p>
             </div>
           </div>
@@ -118,7 +157,11 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
               return (
                 <div
                   key={step.id || idx}
-                  className="flex items-center justify-between px-2.5 py-1.5 rounded-[5px] bg-[#fafafc] border border-[#ececf0] text-[11.5px]"
+                  className={`flex items-center justify-between px-2.5 py-1.5 rounded-[5px] border text-[11.5px] transition-colors ${
+                    idx === currentStepIndex && isRunning
+                      ? 'bg-[#eff6ff] border-[#bfdbfe]'
+                      : 'bg-[#fafafc] border-[#ececf0]'
+                  }`}
                 >
                   <div className="flex items-center gap-2 truncate">
                     {isStepDone ? (

@@ -10,6 +10,7 @@ import {
   WorkflowSessionState,
   QaSuite,
   QaRunRecord,
+  AndroidDeviceInfo,
   AutomationTask,
   AutomationLogRecord,
   TaskWorktreeDiffResult,
@@ -807,6 +808,43 @@ export class DesktopApiService {
       method: 'DELETE',
     });
     return Boolean(res?.success);
+  }
+
+  async getAndroidDevices(): Promise<AndroidDeviceInfo[]> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 拉取 Android 在线设备与模拟器列表');
+    }
+    return requestJson<AndroidDeviceInfo[]>(`${BASE_URL}/api/qa/devices/android`);
+  }
+
+  async getAndroidCurrentApp(serial?: string): Promise<{ packageName: string; activityName?: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 获取 Android 设备前台应用:', serial);
+    }
+    const query = serial ? `?serial=${encodeURIComponent(serial)}` : '';
+    return requestJson<{ packageName: string; activityName?: string }>(`${BASE_URL}/api/qa/devices/android/current-app${query}`);
+  }
+
+  async connectAndroidWifi(address: string): Promise<{ success: boolean; message: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 连接 WiFi ADB 设备:', address);
+    }
+    return requestJson<{ success: boolean; message: string }>(`${BASE_URL}/api/qa/devices/android/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address }),
+    });
+  }
+
+  async disconnectAndroidWifi(address: string): Promise<{ success: boolean; message: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 断开 WiFi ADB 设备:', address);
+    }
+    return requestJson<{ success: boolean; message: string }>(`${BASE_URL}/api/qa/devices/android/disconnect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address }),
+    });
   }
 
   async clearQaRuns(params?: { suiteId?: string; olderThanDays?: number; keepLatestPerSuite?: number; runIds?: string[] }): Promise<{ deletedCount: number }> {

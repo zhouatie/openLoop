@@ -31,6 +31,10 @@ import {
   Loader2,
   Camera,
   Terminal,
+  Smartphone,
+  Eye,
+  EyeOff,
+  KeyRound,
 } from 'lucide-react';
 import { api } from '../services/api';
 import {
@@ -79,7 +83,7 @@ const formatBytes = (bytes?: number): string => {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${(bytes / Math.pow(k, i)).toFixed(i > 1 ? 2 : 1)} ${sizes[i]}`;
 };
-export type SettingsTabId = 'agent' | 'prompts' | 'workspace' | 'storage' | 'sidebar' | 'plugins' | 'shortcuts';
+export type SettingsTabId = 'agent' | 'prompts' | 'workspace' | 'qa' | 'storage' | 'sidebar' | 'plugins' | 'shortcuts';
 
 interface SettingsViewProps {
   activeSubTab?: string;
@@ -90,15 +94,58 @@ interface SettingsViewProps {
   onRefreshPlugins?: () => void;
 }
 
+/** Midscene 1.16 支持的模型家族（取值非法会在运行时抛错） */
+const QA_MODEL_FAMILIES = [
+  'qwen3-vl',
+  'qwen3',
+  'qwen3.5',
+  'qwen3.6',
+  'qwen2.5-vl',
+  'doubao-vision',
+  'doubao-seed',
+  'gpt-5',
+  'gpt-6',
+  'gemini',
+  'deepseek',
+  'kimi',
+  'kimi3',
+  'glm-v',
+  'auto-glm',
+  'auto-glm-multilingual',
+  'vlm-ui-tars',
+  'vlm-ui-tars-doubao',
+  'jev',
+  'xiaomi-mimo',
+];
+
 const SETTINGS_TAB_ITEMS: { id: SettingsTabId; label: string; icon: React.ReactNode }[] = [
   { id: 'agent', label: '智能体驱动', icon: <Cpu size={14} strokeWidth={2} /> },
   { id: 'prompts', label: '提示词配置', icon: <Sparkles size={14} strokeWidth={2} /> },
   { id: 'workspace', label: '工作区与环境', icon: <Folder size={14} strokeWidth={2} /> },
+  { id: 'qa', label: '自动化测试', icon: <Smartphone size={14} strokeWidth={2} /> },
   { id: 'storage', label: '存储与清理', icon: <HardDrive size={14} strokeWidth={2} /> },
   { id: 'sidebar', label: '侧边栏排序', icon: <Sliders size={14} strokeWidth={2} /> },
   { id: 'plugins', label: '插件扩展', icon: <Boxes size={14} strokeWidth={2} /> },
   { id: 'shortcuts', label: '快捷键', icon: <Keyboard size={14} strokeWidth={2} /> },
 ];
+
+/**
+ * 将外部子路由标识映射到设置页 Tab。
+ * 优先精确匹配 settings-<tabId>，再回落到历史命名（general/prompt/plugin 等）。
+ */
+const matchSettingsTab = (subTab?: string | null): SettingsTabId | null => {
+  if (!subTab) return null;
+  const exact = SETTINGS_TAB_ITEMS.find((t) => subTab === `settings-${t.id}`);
+  if (exact) return exact.id;
+  if (subTab.includes('prompt')) return 'prompts';
+  if (subTab.includes('plugin')) return 'plugins';
+  if (subTab.includes('sidebar')) return 'sidebar';
+  if (subTab.includes('storage') || subTab.includes('clean') || subTab.includes('data')) return 'storage';
+  if (subTab.includes('general') || subTab.includes('workspace')) return 'workspace';
+  if (subTab.includes('shortcut')) return 'shortcuts';
+  if (subTab.includes('agent')) return 'agent';
+  return null;
+};
 
 const SIDEBAR_ICON_MAP: Record<string, React.ReactNode> = {
   Kanban: <Layers size={14} strokeWidth={2} />,
@@ -186,14 +233,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   // 解析初始选中的 Tab
   const resolveInitialTab = (): SettingsTabId => {
-    if (activeSubTab) {
-      if (activeSubTab.includes('prompt')) return 'prompts';
-      if (activeSubTab.includes('plugin')) return 'plugins';
-      if (activeSubTab.includes('sidebar')) return 'sidebar';
-      if (activeSubTab.includes('general') || activeSubTab.includes('workspace')) return 'workspace';
-      if (activeSubTab.includes('shortcut')) return 'shortcuts';
-      if (activeSubTab.includes('agent')) return 'agent';
-    }
+    const fromProps = matchSettingsTab(activeSubTab);
+    if (fromProps) return fromProps;
     try {
       const saved = localStorage.getItem('openloop_settings_active_tab') as SettingsTabId;
       if (saved && SETTINGS_TAB_ITEMS.some((t) => t.id === saved)) {
@@ -218,6 +259,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [thinking, setThinking] = useState<ThinkingLevel>('high');
   const [defaultCwd, setDefaultCwd] = useState('');
   const [autoSnapshot, setAutoSnapshot] = useState(true);
+
+  // 自动化测试多模态模型配置（仅 Android 视觉推理需要）
+  const [qaModelBaseUrl, setQaModelBaseUrl] = useState('');
+  const [qaModelApiKey, setQaModelApiKey] = useState('');
+  const [qaModelName, setQaModelName] = useState('');
+  const [qaModelFamily, setQaModelFamily] = useState('');
+  const [showQaApiKey, setShowQaApiKey] = useState(false);
 
   // 提示词状态
   const [prompts, setPrompts] = useState<AgentPromptTemplates>({ ...DEFAULT_PROMPT_TEMPLATES });
@@ -333,15 +381,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // 当外部 activeSubTab 发生变化时同步更新
   useEffect(() => {
-    if (!activeSubTab) return;
-    let target: SettingsTabId = 'agent';
-    if (activeSubTab.includes('prompt')) target = 'prompts';
-    else if (activeSubTab.includes('plugin')) target = 'plugins';
-    else if (activeSubTab.includes('storage') || activeSubTab.includes('clean') || activeSubTab.includes('data')) target = 'storage';
-    else if (activeSubTab.includes('sidebar')) target = 'sidebar';
-    else if (activeSubTab.includes('general') || activeSubTab.includes('workspace')) target = 'workspace';
-    else if (activeSubTab.includes('shortcut')) target = 'shortcuts';
-    else if (activeSubTab.includes('agent')) target = 'agent';
+    const target = matchSettingsTab(activeSubTab);
+    if (!target) return;
 
     setActiveTab((prev) => {
       if (prev !== target) {
@@ -386,6 +427,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         }
         if (settings.prompts) {
           setPrompts({ ...DEFAULT_PROMPT_TEMPLATES, ...settings.prompts });
+        }
+        if (settings.qaAutomation) {
+          setQaModelBaseUrl(settings.qaAutomation.modelBaseUrl || '');
+          setQaModelApiKey(settings.qaAutomation.modelApiKey || '');
+          setQaModelName(settings.qaAutomation.modelName || '');
+          setQaModelFamily(settings.qaAutomation.modelFamily || '');
         }
       }
     } catch (err) {
@@ -574,6 +621,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     } finally {
       setIsExporting(false);
     }
+  };
+
+  // 自动化测试模型配置即时保存
+  const saveQaAutomation = (override?: Partial<{ modelBaseUrl: string; modelApiKey: string; modelName: string; modelFamily: string }>) => {
+    handleSave({
+      qaAutomation: {
+        modelBaseUrl: qaModelBaseUrl.trim(),
+        modelApiKey: qaModelApiKey.trim(),
+        modelName: qaModelName.trim(),
+        modelFamily: qaModelFamily.trim(),
+        ...override,
+      },
+    });
   };
 
   const copyToClipboard = (text: string, key: string) => {
@@ -1277,6 +1337,124 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </span>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB: 自动化测试 ==================== */}
+        {activeTab === 'qa' && (
+          <div className="space-y-5 animate-in fade-in duration-150">
+            <div>
+              <div className="text-[11.5px] text-[#85858d] mb-1.5 px-0.5 font-normal">
+                自动化测试
+              </div>
+
+              <div className="bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                {/* Base URL */}
+                <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium text-[#1c1c21]">模型服务地址</div>
+                    <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                      兼容 OpenAI 协议的 Base URL，例如 https://dashscope.aliyuncs.com/compatible-mode/v1
+                    </div>
+                  </div>
+                  <div className="shrink-0 self-center">
+                    <input
+                      type="text"
+                      value={qaModelBaseUrl}
+                      onChange={(e) => setQaModelBaseUrl(e.target.value)}
+                      onBlur={() => saveQaAutomation()}
+                      placeholder="留空使用官方默认地址"
+                      className="w-72 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#85858d] outline-none shadow-sm focus:border-[#4f46e5]"
+                    />
+                  </div>
+                </div>
+
+                {/* API Key */}
+                <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium text-[#1c1c21] flex items-center gap-1.5">
+                      接口密钥
+                      <KeyRound size={11} className="text-[#a1a1aa]" />
+                    </div>
+                    <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                      仅保存在本地 SQLite，用于 Android 端截图的视觉推理
+                    </div>
+                  </div>
+                  <div className="shrink-0 self-center relative flex items-center">
+                    <input
+                      type={showQaApiKey ? 'text' : 'password'}
+                      value={qaModelApiKey}
+                      onChange={(e) => setQaModelApiKey(e.target.value)}
+                      onBlur={() => saveQaAutomation()}
+                      placeholder="sk-..."
+                      autoComplete="off"
+                      className="w-72 h-[26px] pl-2 pr-7 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#85858d] outline-none shadow-sm focus:border-[#4f46e5]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowQaApiKey((v) => !v)}
+                      className="absolute right-1.5 p-0.5 text-[#85858d] hover:text-[#1c1c21] rounded transition-colors cursor-pointer"
+                      title={showQaApiKey ? '隐藏密钥' : '显示密钥'}
+                    >
+                      {showQaApiKey ? <EyeOff size={12} /> : <Eye size={12} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 模型名称 */}
+                <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium text-[#1c1c21]">模型名称</div>
+                    <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                      需支持图像输入的视觉语言模型，填服务商返回的模型 ID
+                    </div>
+                  </div>
+                  <div className="shrink-0 self-center">
+                    <input
+                      type="text"
+                      value={qaModelName}
+                      onChange={(e) => setQaModelName(e.target.value)}
+                      onBlur={() => saveQaAutomation()}
+                      placeholder="例如 deepseek/deepseek-flash"
+                      className="w-72 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#85858d] outline-none shadow-sm focus:border-[#4f46e5]"
+                    />
+                  </div>
+                </div>
+
+                {/* 模型家族 */}
+                <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium text-[#1c1c21]">模型家族</div>
+                    <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                      Midscene 用于适配不同厂商的推理与坐标格式，必须从下拉列表中选择
+                    </div>
+                  </div>
+                  <div className="shrink-0 self-center">
+                    <select
+                      value={qaModelFamily}
+                      onChange={(e) => {
+                        setQaModelFamily(e.target.value);
+                        saveQaAutomation({ modelFamily: e.target.value });
+                      }}
+                      className="w-72 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] outline-none shadow-sm focus:border-[#4f46e5] bg-white cursor-pointer"
+                    >
+                      <option value="">自动识别</option>
+                      {QA_MODEL_FAMILIES.map((f) => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-[#f8f8fb] border border-[#e3e3e8] rounded-[10px] px-3.5 py-3">
+              <div className="text-[11.5px] text-[#63636b] leading-relaxed">
+                Web 端测试基于浏览器 DOM 定位，不需要模型密钥，也不产生调用成本。
+                Android 端没有 DOM，只能读取截图判断点击位置，因此需要视觉模型。
+                未配置密钥时 Android 自动降级为 ADB 直通模式（返回键、Home、坐标点击、文本定位），用例仍会真实执行。
               </div>
             </div>
           </div>

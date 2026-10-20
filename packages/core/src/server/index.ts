@@ -26,6 +26,8 @@ import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
+import { AndroidDeviceManager } from '../qa/android-device-manager';
+import { applyQaModelEnv } from '../qa/model-env';
 import { WorktreeManager, TaskProcessManager, findRepoRoot } from '../worktree/worktree-manager';
 import { interpolateString } from '../executors';
 import { getAgentProviderMeta, resolveResumeCommand } from '../constants/agent-providers';
@@ -165,6 +167,9 @@ export class OpenLoopServer {
           serverLogger.info(`[WS:Closed] 客户端断开连接 (Code: ${code}, Reason: "${reason.toString()}"), 剩余活跃客户端数: ${this.clients.size}`);
         });
       });
+
+      // 启动时把界面配置的多模态模型参数注入进程环境（Android 视觉推理依赖）
+      applyQaModelEnv(this.store.getSettings()?.qaAutomation);
 
       this.httpServer.listen(this.port, this.host, () => {
         serverLogger.info(`[openLoop Core] 服务就绪，监听地址: http://${this.host}:${this.port}`);
@@ -1661,6 +1666,7 @@ export class OpenLoopServer {
         serverLogger.info(`[Settings:Update] 更新全局配置`, { keys: Object.keys(body) });
         const previous = this.store.getSettings();
         const updated = this.store.updateSettings(body);
+        applyQaModelEnv(updated.qaAutomation);
 
         // 仅有模型 / 思考强度变化时，才同步到已活跃的 Agent 会话（热切换，不重启进程）
         const modelChanged = (previous.defaultModel || '') !== (updated.defaultModel || '');
@@ -1807,16 +1813,44 @@ export class OpenLoopServer {
         return this.sendJson(res, 200, suites, reqMeta);
       }
 
+      // Android 设备探测与管理 API
+      if (pathname === '/api/qa/devices/android' && method === 'GET') {
+        const devices = await AndroidDeviceManager.getDevices();
+        return this.sendJson(res, 200, devices, reqMeta);
+      }
+
+      if (pathname === '/api/qa/devices/android/current-app' && method === 'GET') {
+        const serial = parsedUrl.searchParams.get('serial') || undefined;
+        const app = await AndroidDeviceManager.getCurrentForegroundApp(serial);
+        return this.sendJson(res, 200, app || { packageName: '' }, reqMeta);
+      }
+
+      if (pathname === '/api/qa/devices/android/connect' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const resConn = await AndroidDeviceManager.connectWifiDevice(body.address || body.ipPort || '');
+        return this.sendJson(res, resConn.success ? 200 : 400, resConn, reqMeta);
+      }
+
+      if (pathname === '/api/qa/devices/android/disconnect' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const resDis = await AndroidDeviceManager.disconnectWifiDevice(body.address || body.ipPort || '');
+        return this.sendJson(res, resDis.success ? 200 : 400, resDis, reqMeta);
+      }
+
       if (pathname === '/api/qa/suites' && method === 'POST') {
         const body = await this.parseJsonBody(req);
-        if (!body.name || !body.targetUrl) {
-          return this.sendJson(res, 400, { error: 'name and targetUrl are required' }, reqMeta);
+        const target = body.targetUrl || body.appPackage;
+        if (!body.name || !target) {
+          return this.sendJson(res, 400, { error: 'name and targetUrl (or appPackage) are required' }, reqMeta);
         }
         const suite: QaSuite = {
           id: body.id || `suite_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           name: body.name,
           description: body.description,
-          targetUrl: body.targetUrl,
+          platform: body.platform || 'web',
+          targetUrl: body.targetUrl || body.appPackage || '',
+          appPackage: body.appPackage,
+          deviceSerial: body.deviceSerial,
           viewport: body.viewport,
           steps: body.steps || [],
           tags: body.tags || [],
@@ -1824,7 +1858,7 @@ export class OpenLoopServer {
           updatedAt: Date.now(),
           lastRunStatus: body.lastRunStatus || 'untested',
         };
-        serverLogger.info(`[QA:SaveSuite] 保存测试套件: ${suite.name} (ID: ${suite.id})`);
+        serverLogger.info(`[QA:SaveSuite] 保存测试套件: ${suite.name} (ID: ${suite.id}, 平台: ${suite.platform})`);
         const saved = this.store.saveQaSuite(suite);
         return this.sendJson(res, 200, saved, reqMeta);
       }
@@ -1885,12 +1919,15 @@ export class OpenLoopServer {
       if (pathname === '/api/qa/run' && method === 'POST') {
         const body = await this.parseJsonBody(req);
         let suite = body.suiteId ? this.store.getQaSuiteById(body.suiteId) : null;
-        if (!suite && body.targetUrl && body.steps) {
+        if (!suite && (body.targetUrl || body.appPackage) && body.steps) {
           // 允许临时传入内联用例
           suite = {
             id: `temp_${Date.now()}`,
             name: body.name || '临时执行用例',
-            targetUrl: body.targetUrl,
+            platform: body.platform || 'web',
+            targetUrl: body.targetUrl || body.appPackage || '',
+            appPackage: body.appPackage,
+            deviceSerial: body.deviceSerial,
             steps: body.steps,
             viewport: body.viewport,
             createdAt: Date.now(),
@@ -1904,6 +1941,7 @@ export class OpenLoopServer {
         const runner = new MidsceneRunner({
           artifactBaseDir: path.join(this.store.getDataDir(), 'artifacts'),
           serverBaseUrl: `http://${this.host}:${this.port}`,
+          platform: suite.platform,
           onStepStart: (stepIndex, step) => {
             this.broadcast({
               type: 'qa:step_start',

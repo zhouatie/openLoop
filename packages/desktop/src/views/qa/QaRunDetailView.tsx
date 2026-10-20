@@ -11,6 +11,7 @@ import {
   Sparkles,
   Camera,
   Globe,
+  Smartphone,
   RefreshCw,
   Trash2,
 } from 'lucide-react';
@@ -75,6 +76,8 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
 
   const steps = run?.timeline || [];
   const currentStep: StepTimelineRecord | undefined = steps[currentStepIndex];
+  const isAndroid = run?.platform === 'android';
+  const androidTarget = suite?.appPackage || run?.deviceSerial || run?.suiteName || '目标应用';
 
   // 自动回放定时器
   useEffect(() => {
@@ -215,9 +218,14 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
       {/* 元数据状态细条 */}
       <div className="px-4 py-2 bg-[#fafafc] border-b border-[#e3e3e8] flex items-center justify-between text-[11px] text-[#71717a] shrink-0">
         <div className="flex items-center gap-5">
-          <div className="flex items-center gap-1">
-            <span className="text-[#a1a1aa]">测试地址:</span>
-            {suite?.targetUrl ? (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[#a1a1aa]">{isAndroid ? '目标应用:' : '测试地址:'}</span>
+            {isAndroid ? (
+              <span className="font-mono text-[#4b4b53] flex items-center gap-1">
+                <Smartphone size={11} className="text-[#a1a1aa]" />
+                <span>{androidTarget}</span>
+              </span>
+            ) : suite?.targetUrl ? (
               <a
                 href={suite.targetUrl}
                 target="_blank"
@@ -341,21 +349,36 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
           <div className="flex-1 relative flex items-center justify-center p-6 overflow-hidden select-none">
             {imageUrl ? (
               <div className="relative max-w-full max-h-full bg-white rounded-[8px] border border-[#d8d8de] shadow-[0_4px_24px_rgba(0,0,0,0.06)] overflow-hidden flex flex-col">
-                {/* 模拟浏览器头部栏 */}
+                {/* 视口头部栏：Web 模拟浏览器 / Android 模拟设备状态栏 */}
                 <div className="h-[32px] px-3 bg-[#fbfbfd] border-b border-[#ececf0] flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
-                  </div>
-
-                  <div className="flex-1 max-w-xs mx-auto">
-                    <div className="bg-[#f0f1f4] border border-[#e3e3e8] rounded-[4px] px-2.5 py-0.5 text-center font-mono text-[10px] text-[#71717a] truncate">
-                      {suite?.targetUrl || 'http://localhost:3000'}
-                    </div>
-                  </div>
-
-                  <span className="text-[10px] font-mono text-[#a1a1aa]">1280 x 800</span>
+                  {isAndroid ? (
+                    <>
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#71717a]">
+                        <Smartphone size={11} className="text-[#4f46e5]" />
+                        <span>{run?.deviceSerial || '自动调度设备'}</span>
+                      </div>
+                      <div className="flex-1 max-w-xs mx-auto">
+                        <div className="bg-[#f0f1f4] border border-[#e3e3e8] rounded-[4px] px-2.5 py-0.5 text-center font-mono text-[10px] text-[#71717a] truncate">
+                          {suite?.appPackage || 'Android 应用'}
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-mono text-[#a1a1aa]">Android</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
+                      </div>
+                      <div className="flex-1 max-w-xs mx-auto">
+                        <div className="bg-[#f0f1f4] border border-[#e3e3e8] rounded-[4px] px-2.5 py-0.5 text-center font-mono text-[10px] text-[#71717a] truncate">
+                          {suite?.targetUrl || 'http://localhost:3000'}
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-mono text-[#a1a1aa]">1280 x 800</span>
+                    </>
+                  )}
                 </div>
 
                 {/* 截图本体 */}

@@ -99,12 +99,14 @@ export class MidsceneRunner {
       fs.mkdirSync(runDir, { recursive: true });
     }
 
-    const platform = this.options.platform || 'web';
+    const platform = this.options.platform || suite.platform || 'web';
     qaLogger.info(`[MidsceneRunner] 开始执行自动化测试套件: ${suite.name} (ID: ${suite.id}, 平台: ${platform})`, {
       runId,
       suiteId: suite.id,
       stepsCount: suite.steps.length,
       targetUrl: suite.targetUrl,
+      appPackage: suite.appPackage,
+      deviceSerial: suite.deviceSerial,
       taskId,
     });
 
@@ -119,6 +121,7 @@ export class MidsceneRunner {
 
     let driver: QaDriver | null = null;
     let driverReady = false;
+    let driverInitError: string | undefined;
 
     try {
       if (this.options.signal?.aborted) {
@@ -141,20 +144,26 @@ export class MidsceneRunner {
 
       await driver.initialize({
         targetUrl: suite.targetUrl,
+        appPackage: suite.appPackage,
+        deviceSerial: suite.deviceSerial,
         viewport: { width, height },
         headless: true,
       });
       driverReady = true;
       this.options.onLog?.(`[QA 引擎] ${platform.toUpperCase()} 测试驱动初始化就绪`);
 
-      if (suite.targetUrl) {
-        this.options.onLog?.(`[QA 引擎] 导航到目标环境: ${suite.targetUrl}`);
-        await driver.navigateOrLaunch(suite.targetUrl);
+      const target = platform === 'android' ? (suite.appPackage || suite.targetUrl) : suite.targetUrl;
+      if (target) {
+        this.options.onLog?.(`[QA 引擎] ${platform === 'android' ? '拉起目标应用' : '导航到目标环境'}: ${target}`);
+        await driver.navigateOrLaunch(target);
       }
     } catch (err: any) {
-      qaLogger.warn(`[MidsceneRunner] 驱动启动失败，转入模拟兜底模式: ${err.message}`);
-      this.options.onLog?.(`[QA 引擎 Warn] 真实驱动就绪异常，启用快照模式: ${err.message}`, 'warn');
+      driverInitError = err.message || '测试驱动初始化失败';
       driverReady = false;
+      runStatus = 'failed';
+      errorMessage = driverInitError;
+      qaLogger.error(`[MidsceneRunner] 驱动启动失败，测试标记为失败: ${driverInitError}`, { platform });
+      this.options.onLog?.(`[QA 引擎 Error] 测试驱动启动失败: ${driverInitError}`, 'error');
     }
 
     try {
@@ -176,6 +185,8 @@ export class MidsceneRunner {
           try {
             if (step.type === 'action') {
               stepResult = await driver.executeAction(step.prompt);
+            } else if (step.type === 'waitFor' && driver.executeWaitFor) {
+              stepResult = await driver.executeWaitFor(step.prompt);
             } else {
               stepResult = await driver.executeAssert(step.prompt);
             }
@@ -187,11 +198,11 @@ export class MidsceneRunner {
             };
           }
         } else {
-          // 降级模式模拟响应
-          await new Promise((r) => setTimeout(r, 200));
+          // 驱动未就绪：不做任何伪造结果，直接标记失败并附上启动错误
           stepResult = {
-            passed: true,
-            thought: `[模拟模式] 执行指令: ${step.prompt}`,
+            passed: false,
+            thought: `测试驱动不可用，未执行该步骤: ${step.prompt}`,
+            errorMessage: driverInitError,
           };
         }
 
@@ -243,7 +254,8 @@ export class MidsceneRunner {
         } else {
           runStatus = 'failed';
           errorMessage = stepResult.errorMessage;
-          if (!step.optional) {
+          // 驱动不可用时后续步骤必然无法执行，统一标记失败而不中断时间线记录
+          if (!step.optional && driverReady) {
             break;
           }
         }
@@ -260,6 +272,7 @@ export class MidsceneRunner {
     fs.writeFileSync(path.join(runDir, 'timeline.json'), JSON.stringify(timeline, null, 2), 'utf-8');
 
     const serverUrl = this.options.serverBaseUrl || '';
+    const activeDeviceSerial = driverReady ? driver?.getActiveDeviceSerial?.() || undefined : undefined;
     const record: QaRunRecord = {
       id: runId,
       suiteId: suite.id,
@@ -269,6 +282,8 @@ export class MidsceneRunner {
       durationMs: totalDuration,
       passedSteps,
       totalSteps: suite.steps.length,
+      platform,
+      deviceSerial: suite.deviceSerial || activeDeviceSerial,
       createdAt: startTime,
       finishedAt: Date.now(),
       reportUrl: `${serverUrl}/artifacts/${runId}/report.html`,
