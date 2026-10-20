@@ -173,7 +173,7 @@ export interface KanbanCardProps {
   onRun: (taskId: string) => void;
   onSkipNode: (taskId: string, nodeId?: string) => void;
   onVisualAcceptance: (task: Task) => void;
-  onApprove: (taskId: string, approved: boolean) => void;
+  onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
 }
 
 const KanbanCardComponent: React.FC<KanbanCardProps> = ({
@@ -279,10 +279,6 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   return (
     <div
       onClick={() => onSelect(task)}
-      style={{
-        contentVisibility: 'auto',
-        containIntrinsicSize: 'auto 110px',
-      }}
       className={`group bg-white border rounded-[8px] p-3 transition-all cursor-pointer ${
         isSelected
           ? 'ring-2 ring-[#4f46e5] border-transparent shadow-[0_2px_10px_rgba(79,70,229,0.15)]'
@@ -848,14 +844,13 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
 export const KanbanCard = memo(KanbanCardComponent, (prev, next) => {
   return (
     prev.task === next.task &&
-    prev.allTasks === next.allTasks &&
+    (prev.task.kind !== 'group' || prev.allTasks === next.allTasks) &&
     prev.workflow === next.workflow &&
     prev.isSelected === next.isSelected &&
     prev.isCancelling === next.isCancelling &&
     prev.isMoving === next.isMoving &&
     prev.isRunning === next.isRunning &&
     prev.isSkipping === next.isSkipping &&
-    prev.isApproving === next.isApproving &&
-    prev.workflows === next.workflows
+    prev.isApproving === next.isApproving
   );
 });

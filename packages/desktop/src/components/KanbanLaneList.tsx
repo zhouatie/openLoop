@@ -26,7 +26,7 @@ export interface KanbanLaneListProps {
   onRunTask: (taskId: string) => void;
   onSkipNode: (taskId: string, nodeId?: string) => void;
   onVisualAcceptance: (task: Task) => void;
-  onApprove: (taskId: string, approved: boolean) => void;
+  onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
 }
 
 const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
@@ -135,4 +135,15 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
   );
 };
 
-export const KanbanLaneList = memo(KanbanLaneListComponent);
+export const KanbanLaneList = memo(KanbanLaneListComponent, (prev, next) => {
+  return (
+    prev.tasks === next.tasks &&
+    prev.selectedTaskId === next.selectedTaskId &&
+    prev.cancellingTaskId === next.cancellingTaskId &&
+    prev.movingTaskId === next.movingTaskId &&
+    prev.runningTaskId === next.runningTaskId &&
+    prev.skippingTaskId === next.skippingTaskId &&
+    prev.approvingId === next.approvingId &&
+    prev.wfMap === next.wfMap
+  );
+});

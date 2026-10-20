@@ -145,8 +145,37 @@ export const AppContent: React.FC = () => {
         }
         setPlugins(mergedPlugins);
       }
-      setWorkflows(workflowsRes);
-      setTasks(tasksRes);
+      setWorkflows((prev) => {
+        if (!workflowsRes) return prev;
+        if (
+          prev.length === workflowsRes.length &&
+          prev.every((w, i) => w.id === workflowsRes[i]?.id && w.updatedAt === workflowsRes[i]?.updatedAt)
+        ) {
+          return prev;
+        }
+        return workflowsRes;
+      });
+
+      setTasks((prev) => {
+        if (!tasksRes) return prev;
+        const prevMap = new Map(prev.map((t) => [t.id, t]));
+        let hasChanges = prev.length !== tasksRes.length;
+        const merged = tasksRes.map((t) => {
+          const old = prevMap.get(t.id);
+          if (
+            old &&
+            old.updatedAt === t.updatedAt &&
+            old.status === t.status &&
+            old.kanbanColumn === t.kanbanColumn &&
+            old.currentNodeId === t.currentNodeId
+          ) {
+            return old;
+          }
+          hasChanges = true;
+          return t;
+        });
+        return hasChanges ? merged : prev;
+      });
     } catch (err) {
       console.warn('[App] Fetch error, will retry with WS', err);
     }
