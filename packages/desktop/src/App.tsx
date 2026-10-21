@@ -44,6 +44,8 @@ export const AppContent: React.FC = () => {
   const [isQuickRunModalOpen, setIsQuickRunModalOpen] = useState<boolean>(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
     try {
+      // 权限向导依赖 Electron 主进程能力；浏览器预览（含靶机）无法检测与授权
+      if (!window.electronAPI?.checkSystemStatus) return false;
       return localStorage.getItem('openloop_onboarding_completed') !== 'true';
     } catch {
       return false;
