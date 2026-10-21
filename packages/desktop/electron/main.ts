@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Notification } from 'electron';
 import path from 'path';
 import os from 'os';
 import http from 'http';
@@ -33,6 +33,9 @@ function syncSystemShellEnv() {
 }
 
 syncSystemShellEnv();
+
+// Windows 的系统通知按 AppUserModelID 归因，须与 electron-builder 的 appId 对齐
+app.setAppUserModelId('com.openloop.desktop');
 
 // 开发态隔离 UserData，避免与稳定生产版 Electron 共享 LocalStorage/IndexedDB/Cookies
 if (!app.isPackaged) {
@@ -454,6 +457,28 @@ ipcMain.handle('system:checkSystemStatus', async () => {
     hasFullDiskAccess,
     tools: toolStatuses,
   };
+});
+
+// 注册系统级 IPC：桌面通知（任务进入待验收 / 执行失败等需要人工介入的状态时提醒）
+ipcMain.handle('notification:show', (_event, payload: { title: string; body: string }) => {
+  if (!payload?.title || !Notification.isSupported()) return false;
+  if (!app.isPackaged) {
+    console.log('[Desktop Main] Showing desktop notification:', payload);
+  }
+  const notification = new Notification({ title: payload.title, body: payload.body });
+  // 点击通知唤起主窗口，直达待处理现场
+  notification.on('click', () => {
+    if (process.platform === 'darwin') app.dock?.show();
+    if (!mainWindow) {
+      createWindow();
+      return;
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+  notification.show();
+  return true;
 });
 
 app.whenReady().then(async () => {

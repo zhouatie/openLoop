@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('system:openPrivacySetting', type),
   checkSystemStatus: () =>
     ipcRenderer.invoke('system:checkSystemStatus'),
+  notify: (payload: { title: string; body: string }) =>
+    ipcRenderer.invoke('notification:show', payload),
   send: (channel: string, data: any) => ipcRenderer.send(channel, data),
   on: (channel: string, callback: (...args: any[]) => void) => {
     const subscription = (_event: any, ...args: any[]) => callback(...args);

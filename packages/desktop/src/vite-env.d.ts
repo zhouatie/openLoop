@@ -13,6 +13,7 @@ interface Window {
       hasFullDiskAccess: boolean;
       tools: { name: string; command: string; available: boolean; path?: string }[];
     }>;
+    notify?: (payload: { title: string; body: string }) => Promise<boolean>;
     send: (channel: string, data: any) => void;
     on: (channel: string, callback: (...args: any[]) => void) => () => void;
   };
