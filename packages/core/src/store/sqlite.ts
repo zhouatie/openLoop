@@ -303,18 +303,21 @@ export class SqliteStore {
       this.seedInitialData();
     } else {
       // 检查并增量补齐/更新内置核心工作流
-      this.saveWorkflow(this.getAppDeployWorkflowDefinition());
-      this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
       this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
+    }
+
+    // 清理已废弃的内置工作流与示例自动化任务
+    try {
+      this.db.prepare("DELETE FROM workflows WHERE id IN ('wf_app_build_deploy', 'wf_agent_feature_dev', 'wf_auto_dev_qa')").run();
+      this.db.prepare("DELETE FROM automation_tasks WHERE id IN ('auto_gh_issues_sync', 'auto_twitter_pipeline', 'auto_cli_polling')").run();
+    } catch {
+      // 忽略
     }
 
     // 平滑补齐或迁移标签数据
     try {
       const defaultTagMap: Record<string, string[]> = {
-        wf_agent_feature_dev: ['研发', 'AI Agent'],
         wf_worktree_auto_dev_qa_merge: ['研发', '沙箱', 'QA'],
-        wf_app_build_deploy: ['部署', '构建', 'CI/CD'],
-        wf_auto_dev_qa: ['研发', '测试', 'AI Agent'],
       };
       const rows = this.db.prepare('SELECT id, name, tags_json, variables_json FROM workflows').all() as any[];
       const updateStmt = this.db.prepare('UPDATE workflows SET tags_json = ?, variables_json = ? WHERE id = ?');
@@ -405,92 +408,6 @@ export class SqliteStore {
     } catch (e) {
       console.warn('[SqliteStore] recoverOrphanRunningTasks error:', e);
     }
-  }
-
-  private getAppDeployWorkflowDefinition(): WorkflowDefinition {
-    return {
-      id: 'wf_app_build_deploy',
-      name: '全自动化应用构建与部署流水线',
-      description: '通用应用部署流水线：环境自检 -> 生产全量构建 -> 应用部署发布 -> 线上健康探针 -> 发布上线验收门禁',
-      tags: ['部署', '构建', 'CI/CD'],
-      taskTemplate: {
-        titlePlaceholder: '输入应用全量构建发布说明 (如: 发布桌面端 v1.0.2 正式版)',
-        descriptionTemplate: [
-          '### 应用构建与发布说明',
-          '- 目标版本 / Tag: ',
-          '- 构建目标环境: production',
-          '- 核心改动日志: ',
-        ].join('\n'),
-        acceptanceTemplate: [
-          '- [ ] 全量编译构建无语法/打包报错',
-          '- [ ] 线上/本地健康探测接口返回 HTTP 200',
-        ].join('\n'),
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      nodes: [
-        {
-          id: 'node_deploy_prep',
-          name: '环境与依赖预检',
-          type: 'cli',
-          position: { x: 100, y: 150 },
-          config: {
-            command: 'echo "[Deploy] 正在自检 Node 与依赖环境..." && node -v && pnpm -v',
-            timeoutSec: 60,
-          },
-        },
-        {
-          id: 'node_deploy_build',
-          name: '生产环境全量构建',
-          type: 'cli',
-          position: { x: 400, y: 150 },
-          config: {
-            command: 'pnpm build',
-            timeoutSec: 300,
-          },
-        },
-        {
-          id: 'node_deploy_exec',
-          name: '应用部署与服务启动',
-          type: 'cli',
-          position: { x: 700, y: 150 },
-          config: {
-            command: 'if [ -f "scripts/deploy.sh" ]; then bash scripts/deploy.sh --skip-build; else echo "[Deploy] 部署服务已启动"; fi',
-            timeoutSec: 180,
-          },
-        },
-        {
-          id: 'node_deploy_health',
-          name: '线上服务健康探针',
-          type: 'cli',
-          position: { x: 1000, y: 150 },
-          config: {
-            command: 'curl -fsSL http://127.0.0.1:19888/api/status || echo "[Health] 探测通过"',
-            timeoutSec: 30,
-          },
-        },
-        {
-          id: 'node_deploy_gate',
-          name: '发布上线核验门禁',
-          type: 'qa-approval',
-          position: { x: 1300, y: 150 },
-          config: {
-            approvalPrompt: '请确认应用已成功部署上线，构建产物完整且健康探针返回正常',
-            checklist: [
-              '全量编译构建产物完整生成',
-              '服务进程正常启动且端口监听成功',
-              '健康检查探针返回 200 OK',
-            ],
-          },
-        },
-      ],
-      edges: [
-        { id: 'e_prep_build', source: 'node_deploy_prep', target: 'node_deploy_build' },
-        { id: 'e_build_exec', source: 'node_deploy_build', target: 'node_deploy_exec' },
-        { id: 'e_exec_health', source: 'node_deploy_exec', target: 'node_deploy_health' },
-        { id: 'e_health_gate', source: 'node_deploy_health', target: 'node_deploy_gate' },
-      ],
-    };
   }
 
   private getWorktreeDevQaMergeWorkflowDefinition(): WorkflowDefinition {
@@ -622,159 +539,7 @@ export class SqliteStore {
     };
   }
 
-  private getGeneralDevWorkflowDefinition(): WorkflowDefinition {
-    return {
-      id: 'wf_agent_feature_dev',
-      name: '通用研发流水线',
-      description: '通用智能体敏捷开发流程：AI 智能体根据需求修改代码，执行前端构建自检，经由 QA 人工验收门禁确认',
-      tags: ['研发', 'AI Agent'],
-      taskTemplate: {
-        titlePlaceholder: '例如: 购物车结算全链路回归与截图验收',
-        descriptionTemplate: [
-          '### 需求目标',
-          '- 目标功能说明: ',
-          '- 涉及修改模块: ',
-        ].join('\n'),
-        acceptanceTemplate: [
-          '- [ ] 代码修改符合规范且自测通过',
-          '- [ ] 构建无明显报错阻断',
-        ].join('\n'),
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      nodes: [
-        {
-          id: 'node_agent_coder',
-          name: 'AI Agent 编码实现',
-          type: 'agent',
-          position: { x: 100, y: 150 },
-          config: {
-            agentName: 'Pi Coding Agent',
-            prompt: '请根据需求完成代码修改与自测：\n需求：{{task.title}}\n详细说明：{{task.description}}\n请保持工程代码整洁与类型严谨。',
-            timeoutSec: 600,
-          },
-        },
-        {
-          id: 'node_build_verify',
-          name: '前端构建自检',
-          type: 'cli',
-          position: { x: 420, y: 150 },
-          config: {
-            command: 'pnpm --filter @openloop/desktop build:renderer',
-            timeoutSec: 180,
-          },
-        },
-        {
-          id: 'node_qa_gate',
-          name: 'QA 人工验收门禁',
-          type: 'qa-approval',
-          position: { x: 740, y: 150 },
-          config: {
-            approvalPrompt: '请在前端页面验证功能实现是否完整无误',
-            checklist: [
-              '功能逻辑已按需求完整实现',
-              '界面符合 Magpie 极简规范',
-              '编译与构建无报错',
-            ],
-          },
-        },
-      ],
-      edges: [
-        {
-          id: 'edge_agent_to_build',
-          source: 'node_agent_coder',
-          target: 'node_build_verify',
-        },
-        {
-          id: 'edge_build_to_qa',
-          source: 'node_build_verify',
-          target: 'node_qa_gate',
-        },
-      ],
-    };
-  }
-
   private seedInitialData() {
-    // 预置默认流程：Agent 研发 -> Midscene 测试 -> 截图拼图 -> QA 验收
-    const defaultWorkflow: WorkflowDefinition = {
-      id: 'wf_auto_dev_qa',
-      name: 'Agent开发与Midscene自动化测试验证流水线',
-      description: '触发 Agent 进行功能开发，完成后调用 Midscene 自动 UI 测试并截屏，拼接动图后流转到 QA 审核',
-      tags: ['研发', '测试', 'AI Agent'],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      nodes: [
-        {
-          id: 'node_start_agent',
-          name: 'AI Agent 开发执行',
-          type: 'agent',
-          position: { x: 100, y: 150 },
-          config: {
-            agentName: 'OpenLoop Agent',
-            command: 'echo "[Agent] 正在解析需求并编写核心代码..." && sleep 2 && echo "[Agent] 代码生成与单元测试完成！"',
-            prompt: '实现用户需求功能并提交构建产物',
-          },
-        },
-        {
-          id: 'node_hook_dev_done',
-          name: '开发完成 Hook 触发器',
-          type: 'hook',
-          position: { x: 380, y: 150 },
-          config: {
-            hookType: 'event',
-            command: 'echo "[Hook] 检测到 Agent 构建完成，触发下游 QA 验证流转..."',
-          },
-        },
-        {
-          id: 'node_midscene_test',
-          name: 'Midscene 智能 UI 测试',
-          type: 'midscene',
-          position: { x: 660, y: 150 },
-          config: {
-            testUrl: 'http://localhost:3000',
-            instructions: [
-              '点击登录按钮',
-              '输入测试用户名和密码',
-              '校验页面进入 Dashboard 状态',
-            ],
-            screenshotPath: 'test-artifacts/midscene-report',
-          },
-        },
-        {
-          id: 'node_stitch_image',
-          name: '截图序列拼接动图 (CLI)',
-          type: 'stitch-image',
-          position: { x: 940, y: 150 },
-          config: {
-            sourceDir: 'test-artifacts/midscene-report',
-            outputFormat: 'gif',
-            outputFile: 'preview.gif',
-          },
-        },
-        {
-          id: 'node_qa_approval',
-          name: 'QA 人工/用例最终验收',
-          type: 'qa-approval',
-          position: { x: 1220, y: 150 },
-          config: {
-            approvalPrompt: '请确认 Midscene 截图与录制动画无误后通过',
-            checklist: ['功能无报错', 'UI与设计图一致', '核心流程顺畅'],
-          },
-        },
-      ],
-      edges: [
-        { id: 'e1', source: 'node_start_agent', target: 'node_hook_dev_done' },
-        { id: 'e2', source: 'node_hook_dev_done', target: 'node_midscene_test' },
-        { id: 'e3', source: 'node_midscene_test', target: 'node_stitch_image' },
-        { id: 'e4', source: 'node_stitch_image', target: 'node_qa_approval' },
-      ],
-    };
-
-    this.saveWorkflow(defaultWorkflow);
-
-    // 预置通用研发流水线
-    this.saveWorkflow(this.getGeneralDevWorkflowDefinition());
-    this.saveWorkflow(this.getAppDeployWorkflowDefinition());
     this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
 
     // 预置插件

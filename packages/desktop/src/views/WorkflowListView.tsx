@@ -115,7 +115,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newTags, setNewTags] = useState<string[]>([]);
-  const [templateType, setTemplateType] = useState<'feature_dev' | 'standard' | 'deploy' | 'empty'>('feature_dev');
   const [loading, setLoading] = useState(false);
 
   // 流水线编辑、复制、删除与调试状态
@@ -552,186 +551,22 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     setLoading(true);
     try {
       const id = `wf_${Date.now().toString(36)}`;
-      let nodes: any[] = [];
-      let edges: any[] = [];
-
-      if (templateType === 'feature_dev') {
-        nodes = [
-          {
-            id: 'node_agent_coder',
-            name: 'AI Agent 编码实现',
-            type: 'agent' as NodeType,
-            position: { x: 100, y: 150 },
-            config: {
-              agentName: '代码智能体',
-              prompt: '请根据需求完成代码修改与自测：\n需求：{{task.title}}\n详细说明：{{task.description}}\n请保持工程代码整洁与类型严谨。',
-              timeoutSec: 600,
-            },
-          },
-          {
-            id: 'node_build_verify',
-            name: '前端构建自检',
-            type: 'cli' as NodeType,
-            position: { x: 420, y: 150 },
-            config: {
-              command: 'pnpm --filter @openloop/desktop build:renderer',
-              timeoutSec: 180,
-            },
-          },
-          {
-            id: 'node_qa_gate',
-            name: 'QA 人工验收门禁',
-            type: 'qa-approval' as NodeType,
-            position: { x: 740, y: 150 },
-            config: {
-              approvalPrompt: '请在前端页面验证功能实现是否完整无误',
-              checklist: ['功能逻辑已按需求完整实现', '界面符合极简高质感规范', '构建与类型自检无报错'],
-            },
-          },
-          {
-            id: 'node_git_commit',
-            name: 'Git 自动提交代码',
-            type: 'cli' as NodeType,
-            position: { x: 1060, y: 150 },
-            config: {
-              command: 'git add -A && if git diff --staged --quiet; then echo "工作区干净，无需提交"; else git commit -m "feat: {{task.title}}" && git log -1 --stat; fi',
-              timeoutSec: 60,
-            },
-          },
-        ];
-        edges = [
-          { id: 'edge_agent_to_build', source: 'node_agent_coder', target: 'node_build_verify' },
-          { id: 'edge_build_to_qa', source: 'node_build_verify', target: 'node_qa_gate' },
-          { id: 'edge_qa_to_commit', source: 'node_qa_gate', target: 'node_git_commit' },
-        ];
-      } else if (templateType === 'standard') {
-        nodes = [
-          {
-            id: 'node_agent',
-            name: 'AI Agent 开发执行',
-            type: 'agent' as NodeType,
-            position: { x: 100, y: 150 },
-            config: {
-              agentName: 'OpenLoop Agent',
-              command: 'echo "[Agent] 正在执行业务编码..."',
-              prompt: '按需求完成功能并输出改动',
-            },
-          },
-          {
-            id: 'node_hook',
-            name: '构建完成 Hook',
-            type: 'hook' as NodeType,
-            position: { x: 380, y: 150 },
-            config: {
-              command: 'echo "[Hook] Agent 开发就绪，触发下游验证..."',
-            },
-          },
-          {
-            id: 'node_qa',
-            name: 'QA 审核验收',
-            type: 'qa-approval' as NodeType,
-            position: { x: 660, y: 150 },
-            config: {
-              approvalPrompt: '请确认功能实现与测试无误',
-            },
-          },
-        ];
-        edges = [
-          { id: 'e1', source: 'node_agent', target: 'node_hook' },
-          { id: 'e2', source: 'node_hook', target: 'node_qa' },
-        ];
-      } else if (templateType === 'deploy') {
-        nodes = [
-          {
-            id: 'node_deploy_prep',
-            name: '环境与依赖预检',
-            type: 'cli' as NodeType,
-            position: { x: 80, y: 150 },
-            config: {
-              command: 'echo "[Deploy] 环境自检中..." && node -v && pnpm -v',
-            },
-          },
-          {
-            id: 'node_deploy_build',
-            name: '生产环境构建',
-            type: 'cli' as NodeType,
-            position: { x: 360, y: 150 },
-            config: {
-              command: 'pnpm build',
-            },
-          },
-          {
-            id: 'node_deploy_exec',
-            name: '应用部署上线',
-            type: 'cli' as NodeType,
-            position: { x: 640, y: 150 },
-            config: {
-              command: 'if [ -f "scripts/deploy.sh" ]; then bash scripts/deploy.sh --skip-build; else echo "[Deploy] 部署成功"; fi',
-            },
-          },
-          {
-            id: 'node_deploy_gate',
-            name: '上线发布验收',
-            type: 'qa-approval' as NodeType,
-            position: { x: 920, y: 150 },
-            config: {
-              approvalPrompt: '请核验应用部署与线上探针运行正常',
-            },
-          },
-        ];
-        edges = [
-          { id: 'e1', source: 'node_deploy_prep', target: 'node_deploy_build' },
-          { id: 'e2', source: 'node_deploy_build', target: 'node_deploy_exec' },
-          { id: 'e3', source: 'node_deploy_exec', target: 'node_deploy_gate' },
-        ];
-      } else {
-        nodes = [
-          {
-            id: 'node_start',
-            name: '起始 CLI 节点',
-            type: 'cli' as NodeType,
-            position: { x: 200, y: 150 },
-            config: { command: 'echo "Hello openLoop"' },
-          },
-        ];
-      }
-
-      let initialTaskTemplate: WorkflowTaskTemplate | undefined = undefined;
-      if (templateType === 'feature_dev') {
-        initialTaskTemplate = {
-          titlePlaceholder: '例如: 购物车结算全链路回归与截图验收',
-          descriptionTemplate: [
-            '### 需求目标',
-            '- 目标功能说明: ',
-            '- 涉及修改模块: ',
-          ].join('\n'),
-          acceptanceTemplate: [
-            '- [ ] 代码修改符合规范且自测通过',
-            '- [ ] 构建无明显报错阻断',
-          ].join('\n'),
-        };
-      } else if (templateType === 'deploy') {
-        initialTaskTemplate = {
-          titlePlaceholder: '输入应用全量构建发布说明 (如: 发布桌面端 v1.0.2 正式版)',
-          descriptionTemplate: [
-            '### 应用构建与发布说明',
-            '- 目标版本 / Tag: ',
-            '- 构建目标环境: production',
-            '- 核心改动日志: ',
-          ].join('\n'),
-          acceptanceTemplate: [
-            '- [ ] 全量编译构建无语法/打包报错',
-            '- [ ] 线上/本地健康探测接口返回 HTTP 200',
-          ].join('\n'),
-        };
-      }
+      const nodes: any[] = [
+        {
+          id: 'node_start',
+          name: '起始节点',
+          type: 'cli' as NodeType,
+          position: { x: 200, y: 150 },
+          config: { command: 'echo "开始执行流水线"' },
+        },
+      ];
+      const edges: any[] = [];
 
       const newWf: WorkflowDefinition = {
         id,
         name: newTitle.trim(),
         description: newDesc.trim() || '自定义自动化编排流程',
         tags: newTags,
-        taskTemplate: initialTaskTemplate,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         nodes,
@@ -1897,79 +1732,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                   onChange={setNewTags}
                   placeholder="添加标签（例如：工作、部署、QA）后回车..."
                 />
-              </div>
-
-              <div>
-                <label className="block font-medium text-[#4b4b53] mb-1.5">初始化模板</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <div
-                    onClick={() => setTemplateType('feature_dev')}
-                    className={`p-2.5 rounded-[8px] border cursor-pointer transition-all ${
-                      templateType === 'feature_dev'
-                        ? 'border-[#4f46e5] bg-[#eeedfd]/40 shadow-sm'
-                        : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
-                    }`}
-                  >
-                    <div className="font-semibold text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1.5">
-                      <Bot size={12} className="text-[#4f46e5]" />
-                      <span>通用研发流水线</span>
-                    </div>
-                    <div className="text-[10px] text-[#85858d] line-clamp-2">
-                      Agent 编码 + 构建自检 + QA 门禁 + Git 提交
-                    </div>
-                  </div>
-
-                  <div
-                    onClick={() => setTemplateType('standard')}
-                    className={`p-2.5 rounded-[8px] border cursor-pointer transition-all ${
-                      templateType === 'standard'
-                        ? 'border-[#4f46e5] bg-[#eeedfd]/40 shadow-sm'
-                        : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
-                    }`}
-                  >
-                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1.5">
-                      <Zap size={12} className="text-[#b45309]" />
-                      <span>轻量研发模板</span>
-                    </div>
-                    <div className="text-[10px] text-[#85858d] line-clamp-2">
-                      Agent 编码 + Hook 触发 + QA 验收
-                    </div>
-                  </div>
-
-                  <div
-                    onClick={() => setTemplateType('deploy')}
-                    className={`p-2.5 rounded-[8px] border cursor-pointer transition-all ${
-                      templateType === 'deploy'
-                        ? 'border-[#0284c7] bg-[#f0f9ff] shadow-sm'
-                        : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
-                    }`}
-                  >
-                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1.5">
-                      <Rocket size={12} className="text-[#0284c7]" />
-                      <span>构建部署模板</span>
-                    </div>
-                    <div className="text-[10px] text-[#85858d] line-clamp-2">
-                      预检 + 全量构建 + 部署上线 + 门禁
-                    </div>
-                  </div>
-
-                  <div
-                    onClick={() => setTemplateType('empty')}
-                    className={`p-2.5 rounded-[8px] border cursor-pointer transition-all ${
-                      templateType === 'empty'
-                        ? 'border-[#4f46e5] bg-[#eeedfd]/40 shadow-sm'
-                        : 'border-[#e3e3e8] hover:border-[#b9b9c2]'
-                    }`}
-                  >
-                    <div className="font-medium text-[11.5px] text-[#1c1c21] mb-0.5 flex items-center gap-1.5">
-                      <Sparkles size={12} className="text-[#4f46e5]" />
-                      <span>空白 / AI 助手生成</span>
-                    </div>
-                    <div className="text-[10px] text-[#85858d] line-clamp-2">
-                      进入后由 Agent 对话从头到尾自动编排
-                    </div>
-                  </div>
-                </div>
               </div>
 
               <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#ececf0]">

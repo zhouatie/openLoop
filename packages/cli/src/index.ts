@@ -91,7 +91,7 @@ const taskCmd = program.command('task').description('任务自动化创建与流
 taskCmd
   .command('create')
   .description('创建并触发自动化流转任务')
-  .requiredOption('-w, --workflow <id>', '关联工作流 ID (如: wf_auto_dev_qa)')
+  .requiredOption('-w, --workflow <id>', '关联工作流 ID')
   .option('-t, --title <title>', '任务标题', '自动化开发验证任务')
   .option('-d, --desc <desc>', '任务描述', '')
   .option('-c, --column <column>', '看板初始泳道 (如: inbox, backlog)', 'backlog')
@@ -194,7 +194,7 @@ taskCmd
       }
 
       if (tasks.length === 0) {
-        console.log(`暂无任务。可以使用 'openloop task create -w wf_auto_dev_qa' 创建新任务。`);
+        console.log(`暂无任务。可以使用 'openloop task create -w <workflow-id>' 创建新任务。`);
         return;
       }
 
@@ -512,7 +512,7 @@ qaCmd
 program
   .command('run [args...]')
   .description('快捷触发流水线执行（支持指定流水线名称或自然语言 Prompt，例如: openloop run "构建并部署应用"）')
-  .option('-w, --workflow <id>', '指定工作流 ID (如: wf_app_build_deploy)')
+  .option('-w, --workflow <id>', '指定工作流 ID')
   .option('-f, --follow', '实时跟随并打印执行日志', true)
   .action(async (args: string[], options) => {
     try {
@@ -541,14 +541,10 @@ program
           prompt = match.name;
         } else {
           prompt = args.join(' ');
-          if (/部署|发布|build|deploy/i.test(prompt)) {
-            selectedWorkflow = workflows.find((w) => w.id === 'wf_app_build_deploy') || workflows[0];
-          } else {
-            selectedWorkflow = workflows[0];
-          }
+          selectedWorkflow = workflows[0];
         }
       } else {
-        selectedWorkflow = workflows.find((w) => w.id === 'wf_app_build_deploy') || workflows[0];
+        selectedWorkflow = workflows[0];
         prompt = selectedWorkflow ? `执行 ${selectedWorkflow.name}` : '';
       }
 

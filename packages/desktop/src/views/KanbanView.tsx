@@ -1054,7 +1054,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const handleQuickAddIdea = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!quickIdeaTitle.trim() || isSubmittingQuickIdea) return;
-    const defaultWfId = workflows[0]?.id || 'wf_auto_dev_qa';
+    const defaultWfId = workflows[0]?.id || '';
     const targetWorkspace =
       activeWorkspaceFilter !== 'all' && activeWorkspaceFilter !== 'none'
         ? activeWorkspaceFilter

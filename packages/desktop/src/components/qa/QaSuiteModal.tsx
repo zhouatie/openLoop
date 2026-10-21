@@ -32,7 +32,7 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
   const [name, setName] = useState(initialSuite?.name || '');
   const [description, setDescription] = useState(initialSuite?.description || '');
   const [platform, setPlatform] = useState<QaPlatform>(initialSuite?.platform || 'web');
-  const [targetUrl, setTargetUrl] = useState(initialSuite?.targetUrl || 'http://localhost:3000');
+  const [targetUrl, setTargetUrl] = useState(initialSuite?.targetUrl || '');
   const [appPackage, setAppPackage] = useState(initialSuite?.appPackage || '');
   const [deviceSerial, setDeviceSerial] = useState(initialSuite?.deviceSerial || '');
   const [isMobile, setIsMobile] = useState(Boolean(initialSuite?.viewport?.isMobile));
@@ -49,12 +49,7 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
     if (initialSuite?.steps && initialSuite.steps.length > 0) {
       return initialSuite.steps;
     }
-    return [
-      { id: 's1', type: 'action', prompt: '等待页面完成首屏加载，点击页面顶部的登录或注册按钮' },
-      { id: 's2', type: 'action', prompt: '在用户名输入框输入 demo_user，密码输入 123456' },
-      { id: 's3', type: 'action', prompt: '点击「立即登录」按钮' },
-      { id: 's4', type: 'assert', prompt: '页面呈现登录成功提示，并成功跳转至工作台仪表盘' },
-    ];
+    return [];
   });
   const [isSaving, setIsSaving] = useState(false);
 
@@ -162,31 +157,8 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
     setSteps(steps.map((s, idx) => (idx === index ? { ...s, ...updates } : s)));
   };
 
-  const handleFillTemplate = (templateType: 'web-ecommerce' | 'web-form' | 'android-app' | 'android-settings') => {
-    if (templateType === 'web-ecommerce') {
-      setName('电商商品购买全链路视觉验收');
-      setDescription('使用多模态视觉模型验证商品详情展示、加购交互及订单确认页面的视觉完整性');
-      setPlatform('web');
-      setTargetUrl('http://localhost:3000/shop');
-      setSteps([
-        { id: 's1', type: 'action', prompt: '浏览商品推荐流，点击第 1 件热销商品卡片' },
-        { id: 's2', type: 'assert', prompt: '商品详情页正常加载，主图清晰且显示价格标签与「加入购物车」按钮' },
-        { id: 's3', type: 'action', prompt: '点击页面中的「加入购物车」按钮' },
-        { id: 's4', type: 'assert', prompt: '页面右上角购物车角标更新为 1，弹出加入成功的浮层提示' },
-      ]);
-    } else if (templateType === 'web-form') {
-      setName('客户信息表单校验与提交');
-      setDescription('测试表单必填校验高亮提示以及填写完成后的成功反馈');
-      setPlatform('web');
-      setTargetUrl('http://localhost:3000/contact');
-      setSteps([
-        { id: 's1', type: 'action', prompt: '不填写内容，直接点击底部的「提交」按钮' },
-        { id: 's2', type: 'assert', prompt: '输入框下方弹出红色的表单必填校验错误提示' },
-        { id: 's3', type: 'action', prompt: '在姓名输入框填写「张工程师」，邮箱填写「test@example.com」' },
-        { id: 's4', type: 'action', prompt: '再次点击「提交」按钮' },
-        { id: 's5', type: 'assert', prompt: '页面呈现绿色的提交成功提示卡片' },
-      ]);
-    } else if (templateType === 'android-app') {
+  const handleFillTemplate = (templateType: 'android-app' | 'android-settings') => {
+    if (templateType === 'android-app') {
       setName('移动端原生应用主链路探索');
       setDescription('唤醒 App 并进行主界面导航、列表滑动与返回操作验收');
       setPlatform('android');
@@ -299,47 +271,28 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
             </div>
 
             {/* 模版快捷入口 */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-medium text-[#85858d] flex items-center gap-1">
-                <Sparkles size={11} className="text-[#4f46e5]" />
-                快速模板:
-              </span>
-              {platform === 'web' ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => handleFillTemplate('web-ecommerce')}
-                    className="text-[11px] px-2 py-0.5 rounded-[4px] bg-[#f4f4f7] hover:bg-[#eeedfd] hover:text-[#4f46e5] text-[#52525b] border border-[#ececf0] transition-colors"
-                  >
-                    电商购买链路
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleFillTemplate('web-form')}
-                    className="text-[11px] px-2 py-0.5 rounded-[4px] bg-[#f4f4f7] hover:bg-[#eeedfd] hover:text-[#4f46e5] text-[#52525b] border border-[#ececf0] transition-colors"
-                  >
-                    表单校验提交
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => handleFillTemplate('android-app')}
-                    className="text-[11px] px-2 py-0.5 rounded-[4px] bg-[#f4f4f7] hover:bg-[#eeedfd] hover:text-[#4f46e5] text-[#52525b] border border-[#ececf0] transition-colors"
-                  >
-                    App 探索与返回
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleFillTemplate('android-settings')}
-                    className="text-[11px] px-2 py-0.5 rounded-[4px] bg-[#f4f4f7] hover:bg-[#eeedfd] hover:text-[#4f46e5] text-[#52525b] border border-[#ececf0] transition-colors"
-                  >
-                    系统设置链路
-                  </button>
-                </>
-              )}
-            </div>
+            {platform === 'android' && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-medium text-[#85858d] flex items-center gap-1">
+                  <Sparkles size={11} className="text-[#4f46e5]" />
+                  快速模板:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleFillTemplate('android-app')}
+                  className="text-[11px] px-2 py-0.5 rounded-[4px] bg-[#f4f4f7] hover:bg-[#eeedfd] hover:text-[#4f46e5] text-[#52525b] border border-[#ececf0] transition-colors"
+                >
+                  App 探索与返回
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleFillTemplate('android-settings')}
+                  className="text-[11px] px-2 py-0.5 rounded-[4px] bg-[#f4f4f7] hover:bg-[#eeedfd] hover:text-[#4f46e5] text-[#52525b] border border-[#ececf0] transition-colors"
+                >
+                  系统设置链路
+                </button>
+              </div>
+            )}
           </div>
 
           {/* 基本信息 */}
@@ -559,80 +512,86 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
               </button>
             </div>
 
-            <div className="space-y-2">
-              {steps.map((step, idx) => (
-                <div
-                  key={step.id || idx}
-                  className="p-2.5 rounded-[7px] border border-[#e3e3e8] bg-[#fafafc] hover:border-[#b9b9c2] transition-colors space-y-2"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="w-4 h-4 rounded-full bg-[#e4e4e7] text-[#3f3f46] text-[10px] font-mono font-semibold flex items-center justify-center">
-                        {idx + 1}
-                      </span>
-                      <select
-                        value={step.type}
-                        onChange={(e) =>
-                          handleUpdateStep(idx, { type: e.target.value as QaStepType })
-                        }
-                        className="h-[24px] px-2 rounded-[4px] border border-[#d4d4d8] text-[11.5px] font-medium outline-none bg-white text-[#1c1c21]"
-                      >
-                        <option value="action">aiAction (操作动作)</option>
-                        <option value="assert">aiAssert (视觉断言)</option>
-                        <option value="waitFor">aiWaitFor (等待元素)</option>
-                        <option value="query">aiQuery (数据提取)</option>
-                      </select>
+            {steps.length === 0 ? (
+              <div className="py-8 text-center border border-dashed border-[#e3e3e8] rounded-[7px] text-[11.5px] text-[#85858d]">
+                暂无测试步骤，点击右上角「添加步骤」开始编写
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {steps.map((step, idx) => (
+                  <div
+                    key={step.id || idx}
+                    className="p-2.5 rounded-[7px] border border-[#e3e3e8] bg-[#fafafc] hover:border-[#b9b9c2] transition-colors space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 rounded-full bg-[#e4e4e7] text-[#3f3f46] text-[10px] font-mono font-semibold flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <select
+                          value={step.type}
+                          onChange={(e) =>
+                            handleUpdateStep(idx, { type: e.target.value as QaStepType })
+                          }
+                          className="h-[24px] px-2 rounded-[4px] border border-[#d4d4d8] text-[11.5px] font-medium outline-none bg-white text-[#1c1c21]"
+                        >
+                          <option value="action">aiAction (操作动作)</option>
+                          <option value="assert">aiAssert (视觉断言)</option>
+                          <option value="waitFor">aiWaitFor (等待元素)</option>
+                          <option value="query">aiQuery (数据提取)</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={idx === 0}
+                          onClick={() => handleMoveStep(idx, 'up')}
+                          className="w-5 h-5 rounded hover:bg-[#e4e4e7] disabled:opacity-25 text-[#71717a] flex items-center justify-center"
+                          title="上移"
+                        >
+                          <ArrowUp size={11} />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={idx === steps.length - 1}
+                          onClick={() => handleMoveStep(idx, 'down')}
+                          className="w-5 h-5 rounded hover:bg-[#e4e4e7] disabled:opacity-25 text-[#71717a] flex items-center justify-center"
+                          title="下移"
+                        >
+                          <ArrowDown size={11} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveStep(idx)}
+                          className="w-5 h-5 rounded hover:bg-red-50 text-red-500 flex items-center justify-center ml-1"
+                          title="删除该步"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        disabled={idx === 0}
-                        onClick={() => handleMoveStep(idx, 'up')}
-                        className="w-5 h-5 rounded hover:bg-[#e4e4e7] disabled:opacity-25 text-[#71717a] flex items-center justify-center"
-                        title="上移"
-                      >
-                        <ArrowUp size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={idx === steps.length - 1}
-                        onClick={() => handleMoveStep(idx, 'down')}
-                        className="w-5 h-5 rounded hover:bg-[#e4e4e7] disabled:opacity-25 text-[#71717a] flex items-center justify-center"
-                        title="下移"
-                      >
-                        <ArrowDown size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveStep(idx)}
-                        className="w-5 h-5 rounded hover:bg-red-50 text-red-500 flex items-center justify-center ml-1"
-                        title="删除该步"
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={step.prompt}
+                      onChange={(e) => handleUpdateStep(idx, { prompt: e.target.value })}
+                      placeholder={
+                        platform === 'android'
+                          ? step.type === 'assert'
+                            ? '如: 页面包含「购物车」标签且商品单价正常显示'
+                            : '如: 点击「加入购物车」按钮 / 向上滑动浏览 / 按返回键'
+                          : step.type === 'assert'
+                          ? '如: 界面出现「登录成功」提示且无红字报错'
+                          : '如: 点击页面右上角「登录」按钮'
+                      }
+                      className="w-full h-[28px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white text-[12px] text-[#1c1c21] outline-none focus:border-[#4f46e5]"
+                    />
                   </div>
-
-                  <input
-                    type="text"
-                    required
-                    value={step.prompt}
-                    onChange={(e) => handleUpdateStep(idx, { prompt: e.target.value })}
-                    placeholder={
-                      platform === 'android'
-                        ? step.type === 'assert'
-                          ? '如: 页面包含「购物车」标签且商品单价正常显示'
-                          : '如: 点击「加入购物车」按钮 / 向上滑动浏览 / 按返回键'
-                        : step.type === 'assert'
-                        ? '如: 界面出现「登录成功」提示且无红字报错'
-                        : '如: 点击页面右上角「登录」按钮'
-                    }
-                    className="w-full h-[28px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white text-[12px] text-[#1c1c21] outline-none focus:border-[#4f46e5]"
-                  />
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 底部保存按钮 */}

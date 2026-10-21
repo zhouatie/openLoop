@@ -39,9 +39,6 @@ export class AutomationScheduler extends EventEmitter {
     this.isStarted = true;
     logger.info('[AutomationScheduler] 自动化任务调度服务启动');
 
-    // 如果数据库中尚无任何自动化任务，初始化几个代表性预置示例
-    this.initDefaultTemplatesIfEmpty();
-
     const tasks = this.store.getAutomationTasks();
     logger.info(`[AutomationScheduler] 加载 ${tasks.length} 个自动化任务配置`);
 
@@ -358,23 +355,7 @@ export class AutomationScheduler extends EventEmitter {
           };
         }
 
-        // 内置模拟抓取/测试推文解析
-        const mockTweet = {
-          author: '@dev_fanatic',
-          text: `Found an interesting issue in latest release with query "${query}". Needs automated pipeline check!`,
-          timestamp: new Date().toISOString(),
-        };
-        return {
-          success: true,
-          summary: `推特消息监控成功，发现动态 (关键词: ${query})`,
-          rawOutput: JSON.stringify(mockTweet, null, 2),
-          items: [
-            {
-              title: `[推特消息] 来自 ${mockTweet.author}: ${mockTweet.text.slice(0, 30)}...`,
-              body: `**作者**: ${mockTweet.author}\n**内容**: ${mockTweet.text}\n**抓取时间**: ${mockTweet.timestamp}`,
-            },
-          ],
-        };
+        throw new Error('未配置推特抓取 CLI 工具或抓取命令');
       }
 
       case 'custom':
@@ -472,92 +453,5 @@ export class AutomationScheduler extends EventEmitter {
     }
 
     return { taskId: newTask.id, taskTitle: newTask.title };
-  }
-
-  /**
-   * 首次启动空库时注入常见实用自动化任务模板
-   */
-  private initDefaultTemplatesIfEmpty(): void {
-    const existing = this.store.getAutomationTasks();
-    if (existing.length > 0) return;
-
-    logger.info('[AutomationScheduler] 初始化预置自动化任务示例');
-    const now = Date.now();
-
-    const sampleTasks: AutomationTask[] = [
-      {
-        id: 'auto_gh_issues_sync',
-        name: 'GitHub Issues 监控并自动入会',
-        description: '定时拉取 GitHub Issues，命中后自动创建任务并投递看板 Inbox',
-        enabled: false,
-        intervalSec: 120,
-        sourceType: 'github_issues',
-        sourceConfig: {
-          repo: 'facebook/react',
-        },
-        actionType: 'create_task',
-        actionConfig: {
-          kanbanColumn: 'inbox',
-          titleTemplate: '{{title}}',
-          autoRun: false,
-        },
-        totalRuns: 0,
-        successRuns: 0,
-        failedRuns: 0,
-        createdTaskIds: [],
-        createdAt: now - 3600000,
-        updatedAt: now - 3600000,
-      },
-      {
-        id: 'auto_twitter_pipeline',
-        name: '推特特定舆情/反馈监听流水线',
-        description: '监控社交媒体关键词，自动创建任务并驱动自动化流水线处理',
-        enabled: false,
-        intervalSec: 300,
-        sourceType: 'twitter_query',
-        sourceConfig: {
-          twitterQuery: 'openloop release',
-        },
-        actionType: 'run_workflow',
-        actionConfig: {
-          kanbanColumn: 'in_progress',
-          autoRun: true,
-        },
-        totalRuns: 0,
-        successRuns: 0,
-        failedRuns: 0,
-        createdTaskIds: [],
-        createdAt: now - 1800000,
-        updatedAt: now - 1800000,
-      },
-      {
-        id: 'auto_cli_polling',
-        name: 'CLI 本地构建与代码状态定时轮询',
-        description: '通过脚本轮询本地 CLI 工具方法或 Git 状态，自动报告运行结果',
-        enabled: false,
-        intervalSec: 60,
-        sourceType: 'cli_script',
-        sourceConfig: {
-          command: 'git status --short',
-          cwd: process.cwd(),
-        },
-        actionType: 'create_task',
-        actionConfig: {
-          kanbanColumn: 'inbox',
-          titleTemplate: '[CLI 轮询] {{title}}',
-          autoRun: false,
-        },
-        totalRuns: 0,
-        successRuns: 0,
-        failedRuns: 0,
-        createdTaskIds: [],
-        createdAt: now,
-        updatedAt: now,
-      },
-    ];
-
-    for (const t of sampleTasks) {
-      this.store.saveAutomationTask(t);
-    }
   }
 }

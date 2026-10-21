@@ -72,7 +72,7 @@ export interface NodeConfig {
   checklist?: string[];
 
   // 子流水线 (sub-workflow) 专用
-  subWorkflowId?: string;     // 关联的子流水线定义 ID (如 wf_app_build_deploy)
+  subWorkflowId?: string;     // 关联的子流水线定义 ID
   inheritContext?: boolean;   // 是否继承父级任务全部变量与工作区，默认 true
 
   // 节点超时与重试配置

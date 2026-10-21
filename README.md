@@ -85,7 +85,7 @@ node packages/cli/dist/index.js plugin list
 #### 创建并自动流转任务 (带实时日志监听)
 ```bash
 node packages/cli/dist/index.js task create \
-  --workflow wf_auto_dev_qa \
+  --workflow <workflow_id> \
   --title "用户中心登录优化" \
   --follow
 ```
