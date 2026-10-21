@@ -490,11 +490,13 @@ export interface QaRunRecord {
   error?: string;
 }
 
-export type AutomationSourceType = 'cli_script' | 'github_issues' | 'twitter_query' | 'custom';
+export type AutomationSourceType = 'schedule' | 'cli_script' | 'github_issues' | 'twitter_query' | 'custom';
 export type AutomationActionType = 'create_task' | 'run_workflow' | 'notify_only';
 export type AutomationStatus = 'idle' | 'running' | 'success' | 'failed';
 
 export interface AutomationSourceConfig {
+  /** schedule: 注入流水线的扫描 / 执行目标 */
+  prompt?: string;
   command?: string;
   cwd?: string;
   repo?: string;
@@ -512,6 +514,8 @@ export interface AutomationActionConfig {
   titleTemplate?: string;
   descriptionTemplate?: string;
   autoRun?: boolean;
+  /** 直连运行：不生成看板卡片，任务只存活于自动化 Tab */
+  directRun?: boolean;
 }
 
 export interface AutomationTask {

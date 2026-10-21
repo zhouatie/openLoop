@@ -17,6 +17,7 @@ import {
   Layers,
   Sparkles,
   Zap,
+  Wand2,
 } from 'lucide-react';
 
 const GithubIcon: React.FC<{ size?: number; className?: string }> = ({ size = 12, className = '' }) => (
@@ -42,6 +43,7 @@ import { EditAutomationModal } from '../components/automation/EditAutomationModa
 import { AutomationLogsDrawer } from '../components/automation/AutomationLogsDrawer';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { toast } from '../components/Toast';
+import { buildAutomationDraft, formatInterval } from '../utils/automationDraft';
 
 interface AutomationListViewProps {
   workflows: WorkflowDefinition[];
@@ -65,6 +67,8 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
   // 弹窗与抽屉状态
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<AutomationTask | null>(null);
+  const [draft, setDraft] = useState<Partial<AutomationTask> | null>(null);
+  const [quickText, setQuickText] = useState('');
   const [deleteTargetTask, setDeleteTargetTask] = useState<AutomationTask | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [logsDrawerTask, setLogsDrawerTask] = useState<AutomationTask | null>(null);
@@ -134,7 +138,8 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
         const matchesDesc = task.description?.toLowerCase().includes(q);
         const matchesCmd = task.sourceConfig?.command?.toLowerCase().includes(q);
         const matchesRepo = task.sourceConfig?.repo?.toLowerCase().includes(q);
-        if (!matchesName && !matchesDesc && !matchesCmd && !matchesRepo) return false;
+        const matchesGoal = task.sourceConfig?.prompt?.toLowerCase().includes(q);
+        if (!matchesName && !matchesDesc && !matchesCmd && !matchesRepo && !matchesGoal) return false;
       }
       if (filterSource !== 'all' && task.sourceType !== filterSource) {
         return false;
@@ -144,6 +149,28 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
       return true;
     });
   }, [safeAutomations, searchQuery, filterSource, filterStatus]);
+
+  // 一句话输入的实时预览（纯本地解析，无网络请求）
+  const quickPreview = useMemo(() => {
+    if (!quickText.trim()) return null;
+    return buildAutomationDraft(quickText, workflows).hint;
+  }, [quickText, workflows]);
+
+  const handleQuickCreate = () => {
+    const text = quickText.trim();
+    if (!text) {
+      toast.info('先用一句话描述想要的定时任务');
+      return;
+    }
+    const { draft: nextDraft } = buildAutomationDraft(text, workflows);
+    if (import.meta.env?.DEV) {
+      console.log('[AutomationListView] 一句话草稿:', nextDraft);
+    }
+    setEditingTask(null);
+    setDraft(nextDraft);
+    setIsEditModalOpen(true);
+    setQuickText('');
+  };
 
   // 统计指标
   const stats = useMemo(() => {
@@ -203,7 +230,7 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
         }
         return prev;
       });
-      toast.success(updated.enabled ? `已启用「${task.name}」定时轮询` : `已暂停「${task.name}」定时轮询`);
+      toast.success(updated.enabled ? `已启用「${task.name}」定时任务` : `已暂停「${task.name}」定时任务`);
     } catch (err: any) {
       toast.error(`切换状态失败: ${err.message}`);
     }
@@ -255,6 +282,8 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
 
   const getSourceIcon = (sourceType: AutomationSourceType) => {
     switch (sourceType) {
+      case 'schedule':
+        return <Clock size={12} strokeWidth={2} className="text-[#4f46e5]" />;
       case 'github_issues':
         return <GithubIcon size={12} className="text-[#24292e]" />;
       case 'twitter_query':
@@ -262,6 +291,19 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
       case 'cli_script':
       default:
         return <Terminal size={12} strokeWidth={2} className="text-[#63636b]" />;
+    }
+  };
+
+  const getSourceLabel = (sourceType: AutomationSourceType) => {
+    switch (sourceType) {
+      case 'schedule':
+        return '定时';
+      case 'github_issues':
+        return 'GitHub';
+      case 'twitter_query':
+        return '社媒';
+      default:
+        return 'CLI';
     }
   };
 
@@ -301,7 +343,7 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
             )}
           </div>
           <span className="text-[11.5px] text-[#85858d] hidden md:inline">
-            定时轮询 CLI 工具、GitHub Issue 与社交媒体消息，自动化驱动流水线
+            一句话创建定时任务，按周期驱动流水线
           </span>
         </div>
 
@@ -322,6 +364,7 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
           <button
             onClick={() => {
               setEditingTask(null);
+              setDraft(null);
               setIsEditModalOpen(true);
             }}
             className="flex items-center gap-1.5 h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-xs cursor-pointer"
@@ -334,10 +377,47 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
 
       {/* 2. 独立内容滚动区 */}
       <div className="flex-1 overflow-y-auto px-6 pb-6 pt-3.5 space-y-3">
+        {/* 一句话创建：输入即预览，回车进入确认 */}
+        <div className="bg-white border border-[#e3e3e8] rounded-[8px] px-3 py-2 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <Sparkles size={13} className="text-[#4f46e5] shrink-0" />
+            <input
+              value={quickText}
+              onChange={(e) => setQuickText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleQuickCreate();
+                }
+              }}
+              placeholder="一句话创建，例如：每隔 30 分钟扫描小红书上「艮兴嘉苑」租房帖子"
+              className="flex-1 min-w-0 h-[28px] bg-transparent text-[#1c1c21] text-[12px] placeholder:text-[#a1a1aa] focus:outline-hidden"
+            />
+            <button
+              onClick={handleQuickCreate}
+              disabled={!quickText.trim()}
+              className="flex items-center gap-1 h-[26px] px-2.5 rounded-[5px] bg-[#eeedfd] hover:bg-[#e5e3fc] text-[#4f46e5] text-[11.5px] font-medium border border-[#c7c4f8] transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shrink-0"
+            >
+              <Wand2 size={11} />
+              <span>生成草稿</span>
+            </button>
+          </div>
+          <div className="pl-[21px] mt-0.5 text-[10.5px] truncate">
+            {quickPreview ? (
+              <span className="text-[#52525b]">
+                <span className="text-[#a1a1aa]">将生成 </span>
+                {quickPreview}
+              </span>
+            ) : (
+              <span className="text-[#a1a1aa]">输入后按 Enter 生成草稿，再确认关联流水线</span>
+            )}
+          </div>
+        </div>
+
         {/* 统计指标卡片组 */}
         <div className="grid grid-cols-4 gap-3">
           <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-3 shadow-2xs">
-            <div className="text-[11px] text-[#85858d] font-medium">活跃轮询调度</div>
+            <div className="text-[11px] text-[#85858d] font-medium">活跃定时任务</div>
             <div className="flex items-baseline gap-1.5 mt-1">
               <span className="text-[18px] font-semibold text-[#1c1c21] font-mono">{stats.enabledCount}</span>
               <span className="text-[11px] text-[#85858d] font-mono">/ {stats.total} 启用</span>
@@ -345,7 +425,7 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
           </div>
 
           <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-3 shadow-2xs">
-            <div className="text-[11px] text-[#85858d] font-medium">累计执行轮询</div>
+            <div className="text-[11px] text-[#85858d] font-medium">累计执行次数</div>
             <div className="flex items-baseline gap-1.5 mt-1">
               <span className="text-[18px] font-semibold text-[#1c1c21] font-mono">{stats.totalRuns}</span>
               <span className="text-[11px] text-[#85858d]">次触发</span>
@@ -361,10 +441,10 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
           </div>
 
           <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-3 shadow-2xs">
-            <div className="text-[11px] text-[#85858d] font-medium">自动派生任务</div>
+            <div className="text-[11px] text-[#85858d] font-medium">自动派生执行</div>
             <div className="flex items-baseline gap-1.5 mt-1">
               <span className="text-[18px] font-semibold text-[#4f46e5] font-mono">{stats.totalCreatedTasks}</span>
-              <span className="text-[11px] text-[#85858d]">个看板卡片</span>
+              <span className="text-[11px] text-[#85858d]">次任务 / 流水线</span>
             </div>
           </div>
         </div>
@@ -389,10 +469,11 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
               onChange={(e) => setFilterSource(e.target.value)}
               className="h-[30px] px-2 rounded-[6px] border border-[#e3e3e8] bg-white text-[#52525b] text-[11.5px] focus:outline-hidden focus:border-[#4f46e5] shadow-2xs cursor-pointer"
             >
-              <option value="all">全部数据源</option>
+              <option value="all">全部触发方式</option>
+              <option value="schedule">定时触发</option>
               <option value="cli_script">CLI 脚本轮询</option>
               <option value="github_issues">GitHub Issues</option>
-              <option value="twitter_query">推特 / 社媒消息</option>
+              <option value="twitter_query">社媒监听</option>
             </select>
           </div>
 
@@ -430,9 +511,9 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
           {/* 表格表头: 34px 高度浅灰底微边框 */}
           <div className="h-[34px] bg-[#fafafc] border-b border-[#e3e3e8] px-4 flex items-center text-[11px] font-medium text-[#85858d] select-none">
             <div className="w-[38%] min-w-0 pr-3">任务名称与触发源</div>
-            <div className="w-[14%] pr-2">轮询周期</div>
+            <div className="w-[14%] pr-2">触发周期</div>
             <div className="w-[20%] pr-2">下游联动与流水线</div>
-            <div className="w-[18%] pr-2">最近轮询状态</div>
+            <div className="w-[18%] pr-2">最近运行状态</div>
             <div className="w-[10%] text-right">开关与操作</div>
           </div>
 
@@ -443,7 +524,7 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
                 <Timer size={24} className="mx-auto text-[#d4d4d8] mb-1" />
                 <div className="text-[12.5px] font-medium text-[#1c1c21]">暂无符合条件的自动化任务</div>
                 <div className="text-[11px] text-[#85858d]">
-                  点击右上角「新建自动化任务」或调整检索过滤条件
+                  在顶部输入一句话即可创建，或点击右上角「新建自动化任务」
                 </div>
               </div>
             ) : (
@@ -477,15 +558,14 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
                           </span>
 
                           <span className="shrink-0 text-[9.5px] px-1 py-0.2 rounded bg-[#f4f4f5] text-[#52525b] border border-[#e4e4e7] font-mono">
-                            {task.sourceType === 'github_issues'
-                              ? 'GitHub'
-                              : task.sourceType === 'twitter_query'
-                              ? 'Twitter'
-                              : 'CLI'}
+                            {getSourceLabel(task.sourceType)}
                           </span>
                         </div>
 
                         <div className="text-[11px] text-[#85858d] truncate mt-0.5">
+                          {task.sourceType === 'schedule' && (
+                            <span>{task.sourceConfig?.prompt || task.description || '按周期驱动关联流水线'}</span>
+                          )}
                           {task.sourceType === 'github_issues' && (
                             <span className="font-mono">repo: {task.sourceConfig?.repo || '未知'}</span>
                           )}
@@ -499,34 +579,55 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
                       </div>
                     </div>
 
-                    {/* 2. 轮询周期 */}
+                    {/* 2. 触发周期 */}
                     <div className="w-[14%] pr-2">
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#52525b] text-[10.5px] font-mono border border-[#e3e3e8]">
                         <Clock size={10} className="text-[#85858d]" />
-                        <span>每 {task.intervalSec} 秒</span>
+                        <span>每 {formatInterval(task.intervalSec)}</span>
                       </span>
                     </div>
 
                     {/* 3. 下游联动与流水线 */}
                     <div className="w-[20%] pr-2 min-w-0">
-                      {task.actionType === 'create_task' && (
-                        <div className="flex items-center gap-1.5 text-[11px] text-[#52525b] truncate">
-                          <Layers size={11} className="text-[#71717a] shrink-0" />
-                          <span className="truncate">创建任务 → {task.actionConfig?.kanbanColumn || 'inbox'}</span>
-                        </div>
-                      )}
-                      {task.actionType === 'run_workflow' && (
-                        <div className="flex items-center gap-1.5 text-[11px] text-[#4f46e5] truncate">
-                          <Workflow size={11} className="text-[#4f46e5] shrink-0" />
-                          <span className="truncate font-medium">{wfName || '默认流水线'}</span>
-                        </div>
-                      )}
-                      {task.actionType === 'notify_only' && (
+                      {task.actionType === 'notify_only' ? (
                         <span className="text-[11px] text-[#85858d]">仅记录日志</span>
+                      ) : (
+                        <div className="min-w-0 space-y-0.5">
+                          <div
+                            className={`flex items-center gap-1.5 text-[11px] truncate ${
+                              task.actionType === 'run_workflow' ? 'text-[#4f46e5]' : 'text-[#52525b]'
+                            }`}
+                          >
+                            {task.actionType === 'run_workflow' ? (
+                              <Workflow size={11} className="shrink-0" />
+                            ) : (
+                              <Layers size={11} className="text-[#71717a] shrink-0" />
+                            )}
+                            <span className={`truncate ${task.actionType === 'run_workflow' ? 'font-medium' : ''}`}>
+                              {task.actionType === 'run_workflow'
+                                ? wfName || '默认流水线'
+                                : `创建任务 → ${task.actionConfig?.kanbanColumn || 'inbox'}`}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            {task.actionType === 'run_workflow' &&
+                              (task.actionConfig?.directRun ? (
+                                <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded-[3px] bg-[#eeedfd] text-[#4f46e5] text-[9.5px] font-medium border border-[#c7c4f8]/70">
+                                  <Zap size={8} strokeWidth={2.4} />
+                                  直连 · 不落看板
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-1 py-0.2 rounded-[3px] bg-[#f4f4f6] text-[#71717a] text-[9.5px] border border-[#e3e3e8]">
+                                  写入看板
+                                </span>
+                              ))}
+                          </div>
+                        </div>
                       )}
                     </div>
 
-                    {/* 4. 最近轮询状态 */}
+                    {/* 4. 最近运行状态 */}
                     <div className="w-[18%] pr-2 min-w-0">
                       <div className="flex items-center gap-1.5">
                         {isRunning ? (
@@ -630,8 +731,10 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
         onClose={() => {
           setIsEditModalOpen(false);
           setEditingTask(null);
+          setDraft(null);
         }}
         automation={editingTask}
+        draft={draft}
         workflows={workflows}
         onSave={handleSaveAutomation}
       />
@@ -650,9 +753,10 @@ export const AutomationListView: React.FC<AutomationListViewProps> = ({
         onClose={() => setDeleteTargetTask(null)}
         onConfirm={handleDeleteConfirm}
         title="确认删除自动化任务"
-        message={`确定要删除自动化任务「${deleteTargetTask?.name}」吗？删除后将停止定时轮询调度且不可恢复。`}
+        description="删除后将停止定时调度且不可恢复。"
+        targetName={deleteTargetTask?.name}
         confirmText="确认删除"
-        danger
+        variant="danger"
         loading={isDeleting}
       />
     </div>

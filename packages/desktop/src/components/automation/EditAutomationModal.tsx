@@ -7,9 +7,9 @@ import {
   Workflow,
   Sparkles,
   Loader2,
-  Folder,
   Layers,
-  HelpCircle,
+  Clock,
+  Zap,
 } from 'lucide-react';
 
 const GithubIcon: React.FC<{ size?: number; className?: string }> = ({ size = 12, className = '' }) => (
@@ -28,14 +28,19 @@ import {
   AutomationTask,
   AutomationSourceType,
   AutomationActionType,
+  AutomationSourceConfig,
+  AutomationActionConfig,
   WorkflowDefinition,
   KanbanColumn,
 } from '@openloop/core';
+import { INTERVAL_PRESETS, formatInterval } from '../../utils/automationDraft';
 
 export interface EditAutomationModalProps {
   isOpen: boolean;
   onClose: () => void;
   automation: AutomationTask | null;
+  /** 一句话解析生成的草稿，仅在新建时生效 */
+  draft?: Partial<AutomationTask> | null;
   workflows: WorkflowDefinition[];
   onSave: (taskData: Partial<AutomationTask> & { name: string }) => Promise<void>;
 }
@@ -47,19 +52,27 @@ const TEMPLATES: Array<{
   sourceType: AutomationSourceType;
   actionType: AutomationActionType;
   intervalSec: number;
-  sourceConfig: any;
-  actionConfig: any;
+  sourceConfig: AutomationSourceConfig;
+  actionConfig: AutomationActionConfig;
 }> = [
+  {
+    id: 'tpl_schedule',
+    label: '定时扫描 → 流水线',
+    desc: '按周期触发流水线，Agent 完成扫描与判断',
+    sourceType: 'schedule',
+    actionType: 'run_workflow',
+    intervalSec: 1800,
+    sourceConfig: {},
+    actionConfig: { autoRun: true, directRun: true },
+  },
   {
     id: 'tpl_cli',
     label: 'CLI 工具轮询',
-    desc: '定时执行 CLI 脚本/命令，监控构建或状态',
+    desc: '定时执行 CLI 命令，结果入看板',
     sourceType: 'cli_script',
     actionType: 'create_task',
     intervalSec: 60,
-    sourceConfig: {
-      command: 'git status --short',
-    },
+    sourceConfig: { command: 'git status --short' },
     actionConfig: {
       kanbanColumn: 'inbox',
       titleTemplate: '[CLI 轮询] {{title}}',
@@ -69,33 +82,22 @@ const TEMPLATES: Array<{
   {
     id: 'tpl_gh',
     label: 'GitHub Issue 监控',
-    desc: '拉取最新 Issues，自动入会创建看板任务',
+    desc: '拉取最新 Issues，自动创建看板任务',
     sourceType: 'github_issues',
     actionType: 'create_task',
     intervalSec: 120,
-    sourceConfig: {
-      repo: 'facebook/react',
-    },
-    actionConfig: {
-      kanbanColumn: 'inbox',
-      titleTemplate: '{{title}}',
-      autoRun: false,
-    },
+    sourceConfig: { repo: 'facebook/react' },
+    actionConfig: { kanbanColumn: 'inbox', titleTemplate: '{{title}}', autoRun: false },
   },
   {
     id: 'tpl_twitter',
-    label: '推特消息流水线',
-    desc: '监听推特关键词，自动创建任务并驱动流水线',
+    label: '社媒关键词监听',
+    desc: '监听社媒关键词，命中后直接驱动流水线',
     sourceType: 'twitter_query',
     actionType: 'run_workflow',
     intervalSec: 300,
-    sourceConfig: {
-      twitterQuery: 'openloop release',
-    },
-    actionConfig: {
-      kanbanColumn: 'in_progress',
-      autoRun: true,
-    },
+    sourceConfig: { twitterQuery: 'openloop release' },
+    actionConfig: { autoRun: true, directRun: true },
   },
 ];
 
@@ -103,66 +105,74 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
   isOpen,
   onClose,
   automation,
+  draft,
   workflows,
   onSave,
 }) => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [enabled, setEnabled] = useState(true);
-  const [intervalSec, setIntervalSec] = useState(60);
-  const [sourceType, setSourceType] = useState<AutomationSourceType>('cli_script');
+  const [intervalSec, setIntervalSec] = useState(1800);
+  const [sourceType, setSourceType] = useState<AutomationSourceType>('schedule');
+  const [scanGoal, setScanGoal] = useState('');
   const [command, setCommand] = useState('');
   const [cwd, setCwd] = useState('');
   const [repo, setRepo] = useState('');
   const [githubToken, setGithubToken] = useState('');
   const [twitterQuery, setTwitterQuery] = useState('');
-  const [actionType, setActionType] = useState<AutomationActionType>('create_task');
+  const [actionType, setActionType] = useState<AutomationActionType>('run_workflow');
   const [workflowId, setWorkflowId] = useState('');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>('inbox');
   const [titleTemplate, setTitleTemplate] = useState('');
   const [autoRun, setAutoRun] = useState(true);
+  const [directRun, setDirectRun] = useState(true);
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (automation) {
-      setName(automation.name || '');
-      setDescription(automation.description || '');
-      setEnabled(automation.enabled !== false);
-      setIntervalSec(automation.intervalSec || 60);
-      setSourceType(automation.sourceType || 'cli_script');
-      setCommand(automation.sourceConfig?.command || '');
-      setCwd(automation.sourceConfig?.cwd || '');
-      setRepo(automation.sourceConfig?.repo || '');
-      setGithubToken(automation.sourceConfig?.githubToken || '');
-      setTwitterQuery(automation.sourceConfig?.twitterQuery || '');
-      setActionType(automation.actionType || 'create_task');
-      setWorkflowId(automation.actionConfig?.workflowId || (workflows[0]?.id ?? ''));
-      setKanbanColumn((automation.actionConfig?.kanbanColumn as KanbanColumn) || 'inbox');
-      setTitleTemplate(automation.actionConfig?.titleTemplate || '');
-      setAutoRun(automation.actionConfig?.autoRun !== false);
+    const initial = automation || (draft as AutomationTask | undefined);
+    if (initial) {
+      setName(initial.name || '');
+      setDescription(initial.description || '');
+      setEnabled(initial.enabled !== false);
+      setIntervalSec(initial.intervalSec || 1800);
+      setSourceType(initial.sourceType || 'schedule');
+      setScanGoal(initial.sourceConfig?.prompt || '');
+      setCommand(initial.sourceConfig?.command || '');
+      setCwd(initial.sourceConfig?.cwd || '');
+      setRepo(initial.sourceConfig?.repo || '');
+      setGithubToken(initial.sourceConfig?.githubToken || '');
+      setTwitterQuery(initial.sourceConfig?.twitterQuery || '');
+      setActionType(initial.actionType || 'run_workflow');
+      setWorkflowId(initial.actionConfig?.workflowId || (workflows[0]?.id ?? ''));
+      setKanbanColumn((initial.actionConfig?.kanbanColumn as KanbanColumn) || 'inbox');
+      setTitleTemplate(initial.actionConfig?.titleTemplate || '');
+      setAutoRun(initial.actionConfig?.autoRun !== false);
+      setDirectRun(initial.actionConfig?.directRun !== false);
     } else {
-      // 默认新建初始值
+      // 新建默认值：定时驱动流水线 + 不落看板
       setName('');
       setDescription('');
       setEnabled(true);
-      setIntervalSec(60);
-      setSourceType('cli_script');
+      setIntervalSec(1800);
+      setSourceType('schedule');
+      setScanGoal('');
       setCommand('git status --short');
       setCwd('');
       setRepo('');
       setGithubToken('');
       setTwitterQuery('');
-      setActionType('create_task');
+      setActionType('run_workflow');
       setWorkflowId(workflows[0]?.id || '');
       setKanbanColumn('inbox');
       setTitleTemplate('');
       setAutoRun(true);
+      setDirectRun(true);
     }
     setErrorMsg(null);
-  }, [automation, isOpen, workflows]);
+  }, [automation, draft, isOpen, workflows]);
 
   useEffect(() => {
     if (isOpen) {
@@ -174,18 +184,20 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
   }, [isOpen]);
 
   // 快捷套用模板
-  const applyTemplate = (tpl: typeof TEMPLATES[0]) => {
+  const applyTemplate = (tpl: (typeof TEMPLATES)[0]) => {
     setName(`${tpl.label} 自动化`);
     setDescription(tpl.desc);
     setSourceType(tpl.sourceType);
     setActionType(tpl.actionType);
     setIntervalSec(tpl.intervalSec);
+    setScanGoal(tpl.sourceConfig.prompt || '');
     if (tpl.sourceConfig.command) setCommand(tpl.sourceConfig.command);
     if (tpl.sourceConfig.repo) setRepo(tpl.sourceConfig.repo);
     if (tpl.sourceConfig.twitterQuery) setTwitterQuery(tpl.sourceConfig.twitterQuery);
     if (tpl.actionConfig.kanbanColumn) setKanbanColumn(tpl.actionConfig.kanbanColumn);
     if (tpl.actionConfig.titleTemplate) setTitleTemplate(tpl.actionConfig.titleTemplate);
     if (tpl.actionConfig.autoRun !== undefined) setAutoRun(tpl.actionConfig.autoRun);
+    setDirectRun(Boolean(tpl.actionConfig.directRun));
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -197,7 +209,7 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
     }
 
     if (sourceType === 'cli_script' && !command.trim()) {
-      setErrorMsg('请输入需要轮询执行的 CLI 脚本或命令');
+      setErrorMsg('请输入需要定时执行的 CLI 脚本或命令');
       return;
     }
     if (sourceType === 'github_issues' && !repo.trim()) {
@@ -205,7 +217,15 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
       return;
     }
     if (sourceType === 'twitter_query' && !twitterQuery.trim()) {
-      setErrorMsg('请输入推特搜索关键词或用户名');
+      setErrorMsg('请输入社媒搜索关键词或用户名');
+      return;
+    }
+    if (actionType === 'run_workflow' && workflows.length === 0) {
+      setErrorMsg('还没有可用流水线，请先在「流程编排」中创建一条流水线');
+      return;
+    }
+    if (actionType === 'run_workflow' && !workflowId) {
+      setErrorMsg('请选择要驱动的流水线');
       return;
     }
 
@@ -213,8 +233,10 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
     setErrorMsg(null);
 
     try {
-      const sourceConfig: any = {};
-      if (sourceType === 'cli_script') {
+      const sourceConfig: AutomationSourceConfig = {};
+      if (sourceType === 'schedule') {
+        if (scanGoal.trim()) sourceConfig.prompt = scanGoal.trim();
+      } else if (sourceType === 'cli_script') {
         sourceConfig.command = command.trim();
         if (cwd.trim()) sourceConfig.cwd = cwd.trim();
       } else if (sourceType === 'github_issues') {
@@ -227,9 +249,10 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
         sourceConfig.command = command.trim();
       }
 
-      const actionConfig: any = {
+      const actionConfig: AutomationActionConfig = {
         kanbanColumn,
         autoRun,
+        directRun: actionType === 'run_workflow' ? directRun : false,
       };
       if (workflowId) actionConfig.workflowId = workflowId;
       if (titleTemplate.trim()) actionConfig.titleTemplate = titleTemplate.trim();
@@ -239,7 +262,7 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
         name: trimmedName,
         description: description.trim() || undefined,
         enabled,
-        intervalSec: Number(intervalSec) || 60,
+        intervalSec: Number(intervalSec) || 1800,
         sourceType,
         sourceConfig,
         actionType,
@@ -291,6 +314,13 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
             </div>
           )}
 
+          {draft && !automation && (
+            <div className="px-3 py-2 bg-[#eeedfd] border border-[#c7c4f8] text-[#4f46e5] rounded-[6px] text-[11.5px] leading-relaxed flex items-center gap-1.5">
+              <Sparkles size={12} className="shrink-0" />
+              <span>已根据描述生成草稿，确认关联流水线后保存即开始定时运行</span>
+            </div>
+          )}
+
           {/* 预设快捷场景模板（仅在新建模式下推荐） */}
           {!automation && (
             <div className="space-y-1.5">
@@ -298,18 +328,18 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
                 <Sparkles size={11} className="text-[#4f46e5]" />
                 <span>快速应用常用模板</span>
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {TEMPLATES.map((tpl) => (
                   <button
                     key={tpl.id}
                     type="button"
                     onClick={() => applyTemplate(tpl)}
-                    className="p-2.5 rounded-[6px] border border-[#e3e3e8] bg-[#fafafc] hover:bg-white hover:border-[#4f46e5]/50 transition-all text-left group cursor-pointer shadow-2xs"
+                    className="px-2.5 py-2 rounded-[6px] border border-[#e3e3e8] bg-[#fafafc] hover:bg-white hover:border-[#4f46e5]/50 transition-all text-left group cursor-pointer shadow-2xs"
                   >
                     <div className="font-medium text-[11.5px] text-[#1c1c21] group-hover:text-[#4f46e5] transition-colors truncate">
                       {tpl.label}
                     </div>
-                    <div className="text-[10px] text-[#85858d] line-clamp-2 mt-0.5 leading-snug">
+                    <div className="text-[10px] text-[#85858d] line-clamp-1 mt-0.5 leading-snug">
                       {tpl.desc}
                     </div>
                   </button>
@@ -327,26 +357,44 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="例如: 轮询 CLI 工具 / 监控 GitHub Issue"
+                placeholder="例如: 扫描小红书上「艮兴嘉苑」租房帖子"
                 className="w-full h-[32px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white text-[#1c1c21] text-[12px] focus:outline-hidden focus:border-[#4f46e5] transition-colors"
                 disabled={loading}
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-[11px] font-medium text-[#85858d]">轮询间隔 (秒) *</label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min="5"
-                  max="86400"
-                  value={intervalSec}
-                  onChange={(e) => setIntervalSec(Math.max(5, parseInt(e.target.value, 10) || 60))}
-                  className="w-full h-[32px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white text-[#1c1c21] text-[12px] font-mono focus:outline-hidden focus:border-[#4f46e5] transition-colors"
-                  disabled={loading}
-                />
-              </div>
+              <label className="text-[11px] font-medium text-[#85858d] flex items-center justify-between">
+                <span>触发周期 (秒) *</span>
+                <span className="text-[10px] text-[#a1a1aa] font-mono">= 每 {formatInterval(intervalSec)}</span>
+              </label>
+              <input
+                type="number"
+                min="5"
+                max="86400"
+                value={intervalSec}
+                onChange={(e) => setIntervalSec(Math.max(5, parseInt(e.target.value, 10) || 1800))}
+                className="w-full h-[32px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white text-[#1c1c21] text-[12px] font-mono focus:outline-hidden focus:border-[#4f46e5] transition-colors"
+                disabled={loading}
+              />
             </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {INTERVAL_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setIntervalSec(preset)}
+                className={`h-[22px] px-2 rounded-[4px] border text-[10.5px] transition-all cursor-pointer ${
+                  intervalSec === preset
+                    ? 'border-[#4f46e5] bg-[#eeedfd] text-[#4f46e5] font-medium'
+                    : 'border-[#e3e3e8] bg-white text-[#71717a] hover:bg-[#fafafc]'
+                }`}
+              >
+                {formatInterval(preset)}
+              </button>
+            ))}
           </div>
 
           <div className="space-y-1">
@@ -355,57 +403,89 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="简要说明此轮询自动化任务的业务目标"
+              placeholder="简述业务目标，会与扫描目标一起注入流水线上下文"
               className="w-full h-[30px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white text-[#1c1c21] text-[12px] focus:outline-hidden focus:border-[#4f46e5] transition-colors"
               disabled={loading}
             />
           </div>
 
-          {/* 轮询数据源类型 */}
+          {/* 触发方式 */}
           <div className="space-y-2 pt-1 border-t border-[#f1f1f4]">
-            <label className="text-[11px] font-medium text-[#85858d]">数据源与触发类型 *</label>
-            <div className="grid grid-cols-3 gap-2">
+            <label className="text-[11px] font-medium text-[#85858d]">触发方式 *</label>
+            <div className="grid grid-cols-4 gap-2">
+              <button
+                type="button"
+                onClick={() => setSourceType('schedule')}
+                className={`h-[34px] px-2 rounded-[6px] border flex items-center justify-center gap-1.5 transition-all text-[11.5px] cursor-pointer ${
+                  sourceType === 'schedule'
+                    ? 'border-[#4f46e5] bg-[#eeedfd] text-[#4f46e5] font-medium'
+                    : 'border-[#e3e3e8] bg-white text-[#52525b] hover:bg-[#fafafc]'
+                }`}
+              >
+                <Clock size={12} strokeWidth={2} />
+                <span>定时触发</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setSourceType('cli_script')}
-                className={`h-[34px] px-2.5 rounded-[6px] border flex items-center justify-center gap-1.5 transition-all text-[11.5px] cursor-pointer ${
+                className={`h-[34px] px-2 rounded-[6px] border flex items-center justify-center gap-1.5 transition-all text-[11.5px] cursor-pointer ${
                   sourceType === 'cli_script'
                     ? 'border-[#4f46e5] bg-[#eeedfd] text-[#4f46e5] font-medium'
                     : 'border-[#e3e3e8] bg-white text-[#52525b] hover:bg-[#fafafc]'
                 }`}
               >
                 <Terminal size={12} strokeWidth={2} />
-                <span>CLI 脚本轮询</span>
+                <span>CLI 轮询</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setSourceType('github_issues')}
-                className={`h-[34px] px-2.5 rounded-[6px] border flex items-center justify-center gap-1.5 transition-all text-[11.5px] cursor-pointer ${
+                className={`h-[34px] px-2 rounded-[6px] border flex items-center justify-center gap-1.5 transition-all text-[11.5px] cursor-pointer ${
                   sourceType === 'github_issues'
                     ? 'border-[#4f46e5] bg-[#eeedfd] text-[#4f46e5] font-medium'
                     : 'border-[#e3e3e8] bg-white text-[#52525b] hover:bg-[#fafafc]'
                 }`}
               >
                 <GithubIcon size={12} />
-                <span>GitHub Issues</span>
+                <span>GitHub</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setSourceType('twitter_query')}
-                className={`h-[34px] px-2.5 rounded-[6px] border flex items-center justify-center gap-1.5 transition-all text-[11.5px] cursor-pointer ${
+                className={`h-[34px] px-2 rounded-[6px] border flex items-center justify-center gap-1.5 transition-all text-[11.5px] cursor-pointer ${
                   sourceType === 'twitter_query'
                     ? 'border-[#4f46e5] bg-[#eeedfd] text-[#4f46e5] font-medium'
                     : 'border-[#e3e3e8] bg-white text-[#52525b] hover:bg-[#fafafc]'
                 }`}
               >
                 <TwitterIcon size={12} />
-                <span>推特 / 社媒消息</span>
+                <span>社媒监听</span>
               </button>
             </div>
 
             {/* 动态配置字段 */}
+            {sourceType === 'schedule' && (
+              <div className="space-y-2 p-3 bg-[#fafafc] rounded-[6px] border border-[#e3e3e8]">
+                <div className="space-y-1">
+                  <label className="text-[10.5px] font-medium text-[#71717a] flex items-center justify-between">
+                    <span>扫描 / 执行目标 (注入流水线上下文)</span>
+                    <span className="text-[10px] text-[#a1a1aa]">抓取与判断由流水线内的 Agent 节点完成</span>
+                  </label>
+                  <textarea
+                    value={scanGoal}
+                    onChange={(e) => setScanGoal(e.target.value)}
+                    rows={2}
+                    placeholder="例如: 扫描小红书上关于「艮兴嘉苑」租房的帖子，筛出真实房源并整理成清单"
+                    className="w-full px-2.5 py-1.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#1c1c21] text-[11.5px] leading-relaxed resize-none focus:outline-hidden focus:border-[#4f46e5]"
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+            )}
+
             {sourceType === 'cli_script' && (
               <div className="space-y-2 p-3 bg-[#fafafc] rounded-[6px] border border-[#e3e3e8]">
                 <div className="space-y-1">
@@ -485,7 +565,7 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
                     type="text"
                     value={command}
                     onChange={(e) => setCommand(e.target.value)}
-                    placeholder="例如: twscrape search 'openloop' --limit 5，留空使用内置模拟监听"
+                    placeholder="例如: twscrape search 'openloop' --limit 5"
                     className="w-full h-[30px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#1c1c21] font-mono text-[11px] focus:outline-hidden focus:border-[#4f46e5]"
                     disabled={loading}
                   />
@@ -494,23 +574,10 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
             )}
           </div>
 
-          {/* 下游联动动作 */}
+          {/* 触发后动作 */}
           <div className="space-y-2 pt-1 border-t border-[#f1f1f4]">
-            <label className="text-[11px] font-medium text-[#85858d]">轮询命中后续动作 (Action) *</label>
+            <label className="text-[11px] font-medium text-[#85858d]">触发后动作 (Action) *</label>
             <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => setActionType('create_task')}
-                className={`h-[34px] px-2 rounded-[6px] border flex items-center justify-center gap-1.5 transition-all text-[11.5px] cursor-pointer ${
-                  actionType === 'create_task'
-                    ? 'border-[#4f46e5] bg-[#eeedfd] text-[#4f46e5] font-medium'
-                    : 'border-[#e3e3e8] bg-white text-[#52525b] hover:bg-[#fafafc]'
-                }`}
-              >
-                <Layers size={12} strokeWidth={2} />
-                <span>自动创建看板任务</span>
-              </button>
-
               <button
                 type="button"
                 onClick={() => setActionType('run_workflow')}
@@ -521,7 +588,20 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
                 }`}
               >
                 <Workflow size={12} strokeWidth={2} />
-                <span>驱动流水线执行</span>
+                <span>驱动流水线</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActionType('create_task')}
+                className={`h-[34px] px-2 rounded-[6px] border flex items-center justify-center gap-1.5 transition-all text-[11.5px] cursor-pointer ${
+                  actionType === 'create_task'
+                    ? 'border-[#4f46e5] bg-[#eeedfd] text-[#4f46e5] font-medium'
+                    : 'border-[#e3e3e8] bg-white text-[#52525b] hover:bg-[#fafafc]'
+                }`}
+              >
+                <Layers size={12} strokeWidth={2} />
+                <span>写入看板</span>
               </button>
 
               <button
@@ -539,24 +619,10 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
             </div>
 
             {(actionType === 'create_task' || actionType === 'run_workflow') && (
-              <div className="grid grid-cols-2 gap-3 p-3 bg-[#fafafc] rounded-[6px] border border-[#e3e3e8]">
-                <div className="space-y-1">
-                  <label className="text-[10.5px] font-medium text-[#71717a]">投递看板泳道</label>
-                  <select
-                    value={kanbanColumn}
-                    onChange={(e) => setKanbanColumn(e.target.value as KanbanColumn)}
-                    className="w-full h-[30px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white text-[#1c1c21] text-[11.5px] focus:outline-hidden focus:border-[#4f46e5]"
-                    disabled={loading}
-                  >
-                    <option value="inbox">📥 Inbox (收集箱)</option>
-                    <option value="backlog">📋 Backlog (待排期)</option>
-                    <option value="in_progress">⚡ In Progress (进行中)</option>
-                  </select>
-                </div>
-
+              <div className="space-y-2 p-3 bg-[#fafafc] rounded-[6px] border border-[#e3e3e8]">
                 <div className="space-y-1">
                   <label className="text-[10.5px] font-medium text-[#71717a]">
-                    {actionType === 'run_workflow' ? '关联工作流 (必须)' : '关联工作流 (可选)'}
+                    {actionType === 'run_workflow' ? '关联流水线 (必须)' : '关联流水线 (可选)'}
                   </label>
                   <select
                     value={workflowId}
@@ -569,13 +635,52 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
                         {wf.name} ({wf.nodes?.length || 0} 节点)
                       </option>
                     ))}
-                    {workflows.length === 0 && <option value="">暂无工作流，将使用默认</option>}
+                    {workflows.length === 0 && <option value="">暂无流水线</option>}
                   </select>
                 </div>
 
                 {actionType === 'run_workflow' && (
-                  <div className="col-span-2 flex items-center justify-between pt-1">
-                    <span className="text-[11px] text-[#52525b]">创建任务后立即自动启动 DAG 引擎</span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Zap size={11} className="text-[#4f46e5]" />
+                      <div>
+                        <div className="text-[11px] text-[#1c1c21] font-medium leading-tight">直连运行，不落看板</div>
+                        <div className="text-[10px] text-[#85858d] leading-tight mt-0.5">
+                          任务只存活于自动化 Tab，看板保持干净
+                        </div>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={directRun}
+                        onChange={(e) => setDirectRun(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4 bg-[#e4e4e7] peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#d4d4d8] after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-[#4f46e5]" />
+                    </label>
+                  </div>
+                )}
+
+                {!directRun && (
+                  <div className="space-y-1">
+                    <label className="text-[10.5px] font-medium text-[#71717a]">投递看板泳道</label>
+                    <select
+                      value={kanbanColumn}
+                      onChange={(e) => setKanbanColumn(e.target.value as KanbanColumn)}
+                      className="w-full h-[30px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white text-[#1c1c21] text-[11.5px] focus:outline-hidden focus:border-[#4f46e5]"
+                      disabled={loading}
+                    >
+                      <option value="inbox">📥 Inbox (收集箱)</option>
+                      <option value="backlog">📋 Backlog (待排期)</option>
+                      <option value="in_progress">⚡ In Progress (进行中)</option>
+                    </select>
+                  </div>
+                )}
+
+                {actionType === 'run_workflow' && (
+                  <div className="flex items-center justify-between pt-0.5">
+                    <span className="text-[11px] text-[#52525b]">触发后立即自动启动流水线</span>
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input
                         type="checkbox"
@@ -594,8 +699,8 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
           {/* 启用开关 */}
           <div className="flex items-center justify-between p-3 rounded-[6px] bg-[#fafafc] border border-[#e3e3e8]">
             <div>
-              <div className="text-[11.5px] font-medium text-[#1c1c21]">立即启用调度轮询</div>
-              <div className="text-[10.5px] text-[#85858d]">保存后调度器将立即按照指定周期定时自动轮询</div>
+              <div className="text-[11.5px] font-medium text-[#1c1c21]">保存后立即启用</div>
+              <div className="text-[10.5px] text-[#85858d]">调度器将按指定周期自动运行，无需人工介入</div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input

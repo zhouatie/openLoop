@@ -7,7 +7,6 @@ import {
   AutomationTask,
   AutomationLogRecord,
   Task,
-  KanbanColumn,
 } from '../types';
 import { createLogger } from '../logger';
 
@@ -23,6 +22,8 @@ export class AutomationScheduler extends EventEmitter {
   private engine: DagEngine;
   private timers: Map<string, NodeJS.Timeout> = new Map();
   private runningSet: Set<string> = new Set();
+  /** 直连流水线仍在运行的自动化任务（避免周期重叠与误报终态） */
+  private pipelineRunningSet: Set<string> = new Set();
   private isStarted = false;
 
   constructor(store: Store, engine: DagEngine) {
@@ -59,6 +60,7 @@ export class AutomationScheduler extends EventEmitter {
     }
     this.timers.clear();
     this.runningSet.clear();
+    this.pipelineRunningSet.clear();
     this.isStarted = false;
   }
 
@@ -119,6 +121,7 @@ export class AutomationScheduler extends EventEmitter {
   public onTaskDeleted(taskId: string): void {
     this.unscheduleTask(taskId);
     this.runningSet.delete(taskId);
+    this.pipelineRunningSet.delete(taskId);
   }
 
   /**
@@ -138,6 +141,11 @@ export class AutomationScheduler extends EventEmitter {
       return { success: false, message: '任务正在执行中，请勿重复触发' };
     }
 
+    if (this.pipelineRunningSet.has(taskId)) {
+      logger.warn(`[AutomationScheduler] 任务 ${task.name} 上一轮流水线尚未结束，跳过本次调度`);
+      return { success: false, message: '上一轮流水线仍在执行中，本轮已跳过' };
+    }
+
     this.runningSet.add(taskId);
     const startTime = Date.now();
     logger.info(`[AutomationScheduler] 开始执行自动化任务: ${task.name} (${task.id}), 手动触发: ${Boolean(options.manual)}`);
@@ -151,6 +159,7 @@ export class AutomationScheduler extends EventEmitter {
     let isSuccess = false;
     let summary = '';
     let createdTaskId: string | undefined;
+    let pipelineRun: Promise<void> | undefined;
 
     try {
       // 1. 根据数据源执行获取
@@ -163,9 +172,14 @@ export class AutomationScheduler extends EventEmitter {
       if (isSuccess && (task.actionType === 'create_task' || task.actionType === 'run_workflow')) {
         const actionResult = await this.dispatchDownstreamAction(task, fetchResult);
         createdTaskId = actionResult.taskId;
-        if (createdTaskId) {
-          summary += ` | 已自动创建看板任务: ${actionResult.taskTitle}`;
+        if (actionResult.taskTitle) {
+          summary += actionResult.directRun
+            ? ` | 已驱动流水线: ${actionResult.taskTitle}`
+            : ` | 已自动创建看板任务: ${actionResult.taskTitle}`;
         }
+
+        // 流水线在后台继续执行，不阻塞调度周期
+        pipelineRun = actionResult.runPromise;
       }
     } catch (err: any) {
       isSuccess = false;
@@ -214,6 +228,30 @@ export class AutomationScheduler extends EventEmitter {
     };
     this.store.addAutomationLog(logRecord);
 
+    // 5. 流水线型任务在流水线结束后回写真实终态（结果通知由流水线自身的节点编排负责）
+    if (pipelineRun && createdTaskId) {
+      const runTaskId = createdTaskId;
+      this.pipelineRunningSet.add(taskId);
+      const writeBack = (ok: boolean, message: string) => {
+        const latest = this.store.getAutomationTask(taskId);
+        if (!latest) return;
+        latest.lastRunStatus = ok ? 'success' : 'failed';
+        latest.lastRunMessage = message;
+        this.emit('automation:update', this.store.saveAutomationTask(latest));
+      };
+      void pipelineRun
+        .then(() => {
+          const runStatus = this.store.getTask(runTaskId)?.status;
+          const ok = runStatus === 'completed';
+          writeBack(ok, `${summary} | 流水线${ok ? '执行完成' : `结束于 ${runStatus || 'unknown'}`}`);
+        })
+        .catch((err: any) => {
+          logger.error(`[AutomationScheduler] 流水线执行异常 (${task.name}):`, err);
+          writeBack(false, `${summary} | 流水线执行异常: ${err?.message || String(err)}`);
+        })
+        .finally(() => this.pipelineRunningSet.delete(taskId));
+    }
+
     // 广播事件
     this.emit('automation:update', task);
     this.emit('automation:log', logRecord);
@@ -239,6 +277,18 @@ export class AutomationScheduler extends EventEmitter {
     const { sourceType, sourceConfig } = task;
 
     switch (sourceType) {
+      case 'schedule': {
+        // 纯定时触发：不做数据抓取，扫描/调研由关联流水线内的 Agent 节点完成
+        const goal = (sourceConfig.prompt || task.description || task.name).trim();
+        logger.debug(`[AutomationScheduler] 定时触发流水线: ${task.name} (目标: ${goal.slice(0, 60)})`);
+        return {
+          success: true,
+          summary: `定时触发流水线${goal ? `: ${goal.slice(0, 60).replace(/\n/g, ' ')}` : ''}`,
+          rawOutput: goal,
+          items: [{ title: task.name, body: goal }],
+        };
+      }
+
       case 'cli_script': {
         const cmd = sourceConfig.command?.trim();
         if (!cmd) {
@@ -381,20 +431,26 @@ export class AutomationScheduler extends EventEmitter {
 
   /**
    * 触发下游看板任务创建与流水线执行联动
+   * - directRun: 复用单条隐藏任务，不进入看板，直接在自动化 Tab 内驱动流水线
    */
   private async dispatchDownstreamAction(
     task: AutomationTask,
     fetchResult: { items?: Array<{ title: string; body?: string }>; rawOutput: string }
-  ): Promise<{ taskId?: string; taskTitle?: string }> {
+  ): Promise<{ taskId?: string; taskTitle?: string; directRun: boolean; runPromise?: Promise<void> }> {
     const { actionConfig, actionType } = task;
+    const directRun = Boolean(actionConfig.directRun) && actionType === 'run_workflow';
     const firstItem = fetchResult.items && fetchResult.items[0];
 
-    const taskTitle =
-      actionConfig.titleTemplate
-        ? actionConfig.titleTemplate
-            .replace('{{title}}', firstItem?.title || task.name)
-            .replace('{{name}}', task.name)
-        : firstItem?.title || `[自动化] ${task.name} - ${new Date().toLocaleDateString()}`;
+    const workflowId =
+      actionConfig.workflowId || this.store.getWorkflows()[0]?.id || 'wf_default_automation';
+
+    const taskTitle = directRun
+      ? task.name
+      : actionConfig.titleTemplate
+      ? actionConfig.titleTemplate
+          .replace('{{title}}', firstItem?.title || task.name)
+          .replace('{{name}}', task.name)
+      : firstItem?.title || `[自动化] ${task.name} - ${new Date().toLocaleDateString()}`;
 
     const taskDescription =
       actionConfig.descriptionTemplate ||
@@ -402,56 +458,56 @@ export class AutomationScheduler extends EventEmitter {
         ? `由自动化任务 **${task.name}** 自动捕获拉取。\n\n${firstItem.body || ''}`
         : `由自动化任务 **${task.name}** 执行产出：\n\`\`\`\n${fetchResult.rawOutput.slice(0, 2000)}\n\`\`\``);
 
-    // 查找有效 workflowId
-    let workflowId = actionConfig.workflowId;
-    if (!workflowId) {
-      const availableWorkflows = this.store.getWorkflows();
-      if (availableWorkflows.length > 0) {
-        workflowId = availableWorkflows[0].id;
-      } else {
-        workflowId = 'wf_default_automation';
-      }
-    }
-
+    const now = Date.now();
+    const taskId = directRun
+      ? `auto_run_${task.id}`
+      : `task_${now}_${Math.random().toString(36).slice(2, 6)}`;
+    const existing = this.store.getTask(taskId);
     const newTask: Task = {
-      id: `task_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: taskId,
       title: taskTitle,
       description: taskDescription,
       workflowId,
       status: 'pending',
-      kanbanColumn: (actionConfig.kanbanColumn as KanbanColumn) || 'inbox',
+      kanbanColumn: directRun ? 'in_progress' : actionConfig.kanbanColumn || 'inbox',
       workspace: actionConfig.workspace,
       triggerSource: 'api',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
       nodeRuns: {},
+      autoDecompose: directRun ? false : undefined,
       context: {
         automationTaskId: task.id,
         automationTaskName: task.name,
         sourceType: task.sourceType,
+        ...(directRun ? { hiddenFromKanban: true } : {}),
       },
     };
 
-    logger.info(`[AutomationScheduler] 自动生成 openLoop 看板任务: ${newTask.title} (${newTask.id})`);
+    logger.info(
+      `[AutomationScheduler] ${directRun ? '直连流水线（不落看板）' : '自动生成 openLoop 看板任务'}: ${newTask.title} (${newTask.id})`
+    );
     this.store.saveTask(newTask);
-    this.emit('task:new', newTask);
+    if (!directRun) {
+      this.emit('task:new', newTask);
+    }
 
     // 若配置为走流水线且开启了 autoRun，立即驱动 DAG 引擎
     if (actionType === 'run_workflow' && actionConfig.autoRun !== false) {
-      try {
-        const wf = this.store.getWorkflow(workflowId);
-        if (wf) {
-          logger.info(`[AutomationScheduler] 驱动流水线执行: ${wf.name} (Task: ${newTask.id})`);
-          // 异步驱动流水线
-          this.engine.runTask(newTask.id).catch((err: any) => {
-            logger.error(`[AutomationScheduler] 流水线执行启动异常:`, err);
-          });
-        }
-      } catch (wfErr) {
-        logger.warn(`[AutomationScheduler] 触发工作流失败，已保留任务在看板:`, wfErr);
+      const wf = this.store.getWorkflow(workflowId);
+      if (!wf) {
+        throw new Error(`关联流水线 ${workflowId} 不存在，无法执行`);
       }
+      logger.info(`[AutomationScheduler] 驱动流水线执行: ${wf.name} (Task: ${newTask.id})`);
+      const runPromise = this.engine.runTask(newTask.id);
+      if (directRun) {
+        return { taskId: newTask.id, taskTitle: newTask.title, directRun, runPromise };
+      }
+      runPromise.catch((err: any) => {
+        logger.error(`[AutomationScheduler] 流水线执行启动异常:`, err);
+      });
     }
 
-    return { taskId: newTask.id, taskTitle: newTask.title };
+    return { taskId: newTask.id, taskTitle: newTask.title, directRun };
   }
 }
