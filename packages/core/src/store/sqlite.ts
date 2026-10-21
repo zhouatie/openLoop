@@ -383,14 +383,20 @@ export class SqliteStore {
       // 忽略
     }
 
-    // 系统启动自愈：清理因服务崩溃/重启而残留为 running 状态的孤立任务
-    this.recoverOrphanRunningTasks();
+    // 注意：孤立任务恢复不在此处执行。Store 会被 CLI、脚本等多个进程实例化，
+    // 若在构造时清理，任何并发进程都会误杀正在执行的任务。
+    // 该动作改由 OpenLoopServer.start() 在服务启动时执行一次。
   }
 
-  private recoverOrphanRunningTasks() {
+  /**
+   * 清理因服务崩溃/重启而残留为 running 状态的孤立任务。
+   * 只允许服务进程在启动时调用一次。
+   * @returns 被恢复的任务数量
+   */
+  public recoverOrphanRunningTasks(): number {
     try {
       const runningTasks = this.db.prepare("SELECT id FROM tasks WHERE status = 'running'").all() as { id: string }[];
-      if (runningTasks.length === 0) return;
+      if (runningTasks.length === 0) return 0;
 
       const now = Date.now();
       const updateTaskStmt = this.db.prepare(`
@@ -408,8 +414,10 @@ export class SqliteStore {
         updateTaskStmt.run(now, t.id);
         updateRunsStmt.run(now, t.id);
       }
+      return runningTasks.length;
     } catch (e) {
       console.warn('[SqliteStore] recoverOrphanRunningTasks error:', e);
+      return 0;
     }
   }
 

@@ -48,6 +48,14 @@ export class Store {
     return this.sqlite.getDataDir();
   }
 
+  /**
+   * 服务启动时执行一次：清理上次进程崩溃/重启遗留的 running 任务。
+   * 禁止在构造或普通数据访问路径上调用，否则会误杀其它进程正在执行的任务。
+   */
+  public recoverOrphanRunningTasks(): number {
+    return this.sqlite.recoverOrphanRunningTasks();
+  }
+
   // Tasks
   public getTasks(): Task[] {
     return this.sqlite.getTasks();

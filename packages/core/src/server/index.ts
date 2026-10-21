@@ -144,6 +144,17 @@ export class OpenLoopServer {
 
   public async start(): Promise<{ port: number; host: string }> {
     return new Promise((resolve, reject) => {
+      // 服务启动时执行一次自愈：清理上次崩溃/重启遗留的 running 任务。
+      // 只在服务进程启动时做，避免 CLI 等其它进程触碰数据库时误杀在线任务。
+      try {
+        const recovered = this.store.recoverOrphanRunningTasks();
+        if (recovered > 0) {
+          serverLogger.warn(`[Store:Recovery] 已恢复 ${recovered} 个因上次服务中断而残留的任务`);
+        }
+      } catch (err: any) {
+        serverLogger.warn(`[Store:Recovery] 孤立任务恢复失败: ${err?.message || err}`);
+      }
+
       this.httpServer = http.createServer((req, res) => {
         this.handleHttpRequest(req, res);
       });
