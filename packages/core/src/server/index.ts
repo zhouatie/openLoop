@@ -1396,6 +1396,28 @@ export class OpenLoopServer {
         }
       }
 
+      // Task complete node: /api/tasks/:id/complete-node
+      const taskCompleteNodeMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/complete-node$/);
+      if (taskCompleteNodeMatch && method === 'POST') {
+        const taskId = taskCompleteNodeMatch[1];
+        const body = await this.parseJsonBody(req);
+        const { nodeId } = body;
+        serverLogger.info(
+          `[Tasks:CompleteNode] 接收到确认节点完成指令: ${taskId}, Node: ${nodeId || '自动判定'}`,
+          { nodeId },
+          { taskId }
+        );
+        try {
+          // 先释放仍停留在等待回复的 RPC 会话，再放行节点，避免下游长节点阻塞用户操作反馈
+          PiRpcSessionManager.getInstance().removeSession(taskId);
+          const task = await this.engine.completeNode(taskId, nodeId);
+          return this.sendJson(res, 200, task, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[Tasks:CompleteNode] 确认节点完成失败: ${err.message}`, err, { taskId });
+          return this.sendJson(res, 400, { error: err.message }, reqMeta);
+        }
+      }
+
       // Task retry node: /api/tasks/:id/retry-node
       const taskRetryNodeMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/retry-node$/);
       if (taskRetryNodeMatch && method === 'POST') {

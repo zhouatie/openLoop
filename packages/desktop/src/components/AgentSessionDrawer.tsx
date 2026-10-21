@@ -17,11 +17,13 @@ import {
   ExternalLink,
   FlaskConical,
   Cpu,
+  MessageSquare,
 } from 'lucide-react';
 import { TaskSessionState, SessionChatMessage } from '@openloop/core';
 import { getAgentProviderMeta, getDefaultResumeCommand } from '@openloop/agent-providers';
 import { api } from '../services/api';
 import { AgentMarkdown } from './AgentMarkdown';
+import { AgentAwaitingInputBar } from './AgentAwaitingInputBar';
 import { toast } from './Toast';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 import { ChatScrollToLatestButton } from './ChatScrollToLatestButton';
@@ -182,6 +184,26 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
     }
   };
 
+  // 确认当前节点已完成，手动放行流水线
+  const handleConfirmComplete = async () => {
+    if (!taskId) return;
+    if (import.meta.env?.DEV) {
+      console.log('[AgentSessionDrawer] 请求确认节点已完成并继续:', { taskId, nodeId });
+    }
+    try {
+      // 乐观更新：提示条立即消失，无需等待下游节点调度完成
+      setSessionState((prev) =>
+        prev ? { ...prev, awaitingInput: false, isBusy: true } : prev
+      );
+      await api.completeNode(taskId, nodeId);
+      toast.success('已确认完成，流水线继续推进');
+      await loadSession(true);
+    } catch (err: any) {
+      toast.error(err?.message || '确认完成失败');
+      await loadSession(true);
+    }
+  };
+
   // 切换暂停 / 继续
   const handleTogglePause = async () => {
     if (!taskId || isTogglingPause || !sessionState) return;
@@ -272,6 +294,11 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fffbeb] text-[#d97706] text-[10px] font-medium border border-[#fde68a]">
                   <Pause size={10} />
                   <span>已暂停</span>
+                </span>
+              ) : sessionState?.awaitingInput ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eef2ff] text-[#4338ca] text-[10px] font-medium border border-[#c7d2fe]">
+                  <MessageSquare size={10} />
+                  <span>等待你的回复</span>
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
@@ -592,6 +619,10 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
             </div>
           ) : (
             <>
+              {sessionState?.awaitingInput && (
+                <AgentAwaitingInputBar onConfirmComplete={handleConfirmComplete} />
+              )}
+
               <div className="flex items-center justify-between text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
                 <span className="flex items-center gap-1 min-w-0">
                   {sessionState?.isBusy ? (
@@ -601,7 +632,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                     </>
                   ) : sessionState?.isPaused ? (
                     <span className="text-[#d97706] font-medium truncate">会话已暂停，可输入新指令后继续</span>
-                  ) : (
+                  ) : sessionState?.awaitingInput ? null : (
                     <span className="truncate">可随时追加输入纠偏提示或追问</span>
                   )}
                 </span>

@@ -114,6 +114,8 @@ export interface TaskSessionState {
   active: boolean;
   isBusy: boolean;
   isPaused: boolean;
+  /** 本轮已结束但 Agent 未声明完成，正在等待用户回复 */
+  awaitingInput?: boolean;
   messages: SessionChatMessage[];
   agentName?: string;
   model?: string;

@@ -62,6 +62,7 @@ import { TaskPromptArea } from '../components/TaskPromptArea';
 import { WorkspacePicker } from '../components/WorkspacePicker';
 import { AgentMarkdown } from '../components/AgentMarkdown';
 import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
+import { AgentAwaitingInputBar } from '../components/AgentAwaitingInputBar';
 import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
 import { KanbanLaneList } from '../components/KanbanLaneList';
 import { toast } from '../components/Toast';
@@ -669,6 +670,33 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       toast.error(`会话控制失败: ${e?.message || '未知错误'}`);
     } finally {
       setIsPausingSession(false);
+    }
+  };
+
+  // 确认当前节点已完成，手动放行流水线
+  const handleConfirmCompleteNode = async () => {
+    if (!selectedTask) return;
+    if (import.meta.env?.DEV) {
+      console.log('[UI:AgentChat] 请求确认节点已完成并继续:', {
+        taskId: selectedTask.id,
+        nodeId: selectedTask.currentNodeId,
+      });
+    }
+    try {
+      // 乐观更新：提示条立即消失，无需等待下游节点调度完成
+      setSessionState((prev) =>
+        prev ? { ...prev, awaitingInput: false, isBusy: true } : prev
+      );
+      const updated = await api.completeNode(selectedTask.id, selectedTask.currentNodeId);
+      setSelectedTask(updated);
+      toast.success('已确认完成，流水线继续推进');
+      const latestSession = await api.getTaskSession(selectedTask.id);
+      setSessionState(latestSession);
+    } catch (e: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[UI:AgentChat] 确认节点完成失败:', e);
+      }
+      toast.error(`确认完成失败: ${e?.message || '未知错误'}`);
     }
   };
 
@@ -3309,6 +3337,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                 {/* 贴底悬浮输入框区 */}
                 <div className="pt-2.5 border-t border-[#ececf0] bg-white shrink-0">
+                  {sessionState?.awaitingInput && (
+                    <AgentAwaitingInputBar onConfirmComplete={handleConfirmCompleteNode} />
+                  )}
+
                   {/* 状态轻量提示 */}
                   <div className="flex items-center justify-between text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
                     <span className="flex items-center gap-1">
@@ -3322,7 +3354,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           <span className="w-1.5 h-1.5 rounded-full bg-[#b45309]" />
                           <span className="text-[#b45309] font-medium">已暂停：发送新指令将继续推进</span>
                         </>
-                      ) : (
+                      ) : sessionState?.awaitingInput ? null : (
                         <span>可向当前智能体会话追问或补充指令</span>
                       )}
                     </span>
