@@ -233,6 +233,10 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
     return childSubtasks.find((s) => s.status === 'running');
   }, [childSubtasks]);
   const runningSubIndex = runningSub ? childSubtasks.findIndex((s) => s.id === runningSub.id) : -1;
+  const runningSubWorkflowName = useMemo(() => {
+    if (!runningSub) return '';
+    return workflows.find((w) => w.id === runningSub.workflowId)?.name || runningSub.workflowId;
+  }, [workflows, runningSub]);
 
   // 当任务处于待人工门禁时，按需探活沙箱靶机状态
   useEffect(() => {
@@ -464,8 +468,11 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
           <Loader2 size={10.5} className="animate-spin text-[#2563eb] shrink-0" />
           <span className="shrink-0 font-mono text-[#2563eb]">#{runningSubIndex + 1}</span>
           <span className="truncate flex-1 font-normal text-[#1e40af]">{runningSub.title}</span>
-          <span className="shrink-0 font-mono text-[9px] bg-[#dbeafe] text-[#1e40af] px-1 py-[0.5px] rounded border border-[#bfdbfe]">
-            {workflows.find((w) => w.id === runningSub.workflowId)?.name || runningSub.workflowId}
+          <span
+            className="shrink min-w-0 max-w-[45%] truncate font-mono text-[9px] bg-[#dbeafe] text-[#1e40af] px-1 py-[0.5px] rounded border border-[#bfdbfe]"
+            title={runningSubWorkflowName}
+          >
+            {runningSubWorkflowName}
           </span>
         </div>
       )}
