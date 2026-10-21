@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@midscene/android": "^1.16.0",
+    "@midscene/ios": "^1.16.0",
     "better-sqlite3": "^13.0.3",
     "ws": "^8.18.0"
   },

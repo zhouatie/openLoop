@@ -52,6 +52,8 @@ export interface NodeConfig {
   testUrl?: string;
   appPackage?: string;
   deviceSerial?: string;
+  /** iOS WebDriverAgent 地址，如 http://localhost:8100 */
+  wdaEndpoint?: string;
   initialRoute?: string;
   suiteId?: string;
   instructions?: string[];
@@ -411,7 +413,7 @@ export interface TaskWorktreeDiffResult {
 
 export type QaStepType = 'action' | 'assert' | 'waitFor' | 'query';
 /** 当前已实现的测试平台，新增平台需同时实现对应 QaDriver */
-export type QaPlatform = 'web' | 'android';
+export type QaPlatform = 'web' | 'android' | 'ios';
 
 export interface AndroidDeviceInfo {
   serial: string;
@@ -419,6 +421,32 @@ export interface AndroidDeviceInfo {
   version?: string;
   status: 'device' | 'offline' | 'unauthorized';
   isEmulator: boolean;
+}
+
+export interface IosDeviceInfo {
+  /** 模拟器 UDID 或真机标识 */
+  udid: string;
+  name: string;
+  model: string;
+  version?: string;
+  state: 'booted' | 'shutdown' | 'unknown';
+  isSimulator: boolean;
+}
+
+/** WebDriverAgent 连接状态（iOS 自动化的唯一连接入口） */
+export interface IosWdaStatus {
+  reachable: boolean;
+  endpoint: string;
+  udid?: string;
+  deviceName?: string;
+  isSimulator?: boolean;
+  message?: string;
+}
+
+export interface IosDevicesSnapshot {
+  environment: { available: boolean; message?: string };
+  wda: IosWdaStatus;
+  simulators: IosDeviceInfo[];
 }
 
 export interface QaStep {
@@ -435,8 +463,11 @@ export interface QaSuite {
   description?: string;
   platform?: QaPlatform;
   targetUrl: string;
+  /** Android 包名 / iOS Bundle ID */
   appPackage?: string;
   deviceSerial?: string;
+  /** iOS WebDriverAgent 地址，如 http://localhost:8100 */
+  wdaEndpoint?: string;
   viewport?: {
     width: number;
     height: number;

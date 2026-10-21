@@ -148,17 +148,19 @@ export class MidsceneRunner {
         targetUrl: suite.targetUrl,
         appPackage: suite.appPackage,
         deviceSerial: suite.deviceSerial,
+        wdaEndpoint: suite.wdaEndpoint,
         viewport: { width, height },
         headless: true,
       });
       driverReady = true;
       this.options.onLog?.(`[QA 引擎] ${platform.toUpperCase()} 测试驱动初始化就绪`);
 
-      const target = platform === 'android' ? (suite.appPackage || suite.targetUrl) : suite.targetUrl;
+      // Web 端导航到目标地址，移动端（Android/iOS）拉起目标应用
+      const target = platform === 'web' ? suite.targetUrl : suite.appPackage || suite.targetUrl;
       if (this.options.skipLaunch) {
         this.options.onLog?.('[QA 引擎] 复用当前已打开页面，跳过应用拉起');
       } else if (target) {
-        this.options.onLog?.(`[QA 引擎] ${platform === 'android' ? '拉起目标应用' : '导航到目标环境'}: ${target}`);
+        this.options.onLog?.(`[QA 引擎] ${platform === 'web' ? '导航到目标环境' : '拉起目标应用'}: ${target}`);
         await driver.navigateOrLaunch(target);
       }
     } catch (err: any) {

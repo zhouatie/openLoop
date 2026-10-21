@@ -269,7 +269,7 @@ export class SqliteStore {
       this.db.exec('ALTER TABLE tasks ADD COLUMN auto_decompose INTEGER DEFAULT 1');
     } catch {}
 
-    // 增量表结构平滑迁移：QA 跨端平台 (Android/Web) 扩展字段
+    // 增量表结构平滑迁移：QA 跨端平台 (Web/Android/iOS) 扩展字段
     try {
       this.db.exec("ALTER TABLE qa_suites ADD COLUMN platform TEXT DEFAULT 'web'");
     } catch {}
@@ -278,6 +278,9 @@ export class SqliteStore {
     } catch {}
     try {
       this.db.exec('ALTER TABLE qa_suites ADD COLUMN device_serial TEXT');
+    } catch {}
+    try {
+      this.db.exec('ALTER TABLE qa_suites ADD COLUMN wda_endpoint TEXT');
     } catch {}
     try {
       this.db.exec("ALTER TABLE qa_runs ADD COLUMN platform TEXT DEFAULT 'web'");
@@ -1193,6 +1196,7 @@ export class SqliteStore {
       targetUrl: r.target_url,
       appPackage: r.app_package || undefined,
       deviceSerial: r.device_serial || undefined,
+      wdaEndpoint: r.wda_endpoint || undefined,
       viewport: r.viewport_json ? JSON.parse(r.viewport_json) : undefined,
       steps: JSON.parse(r.steps_json),
       tags: r.tags_json ? JSON.parse(r.tags_json) : undefined,
@@ -1215,6 +1219,7 @@ export class SqliteStore {
       targetUrl: r.target_url,
       appPackage: r.app_package || undefined,
       deviceSerial: r.device_serial || undefined,
+      wdaEndpoint: r.wda_endpoint || undefined,
       viewport: r.viewport_json ? JSON.parse(r.viewport_json) : undefined,
       steps: JSON.parse(r.steps_json),
       tags: r.tags_json ? JSON.parse(r.tags_json) : undefined,
@@ -1237,9 +1242,9 @@ export class SqliteStore {
 
     const stmt = this.db.prepare(`
       INSERT INTO qa_suites (
-        id, name, description, platform, target_url, app_package, device_serial, viewport_json, steps_json,
+        id, name, description, platform, target_url, app_package, device_serial, wda_endpoint, viewport_json, steps_json,
         tags_json, created_at, updated_at, last_run_status, last_run_duration_ms, last_run_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
@@ -1247,6 +1252,7 @@ export class SqliteStore {
         target_url = excluded.target_url,
         app_package = excluded.app_package,
         device_serial = excluded.device_serial,
+        wda_endpoint = excluded.wda_endpoint,
         viewport_json = excluded.viewport_json,
         steps_json = excluded.steps_json,
         tags_json = excluded.tags_json,
@@ -1264,6 +1270,7 @@ export class SqliteStore {
       suiteToSave.targetUrl,
       suiteToSave.appPackage || null,
       suiteToSave.deviceSerial || null,
+      suiteToSave.wdaEndpoint || null,
       suiteToSave.viewport ? JSON.stringify(suiteToSave.viewport) : null,
       JSON.stringify(suiteToSave.steps || []),
       suiteToSave.tags ? JSON.stringify(suiteToSave.tags) : null,

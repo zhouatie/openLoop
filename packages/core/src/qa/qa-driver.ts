@@ -3,7 +3,7 @@ import { QaPlatform } from '../types';
 export type { QaPlatform };
 
 /** 已实现驱动实现的测试平台白名单 */
-export const QA_PLATFORMS = ['web', 'android'] as const;
+export const QA_PLATFORMS = ['web', 'android', 'ios'] as const;
 
 export function isQaPlatform(value: unknown): value is QaPlatform {
   return typeof value === 'string' && (QA_PLATFORMS as readonly string[]).includes(value);
@@ -11,8 +11,11 @@ export function isQaPlatform(value: unknown): value is QaPlatform {
 
 export interface QaDriverOptions {
   targetUrl?: string;
+  /** Android 包名 / iOS Bundle ID */
   appPackage?: string;
   deviceSerial?: string;
+  /** iOS WebDriverAgent 地址 */
+  wdaEndpoint?: string;
   headless?: boolean;
   viewport?: { width: number; height: number };
   timeoutMs?: number;
