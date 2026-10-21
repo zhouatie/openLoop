@@ -2,13 +2,32 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+// 优先使用的固定本地签名身份；可用 CSC_NAME 覆盖
+const PREFERRED_IDENTITY = 'openLoop Local';
+
+// 复用固定签名身份，让 designated requirement 跨构建保持稳定
+// ad-hoc 签名的 requirement 是 cdhash，每次构建都会变化，macOS 因此会重置已授予的系统权限
+function resolveSigningIdentity() {
+  if (process.env.CSC_NAME) return process.env.CSC_NAME;
+  try {
+    const out = execSync('security find-identity -v -p codesigning', { encoding: 'utf-8' });
+    const names = [...out.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    return names.find((n) => n.startsWith(PREFERRED_IDENTITY)) || names[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 console.log('\x1b[36m%s\x1b[0m', '-------------------------------------------------------');
 console.log('\x1b[1m\x1b[36m%s\x1b[0m', '  📦 正在构建并就地更新本地 macOS 桌面端应用...');
 console.log('\x1b[36m%s\x1b[0m', '-------------------------------------------------------\n');
 
 try {
+  const identity = resolveSigningIdentity();
+  const signArg = identity ? ` --config.mac.identity="${identity}"` : '';
+
   // 1. 执行全量构建并打 Mac 本地解压目录包（速度极快，无需制作 DMG 镜像）
-  execSync('pnpm run build && npx electron-builder --mac --dir', { stdio: 'inherit' });
+  execSync(`pnpm run build && npx electron-builder --mac --dir${signArg}`, { stdio: 'inherit' });
 
   // 2. 查找生成的 .app 目录
   const candidates = [
@@ -64,6 +83,11 @@ try {
   console.log(`  安装位置: ${targetApp}`);
   console.log('  已自动注入完整 Shell PATH 环境 (mws, git, pnpm, node 开箱即用)');
   console.log('  已保留原生签名与 Entitlements 特权声明');
+  console.log(
+    identity
+      ? `  固定签名身份: ${identity}（重装不再重置系统授权）`
+      : '  ⚠ 未找到可用签名身份，本次以 ad-hoc 签名打包，系统授权可能需重新确认'
+  );
   console.log('\x1b[32m%s\x1b[0m', '-------------------------------------------------------');
 
 } catch (err) {
