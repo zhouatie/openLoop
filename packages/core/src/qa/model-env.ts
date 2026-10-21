@@ -4,7 +4,7 @@ import { createLogger } from '../logger';
 const logger = createLogger('QaModelEnv');
 
 /** 设置项字段 → Midscene 期望的环境变量 */
-const FIELD_TO_ENV: Record<keyof QaAutomationSettings, string> = {
+const FIELD_TO_ENV: Record<string, string> = {
   modelBaseUrl: 'MIDSCENE_MODEL_BASE_URL',
   modelApiKey: 'MIDSCENE_MODEL_API_KEY',
   modelName: 'MIDSCENE_MODEL_NAME',

@@ -117,6 +117,20 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
     setSelectedNodes(next);
   };
 
+  // 直接从指定节点起跑：保留前序成功成果，只重跑本节点及其后续全部节点
+  const handleRerunFromNode = (targetIdx: number) => {
+    if (!onCustomRetry || isCustomRetrying) return;
+    const ids: string[] = [];
+    for (let i = targetIdx; i < timelineItems.length; i++) {
+      ids.push(timelineItems[i].id);
+    }
+    if (ids.length === 0) return;
+    if (import.meta.env?.DEV) {
+      console.log(`[NodeExecutionTimeline] 从节点 [${ids[0]}] 起重跑, 共 ${ids.length} 个节点`, ids);
+    }
+    onCustomRetry(task.id, { selectedNodeIds: ids, fromNodeId: ids[0] });
+  };
+
   const handleSelectAll = () => {
     const next = new Set<string>();
     timelineItems.forEach((it) => next.add(it.id));
@@ -131,8 +145,11 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
     if (!onCustomRetry) return;
     const selectedList = Array.from(selectedNodes);
     if (selectedList.length === 0) return;
+    // 以时间线中最早被勾选的节点作为起点，未勾选的前序节点保留既有成果
+    const firstSelected = timelineItems.find((it) => selectedNodes.has(it.id));
     onCustomRetry(task.id, {
       selectedNodeIds: selectedList,
+      fromNodeId: firstSelected?.id,
     });
     setIsCustomMode(false);
   };
@@ -637,6 +654,20 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                             <span>从此执行</span>
                           </button>
                         </div>
+                      )}
+
+                      {/* 常驻快捷动作：以本节点为起点重跑后续流程 (成功/失败/未启动节点均可) */}
+                      {!isCustomMode && item.status !== 'running' && onCustomRetry && (
+                        <button
+                          type="button"
+                          disabled={isCustomRetrying || metrics.running > 0}
+                          onClick={() => handleRerunFromNode(index)}
+                          className="h-[21px] px-1.5 rounded-[4px] bg-[#eff6ff] hover:bg-[#dbeafe] text-[#2563eb] border border-[#bfdbfe] text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-none active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="以本节点为起点重跑后续全部节点，之前已成功的节点保留成果不重跑"
+                        >
+                          <Play size={8} className="fill-current" />
+                          <span>从此重跑</span>
+                        </button>
                       )}
 
                       {/* 失败节点微型快捷操作 */}

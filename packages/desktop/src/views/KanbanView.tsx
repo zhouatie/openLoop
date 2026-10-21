@@ -59,6 +59,7 @@ import { KanbanColumnSortDropdown } from '../components/KanbanColumnSortDropdown
 import { NodeExecutionTimeline } from '../components/NodeExecutionTimeline';
 import { ImageLightboxModal } from '../components/ImageLightboxModal';
 import { TaskPromptArea } from '../components/TaskPromptArea';
+import { WorkspacePicker } from '../components/WorkspacePicker';
 import { AgentMarkdown } from '../components/AgentMarkdown';
 import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
 import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
@@ -350,6 +351,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [manualSubtaskAttachments, setManualSubtaskAttachments] = useState<TaskAttachment[]>([]);
   const [manualSubtaskWorkflowId, setManualSubtaskWorkflowId] = useState('');
   const [manualSubtaskDep, setManualSubtaskDep] = useState('');
+  const [manualSubtaskWorkspace, setManualSubtaskWorkspace] = useState('');
 
   const [sessionState, setSessionState] = useState<TaskSessionState | null>(null);
   const [chatInput, setChatInput] = useState('');
@@ -399,6 +401,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       setManualSubtaskAttachments([]);
       setManualSubtaskWorkflowId('');
       setManualSubtaskDep('');
+      setManualSubtaskWorkspace('');
     }
   }, [selectedTask?.id]);
 
@@ -2528,6 +2531,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                     setManualSubtaskDesc('');
                                     setManualSubtaskAttachments([]);
                                     setManualSubtaskDep('');
+                                    setManualSubtaskWorkspace(curTask.workspace || '');
                                     setIsAddingManualSubtask(true);
                                   }}
                                   className="px-3.5 h-[30px] rounded-[6px] bg-white border border-[#e3e3e8] hover:bg-[#f4f4f6] text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
@@ -2655,6 +2659,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               setManualSubtaskDesc('');
                               setManualSubtaskAttachments([]);
                               setManualSubtaskDep('');
+                              setManualSubtaskWorkspace('');
                             };
 
                             return (
@@ -2721,6 +2726,24 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                   <div>
                                     <div className="flex items-center justify-between mb-0.5">
                                       <label className="block text-[10.5px] font-medium text-[#71717a]">
+                                        工程工作区
+                                      </label>
+                                      <span className="text-[10px] text-[#85858d]">
+                                        {manualSubtaskWorkspace.trim()
+                                          ? '已指定独立工程目录'
+                                          : '留空则继承任务组工程目录'}
+                                      </span>
+                                    </div>
+                                    <WorkspacePicker
+                                      value={manualSubtaskWorkspace}
+                                      onChange={setManualSubtaskWorkspace}
+                                      placeholder="选择工序执行所需的代码工程根目录 (留空继承任务组)..."
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between mb-0.5">
+                                      <label className="block text-[10.5px] font-medium text-[#71717a]">
                                         工序说明与提示词 (支持粘贴图片)
                                       </label>
                                       {selectedManualSubtaskWf?.taskTemplate?.descriptionTemplate &&
@@ -2778,6 +2801,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                             attachmentsCount: manualSubtaskAttachments.length,
                                             workflowId: targetWfId,
                                             dependencies: manualSubtaskDep ? [manualSubtaskDep] : undefined,
+                                            workspace: manualSubtaskWorkspace.trim() || '(继承父任务)',
                                           });
                                         }
                                         await api.addSubTask(curTask.id, {
@@ -2786,6 +2810,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                           attachments: manualSubtaskAttachments.length > 0 ? manualSubtaskAttachments : undefined,
                                           workflowId: targetWfId,
                                           dependencies: manualSubtaskDep ? [manualSubtaskDep] : undefined,
+                                          workspace: manualSubtaskWorkspace.trim() || undefined,
                                         });
                                         handleCancelManualSubtask();
                                         toast.success('已成功挂载工序并就地升格');
@@ -2979,6 +3004,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                     setManualSubtaskDesc('');
                                     setManualSubtaskAttachments([]);
                                     setManualSubtaskDep('');
+                                    setManualSubtaskWorkspace(curTask.workspace || '');
                                     setIsAddingManualSubtask(true);
                                   }}
                                   className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:text-[#4338ca] font-medium cursor-pointer"

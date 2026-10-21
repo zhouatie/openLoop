@@ -34,6 +34,7 @@ import {
   Target,
   Undo2,
   GitCommitHorizontal,
+  Smartphone,
 } from 'lucide-react';
 import { Task, QaRunRecord, StepTimelineRecord, WorktreeContextInfo, TaskWorktreeDiffResult } from '@openloop/core';
 import { api } from '../../services/api';
@@ -143,6 +144,10 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   const worktree: WorktreeContextInfo | undefined = currentTask.context?.worktree;
   const qaRunId = currentTask.context?.qaRunId || (worktree as any)?.qaRunId;
 
+  // 原生端验收时「靶向机」指实机/模拟器，Web 端才指开发服务地址
+  const isNativeRun = run?.platform !== undefined && run.platform !== 'web';
+  const deviceLabel = run?.deviceSerial || 'Android 设备';
+
   // 同步外部 task 属性变更
   useEffect(() => {
     setCurrentTask(task);
@@ -200,6 +205,20 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
       toast.info('沙箱靶机已关停，端口已释放');
     } catch (err: any) {
       toast.error(`关停靶机失败: ${err.message || '未知错误'}`);
+    }
+  };
+
+  const handleOpenDeviceMirror = async () => {
+    try {
+      if (import.meta.env?.DEV) console.log('[VisualAcceptanceModal:Mirror] 打开设备镜像窗口:', run?.deviceSerial || '首个在线设备');
+      const res = await api.openAndroidMirror(run?.deviceSerial || undefined);
+      if (res.success) {
+        toast.success(res.message || '已打开设备镜像窗口');
+      } else {
+        toast.error(res.message || '打开设备镜像失败');
+      }
+    } catch (err: any) {
+      toast.error(`打开设备镜像失败: ${err.message || '未知异常'}`);
     }
   };
 
@@ -992,20 +1011,40 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
 
                   <button
                     type="button"
-                    onClick={handleStartOrOpenSandbox}
+                    onClick={isNativeRun ? handleOpenDeviceMirror : handleStartOrOpenSandbox}
                     className="flex items-center gap-1.5 text-[10.5px] font-mono text-[#71717a] hover:text-[#1c1c21] bg-white hover:bg-[#fafafc] border border-[#e3e3e8]/80 hover:border-[#b9b9c2] px-2.5 py-[2px] rounded-[4px] shadow-3xs max-w-[340px] truncate transition-colors cursor-pointer group"
-                    title={sandboxStatus === 'running' ? '点击在新窗口打开靶机预览' : '靶机离线，点击一键唤醒并打开'}
+                    title={
+                      isNativeRun
+                        ? '点击打开靶向机镜像窗口 (实时观看设备画面)'
+                        : sandboxStatus === 'running'
+                        ? '点击在新窗口打开靶机预览'
+                        : '靶机离线，点击一键唤醒并打开'
+                    }
                   >
-                    {sandboxStatus === 'running' ? (
+                    {isNativeRun ? (
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${run?.status === 'passed' ? 'bg-[#059669]' : run?.status === 'failed' ? 'bg-[#dc2626]' : 'bg-[#2563eb]'}`} />
+                    ) : sandboxStatus === 'running' ? (
                       <span className="w-1.5 h-1.5 rounded-full bg-[#059669] shrink-0" />
                     ) : isStartingSandbox ? (
                       <Loader2 size={10} className="animate-spin text-[#b45309] shrink-0" />
                     ) : (
                       <span className="w-1.5 h-1.5 rounded-full bg-[#a1a1aa] shrink-0" />
                     )}
-                    <Globe size={10} className="text-[#85858d] group-hover:text-[#4f46e5] shrink-0 transition-colors" />
-                    <span className="truncate">{worktree?.targetUrl || (worktree?.webPort ? `http://localhost:${worktree.webPort}/` : 'http://localhost/')}</span>
-                    <ExternalLink size={9} className="opacity-60 group-hover:opacity-100 transition-opacity" />
+                    {isNativeRun ? (
+                      <Smartphone size={10} className="text-[#85858d] group-hover:text-[#4f46e5] shrink-0 transition-colors" />
+                    ) : (
+                      <Globe size={10} className="text-[#85858d] group-hover:text-[#4f46e5] shrink-0 transition-colors" />
+                    )}
+                    <span className="truncate">
+                      {isNativeRun
+                        ? deviceLabel
+                        : worktree?.targetUrl || (worktree?.webPort ? `http://localhost:${worktree.webPort}/` : 'http://localhost/')}
+                    </span>
+                    {isNativeRun ? (
+                      <span className="text-[9px] text-[#a1a1aa] group-hover:text-[#4f46e5] shrink-0 transition-colors">镜像</span>
+                    ) : (
+                      <ExternalLink size={9} className="opacity-60 group-hover:opacity-100 transition-opacity" />
+                    )}
                   </button>
 
                   <div className="flex items-center gap-2 text-[10px] font-mono text-[#85858d]">

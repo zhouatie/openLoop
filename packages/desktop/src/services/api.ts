@@ -236,7 +236,7 @@ export class DesktopApiService {
     executionMode?: 'serial' | 'parallel' | 'dag';
     concurrencyLimit?: number;
     autoDecompose?: boolean;
-    subtasks?: Array<{ id?: string; title: string; workflowId?: string; description?: string; dependencies?: string[] }>;
+    subtasks?: Array<{ id?: string; title: string; workflowId?: string; description?: string; dependencies?: string[]; workspace?: string }>;
   }): Promise<Task> {
     if (import.meta.env?.DEV) {
       console.log('[UI:API] 创建新任务/任务组:', params);
@@ -256,6 +256,7 @@ export class DesktopApiService {
       description?: string;
       dependencies?: string[];
       attachments?: TaskAttachment[];
+      workspace?: string;
     }
   ): Promise<{ success: boolean; subtask: Task; parent: Task }> {
     if (import.meta.env?.DEV) {
@@ -278,6 +279,7 @@ export class DesktopApiService {
         description?: string;
         dependencies?: string[];
         attachments?: TaskAttachment[];
+        workspace?: string;
       }>;
       executionMode?: 'serial' | 'parallel' | 'dag';
       concurrencyLimit?: number;
@@ -815,6 +817,17 @@ export class DesktopApiService {
       console.log('[UI:QA] 拉取 Android 在线设备与模拟器列表');
     }
     return requestJson<AndroidDeviceInfo[]>(`${BASE_URL}/api/qa/devices/android`);
+  }
+
+  async openAndroidMirror(serial?: string): Promise<{ success: boolean; message: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 打开 Android 设备镜像窗口:', serial || '首个在线设备');
+    }
+    return requestJson<{ success: boolean; message: string }>(`${BASE_URL}/api/qa/devices/android/mirror`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serial }),
+    });
   }
 
   async getAndroidCurrentApp(serial?: string): Promise<{ packageName: string; activityName?: string }> {

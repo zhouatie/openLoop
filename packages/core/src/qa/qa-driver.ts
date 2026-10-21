@@ -47,7 +47,7 @@ export interface QaDriver {
   /**
    * 执行智能等待步骤（仅支持多模态推理的驱动实现）
    */
-  executeWaitFor?(prompt: string): Promise<QaStepExecutionResult>;
+  executeWaitFor?(prompt: string, timeoutMs?: number): Promise<QaStepExecutionResult>;
   /**
    * 返回驱动实际绑定的目标设备标识（如 Android 设备序列号）
    */

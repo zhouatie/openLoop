@@ -12,6 +12,7 @@ import {
   resolveRunCommand,
 } from '../constants/agent-providers';
 import { MidsceneRunner } from '../qa/midscene-runner';
+import { AndroidDeviceManager } from '../qa/android-device-manager';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 
 const executorLogger = createLogger('Executor');
@@ -999,6 +1000,8 @@ export class MidsceneExecutor implements NodeExecutor {
 
       const actionKeywords = ['点击', '切换', '输入', '选择', '跳转', '打开', '进入', '滚动', '滑动'];
       const assertKeywords = ['检查', '校验', '验证', '确认', '是否', '包含', '断言', '正常渲染', '无报错'];
+      // 等待类用例转轮询等待，避免页面尚在加载时断言抢跑导致误判
+      const waitKeywords = ['等待', '等到', '等待至', '静候', '直到'];
 
       for (const rawInst of instructions) {
         const inst = rawInst.trim();
@@ -1007,6 +1010,12 @@ export class MidsceneExecutor implements NodeExecutor {
         // 如果单行同时包含动作词与断言词，且包含标点符号，智能拆分为两步连续执行
         const hasAction = actionKeywords.some((k) => inst.includes(k));
         const hasAssert = assertKeywords.some((k) => inst.includes(k));
+        const hasWait = waitKeywords.some((k) => inst.startsWith(k));
+
+        if (hasWait && !hasAction) {
+          steps.push({ id: `step_${stepCounter++}`, type: 'waitFor', prompt: inst });
+          continue;
+        }
 
         if (hasAction && hasAssert && /[,，;；\n]+/.test(inst)) {
           const splitParts = inst.split(/[,，;；\n]+/).map((s) => s.trim()).filter(Boolean);
@@ -1052,11 +1061,26 @@ export class MidsceneExecutor implements NodeExecutor {
         } catch {}
       }
 
+      // 客户端（Android）自动化：按设置自动拉起设备镜像窗口，便于实时观看验收过程
+      if (platform === 'android') {
+        const autoOpenMirror = ctx.store?.getSettings?.()?.qaAutomation?.autoOpenMirror !== false;
+        if (autoOpenMirror) {
+          const mirrorRes = await AndroidDeviceManager.openMirror(node.config.deviceSerial || undefined);
+          emitLog(
+            mirrorRes.success ? 'system' : 'stdout',
+            mirrorRes.success
+              ? '[QA 引擎] 已打开靶向机镜像窗口，可实时观看设备画面 (可在设置 - 自动化测试中关闭)'
+              : `[QA 引擎] 设备镜像窗口未打开: ${mirrorRes.message}`
+          );
+        }
+      }
+
       const runner = new MidsceneRunner({
         artifactBaseDir: path.join(dataDir, 'artifacts'),
         serverBaseUrl: 'http://127.0.0.1:19888',
         platform,
         signal: ctx.abortSignal,
+        skipLaunch: node.config.skipLaunch === true,
         onStepStart: (index, step) => {
           emitLog('stdout', `[Midscene 步骤 ${index + 1}/${steps.length}] 执行: [${step.type}] ${step.prompt}`);
         },

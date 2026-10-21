@@ -1,4 +1,4 @@
-import { exec } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { AndroidDeviceInfo } from '../types';
 import { createLogger } from '../logger';
@@ -79,6 +79,46 @@ export class AndroidDeviceManager {
     }
 
     return Array.from(devices.values());
+  }
+
+  /**
+   * 打开设备镜像窗口 (scrcpy)，用于本地直接观看靶机实机画面
+   */
+  static async openMirror(serial?: string): Promise<{ success: boolean; message: string }> {
+    const args = [
+      ...(serial ? ['--serial', serial] : []),
+      '--max-size=1024',
+      '--window-title=openLoop 验收设备',
+    ];
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (payload: { success: boolean; message: string }) => {
+        if (settled) return;
+        settled = true;
+        resolve(payload);
+      };
+
+      try {
+        const child = spawn('scrcpy', args, { detached: true, stdio: 'ignore' });
+        child.once('error', (err: any) => {
+          if (err?.code === 'ENOENT') {
+            logger.warn('[AndroidDeviceManager] 未检测到 scrcpy，无法打开设备镜像');
+            done({ success: false, message: '未检测到 scrcpy，请先安装: brew install scrcpy' });
+            return;
+          }
+          logger.warn(`[AndroidDeviceManager] 打开设备镜像失败: ${err?.message}`);
+          done({ success: false, message: `打开设备镜像失败: ${err?.message || '未知异常'}` });
+        });
+        child.once('spawn', () => {
+          child.unref();
+          logger.info(`[AndroidDeviceManager] 已打开设备镜像窗口 (设备: ${serial || '首个在线设备'})`);
+          done({ success: true, message: '已打开设备镜像窗口' });
+        });
+      } catch (err: any) {
+        done({ success: false, message: `打开设备镜像失败: ${err?.message || '未知异常'}` });
+      }
+    });
   }
 
   /**

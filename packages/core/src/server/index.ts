@@ -938,8 +938,9 @@ export class OpenLoopServer {
         if (!parent) return this.sendJson(res, 404, { error: 'Parent task not found' }, reqMeta);
 
         const body = await this.parseJsonBody(req);
-        const { title, workflowId, description, dependencies, attachments } = body;
+        const { title, workflowId, description, dependencies, attachments, workspace } = body;
         const subId = `task_sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const childWorkspace = typeof workspace === 'string' && workspace.trim() ? workspace.trim() : parent.workspace;
 
         const childTask: Task = {
           id: subId,
@@ -949,7 +950,7 @@ export class OpenLoopServer {
           workflowId: workflowId || parent.workflowId,
           status: 'pending',
           kanbanColumn: parent.kanbanColumn,
-          workspace: parent.workspace,
+          workspace: childWorkspace,
           triggerSource: parent.triggerSource,
           kind: 'subtask',
           parentTaskId: parent.id,
@@ -1011,6 +1012,9 @@ export class OpenLoopServer {
             .map((d: string) => tempIdToRealId.get(d) || d)
             .filter((d: string) => currentSubTaskIds.includes(d));
 
+          const childWorkspace =
+            typeof raw.workspace === 'string' && raw.workspace.trim() ? raw.workspace.trim() : parent.workspace;
+
           const childTask: Task = {
             id: realId,
             title: raw.title || `子工序 #${currentSubTaskIds.length - rawSubtasks.length + i + 1}`,
@@ -1019,7 +1023,7 @@ export class OpenLoopServer {
             workflowId: raw.workflowId || parent.workflowId,
             status: 'pending',
             kanbanColumn: parent.kanbanColumn,
-            workspace: parent.workspace,
+            workspace: childWorkspace,
             triggerSource: parent.triggerSource,
             kind: 'subtask',
             parentTaskId: parent.id,
@@ -1824,6 +1828,12 @@ export class OpenLoopServer {
       if (pathname === '/api/qa/devices/android' && method === 'GET') {
         const devices = await AndroidDeviceManager.getDevices();
         return this.sendJson(res, 200, devices, reqMeta);
+      }
+
+      if (pathname === '/api/qa/devices/android/mirror' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const mirrorRes = await AndroidDeviceManager.openMirror(body.serial || undefined);
+        return this.sendJson(res, mirrorRes.success ? 200 : 400, mirrorRes, reqMeta);
       }
 
       if (pathname === '/api/qa/devices/android/current-app' && method === 'GET') {

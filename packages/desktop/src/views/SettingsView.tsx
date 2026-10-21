@@ -265,6 +265,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [qaModelApiKey, setQaModelApiKey] = useState('');
   const [qaModelName, setQaModelName] = useState('');
   const [qaModelFamily, setQaModelFamily] = useState('');
+  const [autoOpenMirror, setAutoOpenMirror] = useState(true);
   const [showQaApiKey, setShowQaApiKey] = useState(false);
 
   // 提示词状态
@@ -433,6 +434,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           setQaModelApiKey(settings.qaAutomation.modelApiKey || '');
           setQaModelName(settings.qaAutomation.modelName || '');
           setQaModelFamily(settings.qaAutomation.modelFamily || '');
+          setAutoOpenMirror(settings.qaAutomation.autoOpenMirror !== false);
         }
       }
     } catch (err) {
@@ -624,13 +626,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   // 自动化测试模型配置即时保存
-  const saveQaAutomation = (override?: Partial<{ modelBaseUrl: string; modelApiKey: string; modelName: string; modelFamily: string }>) => {
+  const saveQaAutomation = (override?: Partial<{ modelBaseUrl: string; modelApiKey: string; modelName: string; modelFamily: string; autoOpenMirror: boolean }>) => {
     handleSave({
       qaAutomation: {
         modelBaseUrl: qaModelBaseUrl.trim(),
         modelApiKey: qaModelApiKey.trim(),
         modelName: qaModelName.trim(),
         modelFamily: qaModelFamily.trim(),
+        autoOpenMirror,
         ...override,
       },
     });
@@ -1446,6 +1449,51 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       ))}
                     </select>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium text-[#1c1c21] flex items-center gap-1.5">
+                    自动打开靶向机镜像
+                    <Smartphone size={11} className="text-[#a1a1aa]" />
+                  </div>
+                  <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                    客户端自动化开始执行时自动拉起设备镜像窗口 (需本机已安装 scrcpy)，可实时观看真机验证过程
+                  </div>
+                </div>
+
+                <div className="inline-flex p-[2px] rounded-[7px] bg-[#e6e6eb] shrink-0 self-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAutoOpenMirror(false);
+                      saveQaAutomation({ autoOpenMirror: false });
+                    }}
+                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer active:scale-95 ${
+                      !autoOpenMirror
+                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.08)]'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    关闭
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAutoOpenMirror(true);
+                      saveQaAutomation({ autoOpenMirror: true });
+                    }}
+                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer active:scale-95 ${
+                      autoOpenMirror
+                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.08)]'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    开启
+                  </button>
                 </div>
               </div>
             </div>

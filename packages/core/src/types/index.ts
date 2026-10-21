@@ -56,6 +56,7 @@ export interface NodeConfig {
   suiteId?: string;
   instructions?: string[];
   screenshotPath?: string;
+  skipLaunch?: boolean; // 复用前置节点已拉起的页面，不再自行拉起应用
   
   // 拼接截图专用
   sourceDir?: string;
@@ -360,6 +361,8 @@ export interface QaAutomationSettings {
   modelApiKey?: string;
   modelName?: string;
   modelFamily?: string;
+  /** 客户端自动化执行时是否自动打开设备镜像窗口（默认开启） */
+  autoOpenMirror?: boolean;
 }
 
 export interface WorktreeContextInfo {

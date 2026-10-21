@@ -149,11 +149,30 @@ export class AndroidDriver implements QaDriver {
         const actThought = await this.agent.aiAct(prompt);
         thought = typeof actThought === 'string' && actThought.trim() ? actThought : `已完成操作: ${prompt}`;
       } catch (midsceneErr: any) {
-        // 视觉 Agent 已就绪却执行失败，说明目标确实不可达，不再盲目点击屏幕中央
+        // 视觉 Agent 已就绪却执行失败: 若目标为具体文案，则按 UI 文本树坐标确定性点击
         logger.warn(`[AndroidDriver] Midscene aiAct 执行失败: ${midsceneErr.message}`);
-        passed = false;
-        errorMessage = shortError(midsceneErr);
-        thought = `操作未能完成：${errorMessage}`;
+        const quoted = extractQuotedTexts(prompt);
+        let tapped = false;
+        for (const target of quoted) {
+          const pos = await this.findTextCoordsByUiAutomator(target);
+          if (!pos) continue;
+          try {
+            await execAsync(`adb -s ${this.deviceSerial} shell input tap ${pos.x} ${pos.y}`);
+            passed = true;
+            errorMessage = undefined;
+            thought = `模型规划失败，已按 UI 文本树定位并点击「${target}」(${pos.x}, ${pos.y})`;
+            logger.info(`[AndroidDriver] 文本坐标兑底点击成功: ${target}`);
+            tapped = true;
+            break;
+          } catch (tapErr: any) {
+            logger.warn(`[AndroidDriver] 文本坐标点击失败: ${tapErr?.message}`);
+          }
+        }
+        if (!tapped) {
+          passed = false;
+          errorMessage = shortError(midsceneErr);
+          thought = `操作未能完成：${errorMessage}`;
+        }
       }
     } else {
       thought = await this.executeAdbFallbackAction(prompt);
@@ -164,13 +183,14 @@ export class AndroidDriver implements QaDriver {
     return { passed, thought, errorMessage, screenshotBuffer };
   }
 
-  async executeWaitFor(prompt: string): Promise<QaStepExecutionResult> {
-    logger.info(`[AndroidDriver] 执行移动端智能等待: "${prompt}"`);
+  async executeWaitFor(prompt: string, timeoutMs?: number): Promise<QaStepExecutionResult> {
+    logger.info(`[AndroidDriver] 执行移动端智能等待: "${prompt}" (超时 ${timeoutMs || 120000}ms)`);
     let thought = '';
 
     if (this.isMidsceneReady && this.agent) {
       try {
-        await this.agent.aiWaitFor(prompt);
+        // 原生页面首屏需下载完整 dev bundle，等待窗口需足够长，避免拆包加载期误判
+        await this.agent.aiWaitFor(prompt, { timeoutMs: timeoutMs || 120000, checkIntervalMs: 2000 });
         thought = `等待条件已满足: ${prompt}`;
       } catch (waitErr: any) {
         const screenshot = await this.captureScreenshot();
@@ -223,6 +243,23 @@ export class AndroidDriver implements QaDriver {
         passed = false;
         errorMessage = shortError(midsceneErr);
         thought = `断言未通过：${errorMessage}`;
+      }
+
+      // 视觉模型对细小文案识别不稳定: 判负时用 UI 文本树补偿校验，避免欠文案已存在却被误判
+      if (!passed) {
+        const quoted = extractQuotedTexts(prompt);
+        if (quoted.length > 0) {
+          const uiTexts = await this.dumpUiTexts();
+          const missing = quoted.filter((t) => !uiTexts.some((ui) => ui.includes(t)));
+          if (missing.length === 0) {
+            passed = true;
+            errorMessage = undefined;
+            thought = `模型判负，但 UI 文本树已确定存在全部目标文案 (${quoted.join(' / ')})，判定为模型误判`;
+            logger.info(`[AndroidDriver] UI 文本树补偿通过: ${quoted.join(' / ')}`);
+          } else {
+            thought = `${thought}；UI 文本树缺失文案: ${missing.join(' / ')}`;
+          }
+        }
       }
     } else {
       const fallbackRes = await this.executeAdbFallbackAssert(prompt);
@@ -396,6 +433,27 @@ export class AndroidDriver implements QaDriver {
   }
 
   /**
+   * 导出当前界面全部可见文本 (text / content-desc)，用于确定性文案校验
+   */
+  private async dumpUiTexts(): Promise<string[]> {
+    try {
+      await execAsync(`adb -s ${this.deviceSerial} shell uiautomator dump /data/local/tmp/uidump.xml`, { timeout: 5000 });
+      const { stdout: xml } = await execAsync(`adb -s ${this.deviceSerial} shell cat /data/local/tmp/uidump.xml`, { timeout: 5000 });
+      const texts: string[] = [];
+      const regex = /(?:text|content-desc)="([^"]+)"/g;
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(xml)) !== null) {
+        const value = match[1].trim();
+        if (value) texts.push(value);
+      }
+      return texts;
+    } catch (err: any) {
+      logger.warn(`[AndroidDriver] 导出界面文本失败: ${err?.message}`);
+      return [];
+    }
+  }
+
+  /**
    * 通过 UIAutomator dump 文本查找中心坐标
    */
   private async findTextCoordsByUiAutomator(text: string): Promise<{ x: number; y: number } | null> {
@@ -424,6 +482,20 @@ export class AndroidDriver implements QaDriver {
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 提取断言描述中被引号包裹的目标文案，如 「我知道了」、「检查」
+ */
+function extractQuotedTexts(prompt: string): string[] {
+  const results: string[] = [];
+  const regex = /[「“"']([^「」“”"']{1,40})[」”"']/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(prompt)) !== null) {
+    const value = match[1].trim();
+    if (value) results.push(value);
+  }
+  return results;
 }
 
 /**

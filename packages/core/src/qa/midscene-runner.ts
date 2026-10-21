@@ -12,6 +12,8 @@ export interface RunnerOptions {
   serverBaseUrl?: string;
   platform?: QaPlatform;
   signal?: AbortSignal;
+  /** 复用已由前置节点拉起的页面，不再自行拉起应用 */
+  skipLaunch?: boolean;
   onStepStart?: (stepIndex: number, step: QaStep) => void;
   onStepFinish?: (stepIndex: number, record: StepTimelineRecord) => void;
   onLog?: (message: string, level?: 'info' | 'warn' | 'error') => void;
@@ -153,7 +155,9 @@ export class MidsceneRunner {
       this.options.onLog?.(`[QA 引擎] ${platform.toUpperCase()} 测试驱动初始化就绪`);
 
       const target = platform === 'android' ? (suite.appPackage || suite.targetUrl) : suite.targetUrl;
-      if (target) {
+      if (this.options.skipLaunch) {
+        this.options.onLog?.('[QA 引擎] 复用当前已打开页面，跳过应用拉起');
+      } else if (target) {
         this.options.onLog?.(`[QA 引擎] ${platform === 'android' ? '拉起目标应用' : '导航到目标环境'}: ${target}`);
         await driver.navigateOrLaunch(target);
       }
@@ -185,8 +189,11 @@ export class MidsceneRunner {
           try {
             if (step.type === 'action') {
               stepResult = await driver.executeAction(step.prompt);
-            } else if (step.type === 'waitFor' && driver.executeWaitFor) {
-              stepResult = await driver.executeWaitFor(step.prompt);
+            } else if (step.type === 'waitFor') {
+              // 驱动未实现轮询等待时降级为断言，保证跨平台行为不退步
+              stepResult = driver.executeWaitFor
+                ? await driver.executeWaitFor(step.prompt, step.timeoutMs)
+                : await driver.executeAssert(step.prompt);
             } else {
               stepResult = await driver.executeAssert(step.prompt);
             }
