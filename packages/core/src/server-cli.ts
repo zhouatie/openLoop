@@ -2,7 +2,7 @@ import { OpenLoopServer } from './server';
 import { createLogger } from './logger';
 import { execSync } from 'child_process';
 
-// 确保进程具备完整的系统开发环境 PATH（解决非终端启动时 mws/git/pnpm 等 command not found）
+// 确保进程具备完整的系统开发环境 PATH（解决非终端启动时 git/pnpm 等 command not found）
 if (process.platform === 'darwin' && (!process.env.PATH?.includes('/.local/bin') || !process.env.PATH?.includes('/homebrew/'))) {
   try {
     const userShell = process.env.SHELL || '/bin/zsh';

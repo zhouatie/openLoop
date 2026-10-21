@@ -418,11 +418,10 @@ ipcMain.handle('system:openPrivacySetting', async (_event, type = 'all-files') =
 
 // 注册系统级 IPC：环境与权限自诊断
 ipcMain.handle('system:checkSystemStatus', async () => {
+  // 仅列出硬性依赖：Node.js 驱动服务与构建，Git 驱动 Worktree 隔离
   const tools = [
     { name: 'Node.js', command: 'node' },
     { name: 'Git', command: 'git' },
-    { name: 'pnpm', command: 'pnpm' },
-    { name: 'MWS CLI', command: 'mws' },
   ];
 
   const toolStatuses = tools.map((t) => {
