@@ -18,7 +18,6 @@ try {
 
   let appPath = candidates.find((p) => fs.existsSync(p));
   if (!appPath) {
-    // 递归查找 release/ 下以 .app 结尾的目录
     const releaseDir = path.join(__dirname, '../release');
     if (fs.existsSync(releaseDir)) {
       const files = fs.readdirSync(releaseDir);
@@ -54,11 +53,19 @@ try {
 
   execSync(`cp -R "${appPath}" "${targetApp}"`);
 
+  // 3. 自动清除 macOS Gatekeeper 隔离属性（防止拦截与签名权限警告）
+  console.log('正在解除系统隔离限制与清除 Quarantine 标识...');
+  try {
+    execSync(`xattr -cr "${targetApp}"`);
+  } catch {}
+
   console.log('\x1b[32m%s\x1b[0m', '-------------------------------------------------------');
   console.log('\x1b[32m%s\x1b[0m', '  ✔ 本地稳定版已成功更新！');
   console.log(`  安装位置: ${targetApp}`);
-  console.log('  你可以直接在“启动台”或“访达”中打开最新的稳定版 openLoop。');
-  console.log('\x1b[32m%s\x1b[0m', '-------------------------------------------------------\n');
+  console.log('  已自动注入完整 Shell PATH 环境 (mws, git, pnpm, node 开箱即用)');
+  console.log('  已保留原生签名与 Entitlements 特权声明');
+  console.log('\x1b[32m%s\x1b[0m', '-------------------------------------------------------');
+
 } catch (err) {
   console.error('\x1b[31m%s\x1b[0m', '更新本地应用失败:', err.message);
   process.exit(1);

@@ -6,6 +6,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('dialog:openDirectory', options),
   openPath: (dirPath: string) =>
     ipcRenderer.invoke('shell:openPath', dirPath),
+  openPrivacySetting: (type?: 'all-files' | 'accessibility') =>
+    ipcRenderer.invoke('system:openPrivacySetting', type),
+  checkSystemStatus: () =>
+    ipcRenderer.invoke('system:checkSystemStatus'),
   send: (channel: string, data: any) => ipcRenderer.send(channel, data),
   on: (channel: string, callback: (...args: any[]) => void) => {
     const subscription = (_event: any, ...args: any[]) => callback(...args);

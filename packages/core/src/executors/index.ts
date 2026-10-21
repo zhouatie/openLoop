@@ -837,6 +837,8 @@ export class EnvPrepareExecutor implements NodeExecutor {
       emitLog('system', `[服务启动] 执行服务拉起命令: ${cmd} (目录: ${resolvedCwd})`);
 
       const isUnix = process.platform !== 'win32';
+      const currentCorePort = String(ports.corePort || process.env.OPENLOOP_PORT || '19888');
+
       const child = spawn(cmd, {
         cwd: resolvedCwd,
         shell: true,
@@ -845,6 +847,7 @@ export class EnvPrepareExecutor implements NodeExecutor {
           ...process.env,
           ...node.config.env,
           ...(ports.webPort ? { PORT: String(ports.webPort), WEB_PORT: String(ports.webPort) } : {}),
+          VITE_CORE_PORT: currentCorePort,
         },
         stdio: 'pipe',
       });

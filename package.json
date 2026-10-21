@@ -1,6 +1,6 @@
 {
   "name": "openloop-monorepo",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "private": true,
   "description": "Desktop Automation Platform with Visual Orchestration, Plugins, Agent & CLI integration",
   "author": "zhouatie",
@@ -10,6 +10,8 @@
     "dev": "node scripts/dev.js",
     "clean:ports": "node scripts/clean-ports.js",
     "clean:ports:all": "node scripts/clean-ports.js --all",
+    "service:start": "node packages/core/dist/server-cli.js",
+    "service:restart": "node scripts/clean-ports.js --all && node packages/core/dist/server-cli.js",
     "dev:browser": "pnpm run dev",
     "dev:desktop": "node scripts/dev.js --desktop",
     "desktop:start": "pnpm --filter @openloop/desktop start",

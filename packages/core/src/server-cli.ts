@@ -1,5 +1,24 @@
 import { OpenLoopServer } from './server';
 import { createLogger } from './logger';
+import { execSync } from 'child_process';
+
+// 确保进程具备完整的系统开发环境 PATH（解决非终端启动时 mws/git/pnpm 等 command not found）
+if (process.platform === 'darwin' && (!process.env.PATH?.includes('/.local/bin') || !process.env.PATH?.includes('/homebrew/'))) {
+  try {
+    const userShell = process.env.SHELL || '/bin/zsh';
+    const output = execSync(`${userShell} -lc "env"`, { encoding: 'utf-8', timeout: 3000 });
+    for (const line of output.split('\n')) {
+      const idx = line.indexOf('=');
+      if (idx > 0) {
+        const key = line.slice(0, idx).trim();
+        const val = line.slice(idx + 1);
+        if (key && (key === 'PATH' || !process.env[key])) {
+          process.env[key] = val;
+        }
+      }
+    }
+  } catch {}
+}
 
 const cliLogger = createLogger('ServerCLI');
 

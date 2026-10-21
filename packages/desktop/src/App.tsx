@@ -4,6 +4,7 @@ import { Header } from './components/Header';
 import { LogTerminalDrawer } from './components/LogTerminalDrawer';
 import { CreateTaskModal } from './components/CreateTaskModal';
 import { QuickRunWorkflowModal } from './components/QuickRunWorkflowModal';
+import { OnboardingModal } from './components/OnboardingModal';
 import { CommandPalette } from './components/CommandPalette';
 import { ShortcutProvider } from './context/ShortcutContext';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
@@ -41,6 +42,13 @@ export const AppContent: React.FC = () => {
   });
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isQuickRunModalOpen, setIsQuickRunModalOpen] = useState<boolean>(false);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('openloop_onboarding_completed') !== 'true';
+    } catch {
+      return false;
+    }
+  });
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
   const [workflowSubTab, setWorkflowSubTab] = useState<'workflows' | 'runs'>('workflows');
   const [selectedRunTaskId, setSelectedRunTaskId] = useState<string | null>(null);
@@ -420,6 +428,7 @@ export const AppContent: React.FC = () => {
                 setSidebarOrder(newOrder);
               }}
               onRefreshPlugins={refreshData}
+              onOpenOnboarding={() => setIsOnboardingOpen(true)}
             />
           )}
 
@@ -467,6 +476,13 @@ export const AppContent: React.FC = () => {
         workflows={workflows}
         activeNodeFilter={activeNodeFilter}
         onFilterChange={setActiveNodeFilter}
+      />
+
+      {/* 新手环境与权限授权向导 */}
+      <OnboardingModal
+        isOpen={isOnboardingOpen}
+        onClose={() => setIsOnboardingOpen(false)}
+        isDaemonConnected={isDaemonConnected}
       />
 
       {/* 新建任务弹窗 */}

@@ -191,8 +191,8 @@ export class WorktreeManager {
    * 深度校验进程 CWD 与工作区归属，严禁误杀其他并行且在验收中的任务靶机
    */
   public killPortIfBusy(port: number, options?: { allowWorktreeDir?: string; forTaskId?: string }) {
-    // 保护系统核心端口，严禁杀灭
-    const protectedPorts = [19888, 5173];
+    // 保护系统核心端口，严禁杀灭（19888 稳定版端口，19889 开发沙箱端口，5173 前端主端口）
+    const protectedPorts = [19888, 19889, 5173];
     if (process.env.OPENLOOP_PORT) {
       const customPort = parseInt(process.env.OPENLOOP_PORT, 10);
       if (!isNaN(customPort)) protectedPorts.push(customPort);

@@ -92,6 +92,7 @@ interface SettingsViewProps {
   sidebarOrder?: string[];
   onUpdateSidebarOrder?: (newOrder: string[]) => void;
   onRefreshPlugins?: () => void;
+  onOpenOnboarding?: () => void;
 }
 
 /** Midscene 1.16 支持的模型家族（取值非法会在运行时抛错） */
@@ -230,6 +231,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   sidebarOrder = [],
   onUpdateSidebarOrder,
   onRefreshPlugins,
+  onOpenOnboarding,
 }) => {
   // 解析初始选中的 Tab
   const resolveInitialTab = (): SettingsTabId => {
@@ -1340,6 +1342,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {/* 系统环境与权限诊断向导 */}
+                {onOpenOnboarding && (
+                  <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-t border-[#ececf0] bg-[#fafafc]">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-medium text-[#1c1c21]">系统环境与权限诊断向导</div>
+                      <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                        一键自检 macOS 完全磁盘访问权限、开发工具链 (Node/Git/pnpm/mws) 与核心调度状态
+                      </div>
+                    </div>
+                    <div className="shrink-0 self-center">
+                      <button
+                        type="button"
+                        onClick={onOpenOnboarding}
+                        className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2e36] text-white text-[11.5px] font-medium flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                      >
+                        <ShieldCheck size={13} strokeWidth={2} />
+                        <span>运行环境自检向导</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

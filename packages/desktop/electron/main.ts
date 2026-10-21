@@ -9,6 +9,31 @@ let mainWindow: BrowserWindow | null = null;
 let coreProcess: ChildProcess | null = null;
 let embeddedServer: any = null;
 
+// 全面同步用户 macOS 登录 Shell 环境变量（彻底解决 GUI 启动时 command not found 问题）
+function syncSystemShellEnv() {
+  if (process.platform !== 'darwin') return;
+  try {
+    const userShell = process.env.SHELL || '/bin/zsh';
+    const output = execSync(`${userShell} -lc "env"`, { encoding: 'utf-8', timeout: 3000 });
+    const lines = output.split('\n');
+    for (const line of lines) {
+      const idx = line.indexOf('=');
+      if (idx > 0) {
+        const key = line.slice(0, idx).trim();
+        const val = line.slice(idx + 1);
+        if (key && (key === 'PATH' || !process.env[key])) {
+          process.env[key] = val;
+        }
+      }
+    }
+    console.log('[Desktop Main] Successfully synchronized shell environment. PATH count:', (process.env.PATH || '').split(':').length);
+  } catch (err: any) {
+    console.warn('[Desktop Main] Notice: Fallback on shell env sync:', err.message);
+  }
+}
+
+syncSystemShellEnv();
+
 // 开发态隔离 UserData，避免与稳定生产版 Electron 共享 LocalStorage/IndexedDB/Cookies
 if (!app.isPackaged) {
   const devUserData = path.join(app.getPath('appData'), 'openLoop-dev');
@@ -42,30 +67,57 @@ function checkUrlAlive(urlStr: string): Promise<boolean> {
   });
 }
 
-// 极速定位宿主 Node.js 运行时，彻底规避原生 C++ 模块 (better-sqlite3) 与 Electron ABI 冲突
+// 极速定位宿主 Node.js 运行时（严禁使用过时全局 Node 避免 C++ 模块 ABI 段错误）
 function findSystemNode(): string {
-  try {
-    const whichNode = execSync('which node', { encoding: 'utf-8' }).trim();
-    if (whichNode && fs.existsSync(whichNode)) return whichNode;
-  } catch {}
-
   const home = os.homedir();
+
+  // 1. 优先定位用户 NVM 中的默认/活跃版本（与项目编译环境 Node 22 严格对齐）
   const nvmDir = path.join(home, '.nvm/versions/node');
+  const aliasFile = path.join(home, '.nvm/alias/default');
   if (fs.existsSync(nvmDir)) {
     try {
-      const versions = fs.readdirSync(nvmDir).sort().reverse();
-      for (const v of versions) {
-        const fullNode = path.join(nvmDir, v, 'bin/node');
+      let targetPrefix = '';
+      if (fs.existsSync(aliasFile)) {
+        targetPrefix = fs.readFileSync(aliasFile, 'utf-8').trim();
+      }
+      const versions = fs.readdirSync(nvmDir).filter((v) => v.startsWith('v'));
+      // 优先匹配 default alias（如 22）
+      if (targetPrefix) {
+        const matched = versions
+          .filter((v) => v.startsWith(`v${targetPrefix}`) || v === targetPrefix)
+          .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0];
+        if (matched) {
+          const fullNode = path.join(nvmDir, matched, 'bin/node');
+          if (fs.existsSync(fullNode)) return fullNode;
+        }
+      }
+      // 备选匹配 v22 或最高可用现代版本
+      const sorted = versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+      const v22 = sorted.find((v) => v.startsWith('v22.'));
+      if (v22) {
+        const fullNode = path.join(nvmDir, v22, 'bin/node');
+        if (fs.existsSync(fullNode)) return fullNode;
+      }
+      if (sorted.length > 0) {
+        const fullNode = path.join(nvmDir, sorted[0], 'bin/node');
         if (fs.existsSync(fullNode)) return fullNode;
       }
     } catch {}
   }
 
+  // 2. 探测 Homebrew Apple Silicon
+  if (fs.existsSync('/opt/homebrew/bin/node')) {
+    return '/opt/homebrew/bin/node';
+  }
+
+  // 3. 探测 fnm
+  const fnmNode = path.join(home, '.local/share/fnm/current/bin/node');
+  if (fs.existsSync(fnmNode)) return fnmNode;
+
+  // 4. 其余备用路径
   const staticCandidates = [
-    '/opt/homebrew/bin/node',
-    '/usr/local/bin/node',
-    path.join(home, '.local/share/fnm/current/bin/node'),
     path.join(home, '.volta/bin/node'),
+    '/usr/local/bin/node',
     '/usr/bin/node',
   ];
   for (const c of staticCandidates) {
@@ -325,6 +377,65 @@ ipcMain.handle('shell:openPath', async (_event, dirPath: string) => {
   }
   await shell.openPath(targetPath);
   return true;
+});
+
+// 注册系统级 IPC：一键打开 macOS 权限偏好设置
+ipcMain.handle('system:openPrivacySetting', async (_event, type = 'all-files') => {
+  try {
+    if (process.platform === 'darwin') {
+      const pane = type === 'accessibility' ? 'Privacy_Accessibility' : 'Privacy_AllFiles';
+      await shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
+      return true;
+    }
+  } catch (err: any) {
+    console.warn('[Desktop Main] Failed to open privacy settings:', err.message);
+  }
+  return false;
+});
+
+// 注册系统级 IPC：环境与权限自诊断
+ipcMain.handle('system:checkSystemStatus', async () => {
+  const tools = [
+    { name: 'Node.js', command: 'node' },
+    { name: 'Git', command: 'git' },
+    { name: 'pnpm', command: 'pnpm' },
+    { name: 'MWS CLI', command: 'mws' },
+  ];
+
+  const toolStatuses = tools.map((t) => {
+    try {
+      const whichOut = execSync(`which ${t.command}`, { encoding: 'utf-8', timeout: 1000 }).trim();
+      return { ...t, available: !!whichOut && fs.existsSync(whichOut), path: whichOut };
+    } catch {
+      return { ...t, available: false };
+    }
+  });
+
+  let hasFullDiskAccess = false;
+  try {
+    // 探测受 kTCCServiceSystemPolicyAllFiles 严格保护的系统目录
+    // 只有在系统设置中授予了「完全磁盘访问权限」的进程才能成功列出目录
+    const probeDirs = [
+      path.join(os.homedir(), 'Library/Safari'),
+      path.join(os.homedir(), 'Library/Suggestions'),
+    ];
+    for (const dir of probeDirs) {
+      if (fs.existsSync(dir)) {
+        fs.readdirSync(dir);
+        hasFullDiskAccess = true;
+        break;
+      }
+    }
+  } catch {
+    hasFullDiskAccess = false;
+  }
+
+  return {
+    platform: process.platform,
+    nodeVersion: process.version,
+    hasFullDiskAccess,
+    tools: toolStatuses,
+  };
 });
 
 app.whenReady().then(async () => {
