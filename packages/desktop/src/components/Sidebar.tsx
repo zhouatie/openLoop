@@ -71,16 +71,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }`}
     >
       <div className="flex flex-col min-h-0 flex-1">
-        {/* 顶部：macOS 原生红黄绿窗口控制按钮与 Logo */}
+        {/* 顶部：macOS 原生红黄绿窗口控制按钮已由系统绘制，这里只留出让位与 Logo */}
         {isOpen ? (
-          <div className="h-[46px] px-3 flex items-center gap-2.5 shrink-0">
-            <div className="flex items-center gap-1 shrink-0">
-              <span className="w-3 h-3 rounded-full bg-[#ff5f56] border border-[#e0443e] inline-block shadow-sm" />
-              <span className="w-3 h-3 rounded-full bg-[#ffbd2e] border border-[#dea123] inline-block shadow-sm" />
-              <span className="w-3 h-3 rounded-full bg-[#27c93f] border border-[#1aab29] inline-block shadow-sm" />
-            </div>
-
-            <div className="flex items-center gap-1.5 ml-0.5 min-w-0">
+          <div className="h-[46px] pl-[72px] pr-3 flex items-center shrink-0">
+            <div className="flex items-center gap-1.5 min-w-0">
               <div className="w-[18px] h-[18px] rounded-[5px] bg-[#1c1c21] flex items-center justify-center text-white shadow-sm shrink-0">
                 <Layers size={11} strokeWidth={2.4} />
               </div>
@@ -98,13 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
         ) : (
-          <div className="h-[46px] flex items-center justify-center shrink-0">
-            <div className="flex items-center gap-1.5 shrink-0" title="窗口控制">
-              <span className="w-3 h-3 rounded-full bg-[#ff5f56] border border-[#e0443e] inline-block shadow-sm" />
-              <span className="w-3 h-3 rounded-full bg-[#ffbd2e] border border-[#dea123] inline-block shadow-sm" />
-              <span className="w-3 h-3 rounded-full bg-[#27c93f] border border-[#1aab29] inline-block shadow-sm" />
-            </div>
-          </div>
+          <div className="h-[46px] shrink-0" />
         )}
 
         {/* 拍平的单一导航菜单列表 */}
