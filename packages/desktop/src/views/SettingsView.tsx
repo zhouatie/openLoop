@@ -57,7 +57,6 @@ import {
   getAgentProviderMeta,
 } from '@openloop/agent-providers';
 import { PROMPT_METAS, DEFAULT_PROMPT_TEMPLATES } from '../constants/prompts';
-import { APP_VERSION } from '../constants/version';
 import { useShortcuts } from '../context/ShortcutContext';
 import { Kbd } from '../components/Kbd';
 import { toast } from '../components/Toast';
@@ -876,15 +875,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </button>
             );
           })}
-        </div>
-
-        {/* 左侧底部版本标识 */}
-        <div className="p-3 border-t border-[#ececf0] flex items-center justify-between text-[11px] text-[#85858d]">
-          <span className="font-mono">OpenLoop v{APP_VERSION}</span>
-          <span className="inline-flex items-center gap-1 text-[10px] text-[#189a58]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#189a58]" />
-            在线
-          </span>
         </div>
       </div>
 

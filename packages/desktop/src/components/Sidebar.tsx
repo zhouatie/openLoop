@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { PluginManifest } from '@openloop/core';
 import { useShortcuts } from '../context/ShortcutContext';
+import { APP_VERSION } from '../constants/version';
 import { getSortedSidebarPlugins } from '../utils/sidebarOrder';
 
 interface SidebarProps {
@@ -72,19 +73,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex flex-col min-h-0 flex-1">
         {/* 顶部：macOS 原生红黄绿窗口控制按钮与 Logo */}
         {isOpen ? (
-          <div className="h-[46px] px-4 flex items-center gap-3 shrink-0">
-            <div className="flex items-center gap-1.5 shrink-0">
+          <div className="h-[46px] px-3 flex items-center gap-2.5 shrink-0">
+            <div className="flex items-center gap-1 shrink-0">
               <span className="w-3 h-3 rounded-full bg-[#ff5f56] border border-[#e0443e] inline-block shadow-sm" />
               <span className="w-3 h-3 rounded-full bg-[#ffbd2e] border border-[#dea123] inline-block shadow-sm" />
               <span className="w-3 h-3 rounded-full bg-[#27c93f] border border-[#1aab29] inline-block shadow-sm" />
             </div>
 
-            <div className="flex items-center gap-1.5 ml-1.5 shrink-0">
-              <div className="w-[18px] h-[18px] rounded-[5px] bg-[#1c1c21] flex items-center justify-center text-white shadow-sm">
+            <div className="flex items-center gap-1.5 ml-0.5 min-w-0">
+              <div className="w-[18px] h-[18px] rounded-[5px] bg-[#1c1c21] flex items-center justify-center text-white shadow-sm shrink-0">
                 <Layers size={11} strokeWidth={2.4} />
               </div>
-              <span className="font-semibold text-[13.5px] text-[#1c1c21] tracking-tight">
-                openLoop
+              <span className="flex items-baseline gap-1.5 min-w-0">
+                <span className="font-semibold text-[13px] text-[#1c1c21] tracking-tight truncate">
+                  openLoop
+                </span>
+                <span
+                  className="shrink-0 text-[9.5px] font-mono text-[#a1a1aa]"
+                  title={`当前版本 v${APP_VERSION}`}
+                >
+                  v{APP_VERSION}
+                </span>
               </span>
             </div>
           </div>
@@ -234,7 +243,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           <div
             className="h-[22px] flex items-center justify-center"
-            title={isDaemonConnected ? '核心服务 127.0.0.1:19888' : '核心服务未连接'}
+            title={
+              isDaemonConnected
+                ? `核心服务 127.0.0.1:19888 · v${APP_VERSION}`
+                : `核心服务未连接 · v${APP_VERSION}`
+            }
           >
             <span
               className={`w-[7px] h-[7px] rounded-full shrink-0 ${
