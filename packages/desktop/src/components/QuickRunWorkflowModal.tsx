@@ -13,9 +13,12 @@ import {
   RotateCcw,
   ExternalLink,
 } from 'lucide-react';
-import { WorkflowDefinition, Task, LogEntry } from '@openloop/core';
+import { WorkflowDefinition, Task, LogEntry, NodeType } from '@openloop/core';
 import { api } from '../services/api';
 import { VisualAcceptanceModal } from './qa/VisualAcceptanceModal';
+
+// 依赖任务描述做 AI 推理的节点类型；仅包含此类节点的流水线才必须填写需求 Prompt
+const PROMPT_DEPENDENT_NODE_TYPES: NodeType[] = ['agent', 'qa-planner', 'midscene'];
 
 interface QuickRunWorkflowModalProps {
   isOpen: boolean;
@@ -107,6 +110,13 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
 
   const activeWorkflow = workflows.find((w) => w.id === selectedWorkflowId) || workflows[0];
 
+  // 纯命令 / 脚本类流水线无需需求 Prompt，可直接执行
+  const promptRequired = useMemo(
+    () => Boolean(activeWorkflow?.nodes?.some((n) => PROMPT_DEPENDENT_NODE_TYPES.includes(n.type))),
+    [activeWorkflow]
+  );
+  const canExecute = Boolean(activeWorkflow) && !isRunning && (!promptRequired || prompt.trim().length > 0);
+
   // 流程搜索过滤
   const filteredWorkflows = useMemo(() => {
     if (!searchQuery.trim()) return workflows;
@@ -127,7 +137,8 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
   };
 
   const handleExecute = async () => {
-    if (!prompt.trim() || !activeWorkflow || isRunning) return;
+    if (!canExecute || !activeWorkflow) return;
+    const requirement = prompt.trim();
 
     setIsRunning(true);
     setRunStatus('running');
@@ -137,8 +148,8 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
     try {
       const task = await api.createTask({
         workflowId: activeWorkflow.id,
-        title: prompt.trim().slice(0, 60),
-        description: prompt.trim(),
+        title: requirement.slice(0, 60) || activeWorkflow.name,
+        description: requirement,
         kanbanColumn: 'in_progress',
         autoRun: true,
         triggerSource: 'shortcut',
@@ -395,8 +406,17 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
 
           {/* Prompt 输入框 */}
           <div>
-            <label className="block text-[11px] font-medium text-[#63636b] mb-1">
-              需求 Prompt
+            <label className="flex items-center gap-1.5 text-[11px] font-medium text-[#63636b] mb-1">
+              <span>需求 Prompt</span>
+              <span
+                className={`text-[9.5px] font-medium px-1 py-[0.5px] rounded border ${
+                  promptRequired
+                    ? 'text-[#4f46e5] bg-[#eeedfd] border-[#d8d6fb]'
+                    : 'text-[#85858d] bg-[#f4f4f6] border-[#e3e3e8]'
+                }`}
+              >
+                {promptRequired ? '必填' : '选填'}
+              </span>
             </label>
             <textarea
               ref={textareaRef}
@@ -405,7 +425,11 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isRunning}
-              placeholder="输入部署需求，例如：部署 rn-lyric-share-page 分支 feat/xxx 到预发 211 环境..."
+              placeholder={
+                promptRequired
+                  ? '输入部署需求，例如：部署 rn-lyric-share-page 分支 feat/xxx 到预发 211 环境...'
+                  : '可留空：该流程仅执行命令与脚本，无需额外需求描述'
+              }
               className="w-full bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] p-2.5 text-[12px] text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 font-mono resize-none leading-relaxed transition-all"
             />
           </div>
@@ -553,7 +577,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
               <button
                 type="button"
                 onClick={handleExecute}
-                disabled={!prompt.trim() || isRunning}
+                disabled={!canExecute}
                 className="h-[28px] px-3.5 bg-[#1c1c21] hover:bg-[#2e2f36] text-[11.5px] font-medium text-white rounded-[6px] flex items-center gap-1.5 transition-all active:scale-95 shadow-xs disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 {isRunning ? (
