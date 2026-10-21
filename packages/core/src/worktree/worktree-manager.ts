@@ -332,17 +332,18 @@ export class WorktreeManager {
     // 登记预占端口
     this.registerTaskPorts(taskId, Object.values(ports));
 
+    const assignedCorePort = ports.corePort || (process.env.OPENLOOP_PORT ? parseInt(process.env.OPENLOOP_PORT, 10) : 19888);
     const primaryPort = ports.webPort || ports.port || ports.PORT || Object.values(ports)[0] || defaultBase;
-    const targetUrl = `http://localhost:${primaryPort}`;
+    const targetUrl = `http://localhost:${primaryPort}?corePort=${assignedCorePort}`;
 
-    logger.info(`[Worktree:Ready] 隔离工作区就绪，分配端口: ${JSON.stringify(ports)}`);
+    logger.info(`[Worktree:Ready] 隔离工作区就绪，分配端口: ${JSON.stringify(ports)}, 靶机通信 Core: ${assignedCorePort}`);
 
     return {
       worktreeDir,
       branchName,
       baseBranch,
       ports,
-      corePort: ports.corePort || 19888,
+      corePort: assignedCorePort,
       webPort: primaryPort,
       targetUrl,
     };
@@ -743,6 +744,21 @@ export class WorktreeManager {
     TaskProcessManager.getInstance().stopAll(taskId);
 
     if (!fs.existsSync(worktreeDir)) {
+      // 幂等自愈检查：若该任务代码此前已成功合入宿主当前分支，自动视为合并就绪
+      try {
+        const mergedCheck = execSync(`git log -n 50 --grep="${taskId}" --oneline`, {
+          cwd: repoRoot,
+          encoding: 'utf-8',
+        }).trim();
+        if (mergedCheck) {
+          onLog?.(`[合并与清理] ✔ 检测到该任务代码此前已合入主分支 (${mergedCheck.split('\n')[0]})，沙箱已清理完成`);
+          return {
+            success: true,
+            message: `任务变更此前已成功合入主分支，自动判定合并就绪`,
+          };
+        }
+      } catch {}
+
       return { success: false, message: `工作区目录不存在: ${worktreeDir}` };
     }
 

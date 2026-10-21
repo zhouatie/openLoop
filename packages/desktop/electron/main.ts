@@ -326,6 +326,15 @@ async function createWindow() {
     },
   });
 
+  // 拦截应用内所有新窗口打开请求，统一调用 macOS 系统默认外部浏览器（Chrome/Safari）打开
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+
   // 生产打包环境：永久只加载内置静态打包产物，绝不被本地 Vite 5173 串门劫持
   if (app.isPackaged) {
     const distHtml = resolveRendererHtmlPath();
@@ -377,6 +386,15 @@ ipcMain.handle('shell:openPath', async (_event, dirPath: string) => {
   }
   await shell.openPath(targetPath);
   return true;
+});
+
+// 注册系统级 IPC：在系统默认外部浏览器中打开链接
+ipcMain.handle('shell:openExternal', async (_event, targetUrl: string) => {
+  if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
+    await shell.openExternal(targetUrl);
+    return true;
+  }
+  return false;
 });
 
 // 注册系统级 IPC：一键打开 macOS 权限偏好设置

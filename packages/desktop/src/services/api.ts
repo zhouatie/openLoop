@@ -23,18 +23,29 @@ import {
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
-    const { protocol, hostname, port } = window.location;
+    const { protocol, hostname, port, search } = window.location;
     const portNum = port ? parseInt(port, 10) : 0;
+
+    // 0. 最高优先级：从 URL 查询参数解析 ?corePort=... (彻底解决靶机跨环境精准对齐)
+    let explicitCorePort = '';
+    try {
+      const sp = new URLSearchParams(search);
+      const qPort = sp.get('corePort');
+      if (qPort && /^\d+$/.test(qPort)) {
+        explicitCorePort = qPort;
+      }
+    } catch {}
+
     // Vite 本地开发模式或独立靶机沙箱端口 (5170 - 5200)
     // 默认指向开发沙箱 Core 调度服务 19889，或由环境变量 VITE_CORE_PORT 注入
-    if (import.meta.env.DEV || (portNum >= 5170 && portNum <= 5200)) {
-      const corePort = import.meta.env.VITE_CORE_PORT || (import.meta.env.DEV ? '19889' : '19888');
+    if (explicitCorePort || import.meta.env.DEV || (portNum >= 5170 && portNum <= 5200)) {
+      const corePort = explicitCorePort || import.meta.env.VITE_CORE_PORT || (import.meta.env.DEV ? '19889' : '19888');
       let host = hostname || '127.0.0.1';
       if (host === '0.0.0.0' || host === 'localhost') {
         host = '127.0.0.1';
       }
       if (import.meta.env.DEV) {
-        console.log(`[UI:Init] 开发模式已连接沙箱调度服务: http://${host}:${corePort}`);
+        console.log(`[UI:Init] 开发模式已连接沙箱调度服务: http://${host}:${corePort}${explicitCorePort ? ' (via URL param ?corePort)' : ''}`);
       }
       return {
         httpUrl: `http://${host}:${corePort}`,

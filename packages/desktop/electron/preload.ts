@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('dialog:openDirectory', options),
   openPath: (dirPath: string) =>
     ipcRenderer.invoke('shell:openPath', dirPath),
+  openExternal: (url: string) =>
+    ipcRenderer.invoke('shell:openExternal', url),
   openPrivacySetting: (type?: 'all-files' | 'accessibility') =>
     ipcRenderer.invoke('system:openPrivacySetting', type),
   checkSystemStatus: () =>

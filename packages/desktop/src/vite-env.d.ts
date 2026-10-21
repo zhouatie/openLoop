@@ -5,6 +5,7 @@ interface Window {
     platform: string;
     openDirectory: (options?: { defaultPath?: string }) => Promise<string | null>;
     openPath: (dirPath: string) => Promise<boolean>;
+    openExternal?: (url: string) => Promise<boolean>;
     openPrivacySetting?: (type?: 'all-files' | 'accessibility') => Promise<boolean>;
     checkSystemStatus?: () => Promise<{
       platform: string;

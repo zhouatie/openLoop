@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
+import { openInDefaultBrowser } from '../utils/openExternalBrowser';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
 
@@ -268,7 +269,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
 
     if (sandboxStatus === 'running') {
       if (import.meta.env?.DEV) console.log(`[KanbanCard:Sandbox] 打开靶机: ${targetUrl}`);
-      window.open(targetUrl, '_blank');
+      openInDefaultBrowser(targetUrl);
       return;
     }
 
@@ -279,7 +280,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
       const res = await api.startTaskSandbox(task.id);
       if (res.success || res.status === 'running') {
         setSandboxStatus('running');
-        window.open(res.targetUrl || targetUrl, '_blank');
+        openInDefaultBrowser(res.targetUrl || targetUrl);
       } else {
         setSandboxStatus('stopped');
       }

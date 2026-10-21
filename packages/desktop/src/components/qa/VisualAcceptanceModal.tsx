@@ -39,6 +39,7 @@ import {
 import { Task, QaRunRecord, StepTimelineRecord, WorktreeContextInfo, TaskWorktreeDiffResult } from '@openloop/core';
 import { api } from '../../services/api';
 import { toast } from '../Toast';
+import { openInDefaultBrowser } from '../../utils/openExternalBrowser';
 import { CodeDiffViewerModal } from '../diff/CodeDiffViewerModal';
 
 interface VisualAcceptanceModalProps {
@@ -225,7 +226,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   const handleStartOrOpenSandbox = async () => {
     const targetUrl = worktree?.targetUrl || (worktree?.webPort ? `http://localhost:${worktree.webPort}` : 'http://localhost');
     if (sandboxStatus === 'running') {
-      window.open(targetUrl, '_blank');
+      openInDefaultBrowser(targetUrl);
       return;
     }
 
@@ -236,7 +237,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
       if (res.success || res.status === 'running') {
         setSandboxStatus('running');
         toast.success('沙箱靶机服务已就绪');
-        window.open(res.targetUrl || targetUrl, '_blank');
+        openInDefaultBrowser(res.targetUrl || targetUrl);
       } else {
         toast.warning(res.message || '靶机服务启动超时');
         setSandboxStatus('stopped');

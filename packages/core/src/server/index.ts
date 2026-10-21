@@ -1562,6 +1562,10 @@ export class OpenLoopServer {
 
         serverLogger.info(`[Sandbox:Start] 为任务 ${taskId} 启动靶机服务: ${cmd} (目录: ${worktreeDir}, 探活: ${targetUrl})`);
 
+        const currentCorePort = String(
+          task.context.worktree.corePort || this.port || process.env.OPENLOOP_PORT || '19888'
+        );
+
         const isUnix = process.platform !== 'win32';
         const child = spawn(cmd, {
           cwd: worktreeDir,
@@ -1571,6 +1575,7 @@ export class OpenLoopServer {
             ...process.env,
             PORT: String(port),
             WEB_PORT: String(port),
+            VITE_CORE_PORT: currentCorePort,
           },
           stdio: 'pipe',
         });
@@ -1589,20 +1594,25 @@ export class OpenLoopServer {
 
         // 4. 探活等待就绪
         const isReady = await WorktreeManager.getInstance().waitForHttpReady(targetUrl, warmupTimeoutMs);
+        const separator = targetUrl.includes('?') ? '&' : '?';
+        const browserTargetUrl = targetUrl.includes('corePort=')
+          ? targetUrl
+          : `${targetUrl}${separator}corePort=${currentCorePort}`;
+
         if (isReady) {
-          serverLogger.info(`[Sandbox:Start] ✔ 任务 ${taskId} 靶机服务已就绪 (${targetUrl})`);
+          serverLogger.info(`[Sandbox:Start] ✔ 任务 ${taskId} 靶机服务已就绪 (${browserTargetUrl})`);
           return this.sendJson(
             res,
             200,
-            { success: true, status: 'running', port, targetUrl },
+            { success: true, status: 'running', port, targetUrl: browserTargetUrl },
             reqMeta
           );
         } else {
-          serverLogger.warn(`[Sandbox:Start] 任务 ${taskId} 靶机启动超时 (${targetUrl})`);
+          serverLogger.warn(`[Sandbox:Start] 任务 ${taskId} 靶机启动超时 (${browserTargetUrl})`);
           return this.sendJson(
             res,
             200,
-            { success: false, status: 'starting', port, targetUrl, message: '靶机启动中，探活尚在等待中' },
+            { success: false, status: 'starting', port, targetUrl: browserTargetUrl, message: '靶机启动中，探活尚在等待中' },
             reqMeta
           );
         }
