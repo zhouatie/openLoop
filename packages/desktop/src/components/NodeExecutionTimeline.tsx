@@ -25,6 +25,7 @@ import {
   RotateCcw,
   CheckSquare,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { Task, WorkflowDefinition, NodeRun, NodeStatus, WorkflowNode } from '@openloop/core';
 import {
   resolveNodeMeta,
@@ -64,6 +65,20 @@ interface TimelineItem {
   timeRangeStr?: string;
   order: number;
 }
+
+// 节点类型标识：中性灰文字 + 语义微图标着色，替代高饱和彩色胶囊
+const NODE_TYPE_LABELS: Record<string, { label: string; Icon: LucideIcon; tint: string }> = {
+  agent: { label: 'AI Agent', Icon: Bot, tint: 'text-[#7c3aed]' },
+  'qa-approval': { label: '人工门禁', Icon: ShieldCheck, tint: 'text-[#b45309]' },
+  midscene: { label: '智能 UI', Icon: Target, tint: 'text-[#0f766e]' },
+  'stitch-image': { label: '动图生成', Icon: FileVideo, tint: 'text-[#2563eb]' },
+  hook: { label: 'Hook 触发', Icon: Zap, tint: 'text-[#c2410c]' },
+  custom: { label: '扩展插件', Icon: Sparkles, tint: 'text-[#db2777]' },
+  cli: { label: 'CLI 脚本', Icon: Terminal, tint: 'text-[#71717a]' },
+};
+
+const MICRO_BTN =
+  'w-[22px] h-[22px] rounded-[4px] flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed';
 
 export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
   task,
@@ -297,125 +312,91 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
   };
 
   const renderTypeBadge = (item: TimelineItem) => {
-    if (item.isGit) {
-      return (
-        <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-[#1c1c21] text-white">
-          <GitCommit size={10} />
-          <span>Git 提交</span>
-        </span>
-      );
-    }
-    if (item.isDeploy) {
-      return (
-        <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-[#f0f9ff] text-[#0284c7] border border-[#bae6fd]">
-          <Rocket size={10} />
-          <span>应用部署</span>
-        </span>
-      );
-    }
-    switch (item.type) {
-      case 'agent':
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-[#eeedfd] text-[#4f46e5] border border-[#d8d6fb]">
-            <Bot size={10} />
-            <span>AI Agent</span>
-          </span>
-        );
-      case 'qa-approval':
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-[#fffbeb] text-[#b45309] border border-[#fde68a]">
-            <ShieldCheck size={10} />
-            <span>人工门禁</span>
-          </span>
-        );
-      case 'midscene':
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-[#f0fdf4] text-[#15803d] border border-[#bbf7d0]">
-            <Target size={10} />
-            <span>智能 UI</span>
-          </span>
-        );
-      case 'stitch-image':
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-[#eff6ff] text-[#1d4ed8] border border-[#bfdbfe]">
-            <FileVideo size={10} />
-            <span>动图生成</span>
-          </span>
-        );
-      case 'hook':
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-[#fff7ed] text-[#c2410c] border border-[#fed7aa]">
-            <Zap size={10} />
-            <span>Hook 触发</span>
-          </span>
-        );
-      case 'custom':
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-[#fdf2f8] text-[#db2777] border border-[#fbcfe8]">
-            <Sparkles size={10} />
-            <span>扩展插件</span>
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[10px] font-medium bg-[#f4f4f6] text-[#4b4b53] border border-[#ececf0]">
-            <Terminal size={10} />
-            <span>CLI 脚本</span>
-          </span>
-        );
-    }
-  };
-
-  const renderStatusBadge = (status: NodeStatus) => {
-    const config = NODE_STATUS_DICT[status] || NODE_STATUS_DICT.pending;
-    let icon = <CircleDot size={11} />;
-    if (status === 'success') icon = <CheckCircle2 size={11} />;
-    if (status === 'running') icon = <Loader2 size={11} className="animate-spin" />;
-    if (status === 'waiting_approval') icon = <Clock size={11} className="animate-pulse" />;
-    if (status === 'failed') icon = <XCircle size={11} />;
-    if (status === 'skipped') icon = <SkipForward size={11} />;
+    const { label, Icon, tint } = item.isGit
+      ? { label: 'Git 提交', Icon: GitCommit, tint: 'text-[#52525b]' }
+      : item.isDeploy
+      ? { label: '应用部署', Icon: Rocket, tint: 'text-[#0284c7]' }
+      : NODE_TYPE_LABELS[item.type] || NODE_TYPE_LABELS.cli;
 
     return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#9c9ca4] shrink-0">
+        <Icon size={10} className={tint} />
+        <span>{label}</span>
+      </span>
+    );
+  };
+
+  // 成功与静默态仅用微图标文字，异常与停留态才使用低饱和浅底徽章
+  const renderStatusBadge = (status: NodeStatus) => {
+    const config = NODE_STATUS_DICT[status] || NODE_STATUS_DICT.pending;
+
+    if (status === 'success' || status === 'skipped' || status === 'pending') {
+      const Icon = status === 'success' ? CheckCircle2 : status === 'skipped' ? SkipForward : CircleDot;
+      return (
+        <span
+          className={`inline-flex items-center gap-1 text-[10.5px] font-medium ${
+            status === 'success' ? 'text-[#3f8f65]' : 'text-[#a5a5b0]'
+          }`}
+        >
+          <Icon size={11} />
+          <span>{config.label}</span>
+        </span>
+      );
+    }
+
+    const Icon = status === 'running' ? Loader2 : status === 'waiting_approval' ? Clock : XCircle;
+    return (
       <span
-        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-medium shadow-none transition-colors ${config.badgeClass}`}
+        className={`inline-flex items-center gap-1 px-1.5 py-[1px] rounded-[4px] text-[10px] font-medium ${config.badgeClass}`}
       >
-        {icon}
+        <Icon
+          size={10}
+          className={
+            status === 'running' ? 'animate-spin' : status === 'waiting_approval' ? 'animate-pulse' : ''
+          }
+        />
         <span>{config.label}</span>
       </span>
     );
   };
 
+  // 时间线轴点：浅底微边框 + 语义色图标，克制不抢画面
   const renderTimelineIcon = (status: NodeStatus, order: number) => {
+    const base =
+      'w-[18px] h-[18px] rounded-full flex items-center justify-center shrink-0 ring-4 ring-white transition-colors';
+
     if (status === 'success') {
       return (
-        <div className="w-5 h-5 rounded-full bg-[#189a58] text-white flex items-center justify-center shrink-0 shadow-sm ring-4 ring-white">
-          <CheckCircle2 size={12} strokeWidth={2.6} />
+        <div className={`${base} bg-[#ecfdf5] border border-[#a7f3d0] text-[#059669]`}>
+          <CheckCircle2 size={11} strokeWidth={2.6} />
         </div>
       );
     }
     if (status === 'running') {
       return (
-        <div className="w-5 h-5 rounded-full bg-[#4f46e5] text-white flex items-center justify-center shrink-0 shadow-sm ring-4 ring-[#eeedfd]">
-          <Loader2 size={12} className="animate-spin" strokeWidth={2.6} />
+        <div className={`${base} bg-[#eeedfd] border border-[#d8d6fb] text-[#4f46e5]`}>
+          <Loader2 size={11} strokeWidth={2.6} className="animate-spin" />
         </div>
       );
     }
     if (status === 'waiting_approval') {
       return (
-        <div className="w-5 h-5 rounded-full bg-[#f59e0b] text-white flex items-center justify-center shrink-0 shadow-sm ring-4 ring-[#fef3c7]">
-          <Clock size={12} className="animate-pulse" strokeWidth={2.6} />
+        <div className={`${base} bg-[#fbf0df] border border-[#f4dcba] text-[#b45309]`}>
+          <Clock size={11} strokeWidth={2.6} className="animate-pulse" />
         </div>
       );
     }
     if (status === 'failed') {
       return (
-        <div className="w-5 h-5 rounded-full bg-[#d64545] text-white flex items-center justify-center shrink-0 shadow-sm ring-4 ring-[#fee2e2]">
-          <XCircle size={12} strokeWidth={2.6} />
+        <div className={`${base} bg-[#fbe9e9] border border-[#f6c6c6] text-[#d64545]`}>
+          <XCircle size={11} strokeWidth={2.6} />
         </div>
       );
     }
     return (
-      <div className="w-5 h-5 rounded-full bg-[#f1f1f4] text-[#85858d] border border-[#e3e3e8] flex items-center justify-center text-[10px] font-mono font-medium shrink-0 ring-4 ring-white">
+      <div
+        className={`${base} bg-white border border-[#e3e3e8] text-[#a5a5b0] text-[9.5px] font-mono font-medium`}
+      >
         {order}
       </div>
     );
