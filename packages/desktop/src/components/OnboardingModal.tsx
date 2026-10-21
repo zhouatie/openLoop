@@ -51,8 +51,6 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     tools: [
       { name: 'Node.js', command: 'node', available: true },
       { name: 'Git', command: 'git', available: true },
-      { name: 'pnpm', command: 'pnpm', available: true },
-      { name: 'MWS CLI', command: 'mws', available: true },
     ],
   });
 

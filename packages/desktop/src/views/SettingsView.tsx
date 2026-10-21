@@ -1340,7 +1340,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div className="min-w-0 flex-1">
                       <div className="text-[13px] font-medium text-[#1c1c21]">系统环境与权限诊断向导</div>
                       <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                        一键自检 macOS 完全磁盘访问权限、开发工具链 (Node/Git/pnpm/mws) 与核心调度状态
+                        一键自检 macOS 完全磁盘访问权限、必需工具链 (Node/Git) 与核心调度状态
                       </div>
                     </div>
                     <div className="shrink-0 self-center">
