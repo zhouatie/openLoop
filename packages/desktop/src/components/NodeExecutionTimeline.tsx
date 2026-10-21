@@ -638,22 +638,22 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                         </div>
                       )}
 
-                      {/* 失败节点的唯一主操作：常驻可见，便于快速恢复 */}
-                      {!isCustomMode && item.status === 'failed' && onRetryNode && (
-                        <button
-                          type="button"
-                          disabled={isRetryingNode}
-                          onClick={() => onRetryNode(task.id, item.id)}
-                          className={`${MICRO_BTN} text-[#d64545] hover:bg-[#fbe9e9]`}
-                          title="仅重试此节点"
-                        >
-                          <RotateCcw size={11} className={isRetryingNode ? 'animate-spin' : ''} />
-                        </button>
-                      )}
-
-                      {/* 次级动作：悬浮卡片或键盘聚焦时浮现 */}
+                      {/* 次级动作：悬浮卡片或键盘聚焦时浮现，非悬浮态只留展开箭头 */}
                       {!isCustomMode && (
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
+                          {/* 仅重试此节点（失败节点优先，语义红） */}
+                          {item.status === 'failed' && onRetryNode && (
+                            <button
+                              type="button"
+                              disabled={isRetryingNode}
+                              onClick={() => onRetryNode(task.id, item.id)}
+                              className={`${MICRO_BTN} text-[#d64545] hover:bg-[#fbe9e9]`}
+                              title="仅重试此节点"
+                            >
+                              <RotateCcw size={11} className={isRetryingNode ? 'animate-spin' : ''} />
+                            </button>
+                          )}
+
                           {/* 以本节点为起点重跑后续流程（之前成功的节点保留成果） */}
                           {item.status !== 'running' && onCustomRetry && (
                             <button
