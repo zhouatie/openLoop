@@ -12,6 +12,7 @@ import {
   XCircle,
   ExternalLink,
   Smartphone,
+  Apple,
 } from 'lucide-react';
 import { QaSuite } from '@openloop/core';
 
@@ -103,6 +104,8 @@ export const QaSuitesListView: React.FC<QaSuitesListViewProps> = ({
                     <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] group-hover:bg-white flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60 transition-colors">
                       {suite.platform === 'android' ? (
                         <Smartphone size={11} strokeWidth={2} className="text-[#4f46e5]" />
+                      ) : suite.platform === 'ios' ? (
+                        <Apple size={11} strokeWidth={2} className="text-[#4f46e5]" />
                       ) : (
                         <Target size={11} strokeWidth={2} />
                       )}
@@ -114,7 +117,7 @@ export const QaSuitesListView: React.FC<QaSuitesListViewProps> = ({
                       {suite.name}
                     </span>
                     <span className="inline-flex items-center px-1.2 py-0.2 rounded-[3px] bg-[#f4f4f5] text-[#52525b] text-[9.5px] font-medium border border-[#e3e3e8] shrink-0">
-                      {suite.platform === 'android' ? 'Android' : 'Web'}
+                      {suite.platform === 'android' ? 'Android' : suite.platform === 'ios' ? 'iOS' : 'Web'}
                     </span>
                   </div>
 

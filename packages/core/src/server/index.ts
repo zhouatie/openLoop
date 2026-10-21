@@ -27,6 +27,7 @@ import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
+import { IosDeviceManager } from '../qa/ios-device-manager';
 import { isQaPlatform } from '../qa/qa-driver';
 import { applyQaModelEnv } from '../qa/model-env';
 import { configureQaRuntimePaths } from '../qa/runtime-paths';
@@ -1866,6 +1867,12 @@ export class OpenLoopServer {
         return this.sendJson(res, resDis.success ? 200 : 400, resDis, reqMeta);
       }
 
+      if (pathname === '/api/qa/devices/ios' && method === 'GET') {
+        const endpoint = parsedUrl.searchParams.get('endpoint') || undefined;
+        const snapshot = await IosDeviceManager.getSnapshot(endpoint);
+        return this.sendJson(res, 200, snapshot, reqMeta);
+      }
+
       if (pathname === '/api/qa/suites' && method === 'POST') {
         const body = await this.parseJsonBody(req);
         const target = body.targetUrl || body.appPackage;
@@ -1883,6 +1890,7 @@ export class OpenLoopServer {
           targetUrl: body.targetUrl || body.appPackage || '',
           appPackage: body.appPackage,
           deviceSerial: body.deviceSerial,
+          wdaEndpoint: body.wdaEndpoint,
           viewport: body.viewport,
           steps: body.steps || [],
           tags: body.tags || [],
@@ -1960,6 +1968,7 @@ export class OpenLoopServer {
             targetUrl: body.targetUrl || body.appPackage || '',
             appPackage: body.appPackage,
             deviceSerial: body.deviceSerial,
+            wdaEndpoint: body.wdaEndpoint,
             steps: body.steps,
             viewport: body.viewport,
             createdAt: Date.now(),

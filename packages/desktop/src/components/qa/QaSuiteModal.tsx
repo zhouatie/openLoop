@@ -13,8 +13,10 @@ import {
   Radio,
   Wifi,
   Package,
+  Apple,
+  Link2,
 } from 'lucide-react';
-import { QaSuite, QaStep, QaStepType, QaPlatform, AndroidDeviceInfo } from '@openloop/core';
+import { QaSuite, QaStep, QaStepType, QaPlatform, AndroidDeviceInfo, IosDevicesSnapshot } from '@openloop/core';
 import { api } from '../../services/api';
 import { toast } from '../Toast';
 
@@ -23,6 +25,72 @@ interface QaSuiteModalProps {
   onSave: (suite: Partial<QaSuite>) => Promise<void>;
   onClose: () => void;
 }
+
+type MobileTemplateKey = 'android-app' | 'android-settings' | 'ios-app' | 'ios-settings';
+
+/** 移动端快速模板：一键填入完整用例骨架 */
+const MOBILE_TEMPLATES: Record<
+  MobileTemplateKey,
+  { label: string; platform: 'android' | 'ios'; name: string; description: string; appPackage: string; steps: Array<{ type: QaStepType; prompt: string }> }
+> = {
+  'android-app': {
+    label: 'App 探索与返回',
+    platform: 'android',
+    name: '移动端原生应用主链路探索',
+    description: '唤醒 App 并进行主界面导航、列表滑动与返回操作验收',
+    appPackage: 'com.android.chrome',
+    steps: [
+      { type: 'action', prompt: '等待应用首屏渲染完成，如果出现权限弹窗点击允许或同意' },
+      { type: 'assert', prompt: '界面正常展示主功能入口或顶栏，无无响应闪退提示' },
+      { type: 'action', prompt: '向上滑动浏览更多内容' },
+      { type: 'action', prompt: '点击返回按钮回到前一个视口' },
+      { type: 'assert', prompt: '界面成功返回并呈现稳定的内容流' },
+    ],
+  },
+  'android-settings': {
+    label: '系统设置链路',
+    platform: 'android',
+    name: '移动端设置与物理按键响应',
+    description: '验证移动端通用按键与设置页面的交互流',
+    appPackage: 'com.android.settings',
+    steps: [
+      { type: 'action', prompt: '进入系统设置界面，等待列表展示' },
+      { type: 'assert', prompt: '页面包含网络、显示或系统相关设置项' },
+      { type: 'action', prompt: '执行 Android 物理返回键' },
+    ],
+  },
+  'ios-app': {
+    label: 'Safari 探索',
+    platform: 'ios',
+    name: 'iOS 原生应用主链路探索',
+    description: '唤醒 iOS App 并进行主界面导航、滑动与页面切换验收',
+    appPackage: 'com.apple.mobilesafari',
+    steps: [
+      { type: 'action', prompt: '等待应用首屏渲染完成，如果出现弹窗点击允许或同意' },
+      { type: 'assert', prompt: '界面正常展示主功能内容，无白屏或崩溃提示' },
+      { type: 'action', prompt: '向上滑动浏览更多内容' },
+      { type: 'action', prompt: '点击返回主屏' },
+      { type: 'assert', prompt: '界面呈现稳定的内容流' },
+    ],
+  },
+  'ios-settings': {
+    label: '系统设置链路',
+    platform: 'ios',
+    name: 'iOS 设置页交互链路',
+    description: '验证 iOS 系统设置页的元素定位与视觉断言',
+    appPackage: 'com.apple.Preferences',
+    steps: [
+      { type: 'action', prompt: '等待设置列表渲染完成' },
+      { type: 'assert', prompt: '页面包含「通用」或「无线局域网」等设置项' },
+      { type: 'action', prompt: '点击「通用」进入二级页面' },
+    ],
+  },
+};
+
+const PLATFORM_TEMPLATE_KEYS: Record<'android' | 'ios', MobileTemplateKey[]> = {
+  android: ['android-app', 'android-settings'],
+  ios: ['ios-app', 'ios-settings'],
+};
 
 export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
   initialSuite,
@@ -36,6 +104,11 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
   const [appPackage, setAppPackage] = useState(initialSuite?.appPackage || '');
   const [deviceSerial, setDeviceSerial] = useState(initialSuite?.deviceSerial || '');
   const [isMobile, setIsMobile] = useState(Boolean(initialSuite?.viewport?.isMobile));
+
+  // iOS 配置状态
+  const [wdaEndpoint, setWdaEndpoint] = useState(initialSuite?.wdaEndpoint || 'http://localhost:8100');
+  const [iosSnapshot, setIosSnapshot] = useState<IosDevicesSnapshot | null>(null);
+  const [isProbingIos, setIsProbingIos] = useState(false);
   
   // Android 设备列表状态
   const [devices, setDevices] = useState<AndroidDeviceInfo[]>([]);
@@ -80,7 +153,35 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
     if (platform === 'android') {
       loadDevices();
     }
+    if (platform === 'ios') {
+      probeIosDevices();
+    }
   }, [platform]);
+
+  // 探测 WebDriverAgent 与已启动的 iOS 模拟器
+  const probeIosDevices = async () => {
+    setIsProbingIos(true);
+    if (import.meta.env?.DEV) {
+      console.log('[QaSuiteModal] 探测 iOS WebDriverAgent:', wdaEndpoint);
+    }
+    try {
+      const snapshot = await api.getIosDevices(wdaEndpoint.trim() || undefined);
+      setIosSnapshot(snapshot);
+      if (!snapshot.environment.available) {
+        toast.error(snapshot.environment.message || 'iOS 自动化环境不可用');
+      } else if (snapshot.wda.reachable) {
+        setWdaEndpoint(snapshot.wda.endpoint);
+        if (snapshot.wda.udid) setDeviceSerial(snapshot.wda.udid);
+        toast.success(`WebDriverAgent 已连接: ${snapshot.wda.deviceName || snapshot.wda.udid || 'iOS 设备'}`);
+      } else {
+        toast.error(snapshot.wda.message || 'WebDriverAgent 不可达');
+      }
+    } catch (err: any) {
+      toast.error(`检测失败: ${err.message}`);
+    } finally {
+      setIsProbingIos(false);
+    }
+  };
 
   // 从当前设备一键抓取前台 App
   const handleFetchCurrentApp = async () => {
@@ -157,38 +258,22 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
     setSteps(steps.map((s, idx) => (idx === index ? { ...s, ...updates } : s)));
   };
 
-  const handleFillTemplate = (templateType: 'android-app' | 'android-settings') => {
-    if (templateType === 'android-app') {
-      setName('移动端原生应用主链路探索');
-      setDescription('唤醒 App 并进行主界面导航、列表滑动与返回操作验收');
-      setPlatform('android');
-      setAppPackage(appPackage || 'com.android.chrome');
-      setSteps([
-        { id: 's1', type: 'action', prompt: '等待应用首屏渲染完成，如果出现权限弹窗点击允许或同意' },
-        { id: 's2', type: 'assert', prompt: '界面正常展示主功能入口或顶栏，无无响应闪退提示' },
-        { id: 's3', type: 'action', prompt: '向上滑动浏览更多内容' },
-        { id: 's4', type: 'action', prompt: '点击返回按钮回到前一个视口' },
-        { id: 's5', type: 'assert', prompt: '界面成功返回并呈现稳定的内容流' },
-      ]);
-    } else if (templateType === 'android-settings') {
-      setName('移动端设置与物理按键响应');
-      setDescription('验证移动端通用按键与设置页面的交互流');
-      setPlatform('android');
-      setAppPackage('com.android.settings');
-      setSteps([
-        { id: 's1', type: 'action', prompt: '进入系统设置界面，等待列表展示' },
-        { id: 's2', type: 'assert', prompt: '页面包含网络、显示或系统相关设置项' },
-        { id: 's3', type: 'action', prompt: '执行 Android 物理返回键' },
-      ]);
-    }
+  const handleFillTemplate = (key: MobileTemplateKey) => {
+    const tpl = MOBILE_TEMPLATES[key];
+    setName(tpl.name);
+    setDescription(tpl.description);
+    setPlatform(tpl.platform);
+    setAppPackage(tpl.appPackage);
+    setSteps(tpl.steps.map((step, idx) => ({ id: `s${idx + 1}`, ...step })));
     if (import.meta.env?.DEV) {
-      console.log('[QaSuiteModal] 应用预设模板:', templateType);
+      console.log('[QaSuiteModal] 应用预设模板:', key);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const effectiveTarget = platform === 'android' ? (appPackage.trim() || targetUrl.trim()) : targetUrl.trim();
+    const isMobileTarget = platform !== 'web';
+    const effectiveTarget = isMobileTarget ? appPackage.trim() || targetUrl.trim() : targetUrl.trim();
     if (!name.trim() || !effectiveTarget || steps.length === 0) return;
 
     setIsSaving(true);
@@ -202,13 +287,17 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
         description: description.trim() || undefined,
         platform,
         targetUrl: effectiveTarget,
-        appPackage: platform === 'android' ? appPackage.trim() : undefined,
-        deviceSerial: platform === 'android' ? (deviceSerial || undefined) : undefined,
-        viewport: platform === 'android'
-          ? { width: 1080, height: 2400, isMobile: true }
-          : isMobile
-          ? { width: 390, height: 844, isMobile: true }
-          : { width: 1280, height: 800, isMobile: false },
+        appPackage: isMobileTarget ? appPackage.trim() : undefined,
+        deviceSerial: isMobileTarget ? deviceSerial || undefined : undefined,
+        wdaEndpoint: platform === 'ios' ? wdaEndpoint.trim() || undefined : undefined,
+        viewport:
+          platform === 'android'
+            ? { width: 1080, height: 2400, isMobile: true }
+            : platform === 'ios'
+            ? { width: 390, height: 844, isMobile: true }
+            : isMobile
+            ? { width: 390, height: 844, isMobile: true }
+            : { width: 1280, height: 800, isMobile: false },
         steps,
       });
       onClose();
@@ -268,29 +357,37 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
                 <Smartphone size={12} />
                 <span>Android 移动端</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setPlatform('ios')}
+                className={`h-6 px-3 rounded-[5px] text-[11.5px] font-medium flex items-center gap-1.5 transition-all ${
+                  platform === 'ios'
+                    ? 'bg-white text-[#1c1c21] shadow-xs'
+                    : 'text-[#71717a] hover:text-[#1c1c21]'
+                }`}
+              >
+                <Apple size={12} />
+                <span>iOS 移动端</span>
+              </button>
             </div>
 
             {/* 模版快捷入口 */}
-            {platform === 'android' && (
+            {platform !== 'web' && (
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] font-medium text-[#85858d] flex items-center gap-1">
                   <Sparkles size={11} className="text-[#4f46e5]" />
                   快速模板:
                 </span>
-                <button
-                  type="button"
-                  onClick={() => handleFillTemplate('android-app')}
-                  className="text-[11px] px-2 py-0.5 rounded-[4px] bg-[#f4f4f7] hover:bg-[#eeedfd] hover:text-[#4f46e5] text-[#52525b] border border-[#ececf0] transition-colors"
-                >
-                  App 探索与返回
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleFillTemplate('android-settings')}
-                  className="text-[11px] px-2 py-0.5 rounded-[4px] bg-[#f4f4f7] hover:bg-[#eeedfd] hover:text-[#4f46e5] text-[#52525b] border border-[#ececf0] transition-colors"
-                >
-                  系统设置链路
-                </button>
+                {PLATFORM_TEMPLATE_KEYS[platform].map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => handleFillTemplate(key)}
+                    className="text-[11px] px-2 py-0.5 rounded-[4px] bg-[#f4f4f7] hover:bg-[#eeedfd] hover:text-[#4f46e5] text-[#52525b] border border-[#ececf0] transition-colors"
+                  >
+                    {MOBILE_TEMPLATES[key].label}
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -306,7 +403,7 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={platform === 'android' ? '例如: 移动端核心链路自动化验收' : '例如: 核心功能全链路视觉验收'}
+                placeholder={platform !== 'web' ? '例如: 移动端核心链路自动化验收' : '例如: 核心功能全链路视觉验收'}
                 className="w-full h-[30px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white text-[12.5px] text-[#1c1c21] outline-none focus:border-[#4f46e5] shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
               />
             </div>
@@ -373,6 +470,63 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
                       <Smartphone size={12} />
                       <span>移动端 (390x844)</span>
                     </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* iOS 专属配置 */}
+            {platform === 'ios' && (
+              <div className="space-y-3 p-3 rounded-[8px] bg-[#fafafc] border border-[#e3e3e8]">
+                {/* WebDriverAgent 端点 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11.5px] font-medium text-[#4b4b53] flex items-center gap-1.5">
+                      <Link2 size={12} className="text-[#4f46e5]" />
+                      <span>WebDriverAgent 地址</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={probeIosDevices}
+                      disabled={isProbingIos}
+                      className="text-[11px] text-[#71717a] hover:text-[#1c1c21] flex items-center gap-1"
+                      title="探测 WebDriverAgent 与已启动的模拟器"
+                    >
+                      <RefreshCw size={11} className={isProbingIos ? 'animate-spin' : ''} />
+                      <span>检测连接</span>
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={wdaEndpoint}
+                    onChange={(e) => setWdaEndpoint(e.target.value)}
+                    placeholder="http://localhost:8100"
+                    className="w-full h-[30px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white font-mono text-[11.5px] text-[#1c1c21] outline-none focus:border-[#4f46e5] shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
+                  />
+                  <p className="mt-1 text-[11px] text-[#85858d]">
+                    {iosSnapshot?.environment && !iosSnapshot.environment.available
+                      ? iosSnapshot.environment.message || 'iOS 自动化环境不可用'
+                      : iosSnapshot?.wda?.reachable
+                      ? `已连接 ${iosSnapshot.wda.deviceName || 'iOS 设备'}${iosSnapshot.wda.isSimulator ? '（模拟器）' : ''}`
+                      : '需先在 Xcode 中运行 WebDriverAgentRunner，一个 WDA 端点对应一台设备'}
+                  </p>
+                </div>
+
+                {/* 目标 Bundle ID */}
+                <div>
+                  <label className="block text-[11.5px] font-medium text-[#4b4b53] mb-1">
+                    目标 Bundle ID 或启动 URL <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Package size={13} className="absolute left-2.5 top-2.5 text-[#a1a1aa]" />
+                    <input
+                      type="text"
+                      required
+                      value={appPackage}
+                      onChange={(e) => setAppPackage(e.target.value)}
+                      placeholder="例如: com.apple.mobilesafari"
+                      className="w-full h-[30px] pl-8 pr-2.5 rounded-[6px] border border-[#e3e3e8] bg-white font-mono text-[11.5px] text-[#1c1c21] outline-none focus:border-[#4f46e5] shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
+                    />
                   </div>
                 </div>
               </div>
@@ -578,10 +732,10 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
                       value={step.prompt}
                       onChange={(e) => handleUpdateStep(idx, { prompt: e.target.value })}
                       placeholder={
-                        platform === 'android'
+                        platform !== 'web'
                           ? step.type === 'assert'
                             ? '如: 页面包含「购物车」标签且商品单价正常显示'
-                            : '如: 点击「加入购物车」按钮 / 向上滑动浏览 / 按返回键'
+                            : '如: 点击「加入购物车」按钮 / 向上滑动浏览 / 点击返回主屏'
                           : step.type === 'assert'
                           ? '如: 界面出现「登录成功」提示且无红字报错'
                           : '如: 点击页面右上角「登录」按钮'

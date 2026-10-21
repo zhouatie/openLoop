@@ -1,7 +1,7 @@
 # QA 自动化 · Android 端支持
 
-openLoop QA 自动化支持 Web 与 Android 双端执行。Android 端基于 Midscene 官方
-`@midscene/android` SDK，可驱动真机与模拟器（AVD、MuMu、雷电等）。
+openLoop QA 自动化支持 Web、Android、iOS 三端执行（iOS 见 [qa-ios.md](qa-ios.md)）。
+Android 端基于 Midscene 官方`@midscene/android` SDK，可驱动真机与模拟器（AVD、MuMu、雷电等）。
 
 ## 前置条件
 

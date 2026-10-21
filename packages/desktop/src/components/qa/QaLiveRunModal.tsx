@@ -15,16 +15,21 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
   onOpenReplay,
 }) => {
   const isAndroid = suite.platform === 'android';
+  const isIos = suite.platform === 'ios';
+  const isMobilePlatform = isAndroid || isIos;
+  const mobileTarget = suite.appPackage || suite.targetUrl;
   const [isRunning, setIsRunning] = useState(true);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [runRecord, setRunRecord] = useState<QaRunRecord | null>(null);
   const [logs, setLogs] = useState<string[]>([
     `[Core:Daemon] 正在连接 openLoop 核心调度服务...`,
-    isAndroid
+    isIos
+      ? `[Midscene:iOS] 正在连接 WebDriverAgent (${suite.wdaEndpoint || 'http://localhost:8100'})...`
+      : isAndroid
       ? `[Midscene:Android] 正在连接 Android 设备/模拟器 (${suite.deviceSerial || '自动探测'})...`
       : `[Midscene:Web] 正在初始化无头浏览器视口 (${suite.viewport?.width || 1280}x${suite.viewport?.height || 800})...`,
-    isAndroid
-      ? `[Midscene:Launch] 唤醒设备并拉起目标应用: ${suite.appPackage || suite.targetUrl}`
+    isMobilePlatform
+      ? `[Midscene:Launch] 唤醒设备并拉起目标应用: ${mobileTarget}`
       : `[Midscene:Nav] 打开目标地址: ${suite.targetUrl}`,
   ]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -131,7 +136,7 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-[#85858d] font-mono mt-0.5">
-                {isAndroid ? (suite.appPackage || suite.targetUrl) : suite.targetUrl} · 耗时: {elapsedSeconds}s
+                {isMobilePlatform ? mobileTarget : suite.targetUrl} · 耗时: {elapsedSeconds}s
               </p>
             </div>
           </div>

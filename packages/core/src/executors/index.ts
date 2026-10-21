@@ -13,6 +13,7 @@ import {
 } from '../constants/agent-providers';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
+import { IosDeviceManager } from '../qa/ios-device-manager';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 
 const executorLogger = createLogger('Executor');
@@ -911,6 +912,24 @@ export class EnvPrepareExecutor implements NodeExecutor {
       }
     }
 
+    // 3. iOS 移动端 WebDriverAgent 探活
+    if (platform === 'ios') {
+      emitLog('system', `[iOS 准备] 检测 WebDriverAgent 连接状态...`);
+      const environment = await IosDeviceManager.checkEnvironment();
+      if (!environment.available) {
+        const message = environment.message || 'iOS 自动化环境不可用';
+        emitLog('stderr', `[iOS 准备] ${message}`);
+        return { status: 'failed', exitCode: 1, error: message };
+      }
+      const wda = await IosDeviceManager.probeWda(node.config.wdaEndpoint);
+      if (!wda.reachable) {
+        const message = wda.message || `WebDriverAgent 不可达: ${wda.endpoint}`;
+        emitLog('stderr', `[iOS 准备] ${message}`);
+        return { status: 'failed', exitCode: 1, error: message };
+      }
+      emitLog('system', `[iOS 准备] WebDriverAgent 已就绪 (设备: ${wda.deviceName || wda.udid || '未知'})`);
+    }
+
     emitLog('system', `[现场就绪准备] 目标测试现场已就绪，流程继续`);
     return {
       status: 'success',
@@ -1050,8 +1069,9 @@ export class MidsceneExecutor implements NodeExecutor {
         name: `任务验收: ${task.title.slice(0, 30)}`,
         platform,
         targetUrl: testUrl,
-        appPackage: platform === 'android' ? (node.config.appPackage || testUrl) : undefined,
+        appPackage: platform === 'web' ? undefined : node.config.appPackage || testUrl,
         deviceSerial: node.config.deviceSerial,
+        wdaEndpoint: node.config.wdaEndpoint,
         steps,
         createdAt: Date.now(),
         updatedAt: Date.now(),

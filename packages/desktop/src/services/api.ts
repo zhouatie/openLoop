@@ -11,6 +11,7 @@ import {
   QaSuite,
   QaRunRecord,
   AndroidDeviceInfo,
+  IosDevicesSnapshot,
   AutomationTask,
   AutomationLogRecord,
   TaskWorktreeDiffResult,
@@ -872,6 +873,14 @@ export class DesktopApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address }),
     });
+  }
+
+  async getIosDevices(endpoint?: string): Promise<IosDevicesSnapshot> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 拉取 iOS 模拟器与 WebDriverAgent 状态:', endpoint || '默认端点');
+    }
+    const query = endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : '';
+    return requestJson<IosDevicesSnapshot>(`${BASE_URL}/api/qa/devices/ios${query}`);
   }
 
   async clearQaRuns(params?: { suiteId?: string; olderThanDays?: number; keepLatestPerSuite?: number; runIds?: string[] }): Promise<{ deletedCount: number }> {

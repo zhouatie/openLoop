@@ -263,7 +263,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [defaultCwd, setDefaultCwd] = useState('');
   const [autoSnapshot, setAutoSnapshot] = useState(true);
 
-  // 自动化测试多模态模型配置（仅 Android 视觉推理需要）
+  // 自动化测试多模态模型配置（仅移动端 Android / iOS 视觉推理需要）
   const [qaModelBaseUrl, setQaModelBaseUrl] = useState('');
   const [qaModelApiKey, setQaModelApiKey] = useState('');
   const [qaModelName, setQaModelName] = useState('');
@@ -1407,7 +1407,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <KeyRound size={11} className="text-[#a1a1aa]" />
                     </div>
                     <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                      仅保存在本地 SQLite，用于 Android 端截图的视觉推理
+                      仅保存在本地 SQLite，用于移动端 (Android / iOS) 截图的视觉推理
                     </div>
                   </div>
                   <div className="shrink-0 self-center relative flex items-center">
@@ -1526,8 +1526,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="bg-[#f8f8fb] border border-[#e3e3e8] rounded-[10px] px-3.5 py-3">
               <div className="text-[11.5px] text-[#63636b] leading-relaxed">
                 Web 端测试基于浏览器 DOM 定位，不需要模型密钥，也不产生调用成本。
-                Android 端没有 DOM，只能读取截图判断点击位置，因此需要视觉模型。
-                未配置密钥时 Android 自动降级为 ADB 直通模式（返回键、Home、坐标点击、文本定位），用例仍会真实执行。
+                Android / iOS 端没有 DOM，只能读取截图判断点击位置，因此需要视觉模型。
+                未配置密钥时 Android 自动降级为 ADB 直通模式（返回键、Home、坐标点击、文本定位），
+                iOS 降级为 WebDriverAgent 页面源码树定位（文本点击、滑动、Home），用例仍会真实执行。
               </div>
             </div>
           </div>
