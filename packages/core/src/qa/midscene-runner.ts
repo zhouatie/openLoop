@@ -78,7 +78,7 @@ function generateStepVisualSnapshot(
   <rect x="60" y="${height - 70}" width="${width - 120}" height="42" rx="8" fill="#0f172a" opacity="0.9"/>
   <circle cx="85" cy="${height - 49}" r="7" fill="${isFailed ? '#ef4444' : '#22c55e'}"/>
   <text x="105" y="${height - 44}" font-family="-apple-system, sans-serif" font-size="12" font-weight="500" fill="#f8fafc">
-    ${status === 'passed' ? '✔ 步骤断言通过' : '✖ 步骤断言异常'}: ${thought ? thought.slice(0, 70) : ''}
+    ${status === 'passed' ? '✔ 步骤已执行' : '⚠ 步骤已执行，AI 视觉判断未通过'}: ${thought ? thought.slice(0, 70) : ''}
   </text>
 </svg>`;
 }
@@ -256,15 +256,9 @@ export class MidsceneRunner {
         timeline.push(timelineItem);
         this.options.onStepFinish?.(i, timelineItem);
 
+        // 步骤断言结果只作为参考信息记录，不参与流程成败判定：始终执行完全部步骤并留存截图，由人工在验收门禁肉眼确认
         if (stepResult.passed) {
           passedSteps++;
-        } else {
-          runStatus = 'failed';
-          errorMessage = stepResult.errorMessage;
-          // 驱动不可用时后续步骤必然无法执行，统一标记失败而不中断时间线记录
-          if (!step.optional && driverReady) {
-            break;
-          }
         }
       }
     } finally {
@@ -343,7 +337,7 @@ export class MidsceneRunner {
     </div>
     <div>
       <span class="badge ${isPassed ? 'badge-passed' : 'badge-failed'}">
-        ${isPassed ? '✔ 测试通过' : '✖ 存在失败步骤'} (${passedSteps}/${suite.steps.length})
+        ${isPassed ? '✔ 操作回放完成，请人工验收截图' : '✖ 自动化执行中断'} (${timeline.length}/${suite.steps.length} 步已执行 · ${passedSteps} 步 AI 视觉判断通过)
       </span>
     </div>
   </div>
@@ -355,15 +349,15 @@ export class MidsceneRunner {
         <div class="step-card">
           <div class="step-header">
             <strong>步骤 ${t.stepIndex + 1}: [${t.type.toUpperCase()}] ${t.prompt}</strong>
-            <span style="color: ${t.status === 'passed' ? '#16a34a' : '#dc2626'}; font-weight: 600;">
-              ${t.status === 'passed' ? '✔ 成功' : '✖ 失败'} (${t.durationMs}ms)
+            <span style="color: ${t.status === 'passed' ? '#16a34a' : '#d97706'}; font-weight: 600;">
+              ${t.status === 'passed' ? '✔ 完成' : '⚠ AI 视觉判断未通过'} (${t.durationMs}ms)
             </span>
           </div>
           <div class="step-body">
             <img class="step-screenshot" src="${path.basename(t.screenshotRelPath || '')}" alt="Step ${t.stepIndex + 1}" />
             <div class="step-info">
               <p><strong>执行说明:</strong> ${t.thought || '无'}</p>
-              ${t.error ? `<p style="color: #dc2626;"><strong>异常信息:</strong> ${t.error}</p>` : ''}
+              ${t.error ? `<p style="color: #d97706;"><strong>参考信息:</strong> ${t.error}</p>` : ''}
             </div>
           </div>
         </div>

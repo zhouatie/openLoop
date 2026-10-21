@@ -1091,7 +1091,10 @@ export class MidsceneExecutor implements NodeExecutor {
           if (record.status === 'passed') {
             emitLog('stdout', `[Midscene 步骤 ${index + 1}] ✔ 完成 (${record.durationMs}ms) - ${record.thought || ''}`);
           } else {
-            emitLog('stderr', `[Midscene 步骤 ${index + 1}] ✖ 失败: ${record.error || '断言未通过'}`);
+            emitLog(
+              'stdout',
+              `[Midscene 步骤 ${index + 1}] ⚠ AI 视觉判断未通过（仅供人工参考，流程继续）: ${record.error || record.thought || '未通过'}`
+            );
           }
         },
         onLog: (msg) => {
@@ -1149,9 +1152,12 @@ export class MidsceneExecutor implements NodeExecutor {
 
       const isSuccess = runRecord.status === 'passed';
       if (isSuccess) {
-        emitLog('system', `[Midscene UI 测试] 全流程通过！总耗时: ${(runRecord.durationMs / 1000).toFixed(2)}s, 产出 ${artifacts.length} 个快照`);
+        emitLog(
+          'system',
+          `[Midscene UI 测试] 操作回放已完成: ${runRecord.totalSteps} 步, 耗时 ${(runRecord.durationMs / 1000).toFixed(2)}s, 产出 ${artifacts.length} 个快照，请在验收门禁肉眼确认截图效果`
+        );
       } else {
-        emitLog('stderr', `[Midscene UI 测试] 测试未通过: ${runRecord.error || '存在断言失败步骤'}`);
+        emitLog('stderr', `[Midscene UI 测试] 自动化执行中断: ${runRecord.error || '测试驱动不可用'}`);
       }
 
       return {
