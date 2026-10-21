@@ -106,14 +106,12 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
         </div>
       </div>
 
-      {/* 主视图展示区域 */}
-      <div
-        className="flex-1 w-full max-w-4xl flex items-center justify-center p-4 min-h-0"
-        onClick={(e) => e.stopPropagation()}
-      >
+      {/* 主视图展示区域：点击图片以外区域透传到蒙层关闭 */}
+      <div className="flex-1 w-full max-w-4xl flex items-center justify-center p-4 min-h-0">
         <img
           src={imageUrl}
           alt={attachment.name}
+          onClick={(e) => e.stopPropagation()}
           className="max-w-full max-h-[calc(100vh-140px)] object-contain rounded-[6px] shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10"
         />
       </div>
