@@ -63,6 +63,16 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="text-[#b9b9c2]">/</span>
           <span className="text-[#1c1c21] font-medium">{title}</span>
         </div>
+
+        {import.meta.env.DEV && (
+          <span
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[5px] bg-[#fef3c7] text-[#92400e] border border-[#fde68a] text-[10.5px] font-mono font-medium tracking-tight select-none"
+            title="当前处于独立开发沙箱（端口 19889），不影响稳定版环境"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] animate-pulse" />
+            DEV · 19889
+          </span>
+        )}
       </div>
 
       {/* 右侧：动作按钮 */}

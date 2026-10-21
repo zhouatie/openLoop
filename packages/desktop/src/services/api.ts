@@ -26,12 +26,15 @@ function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
     const { protocol, hostname, port } = window.location;
     const portNum = port ? parseInt(port, 10) : 0;
     // Vite 本地开发模式或独立靶机沙箱端口 (5170 - 5200)
-    // 均指向 Core 调度服务（主环境 19888，或由沙箱注入的 VITE_CORE_PORT）
+    // 默认指向开发沙箱 Core 调度服务 19889，或由环境变量 VITE_CORE_PORT 注入
     if (import.meta.env.DEV || (portNum >= 5170 && portNum <= 5200)) {
-      const corePort = import.meta.env.VITE_CORE_PORT || '19888';
+      const corePort = import.meta.env.VITE_CORE_PORT || (import.meta.env.DEV ? '19889' : '19888');
       let host = hostname || '127.0.0.1';
       if (host === '0.0.0.0' || host === 'localhost') {
         host = '127.0.0.1';
+      }
+      if (import.meta.env.DEV) {
+        console.log(`[UI:Init] 开发模式已连接沙箱调度服务: http://${host}:${corePort}`);
       }
       return {
         httpUrl: `http://${host}:${corePort}`,

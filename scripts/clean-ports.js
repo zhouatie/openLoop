@@ -1,6 +1,8 @@
 const { execSync } = require('child_process');
 
-const ports = [19888, 5173];
+// 默认只清理开发环境端口（19889 和 5173），严格保护稳定版端口 19888
+const isAll = process.argv.includes('--all') || process.argv.includes('--prod');
+const ports = isAll ? [19888, 19889, 5173] : [19889, 5173];
 
 for (const port of ports) {
   try {

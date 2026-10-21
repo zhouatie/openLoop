@@ -5,6 +5,7 @@ const cliLogger = createLogger('ServerCLI');
 
 const port = parseInt(process.env.OPENLOOP_PORT || process.env.PORT || '19888', 10);
 const host = process.env.OPENLOOP_HOST || process.env.HOST || '127.0.0.1';
+const storeDir = process.env.OPENLOOP_STORE_DIR || undefined;
 
 // 捕获全局未捕获异常，确保排查错误时堆栈完全记录到日志中
 process.on('uncaughtException', (err) => {
@@ -18,9 +19,11 @@ process.on('unhandledRejection', (reason) => {
   );
 });
 
-cliLogger.info(`正在启动 openLoop Core (Node: ${process.version}, PID: ${process.pid}, Host: ${host}, Port: ${port})`);
+cliLogger.info(
+  `正在启动 openLoop Core (Node: ${process.version}, PID: ${process.pid}, Host: ${host}, Port: ${port}, StoreDir: ${storeDir || '~/.openloop'})`
+);
 
-const server = new OpenLoopServer({ port, host });
+const server = new OpenLoopServer({ port, host, storeDir });
 
 server
   .start()
