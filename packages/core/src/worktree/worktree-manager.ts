@@ -3,7 +3,7 @@ import path from 'path';
 import net from 'net';
 import http from 'http';
 import { spawn, execSync, ChildProcess } from 'child_process';
-import { WorktreeContextInfo, FileDiffItem, TaskWorktreeDiffResult } from '../types';
+import { WorktreeContextInfo, FileDiffItem, TaskWorktreeDiffResult, Task } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
@@ -119,6 +119,8 @@ export class WorktreeManager {
   private static instance: WorktreeManager;
   // 维护全局已分配但可能尚未监听的端口映射，杜绝并行任务端口时间差冲突
   private static allocatedPorts: Map<string, number[]> = new Map();
+  // 串行化端口分配流程，杜绝并发创建 Worktree 时「探测-登记」之间的竞态
+  private static allocationLock: Promise<unknown> = Promise.resolve();
 
   public static getInstance(): WorktreeManager {
     if (!WorktreeManager.instance) {
@@ -145,6 +147,35 @@ export class WorktreeManager {
   public unregisterTaskPorts(taskId: string) {
     WorktreeManager.allocatedPorts.delete(taskId);
     logger.info(`[Worktree:PortRegistry] 任务 ${taskId} 已注销预占端口`);
+  }
+
+  /**
+   * 进程重启后从持久化任务恢复端口预占，避免内存注册表丢失导致并行任务靶机端口重复
+   */
+  public restoreReservedPorts(tasks: Task[]) {
+    const releasedStatus = new Set(['completed', 'failed', 'cancelled']);
+    let restored = 0;
+    for (const task of tasks) {
+      const ports = task.context?.worktree?.ports;
+      if (!ports || releasedStatus.has(task.status)) continue;
+      const list = Object.values(ports).filter((p): p is number => typeof p === 'number');
+      if (list.length === 0) continue;
+      WorktreeManager.allocatedPorts.set(task.id, list);
+      restored++;
+    }
+    logger.info(`[Worktree:PortRegistry] 已从持久化任务恢复 ${restored} 个任务的端口预占`);
+  }
+
+  /**
+   * 串行执行端口分配，保证「探测空闲」与「登记预占」原子完成
+   */
+  private withAllocationLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = WorktreeManager.allocationLock.then(fn, fn);
+    WorktreeManager.allocationLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   /**
@@ -318,19 +349,21 @@ export class WorktreeManager {
       ? options.portKeys
       : ['webPort', 'corePort'];
 
-    const ports: Record<string, number> = {};
     const defaultBase = options.basePort || 5175;
-    const reservedPorts = this.getBusyOrReservedPorts();
 
-    for (const key of portKeys) {
-      const startPortForKey = options.portBases?.[key] || defaultBase;
-      const p = await this.getAvailablePort(startPortForKey, reservedPorts);
-      ports[key] = p;
-      reservedPorts.add(p);
-    }
-
-    // 登记预占端口
-    this.registerTaskPorts(taskId, Object.values(ports));
+    const ports = await this.withAllocationLock(async () => {
+      const reservedPorts = this.getBusyOrReservedPorts();
+      const allocated: Record<string, number> = {};
+      for (const key of portKeys) {
+        const startPortForKey = options.portBases?.[key] || defaultBase;
+        const p = await this.getAvailablePort(startPortForKey, reservedPorts);
+        allocated[key] = p;
+        reservedPorts.add(p);
+      }
+      // 先登记预占再释放分配锁，下一个任务必须避开本次分配结果
+      this.registerTaskPorts(taskId, Object.values(allocated));
+      return allocated;
+    });
 
     const assignedCorePort = ports.corePort || (process.env.OPENLOOP_PORT ? parseInt(process.env.OPENLOOP_PORT, 10) : 19888);
     const primaryPort = ports.webPort || ports.port || ports.PORT || Object.values(ports)[0] || defaultBase;

@@ -83,6 +83,8 @@ export class OpenLoopServer {
     this.staticDir = options.staticDir || process.env.OPENLOOP_STATIC_DIR;
     this.store = new Store(options.storeDir);
     this.engine = new DagEngine(this.store);
+    // 进程重启后恢复各活跃任务的靶机端口预占，防止新任务抢占同一端口
+    WorktreeManager.getInstance().restoreReservedPorts(this.store.getTasks());
     this.scheduler = new AutomationScheduler(this.store, this.engine);
 
     this.setupEngineEvents();
