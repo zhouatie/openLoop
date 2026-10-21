@@ -350,6 +350,17 @@ export class DagEngine extends EventEmitter {
       };
     }
 
+    // 运行期间节点已被用户手动跳过（或任务已被终止）：丢弃本次执行结果，避免重复驱动下游
+    const latestTask = this.store.getTask(task.id);
+    const manualRunStatus = latestTask?.nodeRuns[node.id]?.status;
+    if (manualRunStatus === 'skipped' || manualRunStatus === 'success') {
+      dagLogger.info(`节点 [${node.name}] 运行期间已被用户手动处理，忽略本次执行结果`, undefined, {
+        taskId: task.id,
+        nodeId: node.id,
+      });
+      return;
+    }
+
     const run = task.nodeRuns[node.id];
     run.status = result.status;
     run.finishedAt = Date.now();
@@ -361,7 +372,6 @@ export class DagEngine extends EventEmitter {
     const duration = run.finishedAt - (run.startedAt || run.finishedAt);
 
     // 如果任务已经被手动终止 (cancelled)，保持已终止状态，直接退出流转
-    const latestTask = this.store.getTask(task.id);
     if (latestTask && latestTask.status === 'cancelled') {
       dagLogger.info(`任务 ${task.id} 状态已为 cancelled，退出调度流转`, undefined, {
         taskId: task.id,
@@ -796,15 +806,32 @@ export class DagEngine extends EventEmitter {
    * 手动跳过指定节点并继续执行下游
    */
   async skipNode(taskId: string, targetNodeId?: string): Promise<Task> {
+    return this.finishNodeManually(taskId, targetNodeId, 'skipped');
+  }
+
+  /**
+   * 用户确认当前节点已完成并继续执行下游
+   * 用于 Agent 未输出完成标记、需要人工放行流水线的场景
+   */
+  async completeNode(taskId: string, targetNodeId?: string): Promise<Task> {
+    return this.finishNodeManually(taskId, targetNodeId, 'success');
+  }
+
+  private async finishNodeManually(
+    taskId: string,
+    targetNodeId: string | undefined,
+    status: 'skipped' | 'success'
+  ): Promise<Task> {
+    const actionText = status === 'success' ? '确认完成' : '跳过';
     const task = this.store.getTask(taskId);
     if (!task) {
-      dagLogger.error(`跳过节点失败: Task ${taskId} 未找到`, undefined, { taskId });
+      dagLogger.error(`${actionText}节点失败: Task ${taskId} 未找到`, undefined, { taskId });
       throw new Error(`Task ${taskId} not found`);
     }
 
     const workflow = this.store.getWorkflow(task.workflowId);
     if (!workflow) {
-      dagLogger.error(`跳过节点失败: Workflow ${task.workflowId} 未找到`, undefined, { taskId });
+      dagLogger.error(`${actionText}节点失败: Workflow ${task.workflowId} 未找到`, undefined, { taskId });
       throw new Error(`Workflow ${task.workflowId} not found`);
     }
 
@@ -822,7 +849,7 @@ export class DagEngine extends EventEmitter {
     }
 
     if (!nodeId) {
-      throw new Error(`无法确定要跳过的节点 ID (Task: ${taskId})`);
+      throw new Error(`无法确定要${actionText}的节点 ID (Task: ${taskId})`);
     }
 
     const node = workflow.nodes.find((n) => n.id === nodeId);
@@ -831,22 +858,29 @@ export class DagEngine extends EventEmitter {
     }
 
     dagLogger.warn(
-      `收到跳过节点指令，任务: ${taskId}, 节点: [${node.name}] (${nodeId})`,
+      `收到${actionText}节点指令，任务: ${taskId}, 节点: [${node.name}] (${nodeId})`,
       undefined,
       { taskId, nodeId }
     );
-    this.log(task.id, nodeId, 'system', `[系统干预] 用户手动跳过了节点 [${node.name}]`);
+    this.log(
+      task.id,
+      nodeId,
+      'system',
+      status === 'success'
+        ? `[系统干预] 用户确认节点 [${node.name}] 已完成，流水线继续流转`
+        : `[系统干预] 用户手动跳过了节点 [${node.name}]`
+    );
 
     const now = Date.now();
     const existingRun = task.nodeRuns[nodeId];
     if (existingRun) {
-      existingRun.status = 'skipped';
+      existingRun.status = status;
       existingRun.finishedAt = now;
       delete existingRun.error;
     } else {
       task.nodeRuns[nodeId] = {
         nodeId,
-        status: 'skipped',
+        status,
         startedAt: now,
         finishedAt: now,
       };
@@ -867,7 +901,7 @@ export class DagEngine extends EventEmitter {
     task.kanbanColumn = 'in_progress';
     this.store.saveTask(task);
     this.emit('task:update', task);
-    this.emit('node:status', { taskId: task.id, nodeId, status: 'skipped' });
+    this.emit('node:status', { taskId: task.id, nodeId, status });
 
     // 触发下游节点流转
     await this.triggerNextNodes(task, workflow, nodeId);

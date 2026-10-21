@@ -16,6 +16,9 @@ import { createLogger } from '../logger';
 
 const logger = createLogger('PiRpcSession');
 
+/** Agent 显式声明完成的标记：只有输出该标记，流水线才允许流转到下一个节点 */
+export const PIPELINE_DONE_MARKER = '[OPENLOOP_DONE]';
+
 export interface PiRpcSessionOptions {
   taskId: string;
   taskTitle: string;
@@ -30,6 +33,8 @@ export interface PiRpcSessionOptions {
   cwd?: string;
   env?: Record<string, string>;
   initialPrompt: string;
+  /** 流水线节点场景：Agent 未输出完成标记时停留在本节点等待用户回复，不自动流转下游 */
+  awaitCompletionMarker?: boolean;
   onLog?: (stream: 'stdout' | 'stderr' | 'system', message: string) => void;
   onUpdate?: (state: TaskSessionState) => void;
   onFinished?: (error?: string) => void;
@@ -43,6 +48,8 @@ export class PiRpcSessionInstance extends EventEmitter {
   public messages: SessionChatMessage[] = [];
   public isBusy: boolean = false;
   public isPaused: boolean = false;
+  /** 本轮已结束但 Agent 未声明完成，正在等待用户回复 */
+  public awaitingInput: boolean = false;
   public active: boolean = true;
   public thinking?: string;
   public pendingModel?: string;
@@ -62,6 +69,8 @@ export class PiRpcSessionInstance extends EventEmitter {
   private currentAssistantMessage: SessionChatMessage | null = null;
   private initialPromptSent = false;
   private executionCompleted = false;
+  private awaitCompletionMarker: boolean;
+  private doneMarkerSeen = false;
 
   constructor(options: PiRpcSessionOptions) {
     super();
@@ -74,6 +83,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.onLog = options.onLog;
     this.onUpdateCallback = options.onUpdate;
     this.onFinishedCallback = options.onFinished;
+    this.awaitCompletionMarker = options.awaitCompletionMarker === true;
 
     this.spawnRpcProcess(options);
   }
@@ -180,6 +190,12 @@ export class PiRpcSessionInstance extends EventEmitter {
     if (this.onLog) {
       this.onLog(stream, message);
     }
+  }
+
+  /** 抹除完成标记，标记仅用于流水线判定，不展示在会话气泡中 */
+  private stripDoneMarker(text: string): string {
+    if (!text.includes(PIPELINE_DONE_MARKER)) return text;
+    return text.split(PIPELINE_DONE_MARKER).join('').replace(/\n{3,}/g, '\n\n').trimEnd();
   }
 
   private handleStdout(chunk: Buffer) {
@@ -365,9 +381,10 @@ export class PiRpcSessionInstance extends EventEmitter {
           this.currentAssistantMessage.isStreaming = false;
           this.currentAssistantMessage.isThinking = false;
           if (record.message?.content && typeof record.message.content === 'string') {
-            this.currentAssistantMessage.content = record.message.content;
+            if (record.message.content.includes(PIPELINE_DONE_MARKER)) this.doneMarkerSeen = true;
+            this.currentAssistantMessage.content = this.stripDoneMarker(record.message.content);
             // 将 Agent 生成的最终结论同步打入终端日志，便于在终端抽屉中闭环查看
-            const summaryText = record.message.content.trim();
+            const summaryText = this.currentAssistantMessage.content.trim();
             if (summaryText) {
               this.emitLog('stdout', `[Agent 输出] ${summaryText.slice(0, 300)}${summaryText.length > 300 ? '...' : ''}`);
             }
@@ -380,6 +397,8 @@ export class PiRpcSessionInstance extends EventEmitter {
       case 'agent_settled': {
         this.isBusy = false;
         if (this.currentAssistantMessage) {
+          // 流式增量拼接的文本也可能携带完成标记，兜底判定一次
+          if (this.currentAssistantMessage.content?.includes(PIPELINE_DONE_MARKER)) this.doneMarkerSeen = true;
           this.currentAssistantMessage.isStreaming = false;
           this.currentAssistantMessage.isThinking = false;
           this.currentAssistantMessage = null;
@@ -395,9 +414,21 @@ export class PiRpcSessionInstance extends EventEmitter {
 
         // 首次提示执行结束且没有在等待排队消息时，通知节点执行完成
         if (this.initialPromptSent && !this.executionCompleted && !record.aborted && !this.isPaused) {
-          this.executionCompleted = true;
-          if (this.onFinishedCallback) {
-            this.onFinishedCallback();
+          if (this.awaitCompletionMarker && !this.doneMarkerSeen) {
+            // 未声明完成：视为仍在向用户确认信息，节点保持运行并等待用户回复，绝不流转下游
+            if (!this.awaitingInput) {
+              this.awaitingInput = true;
+              this.emitLog(
+                'system',
+                '[等待用户回复] Agent 本轮未声明完成，流水线停留在本节点，不会流转到下一个节点'
+              );
+              this.notifyUpdate();
+            }
+          } else {
+            this.executionCompleted = true;
+            if (this.onFinishedCallback) {
+              this.onFinishedCallback();
+            }
           }
         }
         break;
@@ -428,6 +459,8 @@ export class PiRpcSessionInstance extends EventEmitter {
   public async sendPrompt(message: string, attachments?: TaskAttachment[]): Promise<any> {
     this.isPaused = false;
     this.isBusy = true;
+    this.awaitingInput = false;
+    this.doneMarkerSeen = false;
 
     // 前置压入用户消息展示
     this.messages.push({
@@ -466,6 +499,7 @@ export class PiRpcSessionInstance extends EventEmitter {
    */
   public async steer(message: string, attachments?: TaskAttachment[]): Promise<any> {
     this.isPaused = false;
+    this.awaitingInput = false;
     // 立即压入用户消息
     this.messages.push({
       id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -714,6 +748,7 @@ export class PiRpcSessionInstance extends EventEmitter {
       active: this.active,
       isBusy: this.isBusy,
       isPaused: this.isPaused,
+      awaitingInput: this.awaitingInput,
       messages: [...this.messages],
       agentName: this.agentName,
       model: this.model,

@@ -4,7 +4,7 @@ import path from 'path';
 import os from 'os';
 import { WorkflowNode, WorkflowDefinition, Task, LogEntry, NodeRun, TaskSessionState, QaSuite, QaStep } from '../types';
 import { createLogger } from '../logger';
-import { PiRpcSessionManager } from '../agent/pi-rpc-session';
+import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 import {
   getAgentProviderMeta,
@@ -347,7 +347,7 @@ export class CliCommandExecutor implements NodeExecutor {
 }
 
 // 组装 Agent 节点执行 Prompt (多重变量兜底、需求模板包裹与附件路径注入)
-export function buildAgentPrompt(ctx: ExecutionContext): string {
+export function buildAgentPrompt(ctx: ExecutionContext, options: { awaitCompletion?: boolean } = {}): string {
   const { node, task, variables = {}, settings = {} } = ctx;
   const rawPrompt =
     node.config.prompt ||
@@ -384,6 +384,11 @@ export function buildAgentPrompt(ctx: ExecutionContext): string {
       .map((att, i) => `  ${i + 1}. [${att.name}] (大小: ${(att.size / 1024).toFixed(1)} KB, 本地绝对路径: "${att.path}")`)
       .join('\n');
     prompt += `\n\n【任务关联参考截图/附件】\n用户为此任务附带了以下图片资源，你可以直接通过本地工具读取这些路径以分析 UI 或报错：\n${attList}`;
+  }
+
+  // 完成协议：仅在 Agent 明确声明完成后，流水线才流转下游；否则停留在本节点等待用户回复
+  if (options.awaitCompletion) {
+    prompt += `\n\n【完成协议（重要）】\n- 需求已全部实现并验证通过后，在最后一条回复末尾单独一行输出 ${PIPELINE_DONE_MARKER}，流水线据此流转到下一个节点。\n- 只要还需要用户确认方案、补充信息或回答问题，就直接提问并不要输出该标记，流水线会停留在本节点等待用户回复。`;
   }
 
   return prompt;
@@ -451,7 +456,7 @@ export class AgentExecutor implements NodeExecutor {
 
     // pi 引擎走内置 RPC 会话驱动
     if (agentProvider === 'pi') {
-      const prompt = buildAgentPrompt(ctx);
+      const prompt = buildAgentPrompt(ctx, { awaitCompletion: true });
 
       executorLogger.info(
         `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId} (工作区 CWD: ${cwd})`,
@@ -478,6 +483,7 @@ export class AgentExecutor implements NodeExecutor {
           thinking,
           cwd,
           initialPrompt: prompt,
+          awaitCompletionMarker: true,
           onLog: emitLog,
           onUpdate: (state) => {
             if (ctx.onSessionUpdate) {
