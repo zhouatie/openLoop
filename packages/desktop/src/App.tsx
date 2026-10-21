@@ -8,6 +8,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { CommandPalette } from './components/CommandPalette';
 import { ShortcutProvider } from './context/ShortcutContext';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
+import { useTaskNotifications } from './hooks/useTaskNotifications';
 import { ToastProvider } from './components/Toast';
 import { KanbanView } from './views/KanbanView';
 import { WorkflowListView } from './views/WorkflowListView';
@@ -229,6 +230,8 @@ export const AppContent: React.FC = () => {
       unsubLog();
     };
   }, [isLogsOpen]);
+
+  useTaskNotifications(tasks);
 
   const handleOpenTaskLogs = async (taskId: string, nodeId?: string) => {
     if (process.env.NODE_ENV !== 'production') {
