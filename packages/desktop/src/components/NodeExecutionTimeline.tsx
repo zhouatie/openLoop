@@ -77,6 +77,7 @@ const NODE_TYPE_LABELS: Record<string, { label: string; Icon: LucideIcon; tint: 
   cli: { label: 'CLI 脚本', Icon: Terminal, tint: 'text-[#71717a]' },
 };
 
+// 卡片行级微图标按钮：方形无边框，悬浮才着色，避免长文字按钮铺满卡片
 const MICRO_BTN =
   'w-[22px] h-[22px] rounded-[4px] flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed';
 
@@ -612,12 +613,12 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                       )}
                     </div>
 
-                    {/* 操作按钮组 */}
+                    {/* 操作区：默认只留展开箭头，次级动作在悬浮/聚焦时以微图标淡入，避免按钮堆满卡片 */}
                     <div
-                      className="flex items-center gap-1 shrink-0"
+                      className="flex items-center gap-0.5 shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* 定制重试模式下的专属微动作 */}
+                      {/* 定制重试模式下的专属微动作（常驻） */}
                       {isCustomMode && (
                         <div className="flex items-center gap-1">
                           {!selectedNodes.has(item.id) && (
@@ -637,92 +638,98 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                         </div>
                       )}
 
-                      {/* 常驻快捷动作：以本节点为起点重跑后续流程 (成功/失败/未启动节点均可) */}
-                      {!isCustomMode && item.status !== 'running' && onCustomRetry && (
+                      {/* 失败节点的唯一主操作：常驻可见，便于快速恢复 */}
+                      {!isCustomMode && item.status === 'failed' && onRetryNode && (
                         <button
                           type="button"
-                          disabled={isCustomRetrying || metrics.running > 0}
-                          onClick={() => handleRerunFromNode(index)}
-                          className="h-[21px] px-1.5 rounded-[4px] bg-[#eff6ff] hover:bg-[#dbeafe] text-[#2563eb] border border-[#bfdbfe] text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-none active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="以本节点为起点重跑后续全部节点，之前已成功的节点保留成果不重跑"
-                        >
-                          <Play size={8} className="fill-current" />
-                          <span>从此重跑</span>
-                        </button>
-                      )}
-
-                      {/* 失败节点微型快捷操作 */}
-                      {item.status === 'failed' && onSkipNode && (
-                        <button
-                          disabled={isSkipping}
-                          onClick={() => onSkipNode(task.id, item.id)}
-                          className="h-[21px] px-1.5 rounded-[4px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[10px] font-medium flex items-center gap-1 transition-colors shadow-none disabled:opacity-50"
-                          title="跳过此节点继续后续流程或标记完成"
-                        >
-                          <SkipForward size={10} className="text-[#85858d]" />
-                          <span>跳过</span>
-                        </button>
-                      )}
-                      {item.status === 'failed' && onRetryNode && (
-                        <button
                           disabled={isRetryingNode}
                           onClick={() => onRetryNode(task.id, item.id)}
-                          className="h-[21px] px-1.5 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 transition-colors shadow-none active:scale-95 disabled:opacity-50"
-                          title="仅单独重试此节点"
+                          className={`${MICRO_BTN} text-[#d64545] hover:bg-[#fbe9e9]`}
+                          title="仅重试此节点"
                         >
-                          <RotateCcw size={10} />
-                          <span>重试</span>
+                          <RotateCcw size={11} className={isRetryingNode ? 'animate-spin' : ''} />
                         </button>
                       )}
 
-                      {/* 查看 Agent 交互会话 */}
-                      {item.type === 'agent' && onOpenAgentSession && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenAgentSession(task.id, item.id, item.name)}
-                          className="h-[21px] px-1.5 rounded-[4px] bg-[#eeedfd] hover:bg-[#e0e7ff] text-[#7c3aed] border border-[#d8d6fb] text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-none"
-                          title="查看该 Agent 节点的交互会话、深度思考与工具调用"
-                        >
-                          <Bot size={10} className="text-[#7c3aed]" />
-                          <span>会话</span>
-                        </button>
+                      {/* 次级动作：悬浮卡片或键盘聚焦时浮现 */}
+                      {!isCustomMode && (
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
+                          {/* 以本节点为起点重跑后续流程（之前成功的节点保留成果） */}
+                          {item.status !== 'running' && onCustomRetry && (
+                            <button
+                              type="button"
+                              disabled={isCustomRetrying || metrics.running > 0}
+                              onClick={() => handleRerunFromNode(index)}
+                              className={`${MICRO_BTN} text-[#85858d] hover:text-[#4f46e5] hover:bg-[#eeedfd]`}
+                              title="从此重跑：本节点及其后续节点全部重跑"
+                            >
+                              <Play size={10} className="fill-current" />
+                            </button>
+                          )}
+
+                          {/* 查看 Agent 交互会话 */}
+                          {item.type === 'agent' && onOpenAgentSession && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenAgentSession(task.id, item.id, item.name)}
+                              className={`${MICRO_BTN} text-[#85858d] hover:text-[#7c3aed] hover:bg-[#eeedfd]`}
+                              title="查看该 Agent 节点的交互会话"
+                            >
+                              <Bot size={11} />
+                            </button>
+                          )}
+
+                          {/* 查看节点日志 */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (process.env.NODE_ENV !== 'production') {
+                                console.log('[NodeExecutionTimeline] openNodeLogs:', task.id, item.id);
+                              }
+                              onOpenTaskLogs(task.id, item.id);
+                            }}
+                            className={`${MICRO_BTN} text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0]`}
+                            title="查看该节点日志（终端已按节点过滤）"
+                          >
+                            <Terminal size={11} />
+                          </button>
+
+                          {/* 查看节点产物 */}
+                          {hasArtifacts && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (item.run?.artifacts?.[0] && onPreviewArtifact) {
+                                  onPreviewArtifact(item.run.artifacts[0]);
+                                }
+                              }}
+                              className={`${MICRO_BTN} text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0]`}
+                              title={`查看产物（${item.run!.artifacts!.length} 个）`}
+                            >
+                              <FileImage size={11} />
+                            </button>
+                          )}
+
+                          {/* 跳过失败节点 */}
+                          {item.status === 'failed' && onSkipNode && (
+                            <button
+                              type="button"
+                              disabled={isSkipping}
+                              onClick={() => onSkipNode(task.id, item.id)}
+                              className={`${MICRO_BTN} text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0]`}
+                              title="跳过此节点，继续后续流程"
+                            >
+                              <SkipForward size={11} />
+                            </button>
+                          )}
+                        </div>
                       )}
 
-                      {/* 查看节点日志 */}
+                      {/* 展开收起详情 */}
                       <button
-                        onClick={() => {
-                          if (process.env.NODE_ENV !== 'production') {
-                            console.log('[NodeExecutionTimeline] openNodeLogs:', task.id, item.id);
-                          }
-                          onOpenTaskLogs(task.id, item.id);
-                        }}
-                        className="h-[21px] px-1.5 rounded-[4px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[10px] font-medium flex items-center gap-1 transition-colors shadow-none"
-                        title="打开终端并仅过滤此节点的日志流"
-                      >
-                        <Terminal size={10} className="text-[#818cf8]" />
-                        <span>日志</span>
-                      </button>
-
-                      {/* 产物胶囊按钮 */}
-                      {hasArtifacts && (
-                        <button
-                          onClick={() => {
-                            if (item.run?.artifacts?.[0] && onPreviewArtifact) {
-                              onPreviewArtifact(item.run.artifacts[0]);
-                            }
-                          }}
-                          className="h-[21px] px-1.5 rounded-[4px] bg-[#eff6ff] hover:bg-[#dbeafe] text-[#1d4ed8] border border-[#bfdbfe] text-[10px] font-medium flex items-center gap-1 transition-colors"
-                          title="查看该节点生成的产物"
-                        >
-                          <FileImage size={10} />
-                          <span>产物 ({item.run!.artifacts!.length})</span>
-                        </button>
-                      )}
-
-                      {/* 展开收起图标 */}
-                      <button
+                        type="button"
                         onClick={() => toggleExpand(item.id)}
-                        className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0] transition-colors"
+                        className={`${MICRO_BTN} text-[#85858d] group-hover:text-[#1c1c21] group-hover:bg-[#ececf0]`}
                         title={isExpanded ? '收起详情' : '展开详情'}
                       >
                         <ChevronDown
