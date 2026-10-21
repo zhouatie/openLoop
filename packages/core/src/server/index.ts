@@ -580,7 +580,9 @@ export class OpenLoopServer {
 
       // Tasks
       if (pathname === '/api/tasks' && method === 'GET') {
-        return this.sendJson(res, 200, this.store.getTasks(), reqMeta);
+        // 直连流水线的隐藏载体任务不进入看板
+        const tasks = this.store.getTasks().filter((t) => !t.context?.hiddenFromKanban);
+        return this.sendJson(res, 200, tasks, reqMeta);
       }
 
       if (pathname === '/api/tasks' && method === 'POST') {

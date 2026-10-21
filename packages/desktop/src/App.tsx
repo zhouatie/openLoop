@@ -201,6 +201,8 @@ export const AppContent: React.FC = () => {
     });
 
     const unsubTaskUpdate = api.on('task:update', (updatedTask: Task) => {
+      // 自动化直连运行的隐藏载体任务不进入看板列表
+      if (updatedTask.context?.hiddenFromKanban) return;
       setTasks((prev) => {
         const idx = prev.findIndex((t) => t.id === updatedTask.id);
         if (idx >= 0) {
@@ -213,6 +215,7 @@ export const AppContent: React.FC = () => {
     });
 
     const unsubTaskNew = api.on('task:new', (newTask: Task) => {
+      if (newTask.context?.hiddenFromKanban) return;
       setTasks((prev) => [newTask, ...prev]);
     });
 
