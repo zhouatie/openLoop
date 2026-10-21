@@ -14,17 +14,21 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
   attachment,
   onClose,
 }) => {
+  // 灯箱永远位于最上层：捕获阶段消费 Esc 并中断传播，避免同时关闭底层抽屉/弹窗
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      if (import.meta.env?.DEV) {
+        console.log('[ImageLightboxModal] 按 Escape 关闭大图预览，并阻断底层浮层响应');
       }
+      onClose();
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, onClose]);
 
   if (!isOpen || !attachment) return null;
