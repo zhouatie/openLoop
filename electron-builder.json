@@ -3,6 +3,8 @@
   "appId": "com.openloop.desktop",
   "productName": "openLoop",
   "electronVersion": "34.2.0",
+  "compression": "normal",
+  "npmRebuild": false,
   "asar": true,
   "directories": {
     "output": "release",
@@ -52,6 +54,7 @@
     ]
   },
   "dmg": {
+    "internetEnabled": false,
     "contents": [
       {
         "x": 130,
