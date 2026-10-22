@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   X,
   Save,
@@ -114,11 +114,6 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
     };
   }, [isDropdownOpen, isParentDropdownOpen]);
 
-  if (!isOpen || !task) return null;
-
-  const isPending = task.status === 'pending';
-  const currentWf = workflows.find((w) => w.id === workflowId) || workflows[0];
-
   // 候选父任务列表 (排除自己、排除子任务、排除运行中)
   const candidateParents = useMemo(() => {
     if (!task) return [];
@@ -130,12 +125,15 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
     });
   }, [allTasks, task]);
 
+  if (!isOpen || !task) return null;
+
+  const isPending = task.status === 'pending';
+  const currentWf = workflows.find((w) => w.id === workflowId) || workflows[0];
+  const isCurrentGroup = task.kind === 'group';
+
   const selectedParentTask = parentTaskId
     ? allTasks.find((t) => t.id === parentTaskId)
     : null;
-
-  const isCurrentGroupWithSubs =
-    task?.kind === 'group' && Array.isArray(task.subTaskIds) && task.subTaskIds.length > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -200,7 +198,9 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between pb-2.5 border-b border-[#ececf0]">
           <div className="flex items-center gap-2 min-w-0">
-            <h3 className="font-semibold text-[13px] text-[#1c1c21] shrink-0">编辑任务信息</h3>
+            <h3 className="font-semibold text-[13px] text-[#1c1c21] shrink-0">
+              {isCurrentGroup ? '编辑任务组信息' : '编辑任务信息'}
+            </h3>
             <button
               type="button"
               onClick={async () => {
@@ -255,11 +255,13 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         <form onSubmit={handleSubmit} className="mt-3 space-y-2.5 text-[11.5px]">
           {/* 任务名称 */}
           <div>
-            <label className="block text-[11px] font-medium text-[#63636b] mb-1">任务名称</label>
+            <label className="block text-[11px] font-medium text-[#63636b] mb-1">
+              {isCurrentGroup ? '任务组名称' : '任务名称'}
+            </label>
             <input
               type="text"
               required
-              placeholder={currentWf?.taskTemplate?.titlePlaceholder || '请输入任务名称'}
+              placeholder={isCurrentGroup ? '请输入任务组名称' : (currentWf?.taskTemplate?.titlePlaceholder || '请输入任务名称')}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={(e) => {
@@ -294,19 +296,19 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
           <div className="relative" ref={parentDropdownRef}>
             <div className="flex items-center justify-between mb-1">
               <label className="text-[11px] font-medium text-[#63636b]">所属父需求 / 任务组</label>
-              {isCurrentGroupWithSubs && (
-                <span className="text-[10px] text-[#dc2626]">当前为容器，无法作为子任务</span>
+              {isCurrentGroup && (
+                <span className="text-[10px] text-[#dc2626]">当前为任务组容器，无法作为子任务</span>
               )}
             </div>
 
             <div
               onClick={() => {
-                if (!isCurrentGroupWithSubs && task.status !== 'running') {
+                if (!isCurrentGroup && task.status !== 'running') {
                   setIsParentDropdownOpen(!isParentDropdownOpen);
                 }
               }}
               className={`w-full h-[30px] px-2.5 rounded-[6px] border transition-all flex items-center justify-between select-none ${
-                isCurrentGroupWithSubs || task.status === 'running'
+                isCurrentGroup || task.status === 'running'
                   ? 'bg-[#f4f4f6] border-[#ececf0] text-[#85858d] cursor-not-allowed'
                   : isParentDropdownOpen
                   ? 'border-[#4f46e5] bg-white ring-1 ring-[#eeedfd] shadow-sm cursor-pointer'
@@ -329,7 +331,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
                 )}
               </div>
 
-              {!isCurrentGroupWithSubs && task.status !== 'running' && (
+              {!isCurrentGroup && task.status !== 'running' && (
                 <ChevronDown
                   size={12}
                   className={`text-[#85858d] shrink-0 transition-transform duration-150 ${
@@ -340,7 +342,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
             </div>
 
             {/* 下拉浮层 */}
-            {!isCurrentGroupWithSubs && task.status !== 'running' && isParentDropdownOpen && (
+            {!isCurrentGroup && task.status !== 'running' && isParentDropdownOpen && (
               <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-white border border-[#e3e3e8] rounded-[8px] shadow-[0_10px_26px_rgba(20,22,30,0.12)] z-50 max-h-[200px] overflow-y-auto p-1 space-y-0.5 animate-in fade-in zoom-in-95 duration-100">
                 {/* 选项 1: 无 (独立任务) */}
                 <div
@@ -545,9 +547,12 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-[11px] font-medium text-[#63636b]">
-                任务说明与提示词 (可选)
+                {isCurrentGroup
+                  ? '任务组全局需求说明与公共上下文'
+                  : '任务说明与提示词 (可选)'}
               </label>
-              {currentWf?.taskTemplate?.descriptionTemplate &&
+              {!isCurrentGroup &&
+                currentWf?.taskTemplate?.descriptionTemplate &&
                 description.trim() !== currentWf.taskTemplate.descriptionTemplate.trim() && (
                   <button
                     type="button"
