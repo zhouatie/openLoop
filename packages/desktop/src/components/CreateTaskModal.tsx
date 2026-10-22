@@ -612,8 +612,21 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100">
-      <div className="w-[465px] max-h-[92vh] flex flex-col bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.14)] text-[#1c1c21] transition-all duration-200 overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100"
+      onClick={() => {
+        if (!loading) {
+          if (import.meta.env?.DEV) {
+            console.log('[CreateTaskModal] 点击蒙层关闭弹窗');
+          }
+          onClose();
+        }
+      }}
+    >
+      <div
+        className="w-[465px] max-h-[92vh] flex flex-col bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.14)] text-[#1c1c21] transition-all duration-200 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between pb-2.5 border-b border-[#ececf0] shrink-0">
           <div className="flex items-center gap-2">

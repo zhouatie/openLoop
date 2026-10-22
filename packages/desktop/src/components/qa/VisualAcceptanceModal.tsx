@@ -876,8 +876,19 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   }, [imageUrl]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-4 select-none">
-      <div className="w-full max-w-6xl h-[90vh] bg-[#f4f4f6] rounded-[12px] border border-[#e3e3e8] shadow-[0_24px_70px_rgba(0,0,0,0.18)] flex flex-col overflow-hidden text-[#1c1c21] animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-4 select-none"
+      onClick={() => {
+        if (import.meta.env?.DEV) {
+          console.log('[VisualAcceptanceModal] 点击蒙层关闭弹窗');
+        }
+        onClose();
+      }}
+    >
+      <div
+        className="w-full max-w-6xl h-[90vh] bg-[#f4f4f6] rounded-[12px] border border-[#e3e3e8] shadow-[0_24px_70px_rgba(0,0,0,0.18)] flex flex-col overflow-hidden text-[#1c1c21] animate-in fade-in zoom-in-95 duration-150"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* 顶部 Header：白底、细下边框、对齐 openLoop 统一设计规范 */}
         <div className="h-[50px] bg-white border-b border-[#e3e3e8] px-5 flex items-center justify-between gap-4 shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
           <div className="flex items-center gap-3 min-w-0 flex-1">

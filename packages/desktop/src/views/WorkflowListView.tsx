@@ -1690,8 +1690,24 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
       {/* 新建工作流弹窗 */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100">
-          <div className="w-[460px] bg-white border border-[#e3e3e8] rounded-[12px] p-5 shadow-[0_16px_44px_rgba(20,22,30,0.16)] text-[#1c1c21]">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100"
+          onClick={() => {
+            if (!loading) {
+              if (import.meta.env?.DEV) {
+                console.log('[WorkflowListView] 点击蒙层关闭新建工作流弹窗');
+              }
+              setIsCreateModalOpen(false);
+              setNewTitle('');
+              setNewDesc('');
+              setNewTags([]);
+            }
+          }}
+        >
+          <div
+            className="w-[460px] bg-white border border-[#e3e3e8] rounded-[12px] p-5 shadow-[0_16px_44px_rgba(20,22,30,0.16)] text-[#1c1c21]"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between pb-3 border-b border-[#ececf0]">
               <div>
                 <h3 className="font-semibold text-[14px] text-[#1c1c21]">新建自动化流程</h3>

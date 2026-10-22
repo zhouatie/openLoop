@@ -145,8 +145,21 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100">
-      <div className="w-[440px] bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.14)] text-[#1c1c21]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100"
+      onClick={() => {
+        if (!loading) {
+          if (import.meta.env?.DEV) {
+            console.log('[EditTaskModal] 点击蒙层关闭弹窗');
+          }
+          onClose();
+        }
+      }}
+    >
+      <div
+        className="w-[440px] bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.14)] text-[#1c1c21]"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between pb-2.5 border-b border-[#ececf0]">
           <div className="flex items-center gap-2 min-w-0">

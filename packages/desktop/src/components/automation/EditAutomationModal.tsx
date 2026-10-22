@@ -280,7 +280,17 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] animate-fadeIn select-none">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] animate-fadeIn select-none"
+      onClick={() => {
+        if (!loading) {
+          if (import.meta.env?.DEV) {
+            console.log('[EditAutomationModal] 点击蒙层关闭弹窗');
+          }
+          onClose();
+        }
+      }}
+    >
       <div
         className="bg-white rounded-[10px] shadow-2xl border border-[#e3e3e8] w-full max-w-[620px] max-h-[90vh] flex flex-col overflow-hidden text-[#1c1c21] animate-scaleUp"
         onClick={(e) => e.stopPropagation()}

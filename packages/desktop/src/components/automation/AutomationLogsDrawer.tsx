@@ -75,7 +75,15 @@ export const AutomationLogsDrawer: React.FC<AutomationLogsDrawerProps> = ({
   if (!isOpen || !automation) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-[1px] animate-fadeIn select-none">
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-[1px] animate-fadeIn select-none"
+      onClick={() => {
+        if (import.meta.env?.DEV) {
+          console.log('[AutomationLogsDrawer] 点击蒙层关闭抽屉');
+        }
+        onClose();
+      }}
+    >
       <div
         className="w-full max-w-[540px] h-full bg-white border-l border-[#e3e3e8] shadow-2xl flex flex-col overflow-hidden animate-slideInRight"
         onClick={(e) => e.stopPropagation()}

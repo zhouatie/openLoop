@@ -92,7 +92,15 @@ export const SaveRecipeModal: React.FC<SaveRecipeModalProps> = ({
       : JSON.stringify(nodeConfig, null, 2);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
+      onClick={() => {
+        if (import.meta.env?.DEV) {
+          console.log('[SaveRecipeModal] 点击蒙层关闭弹窗');
+        }
+        onClose();
+      }}
+    >
       <div
         className="bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_40px_rgba(0,0,0,0.12)] w-full max-w-[460px] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
