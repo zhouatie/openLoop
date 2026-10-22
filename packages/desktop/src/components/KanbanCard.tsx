@@ -28,6 +28,8 @@ import {
   Clock,
   CheckCircle2,
   MessageSquare,
+  Eye,
+  XCircle,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
@@ -239,6 +241,15 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
     if (!runningSub) return '';
     return workflows.find((w) => w.id === runningSub.workflowId)?.name || runningSub.workflowId;
   }, [workflows, runningSub]);
+
+  const waitingSub = useMemo(() => {
+    return childSubtasks.find((s) => s.status === 'waiting_approval');
+  }, [childSubtasks]);
+  const waitingSubIndex = waitingSub ? childSubtasks.findIndex((s) => s.id === waitingSub.id) : -1;
+  const waitingSubWorkflowName = useMemo(() => {
+    if (!waitingSub) return '';
+    return workflows.find((w) => w.id === waitingSub.workflowId)?.name || waitingSub.workflowId;
+  }, [workflows, waitingSub]);
 
   // 当任务处于待人工门禁时，按需探活沙箱靶机状态
   useEffect(() => {
@@ -479,6 +490,28 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
         </div>
       )}
 
+      {/* 任务组：存在待人工验收的子工序通知 */}
+      {isGroup && !runningSub && waitingSub && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect(waitingSub);
+          }}
+          className="flex items-center gap-1.5 py-1 px-2 rounded-[5px] bg-[#fffbeb] border border-[#fde68a] text-[#b45309] text-[10.5px] font-medium my-1.5 animate-fadeIn cursor-pointer hover:bg-[#fef3c7] transition-colors"
+          title="点击查看并验收此子工序"
+        >
+          <Clock size={10.5} className="animate-pulse text-[#b45309] shrink-0" />
+          <span className="shrink-0 font-mono text-[#b45309]">#{waitingSubIndex + 1}</span>
+          <span className="truncate flex-1 font-normal text-[#92400e]">{waitingSub.title}</span>
+          <span
+            className="shrink min-w-0 max-w-[45%] truncate font-mono text-[9px] bg-[#fef3c7] text-[#b45309] px-1 py-[0.5px] rounded border border-[#fde68a]"
+            title={waitingSubWorkflowName}
+          >
+            待验收
+          </span>
+        </div>
+      )}
+
       {/* 任务组子工序卡片式折叠列表 */}
       {isGroup && childSubtasks.length > 0 && (
         <div className="my-2 border border-[#ececf0] rounded-[6px] bg-[#fafafc] overflow-hidden">
@@ -524,6 +557,16 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                       <span>RUNNING</span>
                     </span>
                   );
+                } else if (st.status === 'waiting_approval') {
+                  statusBadge = (
+                    <span
+                      className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#fffbeb] text-[#b45309] text-[9.5px] font-medium border border-[#fde68a]"
+                      title="待人工验收门禁"
+                    >
+                      <Clock size={8.5} className="animate-pulse" />
+                      <span>REVIEW</span>
+                    </span>
+                  );
                 } else if (st.status === 'completed') {
                   statusBadge = (
                     <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#ecfdf5] text-[#059669] text-[9.5px] font-medium border border-[#a7f3d0]/60">
@@ -538,6 +581,16 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                       <span>FAILED</span>
                     </span>
                   );
+                } else if (st.status === 'cancelled') {
+                  statusBadge = (
+                    <span
+                      className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#f4f4f6] text-[#71717a] text-[9.5px] font-medium border border-[#e3e3e8]"
+                      title="已取消"
+                    >
+                      <XCircle size={8.5} />
+                      <span>CANCELLED</span>
+                    </span>
+                  );
                 }
 
                 return (
@@ -547,7 +600,11 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                       e.stopPropagation();
                       onSelect(st);
                     }}
-                    className="flex items-center justify-between gap-1.5 px-1.5 py-1 rounded-[5px] bg-white border border-[#ececf0] hover:border-[#d8d6fb] transition-all cursor-pointer group/sub"
+                    className={`flex items-center justify-between gap-1.5 px-1.5 py-1 rounded-[5px] bg-white border transition-all cursor-pointer group/sub ${
+                      st.status === 'waiting_approval'
+                        ? 'border-[#fde68a] bg-[#fffdfa] hover:border-[#f59e0b]'
+                        : 'border-[#ececf0] hover:border-[#d8d6fb]'
+                    }`}
                   >
                     <div className="flex items-center gap-1.5 min-w-0 flex-1">
                       <span className="font-mono text-[9.5px] text-[#85858d] shrink-0">
@@ -564,6 +621,19 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {statusBadge}
+                      {st.status === 'waiting_approval' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelect(st);
+                          }}
+                          className="w-5 h-5 rounded hover:bg-[#fef3c7] text-[#b45309] flex items-center justify-center transition-colors"
+                          title="查看并处理验收门禁"
+                        >
+                          <Eye size={10} />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={(e) => {
@@ -625,20 +695,22 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                 className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
               >
                 <Play size={10} strokeWidth={2.4} />
-                <span>{isRunning ? '启动中...' : '启动流水线'}</span>
+                <span>{isRunning ? '启动中...' : (isGroup && groupCompletedCount > 0 ? '推进流水线' : '启动流水线')}</span>
               </button>
-              <button
-                disabled={isMoving}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onMoveColumn(task.id, 'inbox');
-                }}
-                className="h-[24px] px-2 rounded-[5px] bg-[#f9f9fb] hover:bg-[#eeedfd] text-[#85858d] hover:text-[#6366f1] text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all border border-[#e3e3e8]"
-                title="退回 Inbox 想法收集"
-              >
-                <ArrowRight size={10} className="rotate-180" />
-                <span>转想法</span>
-              </button>
+              {!(isGroup && groupCompletedCount > 0) && (
+                <button
+                  disabled={isMoving}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMoveColumn(task.id, 'inbox');
+                  }}
+                  className="h-[24px] px-2 rounded-[5px] bg-[#f9f9fb] hover:bg-[#eeedfd] text-[#85858d] hover:text-[#6366f1] text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all border border-[#e3e3e8]"
+                  title="退回 Inbox 想法收集"
+                >
+                  <ArrowRight size={10} className="rotate-180" />
+                  <span>转想法</span>
+                </button>
+              )}
             </div>
           )}
         </div>
