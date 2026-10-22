@@ -49,6 +49,9 @@ import {
   AlignLeft,
   GitCommit,
   Eye,
+  GitMerge,
+  Unlink,
+  Link2,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage, TaskAttachment, SelectedQaArtifacts } from '@openloop/core';
 import { getAgentProviderMeta } from '@openloop/agent-providers';
@@ -67,6 +70,8 @@ import { AgentChatChangedFiles } from '../components/AgentChatChangedFiles';
 import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
 import { QaArtifactSelectorModal } from '../components/qa/QaArtifactSelectorModal';
 import { KanbanLaneList } from '../components/KanbanLaneList';
+import { SelectParentTaskModal } from '../components/SelectParentTaskModal';
+import { LinkExistingTasksModal } from '../components/LinkExistingTasksModal';
 import { toast } from '../components/Toast';
 import { resolveNodeMeta, resolveQaTestNodeId } from '../utils/nodeMeta';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
@@ -262,6 +267,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [visualAcceptanceTask, setVisualAcceptanceTask] = useState<Task | null>(null);
+
+  // 设为子任务 / 变更所属父需求弹窗状态
+  const [parentSelectTask, setParentSelectTask] = useState<Task | null>(null);
+  // 需求容器吸纳关联已有任务弹窗状态（存储当前操作的容器父任务）
+  const [linkExistingParentTask, setLinkExistingParentTask] = useState<Task | null>(null);
 
   // 项目工程级别筛选
   const [internalWorkspaceFilter, setInternalWorkspaceFilter] = useState<string>('all');
@@ -1224,6 +1234,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     kanbanColumn?: KanbanColumn;
     workspace?: string;
     attachments?: TaskAttachment[];
+    parentTaskId?: string | null;
   }) => {
     if (!editingTask) return;
     if (import.meta.env?.DEV) {
@@ -1244,6 +1255,19 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         console.error('[Kanban:TaskEdit] 任务更新异常:', e);
       }
       throw e;
+    }
+  };
+
+  const handleUnlinkSubtask = async (parentId: string, subtaskId: string) => {
+    try {
+      if (import.meta.env?.DEV) {
+        console.log(`[KanbanView] 解绑子工序: 任务组 ${parentId}, 子工序 ${subtaskId}`);
+      }
+      await api.unlinkSubTask(parentId, subtaskId);
+      toast.success('已将工序脱离任务组，恢复为独立任务');
+      await onRefresh();
+    } catch (err: any) {
+      toast.error(`解绑失败: ${err.message}`);
     }
   };
 
@@ -1931,6 +1955,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         onSkipNode={handleSkipNode}
                         onVisualAcceptance={setVisualAcceptanceTask}
                         onApprove={handleApprove}
+                        onSetParentTask={(t) => setParentSelectTask(t)}
+                        onUnlinkSubtask={handleUnlinkSubtask}
                       />
                     )}
                   </div>
@@ -2061,6 +2087,19 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
+                      {curTask.status !== 'running' && !(curTask.kind === 'group' && Array.isArray(curTask.subTaskIds) && curTask.subTaskIds.length > 0) && (
+                        <button
+                          onClick={() => {
+                            if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 点击设为子任务/变更归属:', curTask.id);
+                            setParentSelectTask(curTask);
+                          }}
+                          className="h-[26px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#eeedfd] text-[#4b4b53] hover:text-[#4f46e5] hover:border-[#d8d6fb] text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0"
+                          title={curTask.parentTaskId ? '变更所属需求 / 解绑...' : '设为子工序...'}
+                        >
+                          <GitMerge size={11} />
+                          <span>{curTask.parentTaskId ? '变更归属' : '设为子任务'}</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 点击编辑任务:', curTask.id);
@@ -2097,22 +2136,34 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                   {/* 如果是子工序，显示父需求溯源与跳回链接 */}
                   {curTask.kind === 'subtask' && curTask.parentTaskId && (
-                    <div className="flex items-center gap-1.5 text-[11px] text-[#71717a] bg-[#f4f4f6] px-2 py-1 rounded-[5px] border border-[#ececf0] mb-1 min-w-0">
-                      <span className="shrink-0">所属父需求:</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const parentObj = tasks.find((t) => t.id === curTask.parentTaskId);
-                          if (parentObj) {
-                            setSelectedTask(parentObj);
-                            setDrawerTab('subtasks');
-                          }
-                        }}
-                        className="font-medium text-[#4f46e5] hover:underline truncate min-w-0 flex-1 text-left cursor-pointer"
-                        title="点击跳回父需求卡片"
-                      >
-                        {tasks.find((t) => t.id === curTask.parentTaskId)?.title || curTask.parentTaskId}
-                      </button>
+                    <div className="flex items-center justify-between gap-1.5 text-[11px] text-[#71717a] bg-[#f4f4f6] px-2 py-1 rounded-[5px] border border-[#ececf0] mb-1 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <span className="shrink-0">所属父需求:</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const parentObj = tasks.find((t) => t.id === curTask.parentTaskId);
+                            if (parentObj) {
+                              setSelectedTask(parentObj);
+                              setDrawerTab('subtasks');
+                            }
+                          }}
+                          className="font-medium text-[#4f46e5] hover:underline truncate min-w-0 flex-1 text-left cursor-pointer"
+                          title="点击跳回父需求卡片"
+                        >
+                          {tasks.find((t) => t.id === curTask.parentTaskId)?.title || curTask.parentTaskId}
+                        </button>
+                      </div>
+                      {curTask.status !== 'running' && (
+                        <button
+                          type="button"
+                          onClick={() => setParentSelectTask(curTask)}
+                          className="px-1.5 py-0.5 rounded bg-white border border-[#e3e3e8] hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] text-[10px] font-medium transition-colors cursor-pointer shrink-0"
+                          title="更换或解除父需求归属"
+                        >
+                          变更归属
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -2744,6 +2795,15 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                   <Plus size={12} />
                                   <span>手动添加工序</span>
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setLinkExistingParentTask(curTask)}
+                                  className="px-3.5 h-[30px] rounded-[6px] bg-white border border-[#e3e3e8] hover:bg-[#f4f4f6] text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
+                                  title="吸纳看板中现有的独立任务成为本需求容器的子工序"
+                                >
+                                  <Link2 size={12} />
+                                  <span>关联已有任务</span>
+                                </button>
                               </div>
                             </div>
                           )}
@@ -3173,6 +3233,18 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                             </button>
                                           )}
 
+                                          {/* 解绑脱离为独立任务 */}
+                                          {st.status !== 'running' && curTask.status !== 'running' && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleUnlinkSubtask(curTask.id, st.id)}
+                                              className="h-[24px] w-[24px] rounded-[4px] hover:bg-[#fafafc] text-[#85858d] hover:text-[#4f46e5] hover:border hover:border-[#d8d6fb] flex items-center justify-center transition-colors cursor-pointer"
+                                              title="脱离任务组，恢复为独立看板任务"
+                                            >
+                                              <Unlink size={11} />
+                                            </button>
+                                          )}
+
                                           {/* 删除未运行的子工序 */}
                                           {st.status !== 'running' && curTask.status !== 'running' && (
                                             <button
@@ -3201,22 +3273,34 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                               {/* 底部快速追加与规划动作栏 */}
                               <div className="flex items-center justify-between pt-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setManualSubtaskWorkflowId(curTask.workflowId);
-                                    setManualSubtaskTitle('');
-                                    setManualSubtaskDesc('');
-                                    setManualSubtaskAttachments([]);
-                                    setManualSubtaskDep('');
-                                    setManualSubtaskWorkspace(curTask.workspace || '');
-                                    setIsAddingManualSubtask(true);
-                                  }}
-                                  className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:text-[#4338ca] font-medium cursor-pointer"
-                                >
-                                  <Plus size={11} />
-                                  <span>追加新工序</span>
-                                </button>
+                                <div className="flex items-center gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setManualSubtaskWorkflowId(curTask.workflowId);
+                                      setManualSubtaskTitle('');
+                                      setManualSubtaskDesc('');
+                                      setManualSubtaskAttachments([]);
+                                      setManualSubtaskDep('');
+                                      setManualSubtaskWorkspace(curTask.workspace || '');
+                                      setIsAddingManualSubtask(true);
+                                    }}
+                                    className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:text-[#4338ca] font-medium cursor-pointer"
+                                  >
+                                    <Plus size={11} />
+                                    <span>追加新工序</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setLinkExistingParentTask(curTask)}
+                                    className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:text-[#4338ca] font-medium cursor-pointer"
+                                    title="吸纳看板中现存的独立任务成为本容器的子工序"
+                                  >
+                                    <Link2 size={11} />
+                                    <span>关联已有任务</span>
+                                  </button>
+                                </div>
 
                                 <button
                                   type="button"
@@ -4030,6 +4114,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         onClose={() => setEditingTask(null)}
         task={editingTask}
         workflows={workflows}
+        allTasks={tasks}
         onSave={handleSaveEditedTask}
       />
 
@@ -4095,6 +4180,30 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
           if (import.meta.env?.DEV) {
             console.log('[KanbanView] 用户精选 QA 自动化测试产物:', selection);
           }
+        }}
+      />
+
+      {/* 设置所属父任务弹窗 */}
+      <SelectParentTaskModal
+        isOpen={!!parentSelectTask}
+        onClose={() => setParentSelectTask(null)}
+        task={parentSelectTask}
+        allTasks={tasks}
+        workflows={workflows}
+        onSuccess={() => {
+          onRefresh();
+        }}
+      />
+
+      {/* 需求容器关联已有子工序弹窗 */}
+      <LinkExistingTasksModal
+        isOpen={!!linkExistingParentTask}
+        onClose={() => setLinkExistingParentTask(null)}
+        parentTask={linkExistingParentTask ? (tasks.find((t) => t.id === linkExistingParentTask.id) || linkExistingParentTask) : undefined}
+        allTasks={tasks}
+        workflows={workflows}
+        onSuccess={() => {
+          onRefresh();
         }}
       />
     </div>

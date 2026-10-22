@@ -11,6 +11,8 @@ import {
   Inbox,
   ListTodo,
   Sparkles,
+  GitMerge,
+  Layers,
 } from 'lucide-react';
 import { Task, WorkflowDefinition, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { WorkspacePicker } from './WorkspacePicker';
@@ -23,6 +25,7 @@ interface EditTaskModalProps {
   onClose: () => void;
   task: Task | null;
   workflows: WorkflowDefinition[];
+  allTasks?: Task[];
   onSave: (params: {
     title: string;
     description: string;
@@ -30,6 +33,7 @@ interface EditTaskModalProps {
     kanbanColumn?: KanbanColumn;
     workspace?: string;
     attachments?: TaskAttachment[];
+    parentTaskId?: string | null;
   }) => Promise<void>;
 }
 
@@ -38,6 +42,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   onClose,
   task,
   workflows,
+  allTasks = [],
   onSave,
 }) => {
   const [title, setTitle] = useState('');
@@ -46,12 +51,15 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const [workflowId, setWorkflowId] = useState('');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>('backlog');
   const [workspace, setWorkspace] = useState('');
+  const [parentTaskId, setParentTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [idCopied, setIdCopied] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isParentDropdownOpen, setIsParentDropdownOpen] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const parentDropdownRef = useRef<HTMLDivElement>(null);
   const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
 
   // 初始化或当 task 改变时同步表单
@@ -63,6 +71,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
       setWorkflowId(task.workflowId || workflows[0]?.id || '');
       setKanbanColumn(task.kanbanColumn || 'backlog');
       setWorkspace(task.workspace || '');
+      setParentTaskId(task.parentTaskId || null);
       setErrorMsg(null);
     }
   }, [task, workflows]);
@@ -75,8 +84,9 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation?.();
-        if (isDropdownOpen) {
+        if (isDropdownOpen || isParentDropdownOpen) {
           setIsDropdownOpen(false);
+          setIsParentDropdownOpen(false);
         } else {
           onClose();
         }
@@ -84,7 +94,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, isDropdownOpen, onClose]);
+  }, [isOpen, isDropdownOpen, isParentDropdownOpen, onClose]);
 
   // 点击外部收起下拉框
   useEffect(() => {
@@ -92,19 +102,40 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setIsDropdownOpen(false);
       }
+      if (parentDropdownRef.current && !parentDropdownRef.current.contains(e.target as Node)) {
+        setIsParentDropdownOpen(false);
+      }
     };
-    if (isDropdownOpen) {
+    if (isDropdownOpen || isParentDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isDropdownOpen]);
+  }, [isDropdownOpen, isParentDropdownOpen]);
 
   if (!isOpen || !task) return null;
 
   const isPending = task.status === 'pending';
   const currentWf = workflows.find((w) => w.id === workflowId) || workflows[0];
+
+  // 候选父任务列表 (排除自己、排除子任务、排除运行中)
+  const candidateParents = useMemo(() => {
+    if (!task) return [];
+    return allTasks.filter((t) => {
+      if (t.id === task.id) return false;
+      if (t.kind === 'subtask' || Boolean(t.parentTaskId)) return false;
+      if (t.triggerSource === 'shortcut' || t.triggerSource === 'debug') return false;
+      return true;
+    });
+  }, [allTasks, task]);
+
+  const selectedParentTask = parentTaskId
+    ? allTasks.find((t) => t.id === parentTaskId)
+    : null;
+
+  const isCurrentGroupWithSubs =
+    task?.kind === 'group' && Array.isArray(task.subTaskIds) && task.subTaskIds.length > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,11 +162,13 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         kanbanColumn,
         workspace: trimmedWorkspace || undefined,
         attachments,
+        parentTaskId: parentTaskId !== (task.parentTaskId || null) ? parentTaskId : undefined,
       });
       if (import.meta.env?.DEV) {
         console.log('[TaskEdit] 任务更新保存成功:', task.id);
       }
       setIsDropdownOpen(false);
+      setIsParentDropdownOpen(false);
       onClose();
     } catch (err: any) {
       const msg = err?.message || '未知错误，请检查调度服务连接状态';
@@ -255,6 +288,136 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
               onChange={setWorkspace}
               placeholder="选择工程工作区 (点击下拉或右侧打开访达)..."
             />
+          </div>
+
+          {/* 所属父需求 / 任务组 */}
+          <div className="relative" ref={parentDropdownRef}>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-medium text-[#63636b]">所属父需求 / 任务组</label>
+              {isCurrentGroupWithSubs && (
+                <span className="text-[10px] text-[#dc2626]">当前为容器，无法作为子任务</span>
+              )}
+            </div>
+
+            <div
+              onClick={() => {
+                if (!isCurrentGroupWithSubs && task.status !== 'running') {
+                  setIsParentDropdownOpen(!isParentDropdownOpen);
+                }
+              }}
+              className={`w-full h-[30px] px-2.5 rounded-[6px] border transition-all flex items-center justify-between select-none ${
+                isCurrentGroupWithSubs || task.status === 'running'
+                  ? 'bg-[#f4f4f6] border-[#ececf0] text-[#85858d] cursor-not-allowed'
+                  : isParentDropdownOpen
+                  ? 'border-[#4f46e5] bg-white ring-1 ring-[#eeedfd] shadow-sm cursor-pointer'
+                  : 'border-[#e3e3e8] bg-[#f9f9fb] hover:bg-white hover:border-[#b9b9c2] shadow-[0_1px_2px_rgba(0,0,0,0.02)] cursor-pointer'
+              }`}
+            >
+              <div className="flex items-center gap-2 min-w-0 flex-1 pr-1">
+                <GitMerge size={12} className={parentTaskId ? 'text-[#4f46e5]' : 'text-[#85858d]'} />
+                {selectedParentTask ? (
+                  <>
+                    <span className="font-medium text-[11.5px] text-[#1c1c21] truncate max-w-[240px]">
+                      {selectedParentTask.title}
+                    </span>
+                    <span className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1 py-[0.5px] rounded shrink-0">
+                      父任务
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[#85858d] text-[11.5px]">无 (作为独立顶级卡片)</span>
+                )}
+              </div>
+
+              {!isCurrentGroupWithSubs && task.status !== 'running' && (
+                <ChevronDown
+                  size={12}
+                  className={`text-[#85858d] shrink-0 transition-transform duration-150 ${
+                    isParentDropdownOpen ? 'rotate-180 text-[#4f46e5]' : ''
+                  }`}
+                />
+              )}
+            </div>
+
+            {/* 下拉浮层 */}
+            {!isCurrentGroupWithSubs && task.status !== 'running' && isParentDropdownOpen && (
+              <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-white border border-[#e3e3e8] rounded-[8px] shadow-[0_10px_26px_rgba(20,22,30,0.12)] z-50 max-h-[200px] overflow-y-auto p-1 space-y-0.5 animate-in fade-in zoom-in-95 duration-100">
+                {/* 选项 1: 无 (独立任务) */}
+                <div
+                  onClick={() => {
+                    setParentTaskId(null);
+                    setIsParentDropdownOpen(false);
+                  }}
+                  className={`p-2 rounded-[5px] cursor-pointer transition-all flex items-center justify-between ${
+                    !parentTaskId
+                      ? 'bg-[#eeedfd]/50 border border-[#d8d6fb]'
+                      : 'hover:bg-[#f9f9fb] border border-transparent'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-[4px] bg-[#f1f1f4] text-[#63636b] flex items-center justify-center shrink-0">
+                      <ListTodo size={11} />
+                    </div>
+                    <span className="text-[11.5px] font-medium text-[#1c1c21]">无 (独立顶级卡片)</span>
+                  </div>
+                  {!parentTaskId && (
+                    <span className="flex items-center gap-1 text-[10px] text-[#4f46e5] font-medium">
+                      <Check size={11} strokeWidth={2.4} />
+                      已选
+                    </span>
+                  )}
+                </div>
+
+                {/* 候选父任务列表 */}
+                {candidateParents.map((candidate) => {
+                  const isSelected = candidate.id === parentTaskId;
+                  const isSameWorkspace = Boolean(candidate.workspace && candidate.workspace === workspace);
+
+                  return (
+                    <div
+                      key={candidate.id}
+                      onClick={() => {
+                        setParentTaskId(candidate.id);
+                        setIsParentDropdownOpen(false);
+                      }}
+                      className={`p-2 rounded-[5px] cursor-pointer transition-all flex items-center justify-between ${
+                        isSelected
+                          ? 'bg-[#eeedfd]/50 border border-[#d8d6fb]'
+                          : 'hover:bg-[#f9f9fb] border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
+                        <div
+                          className={`w-5 h-5 rounded-[4px] flex items-center justify-center shrink-0 ${
+                            isSelected ? 'bg-[#4f46e5] text-white' : 'bg-[#f1f1f4] text-[#63636b]'
+                          }`}
+                        >
+                          <GitMerge size={11} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1">
+                            <span className="font-medium text-[11.5px] text-[#1c1c21] truncate max-w-[200px]">
+                              {candidate.title}
+                            </span>
+                            {isSameWorkspace && (
+                              <span className="text-[9px] text-[#059669] bg-[#ecfdf5] border border-[#a7f3d0]/60 px-1 py-[0.5px] rounded shrink-0">
+                                同工作区
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {isSelected && (
+                        <span className="flex items-center gap-1 text-[10px] text-[#4f46e5] font-medium shrink-0">
+                          <Check size={11} strokeWidth={2.4} />
+                          已选
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* 关联工作流 */}

@@ -463,6 +463,55 @@ export class DesktopApiService {
     );
   }
 
+  async unlinkSubTask(
+    parentId: string,
+    subId: string
+  ): Promise<{ success: boolean; parent: Task; subtask: Task }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 从任务组 [${parentId}] 解绑子工序 [${subId}] 恢复为独立任务`);
+    }
+    return requestJson<{ success: boolean; parent: Task; subtask: Task }>(
+      `${BASE_URL}/api/tasks/${parentId}/subtasks/${subId}/unlink`,
+      {
+        method: 'POST',
+      }
+    );
+  }
+
+  async setTaskParent(
+    taskId: string,
+    parentTaskId: string | null
+  ): Promise<{ success: boolean; task: Task; parent?: Task; previousParent?: Task }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 设置任务 [${taskId}] 的父任务归属:`, parentTaskId);
+    }
+    return requestJson<{ success: boolean; task: Task; parent?: Task; previousParent?: Task }>(
+      `${BASE_URL}/api/tasks/${taskId}/parent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentTaskId }),
+      }
+    );
+  }
+
+  async linkSubtasks(
+    parentId: string,
+    subTaskIds: string[]
+  ): Promise<{ success: boolean; parent: Task; linkedTasks: Task[] }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 批量为任务组 [${parentId}] 关联已有子工序:`, subTaskIds);
+    }
+    return requestJson<{ success: boolean; parent: Task; linkedTasks: Task[] }>(
+      `${BASE_URL}/api/tasks/${parentId}/link-subtasks`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subTaskIds }),
+      }
+    );
+  }
+
   async recommendWorkflow(params: { title: string; description?: string; workspace?: string }): Promise<{
     success: boolean;
     recommendations: Array<{

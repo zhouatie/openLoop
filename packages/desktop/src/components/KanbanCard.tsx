@@ -30,6 +30,8 @@ import {
   MessageSquare,
   Eye,
   XCircle,
+  GitMerge,
+  Unlink,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
@@ -180,6 +182,8 @@ export interface KanbanCardProps {
   onSkipNode: (taskId: string, nodeId?: string) => void;
   onVisualAcceptance: (task: Task) => void;
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
+  onSetParent?: (task: Task) => void;
+  onUnlinkSubtask?: (parentId: string, subtaskId: string) => void;
 }
 
 const KanbanCardComponent: React.FC<KanbanCardProps> = ({
@@ -203,6 +207,8 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   onSkipNode,
   onVisualAcceptance,
   onApprove,
+  onSetParent,
+  onUnlinkSubtask,
 }) => {
   const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped' | 'starting'>('checking');
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
@@ -414,6 +420,18 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
               title="移入 Inbox 想法收集"
             >
               <ArrowRight size={11} className="rotate-180" />
+            </button>
+          )}
+          {onSetParent && task.status !== 'running' && !(isGroup && childSubtasks.length > 0) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onSetParent(task);
+              }}
+              className="p-1 rounded text-[#85858d] hover:text-[#4f46e5] hover:bg-[#eeedfd]"
+              title={task.parentTaskId ? '变更所属需求 / 解绑...' : '设为子工序...'}
+            >
+              <GitMerge size={11} />
             </button>
           )}
           <button
@@ -632,6 +650,19 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                           title="查看并处理验收门禁"
                         >
                           <Eye size={10} />
+                        </button>
+                      )}
+                      {onUnlinkSubtask && st.status !== 'running' && task.status !== 'running' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUnlinkSubtask(task.id, st.id);
+                          }}
+                          className="w-5 h-5 rounded hover:bg-[#fef2f2] text-[#85858d] hover:text-[#dc2626] flex items-center justify-center transition-colors"
+                          title="脱离任务组，恢复为独立任务"
+                        >
+                          <Unlink size={10} />
                         </button>
                       )}
                       <button

@@ -27,6 +27,8 @@ export interface KanbanLaneListProps {
   onSkipNode: (taskId: string, nodeId?: string) => void;
   onVisualAcceptance: (task: Task) => void;
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
+  onSetParentTask?: (task: Task) => void;
+  onUnlinkSubtask?: (parentId: string, subtaskId: string) => void;
 }
 
 const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
@@ -50,6 +52,8 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
   onSkipNode,
   onVisualAcceptance,
   onApprove,
+  onSetParentTask,
+  onUnlinkSubtask,
 }) => {
   const [displayCount, setDisplayCount] = useState<number>(INITIAL_BATCH_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -112,6 +116,8 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
           onSkipNode={onSkipNode}
           onVisualAcceptance={onVisualAcceptance}
           onApprove={onApprove}
+          onSetParent={onSetParentTask}
+          onUnlinkSubtask={onUnlinkSubtask}
         />
       ))}
 
