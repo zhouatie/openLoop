@@ -22,8 +22,9 @@ build/icons/*.iconset/
 .DS_Store
 *.local
 
-# openLoop runtime data
+# openLoop runtime data & sandboxes
 .openloop/
+.openloop-data/
 .worktrees/
 .openloop-test-store/
 

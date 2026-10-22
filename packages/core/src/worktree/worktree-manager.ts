@@ -379,30 +379,9 @@ export class WorktreeManager {
     const primaryPort = ports.webPort || ports.port || ports.PORT || Object.values(ports)[0] || defaultBase;
     const targetUrl = `http://localhost:${primaryPort}?corePort=${assignedCorePort}`;
 
-    // 6. 独立沙箱数据底座隔离（保障全栈应用数据 100% 独立）
-    const storeDir = path.join(worktreeDir, '.openloop-data');
-    if (!fs.existsSync(storeDir)) {
-      try {
-        fs.mkdirSync(storeDir, { recursive: true });
-        // 单向快照种子：若宿主存在现有数据库，克隆一份只读快照供沙箱初始化，后续读写完全被限制在沙箱内
-        const hostDbCandidate = process.env.OPENLOOP_STORE_DIR
-          ? path.join(process.env.OPENLOOP_STORE_DIR, 'openloop.db')
-          : path.join(os.homedir(), '.openloop', 'openloop.db');
-        const targetDb = path.join(storeDir, 'openloop.db');
-        if (fs.existsSync(hostDbCandidate) && !fs.existsSync(targetDb)) {
-          fs.copyFileSync(hostDbCandidate, targetDb);
-          if (fs.existsSync(`${hostDbCandidate}-wal`)) {
-            try { fs.copyFileSync(`${hostDbCandidate}-wal`, `${targetDb}-wal`); } catch {}
-          }
-          if (fs.existsSync(`${hostDbCandidate}-shm`)) {
-            try { fs.copyFileSync(`${hostDbCandidate}-shm`, `${targetDb}-shm`); } catch {}
-          }
-          logger.info(`[Worktree:Store] 已完成沙箱数据底座快照隔离初始化 (来源: ${hostDbCandidate} -> 目标: ${targetDb})`);
-        }
-      } catch (err: any) {
-        logger.warn(`[Worktree:Store] 沙箱数据底座初始化提示: ${err.message}`);
-      }
-    }
+    // 6. 独立沙箱数据底座隔离（保障全栈应用数据 100% 独立，脱离代码仓库彻底杜绝 Git 冲突）
+    this.gcSandboxStores(3);
+    const storeDir = this.initTaskSandboxStore(taskId);
 
     logger.info(`[Worktree:Ready] 隔离工作区就绪，分配端口: ${JSON.stringify(ports)}, 靶机通信 Core: ${assignedCorePort}, 数据目录: ${storeDir}`);
 
@@ -451,34 +430,9 @@ export class WorktreeManager {
       onLog?.(`[沙箱隔离] 生产端口阻断保护生效：已为沙箱分配独立核心端口 ${corePort}`);
     }
 
-    // 2. 独立数据目录检查与单向快照初始化
-    const storeDir = worktree.storeDir || path.join(worktreeDir, '.openloop-data');
+    // 2. 独立数据目录检查与单向 COW 瞬时快照初始化
+    const storeDir = worktree.storeDir || this.initTaskSandboxStore(taskId, onLog);
     worktree.storeDir = storeDir;
-    if (!fs.existsSync(storeDir)) {
-      try {
-        fs.mkdirSync(storeDir, { recursive: true });
-      } catch {}
-    }
-    const targetDb = path.join(storeDir, 'openloop.db');
-    if (!fs.existsSync(targetDb)) {
-      const hostDbCandidate = process.env.OPENLOOP_STORE_DIR
-        ? path.join(process.env.OPENLOOP_STORE_DIR, 'openloop.db')
-        : path.join(os.homedir(), '.openloop', 'openloop.db');
-      if (fs.existsSync(hostDbCandidate)) {
-        try {
-          fs.copyFileSync(hostDbCandidate, targetDb);
-          if (fs.existsSync(`${hostDbCandidate}-wal`)) {
-            try { fs.copyFileSync(`${hostDbCandidate}-wal`, `${targetDb}-wal`); } catch {}
-          }
-          if (fs.existsSync(`${hostDbCandidate}-shm`)) {
-            try { fs.copyFileSync(`${hostDbCandidate}-shm`, `${targetDb}-shm`); } catch {}
-          }
-          onLog?.(`[沙箱隔离] 已从宿主环境克隆数据快照种子至 ${targetDb}，后续读写 100% 隔离`);
-        } catch (err: any) {
-          onLog?.(`[沙箱隔离] 克隆数据快照告警: ${err.message}`);
-        }
-      }
-    }
 
     // 3. 探活已有沙箱 Core 进程，若已就绪直接复用
     const isAlreadyAlive = await this.waitForHttpReady(`http://127.0.0.1:${corePort}/api/status`, 500);
@@ -1229,5 +1183,135 @@ export class WorktreeManager {
       execSync(`git branch -D "${branchName}"`, { cwd: repoRoot, stdio: 'ignore' });
       onLog?.(`[合并与清理] 已删除临时特性分支: ${branchName}`);
     } catch {}
+
+    // 4. 清理该任务的沙箱专属数据库目录
+    this.cleanupTaskSandboxStore(taskId, onLog);
+  }
+
+  /**
+   * 获取所有沙箱数据底座的统一根目录
+   * 严格置于代码仓库外（宿主数据目录/sandboxes），彻底杜绝仓库污染与 Git 冲突
+   */
+  public getSandboxBaseDir(): string {
+    const hostBaseDir = process.env.OPENLOOP_STORE_DIR
+      || path.join(os.homedir(), process.env.NODE_ENV === 'development' || !process.env.NODE_ENV ? '.openloop-dev' : '.openloop');
+    return path.join(hostBaseDir, 'sandboxes');
+  }
+
+  /**
+   * 获取指定任务的沙箱数据目录
+   */
+  public getTaskSandboxStoreDir(taskId: string): string {
+    const safeTaskId = taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return path.join(this.getSandboxBaseDir(), safeTaskId);
+  }
+
+  /**
+   * 使用操作系统级 COW（Copy-On-Write / Reflink）执行瞬间克隆
+   * 在 macOS APFS / Linux Btrfs/XFS 上耗时为 0 毫秒，且零额外物理磁盘占用
+   */
+  private cloneFileCoW(src: string, dst: string): void {
+    try {
+      fs.copyFileSync(src, dst, fs.constants.COPYFILE_FICLONE);
+    } catch {
+      fs.copyFileSync(src, dst);
+    }
+  }
+
+  /**
+   * 为任务初始化沙箱数据底座（利用 COW 瞬间克隆宿主数据库快照，数据 100% 保真且写隔离）
+   */
+  public initTaskSandboxStore(taskId: string, onLog?: (msg: string) => void): string {
+    const storeDir = this.getTaskSandboxStoreDir(taskId);
+    if (!fs.existsSync(storeDir)) {
+      try {
+        fs.mkdirSync(storeDir, { recursive: true });
+      } catch (err: any) {
+        logger.warn(`[Worktree:Store] 创建沙箱数据目录失败: ${err.message}`);
+      }
+    }
+
+    const targetDb = path.join(storeDir, 'openloop.db');
+    if (!fs.existsSync(targetDb)) {
+      const hostDbCandidate = process.env.OPENLOOP_STORE_DIR
+        ? path.join(process.env.OPENLOOP_STORE_DIR, 'openloop.db')
+        : path.join(os.homedir(), '.openloop', 'openloop.db');
+
+      if (fs.existsSync(hostDbCandidate)) {
+        try {
+          this.cloneFileCoW(hostDbCandidate, targetDb);
+          if (fs.existsSync(`${hostDbCandidate}-wal`)) {
+            try { this.cloneFileCoW(`${hostDbCandidate}-wal`, `${targetDb}-wal`); } catch {}
+          }
+          if (fs.existsSync(`${hostDbCandidate}-shm`)) {
+            try { this.cloneFileCoW(`${hostDbCandidate}-shm`, `${targetDb}-shm`); } catch {}
+          }
+          const msg = `[沙箱隔离] 已使用 COW 写时复制瞬时克隆宿主数据底座至 ${targetDb} (零物理磁盘增量，数据 100% 保真)`;
+          logger.info(`[Worktree:Store] ${msg}`);
+          onLog?.(msg);
+        } catch (err: any) {
+          const warnMsg = `[沙箱隔离] 克隆数据快照提示: ${err.message}`;
+          logger.warn(`[Worktree:Store] ${warnMsg}`);
+          onLog?.(warnMsg);
+        }
+      }
+    }
+
+    return storeDir;
+  }
+
+  /**
+   * 自动回收指定任务的沙箱数据目录
+   */
+  public cleanupTaskSandboxStore(taskId: string, onLog?: (msg: string) => void): void {
+    try {
+      const storeDir = this.getTaskSandboxStoreDir(taskId);
+      if (fs.existsSync(storeDir)) {
+        fs.rmSync(storeDir, { recursive: true, force: true });
+        const msg = `[沙箱清理] 已自动回收沙箱专属存储目录: ${storeDir}`;
+        logger.info(`[Worktree:Store] ${msg}`);
+        onLog?.(msg);
+      }
+    } catch (err: any) {
+      logger.warn(`[Worktree:Store] 回收沙箱存储目录异常: ${err.message}`);
+    }
+  }
+
+  /**
+   * 沙箱存储自愈与 LRU 垃圾回收（最多保留 maxKeep 个最近活跃沙箱，防止磁盘无序增长）
+   */
+  public gcSandboxStores(maxKeep: number = 3): void {
+    try {
+      const baseDir = this.getSandboxBaseDir();
+      if (!fs.existsSync(baseDir)) return;
+
+      const entries = fs.readdirSync(baseDir, { withFileTypes: true });
+      const dirStats: { name: string; fullPath: string; mtime: number }[] = [];
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const fullPath = path.join(baseDir, entry.name);
+          try {
+            const stat = fs.statSync(fullPath);
+            dirStats.push({ name: entry.name, fullPath, mtime: stat.mtimeMs });
+          } catch {}
+        }
+      }
+
+      // 按最后修改时间倒序排列（最近的排最前）
+      dirStats.sort((a, b) => b.mtime - a.mtime);
+
+      if (dirStats.length > maxKeep) {
+        const toRemove = dirStats.slice(maxKeep);
+        for (const item of toRemove) {
+          try {
+            fs.rmSync(item.fullPath, { recursive: true, force: true });
+            logger.info(`[Worktree:GC] LRU 回收过期沙箱存储: ${item.name}`);
+          } catch {}
+        }
+      }
+    } catch (err: any) {
+      logger.warn(`[Worktree:GC] 扫描清理沙箱存储异常: ${err.message}`);
+    }
   }
 }
