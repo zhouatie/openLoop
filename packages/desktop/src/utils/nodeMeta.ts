@@ -1,4 +1,4 @@
-import type { WorkflowDefinition, NodeType, NodeStatus, WorkflowNode } from '@openloop/core';
+import type { WorkflowDefinition, NodeType, NodeStatus, WorkflowNode, Task } from '@openloop/core';
 
 export interface NodeMeta {
   id: string;
@@ -287,3 +287,104 @@ export const NODE_STATUS_DICT: Record<
     desc: '等待前序节点完成流转',
   },
 };
+
+/**
+ * 智能解析任务对应的 QA 自动化测试与截帧节点 ID
+ * 优先级：
+ * 1. 若提供 workflow，优先匹配 type === 'midscene' 的测试执行节点
+ * 2. 匹配 ID 包含 midscene 或结尾为 _qa_test 的测试执行节点
+ * 3. 匹配名称或 ID 包含 qa/test，但排除 planner、gate、approval、review 等编排与门禁节点
+ * 4. 若无 workflow 或未匹配，从 task.nodeRuns 历史已执行节点中依上述规则推断
+ * 5. 兜底策略：若找不到则退回 'node_qa_test'
+ */
+export function resolveQaTestNodeId(
+  task?: Task | null,
+  workflow?: WorkflowDefinition | null
+): string {
+  // 1. 从工作流定义中寻找
+  if (workflow?.nodes && workflow.nodes.length > 0) {
+    // 1.1 优先寻找明确的 midscene 自动化测试类型节点
+    const midsceneNode = workflow.nodes.find((n) => n.type === 'midscene');
+    if (midsceneNode) return midsceneNode.id;
+
+    // 1.2 明确包含 midscene 或 qa_test 的节点 ID
+    const directIdNode = workflow.nodes.find((n) => {
+      const id = n.id.toLowerCase();
+      return (
+        id === 'node_qa_test' ||
+        id === 'node_midscene_test' ||
+        id.includes('midscene') ||
+        id.endsWith('_qa_test') ||
+        (id.includes('qa') && id.includes('test'))
+      );
+    });
+    if (directIdNode) return directIdNode.id;
+
+    // 1.3 排除 planner、gate、approval、review 等非测试执行节点
+    const testExecutionNode = workflow.nodes.find((n) => {
+      if (
+        n.type === 'qa-planner' ||
+        n.type === 'qa-approval' ||
+        n.type === 'worktree-setup' ||
+        n.type === 'worktree-merge' ||
+        n.type === 'worktree-cleanup' ||
+        n.type === 'env-prepare' ||
+        n.type === 'agent'
+      ) {
+        return false;
+      }
+      const id = n.id.toLowerCase();
+      const name = (n.name || '').toLowerCase();
+      const isExclude =
+        id.includes('plan') ||
+        id.includes('gate') ||
+        id.includes('approval') ||
+        id.includes('review') ||
+        name.includes('设计') ||
+        name.includes('门禁') ||
+        name.includes('审批') ||
+        name.includes('复核');
+      if (isExclude) return false;
+
+      return id.includes('qa') || id.includes('test') || name.includes('qa') || name.includes('测试');
+    });
+    if (testExecutionNode) return testExecutionNode.id;
+  }
+
+  // 2. 从已执行节点历史 nodeRuns 中寻找
+  if (task?.nodeRuns) {
+    const keys = Object.keys(task.nodeRuns);
+
+    // 2.1 明确匹配测试节点
+    const directRunId = keys.find((k) => {
+      const lower = k.toLowerCase();
+      return (
+        lower === 'node_qa_test' ||
+        lower === 'node_midscene_test' ||
+        lower.includes('midscene') ||
+        lower.endsWith('_qa_test') ||
+        (lower.includes('qa') && lower.includes('test'))
+      );
+    });
+    if (directRunId) return directRunId;
+
+    // 2.2 包含 qa/test 并排除 planner、gate、approval、review、setup、merge、cleanup
+    const secondaryRunId = keys.find((k) => {
+      const lower = k.toLowerCase();
+      const isExclude =
+        lower.includes('plan') ||
+        lower.includes('gate') ||
+        lower.includes('approval') ||
+        lower.includes('review') ||
+        lower.includes('setup') ||
+        lower.includes('merge') ||
+        lower.includes('clean');
+      if (isExclude) return false;
+      return lower.includes('qa') || lower.includes('test');
+    });
+    if (secondaryRunId) return secondaryRunId;
+  }
+
+  // 3. 兜底策略
+  return 'node_qa_test';
+}

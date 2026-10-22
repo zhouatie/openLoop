@@ -36,14 +36,16 @@ import {
   GitCommitHorizontal,
   Smartphone,
 } from 'lucide-react';
-import { Task, QaRunRecord, StepTimelineRecord, WorktreeContextInfo, TaskWorktreeDiffResult } from '@openloop/core';
+import { Task, QaRunRecord, StepTimelineRecord, WorktreeContextInfo, TaskWorktreeDiffResult, WorkflowDefinition } from '@openloop/core';
 import { api } from '../../services/api';
 import { toast } from '../Toast';
 import { openInDefaultBrowser } from '../../utils/openExternalBrowser';
 import { CodeDiffViewerModal } from '../diff/CodeDiffViewerModal';
+import { resolveQaTestNodeId } from '../../utils/nodeMeta';
 
 interface VisualAcceptanceModalProps {
   task: Task;
+  workflow?: WorkflowDefinition | null;
   onClose: () => void;
   onApproved?: (updatedTask?: Task) => void;
   onRejected?: (updatedTask?: Task) => void;
@@ -104,6 +106,7 @@ function parseGitDiffSummary(rawSummary?: string) {
 
 export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   task,
+  workflow,
   onClose,
   onApproved,
   onRejected,
@@ -774,12 +777,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
       }
 
       // 3. 动态寻找 QA 测试节点 ID
-      const testNodeId = (() => {
-        const nr = currentTask.nodeRuns || {};
-        const keys = Object.keys(nr);
-        const match = keys.find((k) => k === 'node_qa_test' || k === 'node_midscene_test' || k.includes('qa') || k.includes('midscene'));
-        return match || 'node_qa_test';
-      })();
+      const testNodeId = resolveQaTestNodeId(currentTask, workflow);
 
       if (import.meta.env?.DEV) {
         console.log('[VisualAcceptanceModal] 触发重跑 QA 自动化测试:', { taskId: currentTask.id, testNodeId });
