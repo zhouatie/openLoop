@@ -120,7 +120,7 @@ export const QaArtifactSelectorModal: React.FC<QaArtifactSelectorModalProps> = (
     return list;
   }, [currentRun, steps]);
 
-  // 2. 初始化已选状态
+  // 2. 初始化已选状态（打开时默认不预选任何产物，保持干净未选中状态）
   useEffect(() => {
     if (!isOpen) return;
 
@@ -136,29 +136,22 @@ export const QaArtifactSelectorModal: React.FC<QaArtifactSelectorModalProps> = (
         initialSelection.screenshots.forEach((sc) => scNameSet.add(sc.name));
       }
       setSelectedScreenshotNames(scNameSet);
-    } else {
-      // 默认智能策略：若测试有失败，默认预选失败的步骤及其截图
-      const failedSteps = steps
-        .map((s, idx) => ({ step: s, idx }))
-        .filter(({ step }) => step.status === 'failed');
 
-      if (failedSteps.length > 0) {
-        const stepIdxs = new Set<number>(failedSteps.map((f) => f.idx));
-        setSelectedStepIndices(stepIdxs);
-
-        const scNames = new Set<string>();
-        screenshots.forEach((sc) => {
-          if (sc.stepIndex !== undefined && stepIdxs.has(sc.stepIndex)) {
-            scNames.add(sc.name);
-          }
+      if (import.meta.env?.DEV) {
+        console.log('[QaArtifactSelectorModal] 初始化已选产物状态 (恢复历史选择):', {
+          stepCount: stepIdxSet.size,
+          screenshotCount: scNameSet.size,
         });
-        setSelectedScreenshotNames(scNames);
-      } else {
-        setSelectedStepIndices(new Set());
-        setSelectedScreenshotNames(new Set());
+      }
+    } else {
+      setSelectedStepIndices(new Set());
+      setSelectedScreenshotNames(new Set());
+
+      if (import.meta.env?.DEV) {
+        console.log('[QaArtifactSelectorModal] 打开弹窗默认不选中产物');
       }
     }
-  }, [isOpen, initialSelection, steps, screenshots]);
+  }, [isOpen, initialSelection]);
 
   // 步骤勾选切换
   const handleToggleStep = (index: number) => {
@@ -372,7 +365,11 @@ export const QaArtifactSelectorModal: React.FC<QaArtifactSelectorModalProps> = (
               <div className="relative flex items-center">
                 <select
                   value={currentRun?.id || ''}
-                  onChange={(e) => setSelectedRunId(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedRunId(e.target.value);
+                    setSelectedStepIndices(new Set());
+                    setSelectedScreenshotNames(new Set());
+                  }}
                   className="h-[24px] pl-2 pr-5 text-[10.5px] font-mono bg-[#f9f9fb] border border-[#e3e3e8] rounded-[4px] text-[#4b4b53] focus:outline-none focus:border-[#4f46e5] cursor-pointer appearance-none max-w-[130px] truncate"
                 >
                   {qaRuns.map((r, i) => (

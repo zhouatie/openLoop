@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Trash2, ArrowDown, Filter, Copy, Check, Terminal } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { X, Trash2, ArrowDown, Copy, Check, Terminal, Search, RotateCcw } from 'lucide-react';
 import { LogEntry, WorkflowDefinition } from '@openloop/core';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 
@@ -13,6 +13,42 @@ interface LogTerminalDrawerProps {
   onFilterChange?: (nodeId: string) => void;
 }
 
+// 关键词高亮辅助函数
+const highlightMatch = (text: string, query: string): React.ReactNode => {
+  if (!query || typeof text !== 'string') return text;
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const index = lowerText.indexOf(lowerQuery);
+  if (index === -1) return text;
+
+  const parts: React.ReactNode[] = [];
+  let startIndex = 0;
+  let curIndex = index;
+  let key = 0;
+
+  while (curIndex !== -1) {
+    if (curIndex > startIndex) {
+      parts.push(text.substring(startIndex, curIndex));
+    }
+    parts.push(
+      <mark
+        key={key++}
+        className="bg-[#4f46e5]/40 text-[#ffffff] rounded-[2px] px-0.5 not-italic font-medium"
+      >
+        {text.substring(curIndex, curIndex + query.length)}
+      </mark>
+    );
+    startIndex = curIndex + query.length;
+    curIndex = lowerText.indexOf(lowerQuery, startIndex);
+  }
+
+  if (startIndex < text.length) {
+    parts.push(text.substring(startIndex));
+  }
+
+  return parts;
+};
+
 export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
   isOpen,
   onClose,
@@ -23,6 +59,8 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
   onFilterChange,
 }) => {
   const [selectedNodeFilter, setSelectedNodeFilter] = useState<string>('all');
+  const [selectedStreamFilter, setSelectedStreamFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [isAtBottom, setIsAtBottom] = useState<boolean>(true);
   const [copied, setCopied] = useState<boolean>(false);
@@ -54,24 +92,45 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     }
   }, [isOpen, scrollToBottom]);
 
-  const nodeIds = Array.from(new Set(logs.map((l) => l.nodeId)));
+  const nodeIds = useMemo(
+    () => Array.from(new Set(logs.map((l) => l.nodeId).filter(Boolean))),
+    [logs]
+  );
 
-  const filteredLogs = logs.filter((log) => {
-    if (selectedNodeFilter !== 'all' && log.nodeId !== selectedNodeFilter) {
-      return false;
-    }
-    return true;
-  });
+  const filteredLogs = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return logs.filter((log) => {
+      if (selectedNodeFilter !== 'all' && log.nodeId !== selectedNodeFilter) {
+        return false;
+      }
+      if (selectedStreamFilter !== 'all' && log.stream !== selectedStreamFilter) {
+        return false;
+      }
+      if (query) {
+        const meta = resolveNodeMeta(log.nodeId, undefined, workflows);
+        const matchMessage = typeof log.message === 'string' && log.message.toLowerCase().includes(query);
+        const matchNodeId = typeof log.nodeId === 'string' && log.nodeId.toLowerCase().includes(query);
+        const matchNodeName = typeof meta.name === 'string' && meta.name.toLowerCase().includes(query);
+        if (!matchMessage && !matchNodeId && !matchNodeName) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [logs, selectedNodeFilter, selectedStreamFilter, searchQuery, workflows]);
 
-  // 仅当用户处于最底端且开启自动滚动时，新日志到达才自动滚到底部
+  const isFiltered =
+    selectedNodeFilter !== 'all' || selectedStreamFilter !== 'all' || !!searchQuery.trim();
+
+  // 仅当用户处于最底端且开启自动滚动且未处于主动搜索状态时，新日志到达才自动滚到底部
   useEffect(() => {
-    if (autoScroll && isAtBottomRef.current && scrollRef.current) {
+    if (autoScroll && isAtBottomRef.current && scrollRef.current && !searchQuery.trim()) {
       scrollToBottom();
       if (import.meta.env.DEV) {
         console.log('[LogTerminalDrawer] 新日志到达，自动滚动至底部');
       }
     }
-  }, [filteredLogs, autoScroll, scrollToBottom]);
+  }, [filteredLogs, autoScroll, scrollToBottom, searchQuery]);
 
   // 监听容器滚动，精确区分「查看历史日志」与「处于底部跟随」状态
   const handleScroll = useCallback(() => {
@@ -127,6 +186,49 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     }
   };
 
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (value.trim()) {
+      // 搜索时若视口在底部，定位到顶部方便用户查看首条匹配项
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = 0;
+      }
+      setIsAtBottom(false);
+      isAtBottomRef.current = false;
+    }
+    if (import.meta.env.DEV) {
+      console.log('[LogTerminalDrawer] 搜索关键词变更:', value);
+    }
+  };
+
+  const handleStreamFilterChange = (value: string) => {
+    setSelectedStreamFilter(value);
+    if (import.meta.env.DEV) {
+      console.log('[LogTerminalDrawer] 日志流筛选变更:', value);
+    }
+  };
+
+  const handleNodeFilterChange = (value: string) => {
+    setSelectedNodeFilter(value);
+    onFilterChange?.(value);
+    setIsAtBottom(true);
+    isAtBottomRef.current = true;
+    scrollToBottom();
+    if (import.meta.env.DEV) {
+      console.log('[LogTerminalDrawer] 节点筛选变更:', value);
+    }
+  };
+
+  const handleResetFilters = () => {
+    setSearchQuery('');
+    setSelectedStreamFilter('all');
+    setSelectedNodeFilter('all');
+    onFilterChange?.('all');
+    if (import.meta.env.DEV) {
+      console.log('[LogTerminalDrawer] 重置所有筛选与搜索条件');
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -162,25 +264,67 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
       <div className="fixed bottom-0 left-[212px] right-0 h-[280px] bg-[#1c1c21] border-t border-[#383842] z-[60] flex flex-col shadow-[0_-8px_24px_rgba(0,0,0,0.18)] animate-in slide-in-from-bottom-2 duration-150">
         {/* 终端头部 */}
         <div className="h-[34px] bg-[#16161a] border-b border-[#2e2e36] px-3.5 flex items-center justify-between select-none">
-          <div className="flex items-center gap-2.5">
-            <div className="flex items-center gap-1.5 text-[11.5px] font-mono text-[#e3e3e8]">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center gap-1.5 text-[11.5px] font-mono text-[#e3e3e8] shrink-0">
               <Terminal size={13} className="text-[#818cf8]" />
-              <span>实时执行终端 ({filteredLogs.length} 条)</span>
+              <span>
+                实时执行终端 ({isFiltered ? `${filteredLogs.length}/${logs.length}` : `${logs.length}`} 条)
+              </span>
             </div>
 
-            <div className="flex items-center gap-1 ml-3 text-[11px]">
-              <span className="text-[#85858d]">过滤:</span>
+            <div className="flex items-center gap-1.5 ml-2">
+              {/* 搜索框 */}
+              <div className="relative flex items-center">
+                <Search size={11} className="absolute left-2 text-[#85858d] pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      e.nativeEvent.stopImmediatePropagation();
+                      if (searchQuery) {
+                        handleSearchChange('');
+                      } else {
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }
+                  }}
+                  placeholder="搜索日志..."
+                  className="w-[120px] focus:w-[170px] transition-all h-[22px] bg-[#24242c] border border-[#383842] focus:border-[#818cf8] text-[#e3e3e8] placeholder-[#71717a] text-[11px] rounded-[4px] pl-5 pr-5 outline-none"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => handleSearchChange('')}
+                    className="absolute right-1 text-[#85858d] hover:text-[#e3e3e8] p-0.5 transition-colors"
+                    title="清除搜索"
+                  >
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
+
+              {/* 日志流类型过滤 */}
+              <select
+                value={selectedStreamFilter}
+                onChange={(e) => handleStreamFilterChange(e.target.value)}
+                className="bg-[#24242c] border border-[#383842] text-[#e3e3e8] text-[11px] rounded-[4px] px-1.5 py-[1px] h-[22px] outline-none"
+                title="按日志流过滤"
+              >
+                <option value="all">所有流</option>
+                <option value="stdout">stdout (输出)</option>
+                <option value="stderr">stderr (错误)</option>
+                <option value="system">system (系统)</option>
+              </select>
+
+              {/* 节点过滤 */}
               <select
                 value={selectedNodeFilter}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedNodeFilter(val);
-                  onFilterChange?.(val);
-                  setIsAtBottom(true);
-                  isAtBottomRef.current = true;
-                  scrollToBottom();
-                }}
-                className="bg-[#24242c] border border-[#383842] text-[#e3e3e8] text-[11px] rounded-[4px] px-1.5 py-[1px] outline-none max-w-[200px]"
+                onChange={(e) => handleNodeFilterChange(e.target.value)}
+                className="bg-[#24242c] border border-[#383842] text-[#e3e3e8] text-[11px] rounded-[4px] px-1.5 py-[1px] h-[22px] outline-none max-w-[160px] truncate"
+                title="按节点过滤"
               >
                 <option value="all">所有节点</option>
                 {nodeIds.map((nid) => {
@@ -192,10 +336,23 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
                   );
                 })}
               </select>
+
+              {/* 重置筛选条件按钮 */}
+              {isFiltered && (
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="h-[22px] px-1.5 rounded-[4px] text-[10.5px] text-[#85858d] hover:text-[#f87171] hover:bg-[#282830] transition-colors flex items-center gap-1"
+                  title="重置所有搜索和过滤条件"
+                >
+                  <RotateCcw size={10} />
+                  <span>重置</span>
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0 ml-2">
             <button
               onClick={handleToggleScroll}
               className={`px-2 h-[22px] rounded-[4px] text-[10.5px] flex items-center gap-1 transition-all ${
@@ -216,7 +373,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
             <button
               onClick={copyAll}
               className="w-[22px] h-[22px] rounded-[4px] text-[#85858d] hover:text-white hover:bg-[#282830] flex items-center justify-center transition-colors"
-              title="复制日志"
+              title="复制当前过滤日志"
             >
               {copied ? <Check size={12} className="text-[#10b981]" /> : <Copy size={12} />}
             </button>
@@ -251,7 +408,22 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
           className="flex-1 p-3.5 font-mono text-[11.5px] overflow-y-auto space-y-1 select-text bg-[#18181c]"
         >
           {filteredLogs.length === 0 ? (
-            <div className="text-[#63636b] italic py-6 text-center">暂无日志流</div>
+            logs.length === 0 ? (
+              <div className="text-[#63636b] italic py-6 text-center">暂无日志流</div>
+            ) : (
+              <div className="text-[#85858d] py-8 text-center text-[11.5px] flex flex-col items-center justify-center gap-2 select-none">
+                <Search size={18} className="text-[#4b4b53]" />
+                <span className="text-[#a1a1aa]">未找到与搜索或过滤条件匹配的日志</span>
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] bg-[#24242c] hover:bg-[#2e2e38] text-[#818cf8] text-[11px] border border-[#383842] transition-colors cursor-pointer"
+                >
+                  <RotateCcw size={10} />
+                  <span>清除所有过滤</span>
+                </button>
+              </div>
+            )
           ) : (
             filteredLogs.map((log) => {
               const timeStr = new Date(log.timestamp).toLocaleTimeString();
@@ -259,6 +431,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
               if (log.stream === 'stderr') color = 'text-[#f87171] font-semibold';
               if (log.stream === 'system') color = 'text-[#38bdf8]';
               const meta = resolveNodeMeta(log.nodeId, undefined, workflows);
+              const trimmedQuery = searchQuery.trim();
 
               return (
                 <div key={log.id} className="flex items-start gap-2 leading-relaxed px-1 py-0.5 rounded hover:bg-[#222228]">
@@ -267,9 +440,11 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
                     className="text-[#a5b4fc] shrink-0 font-medium cursor-help"
                     title={`底层标识: ${log.nodeId}\n说明: ${meta.description}`}
                   >
-                    [{meta.name}]
+                    [{highlightMatch(meta.name, trimmedQuery)}]
                   </span>
-                  <span className={`${color} whitespace-pre-wrap break-all`}>{log.message}</span>
+                  <span className={`${color} whitespace-pre-wrap break-all`}>
+                    {highlightMatch(log.message, trimmedQuery)}
+                  </span>
                 </div>
               );
             })
