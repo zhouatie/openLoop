@@ -94,6 +94,23 @@ export const QaReplayerModal: React.FC<QaReplayerModalProps> = ({ run, onClose }
     }
   }, [imageUrl]);
 
+  // 监听 ESC 键关闭回放弹窗
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        if (import.meta.env?.DEV) {
+          console.log('[QaReplayerModal] 按 Escape 关闭回放弹窗，阻断底层浮层响应');
+        }
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [onClose]);
+
   const reportUrl = run.reportRelPath ? api.getArtifactUrl(run.reportRelPath) : run.reportUrl;
 
   return (

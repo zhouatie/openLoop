@@ -50,6 +50,9 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !loading) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
         if (import.meta.env?.DEV) {
           console.log('[ConfirmModal] 用户按 Escape 关闭对话框');
         }
@@ -57,8 +60,8 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, loading, onClose]);
 
   if (!isOpen) return null;

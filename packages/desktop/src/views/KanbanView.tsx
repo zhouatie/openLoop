@@ -1310,6 +1310,12 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
           setEditingTask(null);
         } else if (previewArtifact) {
           setPreviewArtifact(null);
+        } else if (visualAcceptanceTask) {
+          setVisualAcceptanceTask(null);
+        } else if (isQaSelectorOpen) {
+          setIsQaSelectorOpen(false);
+        } else if (taskToDelete) {
+          if (!isDeleting) setTaskToDelete(null);
         } else if (selectedTask) {
           setSelectedTask(null);
         }
@@ -1317,7 +1323,19 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isWsDropdownOpen, isWfDropdownOpen, isBoardSortOpen, openSortDropdownCol, editingTask, previewArtifact, selectedTask]);
+  }, [
+    isWsDropdownOpen,
+    isWfDropdownOpen,
+    isBoardSortOpen,
+    openSortDropdownCol,
+    editingTask,
+    previewArtifact,
+    visualAcceptanceTask,
+    isQaSelectorOpen,
+    taskToDelete,
+    isDeleting,
+    selectedTask,
+  ]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {

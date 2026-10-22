@@ -536,6 +536,23 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   // 键盘快捷键监听 (方向键切帧、首尾帧跳转、翻页、空格播放/暂停、ESC 关闭)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        if (isDiffModalOpen) {
+          setIsDiffModalOpen(false);
+          return;
+        }
+        if (import.meta.env?.DEV) {
+          console.log('[VisualAcceptanceModal] 按 Escape 关闭回放弹窗，阻断底层侧边栏响应');
+        }
+        onClose();
+        return;
+      }
+
       const target = e.target as HTMLElement | null;
       const isTextInput =
         target instanceof HTMLTextAreaElement ||
@@ -564,14 +581,11 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
       } else if (e.key === ' ') {
         e.preventDefault();
         togglePlay();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePrev, handleNext, handleSeekFirst, handleSeekLast, handleSeekTo, currentStepIndex, togglePlay, onClose]);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [handlePrev, handleNext, handleSeekFirst, handleSeekLast, handleSeekTo, currentStepIndex, togglePlay, onClose, isDiffModalOpen]);
 
   // 验收通过并自动合并
   const handleApproveAndMerge = async () => {
