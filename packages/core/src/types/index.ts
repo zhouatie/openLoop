@@ -523,6 +523,33 @@ export interface QaRunRecord {
   error?: string;
 }
 
+export interface SelectedQaStepArtifact {
+  stepIndex: number;
+  stepId?: string;
+  prompt: string;
+  status: 'passed' | 'failed' | 'skipped';
+  durationMs?: number;
+  error?: string;
+  thought?: string;
+  screenshotUrl?: string;
+  screenshotRelPath?: string;
+}
+
+export interface SelectedQaScreenshotArtifact {
+  name: string;
+  url: string;
+  path?: string;
+  stepIndex?: number;
+  stepPrompt?: string;
+}
+
+export interface SelectedQaArtifacts {
+  qaRunId?: string;
+  suiteName?: string;
+  steps: SelectedQaStepArtifact[];
+  screenshots: SelectedQaScreenshotArtifact[];
+}
+
 export type AutomationSourceType = 'schedule' | 'cli_script' | 'github_issues' | 'twitter_query' | 'custom';
 export type AutomationActionType = 'create_task' | 'run_workflow' | 'notify_only';
 export type AutomationStatus = 'idle' | 'running' | 'success' | 'failed';

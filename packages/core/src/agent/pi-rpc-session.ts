@@ -33,6 +33,7 @@ export interface PiRpcSessionOptions {
   cwd?: string;
   env?: Record<string, string>;
   initialPrompt: string;
+  initialAttachments?: TaskAttachment[];
   /** 流水线节点场景：Agent 未输出完成标记时停留在本节点等待用户回复，不自动流转下游 */
   awaitCompletionMarker?: boolean;
   onLog?: (stream: 'stdout' | 'stderr' | 'system', message: string) => void;
@@ -179,7 +180,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     setTimeout(() => {
       if (this.active && !this.initialPromptSent) {
         this.initialPromptSent = true;
-        this.sendPrompt(options.initialPrompt).catch((err) => {
+        this.sendPrompt(options.initialPrompt, options.initialAttachments).catch((err) => {
           logger.error(`发送初始 Prompt 失败: ${err.message}`, undefined, { taskId: this.taskId });
         });
       }

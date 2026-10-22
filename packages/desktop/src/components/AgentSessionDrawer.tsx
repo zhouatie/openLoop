@@ -18,8 +18,9 @@ import {
   FlaskConical,
   Cpu,
   MessageSquare,
+  ZoomIn,
 } from 'lucide-react';
-import { TaskSessionState, SessionChatMessage } from '@openloop/core';
+import { TaskSessionState, SessionChatMessage, QaRunRecord, SelectedQaArtifacts, TaskAttachment } from '@openloop/core';
 import { getAgentProviderMeta, getDefaultResumeCommand } from '@openloop/agent-providers';
 import { api } from '../services/api';
 import { AgentMarkdown } from './AgentMarkdown';
@@ -28,6 +29,8 @@ import { toast } from './Toast';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 import { ChatScrollToLatestButton } from './ChatScrollToLatestButton';
 import { AgentChatChangedFiles } from './AgentChatChangedFiles';
+import { QaArtifactSelectorModal } from './qa/QaArtifactSelectorModal';
+import { ImageLightboxModal } from './ImageLightboxModal';
 
 export interface AgentSessionDrawerProps {
   isOpen: boolean;
@@ -58,7 +61,49 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
   const [expandedQaAttachments, setExpandedQaAttachments] = useState<Record<string, boolean>>({});
   const [defaultModel, setDefaultModel] = useState<string>('');
 
+  // QA 自动化测试产物选择与查看状态
+  const [qaRun, setQaRun] = useState<QaRunRecord | null>(null);
+  const [hasQaArtifacts, setHasQaArtifacts] = useState<boolean>(false);
+  const [isQaSelectorOpen, setIsQaSelectorOpen] = useState<boolean>(false);
+  const [selectedQaArtifacts, setSelectedQaArtifacts] = useState<SelectedQaArtifacts | null>(null);
+  const [activeLightbox, setActiveLightbox] = useState<{ name: string; url: string } | null>(null);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // 检索当前任务是否产生过 QA 自动化运行产物
+  useEffect(() => {
+    if (!isOpen || !taskId) {
+      setQaRun(null);
+      setHasQaArtifacts(false);
+      setSelectedQaArtifacts(null);
+      return;
+    }
+
+    let active = true;
+    api.getQaRuns(undefined, taskId)
+      .then((runs) => {
+        if (!active) return;
+        if (runs && runs.length > 0) {
+          setQaRun(runs[0]);
+          setHasQaArtifacts(true);
+          if (import.meta.env?.DEV) {
+            console.log('[AgentSessionDrawer] 检索到任务 QA 运行记录:', { taskId, runId: runs[0].id, stepsCount: runs[0].timeline?.length });
+          }
+        } else {
+          setQaRun(null);
+          setHasQaArtifacts(false);
+        }
+      })
+      .catch((err) => {
+        if (import.meta.env?.DEV) {
+          console.warn('[AgentSessionDrawer] 获取 QA 运行记录失败:', err);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isOpen, taskId]);
 
   // 加载系统配置中的默认模型并监听变更
   useEffect(() => {
@@ -162,15 +207,39 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, onClose]);
 
+  // 判定是否有选中的 QA 产物
+  const hasSelectedArtifacts = Boolean(
+    selectedQaArtifacts &&
+    ((Array.isArray(selectedQaArtifacts.steps) && selectedQaArtifacts.steps.length > 0) ||
+     (Array.isArray(selectedQaArtifacts.screenshots) && selectedQaArtifacts.screenshots.length > 0))
+  );
+
   // 发送插话 / 引导消息
   const handleSendChat = async () => {
     const text = chatInput.trim();
-    if (!text || !taskId || isSending) return;
+    if ((!text && !hasSelectedArtifacts) || !taskId || isSending) return;
 
     setIsSending(true);
     scrollChatToBottom(true);
+
+    const attachmentsToSend: TaskAttachment[] = (selectedQaArtifacts?.screenshots || []).map((sc) => ({
+      id: `att_qa_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: sc.name,
+      mimeType: sc.name.endsWith('.svg') ? 'image/svg+xml' : 'image/webp',
+      path: sc.path,
+      url: sc.url,
+      createdAt: Date.now(),
+    }));
+
+    const userDisplayMsg = text || '请查看我选中的 UI 自动化测试产物与操作流程，并分析修改代码。';
+
     if (import.meta.env?.DEV) {
-      console.log('[AgentSessionDrawer] 发送会话消息:', { taskId, text });
+      console.log('[AgentSessionDrawer] 发送会话消息:', {
+        taskId,
+        text: userDisplayMsg,
+        attachmentsCount: attachmentsToSend.length,
+        hasSelectedQa: hasSelectedArtifacts,
+      });
     }
 
     // 乐观更新
@@ -185,7 +254,8 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
               {
                 id: `opt_${Date.now()}`,
                 role: 'user',
-                content: text,
+                content: userDisplayMsg,
+                attachments: attachmentsToSend.length > 0 ? attachmentsToSend : undefined,
                 timestamp: Date.now(),
               },
             ],
@@ -194,8 +264,11 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
     );
 
     try {
-      await api.sendTaskChatMessage(taskId, text);
+      await api.sendTaskChatMessage(taskId, userDisplayMsg, attachmentsToSend, {
+        selectedQaArtifacts: hasSelectedArtifacts ? selectedQaArtifacts : undefined,
+      });
       setChatInput('');
+      setSelectedQaArtifacts(null);
       toast('已向 Agent 发送引导消息', 'success');
       loadSession(true);
     } catch (err: any) {
@@ -477,7 +550,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
           ) : (
             sessionState.messages.map((msg, msgIdx) => {
               if (msg.role === 'user') {
-                const qaMarkerMatch = msg.content?.match(/\[(?:系统自动附加|用户主动附带|附带)：?最新 UI 自动化测试产物\]/);
+                const qaMarkerMatch = msg.content?.match(/\[(?:系统自动附加|用户主动附带|附带)：?(?:最新 UI 自动化测试产物|UI 自动化测试验收产物.*?)\]/);
                 const qaMarkerIndex = qaMarkerMatch ? msg.content.indexOf(qaMarkerMatch[0]) : -1;
                 const userText = qaMarkerIndex !== -1 ? msg.content.slice(0, qaMarkerIndex).trim() : msg.content;
                 const qaText = qaMarkerIndex !== -1 ? msg.content.slice(qaMarkerIndex).trim() : '';
@@ -489,8 +562,43 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                         YOU / PROMPT
                       </div>
                       {userText && <div className="whitespace-pre-wrap">{userText}</div>}
+
+                      {/* 渲染用户发送的图片附件缩略图 */}
+                      {msg.attachments && msg.attachments.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-[#e6e6ec]">
+                          <div className="text-[10px] text-[#85858d] font-medium mb-1.5 flex items-center gap-1">
+                            <span>附带截图产物 ({msg.attachments.length})</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {msg.attachments.map((att, attIdx) => {
+                              const rawUrl = att.url || att.path || '';
+                              const imgUrl = api.getArtifactUrl(rawUrl);
+                              return (
+                                <div
+                                  key={att.id || attIdx}
+                                  onClick={() => imgUrl && setActiveLightbox({ name: att.name, url: imgUrl })}
+                                  className="group/att relative w-[54px] h-[38px] rounded-[4px] border border-[#d8d6fb] overflow-hidden bg-black/5 cursor-pointer"
+                                  title={`${att.name} (点击放大预览)`}
+                                >
+                                  {imgUrl ? (
+                                    <img src={imgUrl} alt={att.name} className="w-full h-full object-cover transition-transform group-hover/att:scale-105" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-[9px] text-[#85858d]">
+                                      {att.name}
+                                    </div>
+                                  )}
+                                  <div className="absolute inset-0 bg-black/25 opacity-0 group-hover/att:opacity-100 transition-opacity flex items-center justify-center">
+                                    <ZoomIn size={12} className="text-white" />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                       {qaText && (
-                        <div className={`${userText ? 'mt-2 pt-2 border-t border-[#e6e6ec]' : ''}`}>
+                        <div className={`${userText || (msg.attachments && msg.attachments.length > 0) ? 'mt-2 pt-2 border-t border-[#e6e6ec]' : ''}`}>
                           <button
                             type="button"
                             onClick={() => setExpandedQaAttachments((prev) => ({ ...prev, [msg.id]: !prev[msg.id] }))}
@@ -501,7 +609,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                             {expandedQaAttachments[msg.id] ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
                           </button>
                           {expandedQaAttachments[msg.id] && (
-                            <div className="mt-1.5 p-2 rounded-[5px] bg-[#f9f9fb] border border-[#e3e3e8] font-mono text-[10px] text-[#63636b] leading-relaxed whitespace-pre-wrap max-h-[160px] overflow-y-auto">
+                            <div className="mt-1.5 p-2 rounded-[5px] bg-[#f9f9fb] border border-[#e3e3e8] font-mono text-[10px] text-[#63636b] leading-relaxed whitespace-pre-wrap max-h-[180px] overflow-y-auto">
                               {qaText}
                             </div>
                           )}
@@ -727,7 +835,109 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                 </div>
               </div>
 
-              <div className="relative flex items-end gap-2 bg-[#f9f9fb] border border-[#e3e3e8] focus-within:border-[#7c3aed] focus-within:ring-2 focus-within:ring-[#7c3aed]/15 rounded-[8px] p-2 transition-all">
+              {/* 已选 QA 自动化产物微胶囊面板 */}
+              {hasSelectedArtifacts && selectedQaArtifacts && (
+                <div className="mb-2 p-2 rounded-[7px] bg-[#f9f9fb] border border-[#e3e3e8] space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <div className="flex items-center gap-1.5 font-medium text-[#4f46e5]">
+                      <FlaskConical size={12} />
+                      <span>已选测试产物</span>
+                      <span className="text-[10px] text-[#71717a] font-normal">
+                        ({selectedQaArtifacts.steps?.length || 0} 流程, {selectedQaArtifacts.screenshots?.length || 0} 截图)
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsQaSelectorOpen(true)}
+                        className="text-[10.5px] text-[#4f46e5] hover:underline cursor-pointer font-medium"
+                      >
+                        修改选择
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedQaArtifacts(null)}
+                        className="text-[10.5px] text-[#85858d] hover:text-[#dc2626] cursor-pointer"
+                      >
+                        清空
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 选中的截图横排微缩略图 */}
+                  {selectedQaArtifacts.screenshots && selectedQaArtifacts.screenshots.length > 0 && (
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-0.5">
+                      {selectedQaArtifacts.screenshots.map((sc, scIdx) => (
+                        <div
+                          key={sc.name + scIdx}
+                          className="group/sc relative shrink-0 w-[46px] h-[32px] rounded-[4px] border border-[#d8d6fb] overflow-hidden bg-black/5"
+                        >
+                          <img src={sc.url} alt={sc.name} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/35 opacity-0 group-hover/sc:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setActiveLightbox({ name: sc.name, url: sc.url })}
+                              className="text-white hover:scale-110 transition-transform cursor-pointer"
+                              title="放大预览"
+                            >
+                              <ZoomIn size={10} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedQaArtifacts((prev) => {
+                                  if (!prev) return null;
+                                  const nextScreenshots = prev.screenshots.filter((_, idx) => idx !== scIdx);
+                                  return { ...prev, screenshots: nextScreenshots };
+                                });
+                              }}
+                              className="text-white hover:text-red-300 transition-colors cursor-pointer"
+                              title="移除此截图"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 选中的操作步骤流程标签 */}
+                  {selectedQaArtifacts.steps && selectedQaArtifacts.steps.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {selectedQaArtifacts.steps.map((st, stIdx) => (
+                        <span
+                          key={st.stepIndex}
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] font-medium border ${
+                            st.status === 'failed'
+                              ? 'bg-[#fef2f2] text-[#dc2626] border-[#fecaca]/70'
+                              : 'bg-white text-[#4b4b53] border-[#e3e3e8]'
+                          }`}
+                        >
+                          <span className="font-mono">#{st.stepIndex + 1}</span>
+                          <span className="truncate max-w-[150px]">{st.prompt}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedQaArtifacts((prev) => {
+                                if (!prev) return null;
+                                const nextSteps = prev.steps.filter((_, idx) => idx !== stIdx);
+                                return { ...prev, steps: nextSteps };
+                              });
+                            }}
+                            className="hover:opacity-75 cursor-pointer ml-0.5"
+                            title="移除此步骤"
+                          >
+                            <X size={9} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="bg-[#f9f9fb] border border-[#e3e3e8] focus-within:border-[#7c3aed] focus-within:ring-2 focus-within:ring-[#7c3aed]/15 rounded-[8px] p-2 transition-all flex flex-col gap-1.5">
                 <textarea
                   ref={textareaRef}
                   rows={2}
@@ -739,27 +949,82 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                       handleSendChat();
                     }
                   }}
-                  placeholder="向该 Agent 节点追加补充提示词、纠偏说明或指令..."
-                  className="flex-1 bg-transparent border-0 outline-hidden text-[12px] text-[#1c1c21] placeholder-[#a1a1aa] resize-none leading-relaxed"
+                  placeholder={
+                    hasSelectedArtifacts
+                      ? "已选择测试产物，可输入补充修改建议（直接发送亦可）..."
+                      : "向该 Agent 节点追加补充提示词、纠偏说明或指令..."
+                  }
+                  className="w-full bg-transparent border-0 outline-hidden text-[12px] text-[#1c1c21] placeholder-[#a1a1aa] resize-none leading-relaxed"
                 />
-                <button
-                  type="button"
-                  disabled={!chatInput.trim() || isSending || !taskId}
-                  onClick={handleSendChat}
-                  className="h-[28px] px-2.5 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 transition-all disabled:opacity-40 cursor-pointer shadow-xs shrink-0"
-                >
-                  {isSending ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <Send size={11} />
-                  )}
-                  <span>发送</span>
-                </button>
+
+                {/* 底部微工具条：选择 QA 产物 + 发送按钮 */}
+                <div className="flex items-center justify-between pt-1 border-t border-[#f1f1f4]">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsQaSelectorOpen(true)}
+                      disabled={!hasQaArtifacts}
+                      className={`h-[22px] px-2 rounded-[5px] border text-[10.5px] font-medium flex items-center gap-1 transition-all cursor-pointer ${
+                        hasSelectedArtifacts
+                          ? 'border-[#4f46e5]/40 bg-[#eeedfd] text-[#4f46e5] font-semibold shadow-2xs'
+                          : hasQaArtifacts
+                          ? 'border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] hover:border-[#1c1c21]/30 text-[#63636b] hover:text-[#1c1c21]'
+                          : 'border-[#f1f1f4] bg-[#f9f9fb] text-[#a1a1aa] cursor-not-allowed opacity-60'
+                      }`}
+                      title={hasQaArtifacts ? '选择 UI 自动化测试截帧或操作流程发给 Agent' : '当前任务暂无 UI 自动化测试产物'}
+                    >
+                      <FlaskConical size={10.5} className={hasSelectedArtifacts ? 'text-[#4f46e5]' : ''} />
+                      <span>
+                        {hasSelectedArtifacts
+                          ? `已选产物 (${(selectedQaArtifacts?.steps?.length || 0) + (selectedQaArtifacts?.screenshots?.length || 0)})`
+                          : '选择测试产物'}
+                      </span>
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={(!chatInput.trim() && !hasSelectedArtifacts) || isSending || !taskId}
+                    onClick={handleSendChat}
+                    className="h-[26px] px-2.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 transition-all disabled:opacity-40 cursor-pointer shadow-xs shrink-0"
+                  >
+                    {isSending ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Send size={11} />
+                    )}
+                    <span>发送</span>
+                  </button>
+                </div>
               </div>
             </>
           )}
         </div>
       </aside>
+
+      {/* QA 自动化测试产物选择弹窗 */}
+      <QaArtifactSelectorModal
+        isOpen={isQaSelectorOpen}
+        onClose={() => setIsQaSelectorOpen(false)}
+        taskId={taskId}
+        qaRun={qaRun}
+        initialSelection={selectedQaArtifacts}
+        onConfirm={(selection) => {
+          setSelectedQaArtifacts(selection);
+          if (import.meta.env?.DEV) {
+            console.log('[AgentSessionDrawer] 用户更新已选 QA 产物:', selection);
+          }
+        }}
+      />
+
+      {/* 截帧大图全屏预览弹窗 */}
+      {activeLightbox && (
+        <ImageLightboxModal
+          isOpen={true}
+          attachment={{ name: activeLightbox.name, url: activeLightbox.url }}
+          onClose={() => setActiveLightbox(null)}
+        />
+      )}
     </div>
   );
 };
