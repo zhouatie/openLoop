@@ -303,9 +303,24 @@ export class WorktreeManager {
     const safeTaskId = taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
     const branchName = `feat/task-${safeTaskId}`;
     const worktreeDir = path.join(repoRoot, '.worktrees', `task-${safeTaskId}`);
-    const baseBranch = options.baseBranch || 'HEAD';
 
-    logger.info(`[Worktree:Create] 准备创建隔离开发工作区: ${worktreeDir} (分支: ${branchName})`);
+    // 自动探测宿主仓库当前检出分支与基线 commit，避免退化为 HEAD 导致后续 Diff 错误对比 master
+    let detectedBaseBranch = options.baseBranch;
+    if (!detectedBaseBranch || detectedBaseBranch === 'HEAD') {
+      try {
+        const repoBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim();
+        if (repoBranch && repoBranch !== 'HEAD') {
+          detectedBaseBranch = repoBranch;
+        }
+      } catch {}
+    }
+    const baseBranch = detectedBaseBranch || 'HEAD';
+    let baseCommit = '';
+    try {
+      baseCommit = execSync(`git rev-parse "${options.baseBranch || 'HEAD'}"`, { cwd: repoRoot, encoding: 'utf-8' }).trim();
+    } catch {}
+
+    logger.info(`[Worktree:Create] 准备创建隔离开发工作区: ${worktreeDir} (分支: ${branchName}, 基线: ${baseBranch})`);
 
     // 0. 清理 Git 孤儿 worktree 记录与既有后台进程
     try {
@@ -389,6 +404,7 @@ export class WorktreeManager {
       worktreeDir,
       branchName,
       baseBranch,
+      baseCommit,
       ports,
       corePort: assignedCorePort,
       webPort: primaryPort,
@@ -576,7 +592,11 @@ export class WorktreeManager {
   /**
    * 结构化获取 Worktree 相比主分支的代码修改详情与完整 Diff
    */
-  public getWorktreeDiffDetail(worktreeDir: string, baseBranch?: string): TaskWorktreeDiffResult {
+  public getWorktreeDiffDetail(
+    worktreeDir: string,
+    baseBranch?: string,
+    baseCommitParam?: string
+  ): TaskWorktreeDiffResult {
     if (!fs.existsSync(worktreeDir)) {
       return {
         hasWorktree: false,
@@ -593,12 +613,42 @@ export class WorktreeManager {
       } catch {}
 
       // 2. 确定比较基线祖先 commit
-      let baseCommit = '';
-      if (baseBranch && baseBranch !== 'HEAD' && baseBranch !== branchName) {
+      let baseCommit = baseCommitParam || '';
+      // 2.1 若显式指定了基线分支名（且非当前分支自身及 HEAD）
+      if (!baseCommit && baseBranch && baseBranch !== 'HEAD' && baseBranch !== branchName) {
         try {
           baseCommit = execSync(`git merge-base HEAD "${baseBranch}"`, { cwd: worktreeDir, encoding: 'utf-8' }).trim();
         } catch {}
       }
+      // 2.2 若未指定或为 HEAD，优先推导直接父级宿主仓库的当前分支
+      if (!baseCommit) {
+        try {
+          const directParentRepo = path.dirname(path.dirname(worktreeDir));
+          if (fs.existsSync(directParentRepo)) {
+            const hostBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: directParentRepo, encoding: 'utf-8' }).trim();
+            if (hostBranch && hostBranch !== 'HEAD' && hostBranch !== branchName) {
+              baseCommit = execSync(`git merge-base HEAD "${hostBranch}"`, { cwd: worktreeDir, encoding: 'utf-8' }).trim();
+            }
+          }
+        } catch {}
+      }
+      // 2.3 尝试从分支创建 reflog 中提取初始创建 commit 作为基线
+      if (!baseCommit && branchName) {
+        try {
+          const reflogOut = execSync(`git reflog show "${branchName}"`, { cwd: worktreeDir, encoding: 'utf-8' }).trim();
+          const lines = reflogOut.split('\n').filter(Boolean);
+          if (lines.length > 0) {
+            const lastLine = lines[lines.length - 1];
+            const match = lastLine.match(/^([a-f0-9]{7,40})\b/);
+            if (match) {
+              const rootCommit = match[1];
+              execSync(`git rev-parse --verify "${rootCommit}^{commit}"`, { cwd: worktreeDir, stdio: 'ignore' });
+              baseCommit = rootCommit;
+            }
+          }
+        } catch {}
+      }
+      // 2.4 通用主干分支兜底
       if (!baseCommit) {
         for (const candidate of ['main', 'master', 'origin/main', 'origin/master', 'HEAD~1']) {
           try {
@@ -810,12 +860,16 @@ export class WorktreeManager {
   /**
    * 获取 Worktree 相比主分支的代码修改与统计（通用 git diff 审计）
    */
-  public getWorktreeDiff(worktreeDir: string, baseBranch?: string): { changedFiles: string[]; diffSummary: string; diffResult?: TaskWorktreeDiffResult } {
+  public getWorktreeDiff(
+    worktreeDir: string,
+    baseBranch?: string,
+    baseCommit?: string
+  ): { changedFiles: string[]; diffSummary: string; diffResult?: TaskWorktreeDiffResult } {
     if (!fs.existsSync(worktreeDir)) {
       return { changedFiles: [], diffSummary: '0 files' };
     }
     try {
-      const detail = this.getWorktreeDiffDetail(worktreeDir, baseBranch);
+      const detail = this.getWorktreeDiffDetail(worktreeDir, baseBranch, baseCommit);
       const changedFiles = detail.files.map((f) => f.file);
       
       // 生成优雅紧凑的单行统计，严禁包含多行或复杂管道破坏 UI 布局

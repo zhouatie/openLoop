@@ -373,6 +373,7 @@ export interface WorktreeContextInfo {
   worktreeDir: string;
   branchName: string;
   baseBranch?: string;
+  baseCommit?: string;
   ports?: Record<string, number>; // 通用动态端口字典，如 { webPort: 5175, corePort: 19891 }
   corePort?: number; // 兼容字段
   webPort?: number;  // 兼容字段
