@@ -282,8 +282,21 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 backdrop-blur-[2px] animate-in fade-in duration-100 p-4">
-      <div className="w-[460px] max-w-full bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.12)] text-[#1c1c21] flex flex-col max-h-[85vh] transition-all">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 backdrop-blur-[2px] animate-in fade-in duration-100 p-4"
+      onClick={() => {
+        if (!isRunning) {
+          if (import.meta.env?.DEV) {
+            console.log('[QuickRunWorkflowModal] 点击蒙层关闭弹窗');
+          }
+          onClose();
+        }
+      }}
+    >
+      <div
+        className="w-[460px] max-w-full bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.12)] text-[#1c1c21] flex flex-col max-h-[85vh] transition-all"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* 顶部标题栏 */}
         <div className="flex items-center justify-between pb-2.5 border-b border-[#ececf0]">
           <div className="flex items-center gap-2">

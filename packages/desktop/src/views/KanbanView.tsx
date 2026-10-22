@@ -1851,8 +1851,19 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
       {/* 产物预览弹窗 */}
       {previewArtifact && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100">
-          <div className="w-[480px] bg-white border border-[#e3e3e8] rounded-[12px] p-5 shadow-[0_16px_44px_rgba(20,22,30,0.16)]">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100"
+          onClick={() => {
+            if (import.meta.env?.DEV) {
+              console.log('[KanbanView] 点击蒙层关闭产物预览弹窗');
+            }
+            setPreviewArtifact(null);
+          }}
+        >
+          <div
+            className="w-[480px] bg-white border border-[#e3e3e8] rounded-[12px] p-5 shadow-[0_16px_44px_rgba(20,22,30,0.16)]"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between pb-3 border-b border-[#ececf0]">
               <div className="flex items-center gap-2">
                 <FileImage className="text-[#4f46e5]" size={16} />

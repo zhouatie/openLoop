@@ -307,8 +307,21 @@ export const QaSuiteModal: React.FC<QaSuiteModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl bg-white rounded-[12px] border border-[#e3e3e8] shadow-[0_12px_32px_rgba(0,0,0,0.12)] flex flex-col max-h-[88vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4"
+      onClick={() => {
+        if (!isSaving) {
+          if (import.meta.env?.DEV) {
+            console.log('[QaSuiteModal] 点击蒙层关闭弹窗');
+          }
+          onClose();
+        }
+      }}
+    >
+      <div
+        className="w-full max-w-2xl bg-white rounded-[12px] border border-[#e3e3e8] shadow-[0_12px_32px_rgba(0,0,0,0.12)] flex flex-col max-h-[88vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* 顶部标题栏 */}
         <div className="px-5 py-3.5 border-b border-[#ececf0] flex items-center justify-between shrink-0 bg-[#fafafc]">
           <div>

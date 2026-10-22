@@ -107,9 +107,20 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           ? 'bg-gradient-to-b from-[#fafafb] via-[#f4f4f6] to-[#ebebee]'
           : 'bg-black/35 backdrop-blur-[3px]'
       } p-6 select-none animate-in fade-in duration-200`}
+      onClick={() => {
+        if (!asPage) {
+          if (import.meta.env?.DEV) {
+            console.log('[OnboardingModal] 点击蒙层关闭引导弹窗');
+          }
+          handleComplete();
+        }
+      }}
     >
       {/* 居中面板：极简苹果原厂质感 */}
-      <div className="bg-white border border-[#e2e2e7] rounded-[14px] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.07),0_1px_3px_rgba(0,0,0,0.03)] w-full max-w-[640px] overflow-hidden flex flex-col">
+      <div
+        className="bg-white border border-[#e2e2e7] rounded-[14px] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.07),0_1px_3px_rgba(0,0,0,0.03)] w-full max-w-[640px] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* 顶部 Header：克制留白与品牌呈现 */}
         <div className="px-7 pt-7 pb-5 border-b border-[#f1f1f4] bg-gradient-to-b from-white to-[#fafafc]">
           <div className="flex items-center justify-between mb-3">

@@ -1019,7 +1019,19 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
 
       {/* 右侧滑出式执行详情与实时观测抽屉 (Detail Drawer) */}
       {activeTaskId && activeTaskDetail && (
-        <div className="fixed inset-y-0 right-0 w-full sm:w-[580px] md:w-[620px] max-w-[95vw] bg-white border-l border-[#e3e3e8] shadow-2xl z-40 flex flex-col animate-in slide-in-from-right-4 duration-150 select-text">
+        <div
+          className="fixed inset-0 z-40 flex justify-end bg-black/25 backdrop-blur-[1px] animate-in fade-in duration-150 select-none"
+          onClick={() => {
+            if (import.meta.env?.DEV) {
+              console.log('[WorkflowExecutionHistoryView] 点击蒙层关闭详情抽屉');
+            }
+            handleCloseDetail();
+          }}
+        >
+          <div
+            className="w-full sm:w-[580px] md:w-[620px] max-w-[95vw] h-full bg-white border-l border-[#e3e3e8] shadow-2xl flex flex-col animate-in slide-in-from-right-4 duration-150 select-text"
+            onClick={(e) => e.stopPropagation()}
+          >
           {/* 抽屉头部 */}
           <div className="h-[48px] border-b border-[#e3e3e8] px-4 bg-[#fafafc] flex items-center justify-between shrink-0 select-none">
             <div className="flex items-center gap-2 min-w-0">
@@ -1226,6 +1238,7 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
               </div>
             </div>
           </div>
+        </div>
         </div>
       )}
 

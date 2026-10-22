@@ -97,8 +97,19 @@ export const QaReplayerModal: React.FC<QaReplayerModalProps> = ({ run, onClose }
   const reportUrl = run.reportRelPath ? api.getArtifactUrl(run.reportRelPath) : run.reportUrl;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 select-none">
-      <div className="w-full max-w-6xl h-[90vh] bg-[#18181b] rounded-[12px] border border-[#27272a] shadow-[0_20px_60px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden text-[#e4e4e7] animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 select-none"
+      onClick={() => {
+        if (import.meta.env?.DEV) {
+          console.log('[QaReplayerModal] 点击蒙层关闭弹窗');
+        }
+        onClose();
+      }}
+    >
+      <div
+        className="w-full max-w-6xl h-[90vh] bg-[#18181b] rounded-[12px] border border-[#27272a] shadow-[0_20px_60px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden text-[#e4e4e7] animate-in fade-in zoom-in-95 duration-150"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* 顶部标题与摘要栏 */}
         <div className="h-[48px] bg-[#27272a]/70 border-b border-[#3f3f46] px-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">

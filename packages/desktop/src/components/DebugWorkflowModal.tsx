@@ -220,7 +220,17 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
+      onClick={() => {
+        if (!loading) {
+          if (import.meta.env?.DEV) {
+            console.log('[DebugWorkflowModal] 点击蒙层关闭弹窗');
+          }
+          onClose();
+        }
+      }}
+    >
       <div
         className="w-full max-w-[560px] bg-white rounded-[12px] border border-[#e3e3e8] shadow-[0_16px_48px_rgba(0,0,0,0.12)] overflow-hidden flex flex-col scale-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
