@@ -29,6 +29,29 @@ function resolveWorkingDir(rawPath?: string): string | undefined {
   return trimmed;
 }
 
+/**
+ * Worktree 沙箱环境变量：Agent 及其 shell 拉起的服务必须作用于沙箱端口与沙箱数据目录。
+ * 不注入时子进程会回落到生产默认值 (端口 19888 / 数据目录 ~/.openloop)，
+ * 从而误触生产库的孤立任务恢复逻辑。
+ */
+function buildWorktreeEnv(task: Task): Record<string, string> {
+  const wt = task.context?.worktree;
+  if (!wt) return {};
+
+  const corePort = wt.corePort || wt.ports?.corePort;
+  const env: Record<string, string> = {};
+
+  if (corePort) {
+    env.OPENLOOP_PORT = String(corePort);
+    env.VITE_CORE_PORT = String(corePort);
+  }
+  if (wt.storeDir) {
+    env.OPENLOOP_STORE_DIR = wt.storeDir;
+  }
+
+  return env;
+}
+
 function findRepoRoot(startDir?: string): string {
   let cur = startDir ? path.resolve(startDir) : process.cwd();
   // 必须剥离 .worktrees，防止任务重试时在 worktree 内部再次嵌套创建
@@ -583,6 +606,7 @@ export class AgentExecutor implements NodeExecutor {
           initialPrompt: prompt,
           initialAttachments: mergedAttachments.length > 0 ? mergedAttachments : undefined,
           awaitCompletionMarker: true,
+          env: buildWorktreeEnv(task),
           onLog: emitLog,
           onUpdate: (state) => {
             if (ctx.onSessionUpdate) {
@@ -668,6 +692,7 @@ export class AgentExecutor implements NodeExecutor {
         ...node.config,
         command: resolvedCommand,
         env: {
+          ...buildWorktreeEnv(task),
           ...node.config.env,
           OPENLOOP_SESSION_ID: sessionId,
           OPENLOOP_TASK_ID: task.id,
