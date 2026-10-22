@@ -21,6 +21,7 @@ export * from './AgentSessionDrawer';
 export * from './ChatScrollToLatestButton';
 export * from './AgentChatChangedFiles';
 export * from './diff/CodeDiffViewerModal';
+export * from './qa/QaArtifactSelectorModal';
 
 
 

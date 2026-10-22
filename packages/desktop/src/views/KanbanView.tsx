@@ -50,7 +50,7 @@ import {
   GitCommit,
   Eye,
 } from 'lucide-react';
-import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage, TaskAttachment } from '@openloop/core';
+import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage, TaskAttachment, SelectedQaArtifacts } from '@openloop/core';
 import { getAgentProviderMeta } from '@openloop/agent-providers';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';
@@ -65,6 +65,7 @@ import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton
 import { AgentAwaitingInputBar } from '../components/AgentAwaitingInputBar';
 import { AgentChatChangedFiles } from '../components/AgentChatChangedFiles';
 import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
+import { QaArtifactSelectorModal } from '../components/qa/QaArtifactSelectorModal';
 import { KanbanLaneList } from '../components/KanbanLaneList';
 import { toast } from '../components/Toast';
 import { resolveNodeMeta } from '../utils/nodeMeta';
@@ -428,6 +429,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [includeQaArtifacts, setIncludeQaArtifacts] = useState(false);
   const [expandedQaAttachments, setExpandedQaAttachments] = useState<Record<string, boolean>>({});
 
+  // 精细选择 QA 自动化测试产物状态
+  const [isQaSelectorOpen, setIsQaSelectorOpen] = useState(false);
+  const [selectedQaArtifacts, setSelectedQaArtifacts] = useState<SelectedQaArtifacts | null>(null);
+
   // 结合全局 tasks 获取最新任务上下文信息
   const activeTask = selectedTask ? (tasks.find((t) => t.id === selectedTask.id) || selectedTask) : null;
   const currentQaRunId = activeTask?.context?.qaRunId || (activeTask?.context?.worktree as any)?.qaRunId;
@@ -591,19 +596,44 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     const msg = chatInput.trim();
     const toSendAttachments = [...chatAttachments];
     const willIncludeQa = includeQaArtifacts;
-    if (!msg && toSendAttachments.length === 0 && !willIncludeQa) return;
+
+    const hasSelectedArtifacts = Boolean(
+      selectedQaArtifacts &&
+      ((Array.isArray(selectedQaArtifacts.steps) && selectedQaArtifacts.steps.length > 0) ||
+       (Array.isArray(selectedQaArtifacts.screenshots) && selectedQaArtifacts.screenshots.length > 0))
+    );
+
+    if (!msg && toSendAttachments.length === 0 && !willIncludeQa && !hasSelectedArtifacts) return;
     if (pendingChatUploads.some((p) => p.status === 'uploading')) {
       toast.warning('请等待图片附件上传完成后再发送');
       return;
     }
 
+    // 将精选的 QA 截图注入附件列表
+    if (hasSelectedArtifacts && selectedQaArtifacts?.screenshots) {
+      selectedQaArtifacts.screenshots.forEach((sc) => {
+        toSendAttachments.push({
+          id: `att_qa_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          name: sc.name,
+          mimeType: sc.name.endsWith('.svg') ? 'image/svg+xml' : 'image/webp',
+          path: sc.path,
+          url: sc.url,
+          createdAt: Date.now(),
+        });
+      });
+    }
+
     setChatInput('');
     setChatAttachments([]);
     setIncludeQaArtifacts(false);
+    const sentSelection = selectedQaArtifacts;
+    setSelectedQaArtifacts(null);
     setIsSendingChat(true);
     scrollChatToBottom(true);
 
-    const userDisplayMsg = msg || (willIncludeQa ? '请查看最新 UI 自动化测试产物并分析修复。' : '');
+    const userDisplayMsg = msg || (hasSelectedArtifacts
+      ? '请查看我选中的 UI 自动化测试产物与操作流程，并分析修改代码。'
+      : (willIncludeQa ? '请查看最新 UI 自动化测试产物并分析修复。' : ''));
 
     if (import.meta.env?.DEV) {
       console.log('[UI:AgentChat] 用户向 Agent 发送对话:', {
@@ -611,6 +641,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         content: userDisplayMsg,
         attachmentsCount: toSendAttachments.length,
         includeQaArtifacts: willIncludeQa,
+        hasSelectedQa: hasSelectedArtifacts,
       });
     }
 
@@ -636,6 +667,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     try {
       await api.sendTaskChatMessage(selectedTask.id, userDisplayMsg, toSendAttachments, {
         includeQaArtifacts: willIncludeQa,
+        selectedQaArtifacts: hasSelectedArtifacts ? (sentSelection || undefined) : undefined,
       });
     } catch (e: any) {
       if (import.meta.env?.DEV) {
@@ -3580,12 +3612,112 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       </div>
                     )}
 
-                    {/* 已附加测试产物微胶囊 */}
-                    {includeQaArtifacts && (
-                      <div className="mb-2 flex items-center">
-                        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[5px] bg-[#f0f0ff] border border-[#d8d6fb] text-[#4f46e5] text-[10.5px] font-medium select-none">
+                    {/* 精选 QA 自动化测试产物微胶囊面板 */}
+                    {selectedQaArtifacts && (selectedQaArtifacts.screenshots?.length > 0 || selectedQaArtifacts.steps?.length > 0) ? (
+                      <div className="mb-2 p-2 rounded-[7px] bg-[#f9f9fb] border border-[#e3e3e8] space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <div className="flex items-center gap-1.5 font-medium text-[#4f46e5]">
+                            <FlaskConical size={12} />
+                            <span>已选测试产物</span>
+                            <span className="text-[10px] text-[#71717a] font-normal">
+                              ({selectedQaArtifacts.steps?.length || 0} 流程, {selectedQaArtifacts.screenshots?.length || 0} 截图)
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setIsQaSelectorOpen(true)}
+                              className="text-[10.5px] text-[#4f46e5] hover:underline cursor-pointer font-medium"
+                            >
+                              修改选择
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedQaArtifacts(null)}
+                              className="text-[10.5px] text-[#85858d] hover:text-[#dc2626] cursor-pointer"
+                            >
+                              清空
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 选中的截图横排微缩略图 */}
+                        {selectedQaArtifacts.screenshots && selectedQaArtifacts.screenshots.length > 0 && (
+                          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-0.5">
+                            {selectedQaArtifacts.screenshots.map((sc, scIdx) => (
+                              <div
+                                key={sc.name + scIdx}
+                                className="group/sc relative shrink-0 w-[46px] h-[32px] rounded-[4px] border border-[#d8d6fb] overflow-hidden bg-black/5"
+                              >
+                                <img src={sc.url} alt={sc.name} className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/35 opacity-0 group-hover/sc:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveLightboxImage({ name: sc.name, url: sc.url })}
+                                    className="text-white hover:scale-110 transition-transform cursor-pointer"
+                                    title="放大预览"
+                                  >
+                                    <ZoomIn size={10} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedQaArtifacts((prev) => {
+                                        if (!prev) return null;
+                                        const nextScreenshots = prev.screenshots.filter((_, idx) => idx !== scIdx);
+                                        return { ...prev, screenshots: nextScreenshots };
+                                      });
+                                    }}
+                                    className="text-white hover:text-red-300 transition-colors cursor-pointer"
+                                    title="移除此截图"
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* 选中的操作步骤流程标签 */}
+                        {selectedQaArtifacts.steps && selectedQaArtifacts.steps.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {selectedQaArtifacts.steps.map((st, stIdx) => (
+                              <span
+                                key={st.stepIndex}
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] font-medium border ${
+                                  st.status === 'failed'
+                                    ? 'bg-[#fef2f2] text-[#dc2626] border-[#fecaca]/70'
+                                    : 'bg-white text-[#4b4b53] border-[#e3e3e8]'
+                                }`}
+                              >
+                                <span className="font-mono">#{st.stepIndex + 1}</span>
+                                <span className="truncate max-w-[150px]">{st.prompt}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedQaArtifacts((prev) => {
+                                      if (!prev) return null;
+                                      const nextSteps = prev.steps.filter((_, idx) => idx !== stIdx);
+                                      return { ...prev, steps: nextSteps };
+                                    });
+                                  }}
+                                  className="hover:opacity-75 cursor-pointer ml-0.5"
+                                  title="移除此步骤"
+                                >
+                                  <X size={9} />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : includeQaArtifacts ? (
+                      /* 原有全量附带测试产物微胶囊 */
+                      <div className="mb-2 flex items-center justify-between bg-[#f0f0ff] border border-[#d8d6fb] rounded-[5px] px-2 py-1">
+                        <div className="inline-flex items-center gap-1.5 text-[#4f46e5] text-[10.5px] font-medium select-none">
                           <FlaskConical size={11} className="text-[#4f46e5]" />
-                          <span>本次将附带最新自动化测试产物</span>
+                          <span>本次将附带全量最新测试产物</span>
                           {currentQaRunId && (
                             <span
                               className="text-[9.5px] font-mono text-[#4f46e5]/80 bg-white/90 px-1 py-0.5 rounded border border-[#4f46e5]/20 max-w-[130px] truncate"
@@ -3594,17 +3726,26 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               {currentQaRunId}
                             </span>
                           )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setIsQaSelectorOpen(true)}
+                            className="text-[10px] text-[#4f46e5] hover:underline cursor-pointer font-medium"
+                          >
+                            精细选择...
+                          </button>
                           <button
                             type="button"
                             onClick={() => setIncludeQaArtifacts(false)}
-                            className="w-3.5 h-3.5 rounded-full hover:bg-[#4f46e5]/15 flex items-center justify-center text-[#4f46e5] transition-colors ml-0.5 cursor-pointer"
+                            className="w-3.5 h-3.5 rounded-full hover:bg-[#4f46e5]/15 flex items-center justify-center text-[#4f46e5] transition-colors cursor-pointer"
                             title="取消附带测试产物"
                           >
                             <X size={9} strokeWidth={2.5} />
                           </button>
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     <textarea
                       ref={chatTextareaRef}
@@ -3640,31 +3781,27 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           <span>图片</span>
                         </button>
 
-                        {/* 主动附带测试产物开关按钮 */}
+                        {/* 选择测试产物按钮 */}
                         {hasQaArtifacts && (
                           <button
                             type="button"
-                            onClick={() => {
-                              const next = !includeQaArtifacts;
-                              setIncludeQaArtifacts(next);
-                              if (import.meta.env?.DEV) {
-                                console.log('[UI:AgentChat] 用户切换附带测试产物状态:', next);
-                              }
-                            }}
+                            onClick={() => setIsQaSelectorOpen(true)}
                             className={`h-[22px] px-2 rounded-[5px] border text-[10.5px] font-medium flex items-center gap-1 transition-all cursor-pointer ${
-                              includeQaArtifacts
+                              (selectedQaArtifacts && (selectedQaArtifacts.screenshots?.length > 0 || selectedQaArtifacts.steps?.length > 0)) || includeQaArtifacts
                                 ? 'border-[#4f46e5]/40 bg-[#eeedfd] text-[#4f46e5] shadow-xs font-semibold'
                                 : 'border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] hover:border-[#1c1c21]/30 text-[#63636b] hover:text-[#1c1c21]'
                             }`}
-                            title={
-                              includeQaArtifacts
-                                ? '已开启：本次消息将随附最新自动化测试截帧与时间轴 (点击取消)'
-                                : '点击在本次消息中附带最新自动化测试截帧与时间轴'
-                            }
+                            title="精细选择 UI 自动化测试截帧与操作流程发给 Agent"
                           >
-                            <FlaskConical size={10.5} className={includeQaArtifacts ? 'text-[#4f46e5]' : ''} />
-                            <span>{includeQaArtifacts ? '已带测试产物' : '附带测试产物'}</span>
-                            {includeQaArtifacts && <Check size={10} strokeWidth={2.5} />}
+                            <FlaskConical size={10.5} className={(selectedQaArtifacts || includeQaArtifacts) ? 'text-[#4f46e5]' : ''} />
+                            <span>
+                              {selectedQaArtifacts && (selectedQaArtifacts.screenshots?.length > 0 || selectedQaArtifacts.steps?.length > 0)
+                                ? `已选产物 (${(selectedQaArtifacts.steps?.length || 0) + (selectedQaArtifacts.screenshots?.length || 0)})`
+                                : includeQaArtifacts
+                                ? '已带全量测试产物'
+                                : '选择测试产物'}
+                            </span>
+                            {(selectedQaArtifacts || includeQaArtifacts) && <Check size={10} strokeWidth={2.5} />}
                           </button>
                         )}
 
@@ -3706,10 +3843,20 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           </span>
                         )}
                         <button
-                          disabled={(!chatInput.trim() && chatAttachments.length === 0 && !includeQaArtifacts) || isSendingChat}
+                          disabled={
+                            (!chatInput.trim() &&
+                              chatAttachments.length === 0 &&
+                              !includeQaArtifacts &&
+                              !(selectedQaArtifacts && (selectedQaArtifacts.screenshots?.length > 0 || selectedQaArtifacts.steps?.length > 0))) ||
+                            isSendingChat
+                          }
                           onClick={handleSendChat}
                           className={`h-[24px] px-3 rounded-[5px] text-[11px] font-medium flex items-center gap-1 transition-all ${
-                            (chatInput.trim() || chatAttachments.length > 0 || includeQaArtifacts) && !isSendingChat
+                            (chatInput.trim() ||
+                              chatAttachments.length > 0 ||
+                              includeQaArtifacts ||
+                              (selectedQaArtifacts && (selectedQaArtifacts.screenshots?.length > 0 || selectedQaArtifacts.steps?.length > 0))) &&
+                            !isSendingChat
                               ? 'bg-[#1c1c21] hover:bg-[#2e2f36] text-white shadow-sm active:scale-95 cursor-pointer'
                               : 'bg-[#f4f4f6] text-[#a5a5b0] cursor-not-allowed'
                           }`}
@@ -3786,6 +3933,21 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
           }}
         />
       )}
+
+      {/* 精细选择 QA 自动化测试产物弹窗 */}
+      <QaArtifactSelectorModal
+        isOpen={isQaSelectorOpen}
+        onClose={() => setIsQaSelectorOpen(false)}
+        taskId={activeTask?.id || selectedTask?.id}
+        initialSelection={selectedQaArtifacts}
+        onConfirm={(selection) => {
+          setSelectedQaArtifacts(selection);
+          setIncludeQaArtifacts(false);
+          if (import.meta.env?.DEV) {
+            console.log('[KanbanView] 用户精选 QA 自动化测试产物:', selection);
+          }
+        }}
+      />
     </div>
   );
 };

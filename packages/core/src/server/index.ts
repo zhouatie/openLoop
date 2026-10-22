@@ -1205,21 +1205,57 @@ export class OpenLoopServer {
         const task = this.store.getTask(taskId);
         if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
         const body = await this.parseJsonBody(req);
-        const { message, attachments, includeQaArtifacts } = body;
+        const { message, attachments, includeQaArtifacts, selectedQaArtifacts } = body;
         const safeAttachments: TaskAttachment[] = Array.isArray(attachments) ? attachments : [];
         const rawMsg = typeof message === 'string' ? message.trim() : '';
 
-        if (!rawMsg && safeAttachments.length === 0 && !includeQaArtifacts) {
+        const hasSelectedQa = Boolean(
+          selectedQaArtifacts &&
+          ((Array.isArray(selectedQaArtifacts.steps) && selectedQaArtifacts.steps.length > 0) ||
+           (Array.isArray(selectedQaArtifacts.screenshots) && selectedQaArtifacts.screenshots.length > 0))
+        );
+
+        if (!rawMsg && safeAttachments.length === 0 && !includeQaArtifacts && !hasSelectedQa) {
           return this.sendJson(res, 400, { error: 'Message or attachments required' }, reqMeta);
         }
 
-        const finalMessage = rawMsg || (includeQaArtifacts ? '请查看最新 UI 自动化测试产物并分析修复。' : (safeAttachments.length > 0 ? '请查看我提供的图片附件并推进任务。' : ''));
+        const finalMessage = rawMsg || (hasSelectedQa
+          ? '请查看我选中的 UI 自动化测试产物与操作流程，并分析修改代码。'
+          : (includeQaArtifacts
+            ? '请查看最新 UI 自动化测试产物并分析修复。'
+            : (safeAttachments.length > 0 ? '请查看我提供的图片附件并推进任务。' : '')));
 
         serverLogger.info(
-          `[AgentChat] 接收到任务会话消息 (${taskId}): "${finalMessage.slice(0, 30)}", 附件数: ${safeAttachments.length}, 附带QA产物: ${!!includeQaArtifacts}`
+          `[AgentChat] 接收到任务会话消息 (${taskId}): "${finalMessage.slice(0, 30)}", 附件数: ${safeAttachments.length}, 附带QA产物: ${!!includeQaArtifacts}, 精选QA产物: ${hasSelectedQa}`
         );
 
-        // 如果用户上传了新图片，也同步累加到任务全局 attachments 中
+        // 如果用户选择了特定 QA 产物，自动解析本地截图路径并装配入 safeAttachments
+        if (selectedQaArtifacts && Array.isArray(selectedQaArtifacts.screenshots)) {
+          const dataDir = this.store.getDataDir();
+          for (const sc of selectedQaArtifacts.screenshots) {
+            const runId = selectedQaArtifacts.qaRunId;
+            let absPath = sc.path;
+            if (!absPath && runId && sc.name) {
+              absPath = path.join(dataDir, 'artifacts', runId, sc.name);
+            }
+            if (absPath && fs.existsSync(absPath)) {
+              const existingAtt = safeAttachments.find((a) => a.path === absPath || a.name === sc.name);
+              if (!existingAtt) {
+                safeAttachments.push({
+                  id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                  name: sc.name,
+                  mimeType: sc.name.endsWith('.svg') ? 'image/svg+xml' : 'image/webp',
+                  path: absPath,
+                  url: sc.url || (runId ? `/artifacts/${runId}/${sc.name}` : undefined),
+                  size: fs.statSync(absPath).size,
+                  createdAt: Date.now(),
+                });
+              }
+            }
+          }
+        }
+
+        // 如果用户上传或选择了新图片，也同步累加到任务全局 attachments 中
         if (safeAttachments.length > 0) {
           const currentAtts = task.attachments || [];
           const existingIds = new Set(currentAtts.map((a) => a.id));
@@ -1232,7 +1268,40 @@ export class OpenLoopServer {
 
         // 仅在用户主动操作附带时，才装配 QA 自动化测试产物信息，默认绝不自动插入
         let enrichedMessage = finalMessage;
-        if (includeQaArtifacts) {
+
+        // 优先装配用户精选的 QA 截图与步骤产物
+        if (hasSelectedQa && !enrichedMessage.includes('[用户主动附带：')) {
+          const parts: string[] = [];
+          parts.push(`[用户主动附带：UI 自动化测试验收产物与问题流程]`);
+          if (selectedQaArtifacts.qaRunId) {
+            parts.push(`- 自动化测试 Run ID: ${selectedQaArtifacts.qaRunId}${selectedQaArtifacts.suiteName ? ` (${selectedQaArtifacts.suiteName})` : ''}`);
+          }
+          if (Array.isArray(selectedQaArtifacts.steps) && selectedQaArtifacts.steps.length > 0) {
+            parts.push(`\n【选中的关键操作流程与步骤 (${selectedQaArtifacts.steps.length} 项)】`);
+            for (const step of selectedQaArtifacts.steps) {
+              const statusUpper = (step.status || 'unknown').toUpperCase();
+              const durationText = step.durationMs !== undefined ? ` [${step.durationMs}ms]` : '';
+              parts.push(`* 步骤 ${step.stepIndex + 1} [${statusUpper}]${durationText}: ${step.prompt}`);
+              if (step.error) {
+                parts.push(`  - 报错信息: ${step.error}`);
+              }
+              if (step.thought) {
+                parts.push(`  - 步骤思考: ${step.thought}`);
+              }
+            }
+          }
+          if (Array.isArray(selectedQaArtifacts.screenshots) && selectedQaArtifacts.screenshots.length > 0) {
+            parts.push(`\n【选中的截帧快照与界面证据 (${selectedQaArtifacts.screenshots.length} 张)】`);
+            for (const sc of selectedQaArtifacts.screenshots) {
+              const promptDesc = sc.stepPrompt ? ` (对应步骤: ${sc.stepPrompt})` : (sc.stepIndex !== undefined ? ` (对应步骤 #${sc.stepIndex + 1})` : '');
+              const pathInfo = sc.path ? ` [路径: ${sc.path}]` : '';
+              parts.push(`* ${sc.name}${promptDesc}${pathInfo}`);
+            }
+          }
+          parts.push(`\n提示：请结合上述选中的真实测试截帧与流程报错，精准分析失败根因并修改代码。`);
+          const qaFormattedText = parts.join('\n');
+          enrichedMessage = enrichedMessage ? `${enrichedMessage}\n\n${qaFormattedText}` : qaFormattedText;
+        } else if (includeQaArtifacts) {
           let qaRunId = task.context?.qaRunId || (task.context?.worktree as any)?.qaRunId;
           if (!qaRunId) {
             const taskQaRuns = this.store.getQaRuns(undefined, taskId, 1);
@@ -1320,6 +1389,7 @@ export class OpenLoopServer {
           thinking: settings.reasoningLevel || 'high',
           cwd,
           initialPrompt: enrichedMessage,
+          initialAttachments: safeAttachments.length > 0 ? safeAttachments : undefined,
           awaitCompletionMarker: true,
           onLog: (stream, message) => {
             const logEntry = {
@@ -1956,9 +2026,10 @@ export class OpenLoopServer {
       // QA Automation Runs: /api/qa/runs
       if (pathname === '/api/qa/runs' && method === 'GET') {
         const suiteId = parsedUrl.searchParams.get('suiteId') || undefined;
+        const taskId = parsedUrl.searchParams.get('taskId') || undefined;
         const limitStr = parsedUrl.searchParams.get('limit');
         const limit = limitStr ? parseInt(limitStr, 10) : 30;
-        const runs = this.store.getQaRuns(suiteId, undefined, limit);
+        const runs = this.store.getQaRuns(suiteId, taskId, limit);
         return this.sendJson(res, 200, runs, reqMeta);
       }
 

@@ -10,6 +10,7 @@ import {
   WorkflowSessionState,
   QaSuite,
   QaRunRecord,
+  SelectedQaArtifacts,
   AndroidDeviceInfo,
   IosDevicesSnapshot,
   AutomationTask,
@@ -653,13 +654,14 @@ export class DesktopApiService {
     taskId: string,
     message: string,
     attachments?: TaskAttachment[],
-    options?: { includeQaArtifacts?: boolean }
+    options?: { includeQaArtifacts?: boolean; selectedQaArtifacts?: SelectedQaArtifacts }
   ): Promise<any> {
     if (import.meta.env?.DEV) {
       console.log(`[UI:API] 发送任务会话消息 (${taskId}):`, {
         message: message ? message.slice(0, 40) : '',
         attachmentsCount: attachments?.length || 0,
         includeQaArtifacts: !!options?.includeQaArtifacts,
+        hasSelectedQaArtifacts: !!options?.selectedQaArtifacts,
       });
     }
     return requestJson<any>(`${BASE_URL}/api/tasks/${taskId}/session/chat`, {
@@ -669,6 +671,7 @@ export class DesktopApiService {
         message,
         attachments,
         includeQaArtifacts: options?.includeQaArtifacts ?? false,
+        selectedQaArtifacts: options?.selectedQaArtifacts,
       }),
     });
   }
@@ -813,11 +816,14 @@ export class DesktopApiService {
     });
   }
 
-  async getQaRuns(suiteId?: string): Promise<QaRunRecord[]> {
+  async getQaRuns(suiteId?: string, taskId?: string): Promise<QaRunRecord[]> {
     if (import.meta.env?.DEV) {
-      console.log('[UI:QA] 获取 QA 运行记录列表, suiteId:', suiteId);
+      console.log('[UI:QA] 获取 QA 运行记录列表, suiteId:', suiteId, 'taskId:', taskId);
     }
-    const query = suiteId ? `?suiteId=${encodeURIComponent(suiteId)}` : '';
+    const params = new URLSearchParams();
+    if (suiteId) params.append('suiteId', suiteId);
+    if (taskId) params.append('taskId', taskId);
+    const query = params.toString() ? `?${params.toString()}` : '';
     return requestJson<QaRunRecord[]>(`${BASE_URL}/api/qa/runs${query}`);
   }
 
