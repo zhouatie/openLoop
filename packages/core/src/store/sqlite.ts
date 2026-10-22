@@ -450,8 +450,9 @@ export class SqliteStore {
           type: 'worktree-setup',
           position: { x: 100, y: 150 },
           config: {
-            allocatePorts: ['webPort'],
+            allocatePorts: ['webPort', 'corePort'],
             basePort: 5175,
+            portBases: { webPort: 5175, corePort: 19890 },
             sharedPaths: ['node_modules', 'packages/*/node_modules'],
             timeoutSec: 120,
           },
