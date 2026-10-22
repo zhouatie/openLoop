@@ -1320,6 +1320,7 @@ export class OpenLoopServer {
           thinking: settings.reasoningLevel || 'high',
           cwd,
           initialPrompt: enrichedMessage,
+          awaitCompletionMarker: true,
           onLog: (stream, message) => {
             const logEntry = {
               id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1338,7 +1339,13 @@ export class OpenLoopServer {
               if (!currentTask.context) currentTask.context = {};
               currentTask.context.chatMessages = state.messages;
               if (state.model) currentTask.context.model = state.model;
+              const prevAwaiting = !!currentTask.context.awaitingInput;
+              const nextAwaiting = !!state.awaitingInput;
+              currentTask.context.awaitingInput = nextAwaiting;
               this.store.saveTask(currentTask);
+              if (prevAwaiting !== nextAwaiting) {
+                this.broadcast({ type: 'task:update', data: currentTask });
+              }
             }
             this.broadcast({ type: 'agent:chat_update', data: state });
           },

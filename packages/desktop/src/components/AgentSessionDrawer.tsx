@@ -172,6 +172,26 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
       console.log('[AgentSessionDrawer] 发送会话消息:', { taskId, text });
     }
 
+    // 乐观更新
+    setSessionState((prev) =>
+      prev
+        ? {
+            ...prev,
+            isBusy: true,
+            awaitingInput: false,
+            messages: [
+              ...prev.messages,
+              {
+                id: `opt_${Date.now()}`,
+                role: 'user',
+                content: text,
+                timestamp: Date.now(),
+              },
+            ],
+          }
+        : prev
+    );
+
     try {
       await api.sendTaskChatMessage(taskId, text);
       setChatInput('');
@@ -184,11 +204,46 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
     }
   };
 
-  // 确认当前节点已完成，手动放行流水线
+  // 确认 Agent 方案，向 Agent 发送确认指令，启动执行状态
+  const handleConfirmPlan = async (prompt = '方案已确认，请开始执行编码实现。') => {
+    if (!taskId) return;
+    if (import.meta.env?.DEV) {
+      console.log('[AgentSessionDrawer] 用户确认方案，发送确认指令以开始执行:', { taskId, prompt });
+    }
+    // 乐观更新
+    setSessionState((prev) =>
+      prev
+        ? {
+            ...prev,
+            awaitingInput: false,
+            isBusy: true,
+            messages: [
+              ...prev.messages,
+              {
+                id: `opt_${Date.now()}`,
+                role: 'user',
+                content: prompt,
+                timestamp: Date.now(),
+              },
+            ],
+          }
+        : prev
+    );
+    try {
+      await api.sendTaskChatMessage(taskId, prompt);
+      toast('方案已确认，Agent 已开始执行', 'success');
+      await loadSession(true);
+    } catch (err: any) {
+      toast(err?.message || '启动执行失败', 'error');
+      await loadSession(true);
+    }
+  };
+
+  // 确认当前节点已完成，手动放行流水线（兜底跳过）
   const handleConfirmComplete = async () => {
     if (!taskId) return;
     if (import.meta.env?.DEV) {
-      console.log('[AgentSessionDrawer] 请求确认节点已完成并继续:', { taskId, nodeId });
+      console.log('[AgentSessionDrawer] 请求跳过节点并放行流水线:', { taskId, nodeId });
     }
     try {
       // 乐观更新：提示条立即消失，无需等待下游节点调度完成
@@ -196,10 +251,10 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
         prev ? { ...prev, awaitingInput: false, isBusy: true } : prev
       );
       await api.completeNode(taskId, nodeId);
-      toast.success('已确认完成，流水线继续推进');
+      toast('已跳过当前节点，流水线继续推进', 'info');
       await loadSession(true);
     } catch (err: any) {
-      toast.error(err?.message || '确认完成失败');
+      toast(err?.message || '放行失败', 'error');
       await loadSession(true);
     }
   };
@@ -620,7 +675,10 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
           ) : (
             <>
               {sessionState?.awaitingInput && (
-                <AgentAwaitingInputBar onConfirmComplete={handleConfirmComplete} />
+                <AgentAwaitingInputBar
+                  onConfirmPlan={handleConfirmPlan}
+                  onConfirmComplete={handleConfirmComplete}
+                />
               )}
 
               <div className="flex items-center justify-between text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
@@ -632,7 +690,12 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                     </>
                   ) : sessionState?.isPaused ? (
                     <span className="text-[#d97706] font-medium truncate">会话已暂停，可输入新指令后继续</span>
-                  ) : sessionState?.awaitingInput ? null : (
+                  ) : sessionState?.awaitingInput ? (
+                    <>
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
+                      <span className="text-[#4f46e5] font-medium truncate">等待确认：可点击上方按钮确认方案，或输入新指令继续</span>
+                    </>
+                  ) : (
                     <span className="truncate">可随时追加输入纠偏提示或追问</span>
                   )}
                 </span>

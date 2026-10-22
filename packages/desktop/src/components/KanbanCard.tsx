@@ -27,6 +27,7 @@ import {
   ChevronDown,
   Clock,
   CheckCircle2,
+  MessageSquare,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
@@ -726,19 +727,39 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
         const visual = getRunningNodeVisual(activeType);
         const IconComp = visual.icon;
         const activeName = currentNodeMeta?.name || currentNode?.name || '自动化工序执行中';
+        const isAwaitingInput = !!task.context?.awaitingInput;
 
         return (
-          <div className={`mb-2 p-2 rounded-[7px] border transition-all ${visual.badgeBg} ${visual.badgeBorder}`}>
+          <div
+            className={`mb-2 p-2 rounded-[7px] border transition-all ${
+              isAwaitingInput ? 'bg-[#fcfbff] border-[#dcdbf8]' : `${visual.badgeBg} ${visual.badgeBorder}`
+            }`}
+          >
             <div className="flex items-center justify-between gap-1.5 mb-1.5">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="relative flex h-2 w-2 shrink-0">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${visual.pingColor}`} />
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${visual.pingColor}`} />
+                  <span
+                    className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                      isAwaitingInput ? 'bg-[#6366f1]' : visual.pingColor
+                    }`}
+                  />
+                  <span
+                    className={`relative inline-flex rounded-full h-2 w-2 ${
+                      isAwaitingInput ? 'bg-[#4f46e5]' : visual.pingColor
+                    }`}
+                  />
                 </span>
-                <span className={`text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/90 border ${visual.badgeBorder} ${visual.badgeText} flex items-center gap-1 shrink-0`}>
-                  <IconComp size={9.5} />
-                  <span>{visual.label}</span>
-                </span>
+                {isAwaitingInput ? (
+                  <span className="text-[9.5px] font-semibold tracking-wider px-1.5 py-[1px] rounded bg-white/90 border border-[#c7d2fe] text-[#4338ca] flex items-center gap-1 shrink-0">
+                    <MessageSquare size={9.5} />
+                    <span>等待确认</span>
+                  </span>
+                ) : (
+                  <span className={`text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/90 border ${visual.badgeBorder} ${visual.badgeText} flex items-center gap-1 shrink-0`}>
+                    <IconComp size={9.5} />
+                    <span>{visual.label}</span>
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button
@@ -768,6 +789,11 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
             </div>
             <div className="text-[11px] font-medium text-[#1c1c21] truncate flex items-center gap-1" title={activeName}>
               <span className="truncate">{activeName}</span>
+              {isAwaitingInput && (
+                <span className="text-[10px] text-[#4f46e5] font-normal shrink-0">
+                  (需确认方案)
+                </span>
+              )}
             </div>
           </div>
         );

@@ -618,6 +618,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       setSessionState({
         ...sessionState,
         isBusy: true,
+        awaitingInput: false,
         messages: [
           ...sessionState.messages,
           {
@@ -673,11 +674,50 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
 
-  // 确认当前节点已完成，手动放行流水线
+  // 确认 Agent 方案，向会话发送确认指令，启动执行状态
+  const handleConfirmPlanAndExecute = async (prompt = '方案已确认，请开始执行编码实现。') => {
+    if (!selectedTask) return;
+    if (import.meta.env?.DEV) {
+      console.log('[UI:AgentChat] 用户确认方案，发送确认指令以开始执行:', {
+        taskId: selectedTask.id,
+        prompt,
+      });
+    }
+    // 乐观更新：隐藏等待条，将状态切换为执行中 (isBusy: true, awaitingInput: false)
+    setSessionState((prev) =>
+      prev
+        ? {
+            ...prev,
+            awaitingInput: false,
+            isBusy: true,
+            messages: [
+              ...prev.messages,
+              {
+                id: `opt_${Date.now()}`,
+                role: 'user',
+                content: prompt,
+                timestamp: Date.now(),
+              },
+            ],
+          }
+        : prev
+    );
+    try {
+      await api.sendTaskChatMessage(selectedTask.id, prompt);
+      toast.success('方案已确认，Agent 已开始执行');
+    } catch (e: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[UI:AgentChat] 发送确认指令失败:', e);
+      }
+      toast.error(`启动执行失败: ${e?.message || '未知错误'}`);
+    }
+  };
+
+  // 确认当前节点已完成，手动放行流水线（兜底跳过）
   const handleConfirmCompleteNode = async () => {
     if (!selectedTask) return;
     if (import.meta.env?.DEV) {
-      console.log('[UI:AgentChat] 请求确认节点已完成并继续:', {
+      console.log('[UI:AgentChat] 请求跳过节点并放行流水线:', {
         taskId: selectedTask.id,
         nodeId: selectedTask.currentNodeId,
       });
@@ -689,14 +729,14 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       );
       const updated = await api.completeNode(selectedTask.id, selectedTask.currentNodeId);
       setSelectedTask(updated);
-      toast.success('已确认完成，流水线继续推进');
+      toast.info('已跳过当前节点，流水线继续推进');
       const latestSession = await api.getTaskSession(selectedTask.id);
       setSessionState(latestSession);
     } catch (e: any) {
       if (import.meta.env?.DEV) {
         console.error('[UI:AgentChat] 确认节点完成失败:', e);
       }
-      toast.error(`确认完成失败: ${e?.message || '未知错误'}`);
+      toast.error(`放行失败: ${e?.message || '未知错误'}`);
     }
   };
 
@@ -3112,6 +3152,29 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
+                    {/* 会话状态微徽章 */}
+                    {sessionState?.isBusy ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eff6ff] text-[#2563eb] text-[10px] font-medium border border-[#bfdbfe]/60">
+                        <Loader2 size={10} className="animate-spin" />
+                        <span>执行中</span>
+                      </span>
+                    ) : sessionState?.isPaused ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fffbeb] text-[#d97706] text-[10px] font-medium border border-[#fde68a]">
+                        <Pause size={10} />
+                        <span>已暂停</span>
+                      </span>
+                    ) : sessionState?.awaitingInput ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eef2ff] text-[#4338ca] text-[10px] font-medium border border-[#c7d2fe]">
+                        <MessageSquare size={10} />
+                        <span>等待确认</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
+                        <Check size={10} />
+                        <span>就绪 / 空闲</span>
+                      </span>
+                    )}
+
                     {/* 运行中：显示暂停按钮 */}
                     {sessionState?.isBusy && (
                       <button
@@ -3349,7 +3412,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                 {/* 贴底悬浮输入框区 */}
                 <div className="pt-2.5 border-t border-[#ececf0] bg-white shrink-0">
                   {sessionState?.awaitingInput && (
-                    <AgentAwaitingInputBar onConfirmComplete={handleConfirmCompleteNode} />
+                    <AgentAwaitingInputBar
+                      onConfirmPlan={handleConfirmPlanAndExecute}
+                      onConfirmComplete={handleConfirmCompleteNode}
+                    />
                   )}
 
                   {/* 状态轻量提示 */}
@@ -3365,7 +3431,12 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           <span className="w-1.5 h-1.5 rounded-full bg-[#b45309]" />
                           <span className="text-[#b45309] font-medium">已暂停：发送新指令将继续推进</span>
                         </>
-                      ) : sessionState?.awaitingInput ? null : (
+                      ) : sessionState?.awaitingInput ? (
+                        <>
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
+                          <span className="text-[#4f46e5] font-medium">等待确认：可点击上方按钮一键确认方案，或输入指令后继续</span>
+                        </>
+                      ) : (
                         <span>可向当前智能体会话追问或补充指令</span>
                       )}
                     </span>

@@ -329,7 +329,13 @@ export class DagEngine extends EventEmitter {
         if (!task.context) task.context = {};
         task.context.chatMessages = state.messages;
         if (state.model) task.context.model = state.model;
+        const prevAwaiting = !!task.context.awaitingInput;
+        const nextAwaiting = !!state.awaitingInput;
+        task.context.awaitingInput = nextAwaiting;
         this.store.saveTask(task);
+        if (prevAwaiting !== nextAwaiting) {
+          this.emit('task:update', task);
+        }
         this.emit('agent:chat_update', state);
       },
       store: this.store,

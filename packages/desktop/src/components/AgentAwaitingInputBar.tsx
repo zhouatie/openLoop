@@ -1,35 +1,52 @@
 import React, { useState } from 'react';
-import { ArrowRight, Loader2 } from 'lucide-react';
+import { ArrowRight, Loader2, Play } from 'lucide-react';
 
 export interface AgentAwaitingInputBarProps {
-  /** 用户确认 Agent 已完成，手动放行流水线继续流转 */
-  onConfirmComplete: () => Promise<void> | void;
+  /** 用户确认 Agent 方案，向 Agent 发送确认指令并启动执行 */
+  onConfirmPlan?: () => Promise<void> | void;
+  /** 兜底操作：用户强制跳过/完成当前 Agent 节点，手动放行流水线继续流转到下一节点 */
+  onConfirmComplete?: () => Promise<void> | void;
 }
 
 /**
- * Agent 正在等待用户回复时的贴底提示条
- * 流水线停在当前节点，用户既可回答追问，也可直接确认完成放行
+ * Agent 正在等待用户回复或确认方案时的贴底提示条
+ * 流水线停在当前节点，用户可一键确认方案让 Agent 启动执行，也可在输入框补充说明或直接放行
  */
 export const AgentAwaitingInputBar: React.FC<AgentAwaitingInputBarProps> = ({
+  onConfirmPlan,
   onConfirmComplete,
 }) => {
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmittingPlan, setIsSubmittingPlan] = useState(false);
+  const [isSubmittingComplete, setIsSubmittingComplete] = useState(false);
 
-  const handleConfirm = async () => {
-    if (isSubmitting) return;
+  const handleConfirmPlan = async () => {
+    if (isSubmittingPlan || isSubmittingComplete || !onConfirmPlan) return;
     if (import.meta.env?.DEV) {
-      console.log('[AgentAwaitingInputBar] 用户确认节点已完成，请求放行流水线');
+      console.log('[AgentAwaitingInputBar] 用户确认方案，触发 Agent 启动执行');
     }
-    setIsSubmitting(true);
+    setIsSubmittingPlan(true);
+    try {
+      await onConfirmPlan();
+    } finally {
+      setIsSubmittingPlan(false);
+    }
+  };
+
+  const handleConfirmComplete = async () => {
+    if (isSubmittingPlan || isSubmittingComplete || !onConfirmComplete) return;
+    if (import.meta.env?.DEV) {
+      console.log('[AgentAwaitingInputBar] 用户手动跳过节点，请求放行流水线');
+    }
+    setIsSubmittingComplete(true);
     try {
       await onConfirmComplete();
     } finally {
-      setIsSubmitting(false);
+      setIsSubmittingComplete(false);
     }
   };
 
   return (
-    <div className="mb-2 flex items-center gap-2.5 pl-2.5 pr-2 py-[9px] rounded-[8px] border border-[#e2e1f8] bg-[linear-gradient(90deg,#f8f7ff_0%,#fcfcff_100%)] shadow-[0_1px_2px_rgba(79,70,229,0.05)]">
+    <div className="mb-2 flex items-center gap-2.5 pl-2.5 pr-2 py-[8px] rounded-[8px] border border-[#e2e1f8] bg-[linear-gradient(90deg,#f8f7ff_0%,#fcfcff_100%)] shadow-[0_1px_2px_rgba(79,70,229,0.05)]">
       <span className="relative flex w-1.5 h-1.5 shrink-0">
         <span className="absolute inline-flex w-1.5 h-1.5 rounded-full bg-[#6366f1]/50 animate-ping" />
         <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
@@ -40,24 +57,45 @@ export const AgentAwaitingInputBar: React.FC<AgentAwaitingInputBarProps> = ({
           Agent 正在等待你的确认
         </div>
         <div className="text-[10.5px] text-[#71717a] mt-1 leading-none truncate">
-          流水线已停留本节点，回答追问后自动继续；若已完成可直接放行
+          流水线已停留本节点；点击确认方案将立即开始执行，也可在下方输入修改意见
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={handleConfirm}
-        disabled={isSubmitting}
-        className="h-[24px] px-2.5 rounded-[5px] bg-white border border-[#dcdcf0] text-[#3f3f6b] hover:bg-[#1c1c21] hover:border-[#1c1c21] hover:text-white text-[10.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-default"
-        title="确认当前节点已完成，流水线继续流转到下一个节点"
-      >
-        {isSubmitting ? (
-          <Loader2 size={10.5} className="animate-spin" />
-        ) : (
-          <ArrowRight size={10.5} strokeWidth={2.4} />
+      <div className="flex items-center gap-1.5 shrink-0">
+        {onConfirmPlan && (
+          <button
+            type="button"
+            onClick={handleConfirmPlan}
+            disabled={isSubmittingPlan || isSubmittingComplete}
+            className="h-[24px] px-2.5 rounded-[5px] bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[10.5px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-default"
+            title="确认 Agent 当前方案，向 Agent 发送确认指令并进入执行中状态"
+          >
+            {isSubmittingPlan ? (
+              <Loader2 size={10.5} className="animate-spin" />
+            ) : (
+              <Play size={9.5} className="fill-current" />
+            )}
+            <span>确认方案并开始执行</span>
+          </button>
         )}
-        <span>确认完成并继续</span>
-      </button>
+
+        {onConfirmComplete && (
+          <button
+            type="button"
+            onClick={handleConfirmComplete}
+            disabled={isSubmittingPlan || isSubmittingComplete}
+            className="h-[24px] px-2 rounded-[5px] bg-white border border-[#dcdcf0] text-[#71717a] hover:text-[#1c1c21] hover:bg-[#f4f4f6] text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-default"
+            title="跳过当前 Agent 任务，流水线直接推进到下一节点（仅在无需 Agent 编码或已手动完成时使用）"
+          >
+            {isSubmittingComplete ? (
+              <Loader2 size={10} className="animate-spin" />
+            ) : (
+              <ArrowRight size={10} strokeWidth={2.2} />
+            )}
+            <span>跳过放行</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 };
