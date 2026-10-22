@@ -10,6 +10,8 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       // 复用 core 的引擎元数据（纯 TS 常量，无 node 依赖），避免前端重复维护一份
       '@openloop/agent-providers': path.resolve(__dirname, '../core/src/constants/agent-providers.ts'),
+      // 纯函数常量同理别名到 core 源码，避免把 core 的 CJS 产物引入渲染层
+      '@openloop/core/media-mime': path.resolve(__dirname, '../core/src/constants/media-mime.ts'),
     },
   },
   server: {

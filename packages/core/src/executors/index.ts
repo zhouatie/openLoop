@@ -12,6 +12,7 @@ import {
   resolveRunCommand,
 } from '../constants/agent-providers';
 import { MidsceneRunner } from '../qa/midscene-runner';
+import { guessImageMimeType } from '../constants/media-mime';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
 import { IosDeviceManager } from '../qa/ios-device-manager';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
@@ -1144,7 +1145,7 @@ export class MidsceneExecutor implements NodeExecutor {
 
     // 分支 2: 使用内置 MidsceneRunner 驱动测试，带每步回调与产物收集
     try {
-      const dataDir = path.join(os.homedir(), '.openloop');
+      const dataDir = ctx.store?.getDataDir?.() || path.join(os.homedir(), '.openloop');
 
       // 1. 优先读取任务定制验收用例（用户在任务创建时输入，或 Agent 编码完成后智能规划输出）
       let instructions: string[] = [];
@@ -1313,7 +1314,7 @@ export class MidsceneExecutor implements NodeExecutor {
         task.attachments.push({
           id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           name: art.name,
-          mimeType: art.name.endsWith('.svg') ? 'image/svg+xml' : 'image/webp',
+          mimeType: guessImageMimeType(art.name),
           path: art.path,
           url: `/artifacts/${runRecord.id}/${art.name}`,
           size: fs.existsSync(art.path) ? fs.statSync(art.path).size : 1024,

@@ -31,6 +31,8 @@ import { IosDeviceManager } from '../qa/ios-device-manager';
 import { isQaPlatform } from '../qa/qa-driver';
 import { applyQaModelEnv } from '../qa/model-env';
 import { configureQaRuntimePaths } from '../qa/runtime-paths';
+import { guessImageMimeType } from '../constants/media-mime';
+import { resolveArtifactPath } from '../qa/artifact-paths';
 import { WorktreeManager, TaskProcessManager, findRepoRoot } from '../worktree/worktree-manager';
 import { interpolateString } from '../executors';
 import { getAgentProviderMeta, resolveResumeCommand } from '../constants/agent-providers';
@@ -935,7 +937,7 @@ export class OpenLoopServer {
           }
 
           try {
-            const dataDir = path.join(os.homedir(), '.openloop', 'artifacts');
+            const dataDir = path.join(this.store.getDataDir(), 'artifacts');
             const runIdsToClean: string[] = [];
             if (target.context?.qaRunId) runIdsToClean.push(target.context.qaRunId);
             if (target.attachments) {
@@ -1507,28 +1509,30 @@ export class OpenLoopServer {
         );
 
         // 如果用户选择了特定 QA 产物，自动解析本地截图路径并装配入 safeAttachments
+        const dataDir = this.store.getDataDir();
         if (selectedQaArtifacts && Array.isArray(selectedQaArtifacts.screenshots)) {
-          const dataDir = this.store.getDataDir();
+          const runId = selectedQaArtifacts.qaRunId;
           for (const sc of selectedQaArtifacts.screenshots) {
-            const runId = selectedQaArtifacts.qaRunId;
-            let absPath = sc.path;
-            if (!absPath && runId && sc.name) {
-              absPath = path.join(dataDir, 'artifacts', runId, sc.name);
+            const absPath = resolveArtifactPath(
+              sc.path,
+              dataDir,
+              runId && sc.name ? path.join('artifacts', runId, sc.name) : undefined
+            );
+            if (!absPath) {
+              serverLogger.warn(`[AgentChat] 未找到选中的 QA 截图: ${sc.path || sc.name}`);
+              continue;
             }
-            if (absPath && fs.existsSync(absPath)) {
-              const existingAtt = safeAttachments.find((a) => a.path === absPath || a.name === sc.name);
-              if (!existingAtt) {
-                safeAttachments.push({
-                  id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                  name: sc.name,
-                  mimeType: sc.name.endsWith('.svg') ? 'image/svg+xml' : 'image/webp',
-                  path: absPath,
-                  url: sc.url || (runId ? `/artifacts/${runId}/${sc.name}` : undefined),
-                  size: fs.statSync(absPath).size,
-                  createdAt: Date.now(),
-                });
-              }
-            }
+            const existingAtt = safeAttachments.find((a) => a.path === absPath || a.name === sc.name);
+            if (existingAtt) continue;
+            safeAttachments.push({
+              id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              name: sc.name,
+              mimeType: guessImageMimeType(sc.name || absPath),
+              path: absPath,
+              url: sc.url || (runId ? `/artifacts/${runId}/${sc.name}` : undefined),
+              size: fs.statSync(absPath).size,
+              createdAt: Date.now(),
+            });
           }
         }
 
@@ -1568,10 +1572,17 @@ export class OpenLoopServer {
             }
           }
           if (Array.isArray(selectedQaArtifacts.screenshots) && selectedQaArtifacts.screenshots.length > 0) {
+            const runId = selectedQaArtifacts.qaRunId;
             parts.push(`\n【选中的截帧快照与界面证据 (${selectedQaArtifacts.screenshots.length} 张)】`);
             for (const sc of selectedQaArtifacts.screenshots) {
               const promptDesc = sc.stepPrompt ? ` (对应步骤: ${sc.stepPrompt})` : (sc.stepIndex !== undefined ? ` (对应步骤 #${sc.stepIndex + 1})` : '');
-              const pathInfo = sc.path ? ` [路径: ${sc.path}]` : '';
+              const resolvedPath = resolveArtifactPath(
+                sc.path,
+                dataDir,
+                runId && sc.name ? path.join('artifacts', runId, sc.name) : undefined
+              );
+              const displayPath = resolvedPath || (sc.path ? path.join(dataDir, sc.path) : undefined);
+              const pathInfo = displayPath ? ` [路径: ${displayPath}]` : '';
               parts.push(`* ${sc.name}${promptDesc}${pathInfo}`);
             }
           }
@@ -1587,7 +1598,7 @@ export class OpenLoopServer {
             }
           }
           if (qaRunId) {
-            const runDir = path.join(os.homedir(), '.openloop', 'artifacts', qaRunId);
+            const runDir = path.join(dataDir, 'artifacts', qaRunId);
             const timelinePath = path.join(runDir, 'timeline.json');
             const imageFiles = fs.existsSync(runDir)
               ? fs.readdirSync(runDir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).map((f) => path.join(runDir, f))

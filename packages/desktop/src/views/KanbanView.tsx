@@ -54,6 +54,7 @@ import {
   Link2,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage, TaskAttachment, SelectedQaArtifacts } from '@openloop/core';
+import { guessImageMimeType } from '@openloop/core/media-mime';
 import { getAgentProviderMeta } from '@openloop/agent-providers';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';
@@ -625,7 +626,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         toSendAttachments.push({
           id: `att_qa_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           name: sc.name,
-          mimeType: sc.name.endsWith('.svg') ? 'image/svg+xml' : 'image/webp',
+          mimeType: guessImageMimeType(sc.name),
           path: sc.path,
           url: sc.url,
           createdAt: Date.now(),

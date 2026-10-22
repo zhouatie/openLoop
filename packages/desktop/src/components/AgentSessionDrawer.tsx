@@ -21,6 +21,7 @@ import {
   ZoomIn,
 } from 'lucide-react';
 import { TaskSessionState, SessionChatMessage, QaRunRecord, SelectedQaArtifacts, TaskAttachment } from '@openloop/core';
+import { guessImageMimeType } from '@openloop/core/media-mime';
 import { getAgentProviderMeta, getDefaultResumeCommand } from '@openloop/agent-providers';
 import { api } from '../services/api';
 import { AgentMarkdown } from './AgentMarkdown';
@@ -234,7 +235,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
     const attachmentsToSend: TaskAttachment[] = (selectedQaArtifacts?.screenshots || []).map((sc) => ({
       id: `att_qa_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name: sc.name,
-      mimeType: sc.name.endsWith('.svg') ? 'image/svg+xml' : 'image/webp',
+      mimeType: guessImageMimeType(sc.name),
       path: sc.path,
       url: sc.url,
       createdAt: Date.now(),
