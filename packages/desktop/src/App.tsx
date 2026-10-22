@@ -195,7 +195,7 @@ export const AppContent: React.FC = () => {
   useEffect(() => {
     refreshData();
 
-    const unsubConn = api.on('connection:change', (status: boolean) => {
+    const unsubConn = api.onConnectionChange((status: boolean) => {
       setIsDaemonConnected(status);
       if (status) refreshData();
     });
