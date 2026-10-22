@@ -23,7 +23,7 @@ import {
   RuntimeSettingsApplySummary,
 } from '../types';
 import { createLogger } from '../logger';
-import { PiRpcSessionManager } from '../agent/pi-rpc-session';
+import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
@@ -1171,12 +1171,24 @@ export class OpenLoopServer {
         const resumeCommand =
           task.context?.resumeCommand || resolveResumeCommand(provider, sessionId);
 
+        const workflow = this.store.getWorkflow(task.workflowId);
+        const currentNode = workflow?.nodes.find((n) => n.id === task.currentNodeId);
+        const isCurrentAgentRunning = task.status === 'running' && currentNode?.type === 'agent';
+
+        // 若任务当前并非停留在 Agent 节点（例如进入了后续测试、门禁或已结束），修正历史遗留的 awaitingInput 脏数据
+        if (!isCurrentAgentRunning && task.context?.awaitingInput) {
+          task.context.awaitingInput = false;
+          this.store.saveTask(task);
+        }
+
         const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
         if (rpcSession) {
+          const state = rpcSession.getState();
+          const effectiveAwaiting = isCurrentAgentRunning ? !!state.awaitingInput : false;
           return this.sendJson(
             res,
             200,
-            { ...rpcSession.getState(), sessionId, resumeCommand },
+            { ...state, awaitingInput: effectiveAwaiting, sessionId, resumeCommand },
             reqMeta
           );
         }
@@ -1187,6 +1199,7 @@ export class OpenLoopServer {
           active: false,
           isBusy: task.status === 'running',
           isPaused: false,
+          awaitingInput: isCurrentAgentRunning ? !!task.context?.awaitingInput : false,
           messages: task.context?.chatMessages || [],
           agentName: task.context?.agentName || 'OpenLoop Agent',
           model: task.context?.model || settings.defaultModel || undefined,
@@ -1329,9 +1342,20 @@ export class OpenLoopServer {
           }
         }
 
+        // 校验当前任务是否真正停留在 agent 节点上
+        const workflow = this.store.getWorkflow(task.workflowId);
+        const currentNode = workflow?.nodes.find((n) => n.id === task.currentNodeId);
+        const isCurrentAgentNode = task.status === 'running' && currentNode?.type === 'agent';
+
+        // 仅当当前任务真正由 Agent 节点驱动流水线时，才注入完成协议提示词，提示 Agent 在验证通过后输出完成标记
+        let promptToSend = enrichedMessage;
+        if (isCurrentAgentNode) {
+          promptToSend += `\n\n【完成协议（重要）】\n- 需求修改并验证通过后，在最后一条回复末尾单独一行输出 ${PIPELINE_DONE_MARKER}，流水线据此流转到下一个节点。\n- 只要还需要用户确认方案、补充信息或回答问题，就直接提问并不要输出该标记，流水线会停留在本节点等待用户回复。`;
+        }
+
         const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
         if (rpcSession && rpcSession.active) {
-          rpcSession.sendUserMessage(enrichedMessage, safeAttachments).catch((err) => {
+          rpcSession.sendUserMessage(promptToSend, safeAttachments).catch((err) => {
             serverLogger.error(`发送用户消息失败: ${err.message}`, undefined, { taskId });
           });
           return this.sendJson(res, 200, { success: true, message: 'Message sent to active session', active: true }, reqMeta);
@@ -1388,9 +1412,9 @@ export class OpenLoopServer {
           model: settings.defaultModel,
           thinking: settings.reasoningLevel || 'high',
           cwd,
-          initialPrompt: enrichedMessage,
+          initialPrompt: promptToSend,
           initialAttachments: safeAttachments.length > 0 ? safeAttachments : undefined,
-          awaitCompletionMarker: true,
+          awaitCompletionMarker: isCurrentAgentNode,
           onLog: (stream, message) => {
             const logEntry = {
               id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1410,14 +1434,20 @@ export class OpenLoopServer {
               currentTask.context.chatMessages = state.messages;
               if (state.model) currentTask.context.model = state.model;
               const prevAwaiting = !!currentTask.context.awaitingInput;
-              const nextAwaiting = !!state.awaitingInput;
+              const nextAwaiting = isCurrentAgentNode ? !!state.awaitingInput : false;
               currentTask.context.awaitingInput = nextAwaiting;
               this.store.saveTask(currentTask);
               if (prevAwaiting !== nextAwaiting) {
                 this.broadcast({ type: 'task:update', data: currentTask });
               }
             }
-            this.broadcast({ type: 'agent:chat_update', data: state });
+            this.broadcast({
+              type: 'agent:chat_update',
+              data: {
+                ...state,
+                awaitingInput: isCurrentAgentNode ? !!state.awaitingInput : false,
+              },
+            });
           },
           onFinished: (error) => {
             serverLogger.info(`[AgentChat] 对话处理轮次完成: ${error || '成功'}`, undefined, { taskId });

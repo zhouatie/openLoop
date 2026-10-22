@@ -3194,27 +3194,48 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     />
 
                     {/* 会话状态微徽章 */}
-                    {sessionState?.isBusy ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eff6ff] text-[#2563eb] text-[10px] font-medium border border-[#bfdbfe]/60">
-                        <Loader2 size={10} className="animate-spin" />
-                        <span>执行中</span>
-                      </span>
-                    ) : sessionState?.isPaused ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fffbeb] text-[#d97706] text-[10px] font-medium border border-[#fde68a]">
-                        <Pause size={10} />
-                        <span>已暂停</span>
-                      </span>
-                    ) : sessionState?.awaitingInput ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eef2ff] text-[#4338ca] text-[10px] font-medium border border-[#c7d2fe]">
-                        <MessageSquare size={10} />
-                        <span>等待确认</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
-                        <Check size={10} />
-                        <span>就绪 / 空闲</span>
-                      </span>
-                    )}
+                    {(() => {
+                      const isCurTaskAgentRunning =
+                        curTask.status === 'running' &&
+                        wfMap.get(curTask.workflowId)?.nodes.find((n) => n.id === curTask.currentNodeId)?.type === 'agent';
+                      const hasSessionCodeChanges = !!sessionState?.messages?.some((msg) =>
+                        msg.tools?.some(
+                          (t) => (t.name === 'edit' || t.name === 'write' || t.name === 'patch') && !t.isError
+                        )
+                      );
+                      const showAwaitingBar = !!(sessionState?.awaitingInput && isCurTaskAgentRunning);
+
+                      if (sessionState?.isBusy) {
+                        return (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eff6ff] text-[#2563eb] text-[10px] font-medium border border-[#bfdbfe]/60">
+                            <Loader2 size={10} className="animate-spin" />
+                            <span>执行中</span>
+                          </span>
+                        );
+                      }
+                      if (sessionState?.isPaused) {
+                        return (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fffbeb] text-[#d97706] text-[10px] font-medium border border-[#fde68a]">
+                            <Pause size={10} />
+                            <span>已暂停</span>
+                          </span>
+                        );
+                      }
+                      if (showAwaitingBar) {
+                        return (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eef2ff] text-[#4338ca] text-[10px] font-medium border border-[#c7d2fe]">
+                            <MessageSquare size={10} />
+                            <span>{hasSessionCodeChanges ? '待确认放行' : '等待方案确认'}</span>
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
+                          <Check size={10} />
+                          <span>就绪 / 空闲</span>
+                        </span>
+                      );
+                    })()}
 
                     {/* 运行中：显示暂停按钮 */}
                     {sessionState?.isBusy && (
@@ -3452,37 +3473,61 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                 {/* 贴底悬浮输入框区 */}
                 <div className="pt-2.5 border-t border-[#ececf0] bg-white shrink-0">
-                  {sessionState?.awaitingInput && (
-                    <AgentAwaitingInputBar
-                      onConfirmPlan={handleConfirmPlanAndExecute}
-                      onConfirmComplete={handleConfirmCompleteNode}
-                    />
-                  )}
+                  {(() => {
+                    const isCurTaskAgentRunning =
+                      curTask.status === 'running' &&
+                      wfMap.get(curTask.workflowId)?.nodes.find((n) => n.id === curTask.currentNodeId)?.type === 'agent';
+                    const hasSessionCodeChanges = !!sessionState?.messages?.some((msg) =>
+                      msg.tools?.some(
+                        (t) => (t.name === 'edit' || t.name === 'write' || t.name === 'patch') && !t.isError
+                      )
+                    );
+                    const showAwaitingBar = !!(sessionState?.awaitingInput && isCurTaskAgentRunning);
 
-                  {/* 状态轻量提示 */}
-                  <div className="flex items-center justify-between text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
-                    <span className="flex items-center gap-1">
-                      {sessionState?.isBusy ? (
-                        <>
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />
-                          <span className="text-[#7c3aed] font-medium">运行中：发送将无缝插话 (Steer)</span>
-                        </>
-                      ) : sessionState?.isPaused ? (
-                        <>
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#b45309]" />
-                          <span className="text-[#b45309] font-medium">已暂停：发送新指令将继续推进</span>
-                        </>
-                      ) : sessionState?.awaitingInput ? (
-                        <>
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
-                          <span className="text-[#4f46e5] font-medium">等待确认：可点击上方按钮一键确认方案，或输入指令后继续</span>
-                        </>
-                      ) : (
-                        <span>可向当前智能体会话追问或补充指令</span>
-                      )}
-                    </span>
-                    <span className="font-mono text-[#a5a5b0] text-[10px]">⌘ + Enter 发送</span>
-                  </div>
+                    return (
+                      <>
+                        {showAwaitingBar && (
+                          <AgentAwaitingInputBar
+                            hasCodeChanges={hasSessionCodeChanges}
+                            onConfirmPlan={handleConfirmPlanAndExecute}
+                            onConfirmComplete={handleConfirmCompleteNode}
+                          />
+                        )}
+
+                        {/* 状态轻量提示 */}
+                        <div className="flex items-center justify-between text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
+                          <span className="flex items-center gap-1">
+                            {sessionState?.isBusy ? (
+                              <>
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />
+                                <span className="text-[#7c3aed] font-medium">运行中：发送将无缝插话 (Steer)</span>
+                              </>
+                            ) : sessionState?.isPaused ? (
+                              <>
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#b45309]" />
+                                <span className="text-[#b45309] font-medium">已暂停：发送新指令将继续推进</span>
+                              </>
+                            ) : showAwaitingBar ? (
+                              hasSessionCodeChanges ? (
+                                <>
+                                  <span className="w-1.5 h-1.5 rounded-full bg-[#059669]" />
+                                  <span className="text-[#059669] font-medium">代码已修改：可点击上方按钮放行流转，或输入修改意见</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
+                                  <span className="text-[#4f46e5] font-medium">等待确认：可点击上方按钮一键确认方案，或输入指令后继续</span>
+                                </>
+                              )
+                            ) : (
+                              <span>可向当前智能体会话追问或补充指令</span>
+                            )}
+                          </span>
+                          <span className="font-mono text-[#a5a5b0] text-[10px]">⌘ + Enter 发送</span>
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   {/* 隐藏的图片选择器 */}
                   <input

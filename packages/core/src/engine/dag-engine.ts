@@ -330,7 +330,8 @@ export class DagEngine extends EventEmitter {
         task.context.chatMessages = state.messages;
         if (state.model) task.context.model = state.model;
         const prevAwaiting = !!task.context.awaitingInput;
-        const nextAwaiting = !!state.awaitingInput;
+        // 仅当当前正在执行的节点是 agent 类型时，才同步 task.context.awaitingInput
+        const nextAwaiting = node.type === 'agent' ? !!state.awaitingInput : false;
         task.context.awaitingInput = nextAwaiting;
         this.store.saveTask(task);
         if (prevAwaiting !== nextAwaiting) {
@@ -407,6 +408,9 @@ export class DagEngine extends EventEmitter {
       this.activeProcesses.delete(task.id);
       task.status = 'failed';
       task.kanbanColumn = 'backlog'; // 执行失败，退回待处理泳道，保持活跃泳道语义纯净
+      if (task.context?.awaitingInput) {
+        task.context.awaitingInput = false;
+      }
       this.store.saveTask(task);
       this.emit('task:update', task);
       return;
@@ -421,6 +425,9 @@ export class DagEngine extends EventEmitter {
       this.log(task.id, node.id, 'system', `节点 [${node.name}] 挂起，等待人工审核流转`);
       task.status = 'waiting_approval';
       task.kanbanColumn = 'qa_review';
+      if (task.context?.awaitingInput) {
+        task.context.awaitingInput = false;
+      }
       this.store.saveTask(task);
       this.emit('task:update', task);
       return;
@@ -433,6 +440,9 @@ export class DagEngine extends EventEmitter {
       { taskId: task.id, nodeId: node.id }
     );
     this.log(task.id, node.id, 'system', `<<< 节点 [${node.name}] 执行完成`);
+    if (task.context?.awaitingInput) {
+      task.context.awaitingInput = false;
+    }
     await this.triggerNextNodes(task, workflow, node.id);
   }
 
@@ -932,6 +942,9 @@ export class DagEngine extends EventEmitter {
 
     task.status = 'running';
     task.kanbanColumn = 'in_progress';
+    if (task.context?.awaitingInput) {
+      task.context.awaitingInput = false;
+    }
     this.store.saveTask(task);
     this.emit('task:update', task);
     this.emit('node:status', { taskId: task.id, nodeId, status });
@@ -1446,6 +1459,9 @@ export class DagEngine extends EventEmitter {
     // 4. 更新任务状态并归位回待处理泳道
     task.status = 'cancelled';
     task.kanbanColumn = 'backlog';
+    if (task.context?.awaitingInput) {
+      task.context.awaitingInput = false;
+    }
     this.store.saveTask(task);
 
     this.log(task.id, 'SYSTEM', 'stderr', `[SYSTEM] 任务已被用户手动终止`);

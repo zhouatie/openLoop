@@ -70,6 +70,15 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // 检测会话中是否有代码改动工具调用（edit, write, patch）
+  const hasCodeChanges = useMemo(() => {
+    return !!sessionState?.messages?.some((msg) =>
+      msg.tools?.some(
+        (t) => (t.name === 'edit' || t.name === 'write' || t.name === 'patch') && !t.isError
+      )
+    );
+  }, [sessionState?.messages]);
+
   // 检索当前任务是否产生过 QA 自动化运行产物
   useEffect(() => {
     if (!isOpen || !taskId) {
@@ -427,7 +436,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
               ) : sessionState?.awaitingInput ? (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eef2ff] text-[#4338ca] text-[10px] font-medium border border-[#c7d2fe]">
                   <MessageSquare size={10} />
-                  <span>等待你的回复</span>
+                  <span>{hasCodeChanges ? '待确认放行' : '等待方案确认'}</span>
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
@@ -794,6 +803,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
             <>
               {sessionState?.awaitingInput && (
                 <AgentAwaitingInputBar
+                  hasCodeChanges={hasCodeChanges}
                   onConfirmPlan={handleConfirmPlan}
                   onConfirmComplete={handleConfirmComplete}
                 />
@@ -809,10 +819,17 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                   ) : sessionState?.isPaused ? (
                     <span className="text-[#d97706] font-medium truncate">会话已暂停，可输入新指令后继续</span>
                   ) : sessionState?.awaitingInput ? (
-                    <>
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
-                      <span className="text-[#4f46e5] font-medium truncate">等待确认：可点击上方按钮确认方案，或输入新指令继续</span>
-                    </>
+                    hasCodeChanges ? (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#059669]" />
+                        <span className="text-[#059669] font-medium truncate">代码已修改：可点击上方按钮放行流转，或输入修改意见</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
+                        <span className="text-[#4f46e5] font-medium truncate">等待确认：可点击上方按钮确认方案，或输入新指令继续</span>
+                      </>
+                    )
                   ) : (
                     <span className="truncate">可随时追加输入纠偏提示或追问</span>
                   )}
