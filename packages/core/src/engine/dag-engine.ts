@@ -609,6 +609,33 @@ export class DagEngine extends EventEmitter {
       }
       this.store.saveTask(task);
       this.emit('task:update', task);
+
+      // 若为子工序，联动同步更新父任务组进度
+      if (task.parentTaskId) {
+        try {
+          const parentTask = this.store.getTask(task.parentTaskId);
+          if (parentTask && parentTask.kind === 'group' && Array.isArray(parentTask.subTaskIds)) {
+            const subtasks = parentTask.subTaskIds.map((id) => this.store.getTask(id)).filter(Boolean) as Task[];
+            const completedCount = subtasks.filter((s) => s.status === 'completed').length;
+            const failedCount = subtasks.filter((s) => s.status === 'failed').length;
+            if (!parentTask.context) parentTask.context = {};
+            parentTask.context.groupProgress = {
+              completed: completedCount,
+              failed: failedCount,
+              total: subtasks.length,
+            };
+            if (completedCount === subtasks.length) {
+              parentTask.status = 'completed';
+              parentTask.kanbanColumn = 'done';
+            }
+            this.store.saveTask(parentTask);
+            this.emit('task:update', parentTask);
+          }
+        } catch (syncErr: any) {
+          dagLogger.warn(`[TaskGroup:SyncProgress] 同步父任务组进度失败: ${syncErr.message}`);
+        }
+      }
+
       return true;
     }
     return false;
@@ -1212,6 +1239,11 @@ export class DagEngine extends EventEmitter {
     }
 
     const completed = new Set<string>();
+    for (const sub of subtasks) {
+      if (sub.status === 'completed') {
+        completed.add(sub.id);
+      }
+    }
     const failed = new Set<string>();
     const running = new Set<string>();
 
@@ -1300,6 +1332,8 @@ export class DagEngine extends EventEmitter {
               if (freshSub && freshSub.status === 'completed') {
                 completed.add(sub.id);
                 this.log(groupId, 'GROUP', 'system', `✓ 子任务 [${sub.title}] 执行完成 (进度: ${completed.size}/${subtasks.length})`);
+              } else if (freshSub && freshSub.status === 'waiting_approval') {
+                this.log(groupId, 'GROUP', 'system', `⏸ 子任务 [${sub.title}] 处于待人工验收状态，等待验收确认后继续推进`);
               } else {
                 failed.add(sub.id);
                 this.log(groupId, 'GROUP', 'stderr', `✗ 子任务 [${sub.title}] 执行非成功状态: ${freshSub?.status}`);
