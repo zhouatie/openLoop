@@ -130,6 +130,8 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [isAiOverlayVisible, setIsAiOverlayVisible] = useState(true);
+  const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number }>({ width: 1280, height: 800 });
+  const imgRef = useRef<HTMLImageElement>(null);
   const timerRef = useRef<any>(null);
 
   const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped'>('checking');
@@ -854,6 +856,25 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
     ? api.getArtifactUrl(currentStep.screenshotRelPath)
     : '';
 
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const { naturalWidth, naturalHeight } = e.currentTarget;
+    if (naturalWidth > 0 && naturalHeight > 0) {
+      if (import.meta.env?.DEV) {
+        console.log('[VisualAcceptanceModal] 截帧原始尺寸解析成功:', { naturalWidth, naturalHeight });
+      }
+      setImageNaturalSize({ width: naturalWidth, height: naturalHeight });
+    }
+  };
+
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
+      setImageNaturalSize({
+        width: imgRef.current.naturalWidth,
+        height: imgRef.current.naturalHeight,
+      });
+    }
+  }, [imageUrl]);
+
   return (
     <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-4 select-none">
       <div className="w-full max-w-6xl h-[90vh] bg-[#f4f4f6] rounded-[12px] border border-[#e3e3e8] shadow-[0_24px_70px_rgba(0,0,0,0.18)] flex flex-col overflow-hidden text-[#1c1c21] animate-in fade-in zoom-in-95 duration-150">
@@ -1061,12 +1082,46 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                   className="relative flex-1 min-h-0 flex items-center justify-center bg-[#fbfbfc] overflow-hidden group/viewport"
                   onWheel={handleViewportWheel}
                 >
-                  <img
-                    src={imageUrl}
-                    alt={`Step ${currentStepIndex + 1}`}
-                    className="max-w-full max-h-full object-contain block select-none"
-                    decoding="async"
-                  />
+                  {/* 图片与标注框等比精确贴合包裹容器，消除任何黑边及容器形变导致的偏移 */}
+                  <div
+                    className="relative max-w-full max-h-full flex items-center justify-center select-none"
+                    style={{
+                      aspectRatio: `${imageNaturalSize.width} / ${imageNaturalSize.height}`,
+                    }}
+                  >
+                    <img
+                      ref={imgRef}
+                      src={imageUrl}
+                      alt={`Step ${currentStepIndex + 1}`}
+                      className="w-full h-full object-contain block select-none pointer-events-none"
+                      decoding="async"
+                      onLoad={handleImageLoad}
+                    />
+
+                    {/* AI 目标区域高亮悬浮聚焦框（与图片像素严格 1:1 精确投影） */}
+                    {isAiOverlayVisible && currentStep?.boundingBox && (
+                      <div
+                        className="absolute border-2 border-indigo-600 bg-indigo-500/15 rounded-[3px] pointer-events-none transition-all duration-300 z-10"
+                        style={{
+                          left: `${(currentStep.boundingBox.x / imageNaturalSize.width) * 100}%`,
+                          top: `${(currentStep.boundingBox.y / imageNaturalSize.height) * 100}%`,
+                          width: `${(currentStep.boundingBox.width / imageNaturalSize.width) * 100}%`,
+                          height: `${(currentStep.boundingBox.height / imageNaturalSize.height) * 100}%`,
+                        }}
+                      >
+                        <div
+                          className={`absolute left-0 px-1.5 py-0.5 rounded bg-[#1c1c21] text-[9.5px] font-mono font-medium text-white shadow-xs flex items-center gap-1 whitespace-nowrap z-20 ${
+                            currentStep.boundingBox.y / imageNaturalSize.height < 0.05
+                              ? 'top-full mt-1'
+                              : '-top-5'
+                          }`}
+                        >
+                          <Sparkles size={9} className="text-indigo-400" />
+                          <span>{currentStep.prompt.slice(0, 24)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
                   {/* 悬浮上一帧切换按钮 */}
                   {steps.length > 1 && (
@@ -1098,24 +1153,6 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                     >
                       <ChevronRight size={16} strokeWidth={2.2} />
                     </button>
-                  )}
-
-                  {/* AI 目标区域高亮悬浮聚焦框 */}
-                  {isAiOverlayVisible && currentStep?.boundingBox && (
-                    <div
-                      className="absolute border-2 border-indigo-600 bg-indigo-500/15 rounded-[3px] pointer-events-none transition-all duration-300"
-                      style={{
-                        left: `${(currentStep.boundingBox.x / 1280) * 100}%`,
-                        top: `${(currentStep.boundingBox.y / 800) * 100}%`,
-                        width: `${(currentStep.boundingBox.width / 1280) * 100}%`,
-                        height: `${(currentStep.boundingBox.height / 800) * 100}%`,
-                      }}
-                    >
-                      <div className="absolute -top-5 left-0 px-1.5 py-0.5 rounded bg-[#1c1c21] text-[9.5px] font-mono font-medium text-white shadow-xs flex items-center gap-1 whitespace-nowrap">
-                        <Sparkles size={9} />
-                        <span>{currentStep.prompt.slice(0, 24)}</span>
-                      </div>
-                    </div>
                   )}
 
                   {/* 当前步骤说明微胶囊 */}

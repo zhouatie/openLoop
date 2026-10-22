@@ -26,6 +26,8 @@ export const QaReplayerModal: React.FC<QaReplayerModalProps> = ({ run, onClose }
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [isAiOverlayVisible, setIsAiOverlayVisible] = useState(true);
+  const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number }>({ width: 1280, height: 800 });
+  const imgRef = useRef<HTMLImageElement>(null);
   const timerRef = useRef<any>(null);
 
   const steps = run.timeline || [];
@@ -72,6 +74,25 @@ export const QaReplayerModal: React.FC<QaReplayerModalProps> = ({ run, onClose }
   const imageUrl = currentStep?.screenshotRelPath
     ? api.getArtifactUrl(currentStep.screenshotRelPath)
     : currentStep?.screenshotUrl || '';
+
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const { naturalWidth, naturalHeight } = e.currentTarget;
+    if (naturalWidth > 0 && naturalHeight > 0) {
+      if (import.meta.env?.DEV) {
+        console.log('[QaReplayerModal] 截帧原始尺寸解析成功:', { naturalWidth, naturalHeight });
+      }
+      setImageNaturalSize({ width: naturalWidth, height: naturalHeight });
+    }
+  };
+
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
+      setImageNaturalSize({
+        width: imgRef.current.naturalWidth,
+        height: imgRef.current.naturalHeight,
+      });
+    }
+  }, [imageUrl]);
 
   const reportUrl = run.reportRelPath ? api.getArtifactUrl(run.reportRelPath) : run.reportUrl;
 
@@ -149,27 +170,40 @@ export const QaReplayerModal: React.FC<QaReplayerModalProps> = ({ run, onClose }
           {/* 左侧快照大画面 */}
           <div className="flex-1 relative flex items-center justify-center p-4 overflow-hidden">
             {imageUrl ? (
-              <div className="relative max-w-full max-h-full rounded-[6px] overflow-hidden shadow-2xl border border-[#27272a]">
+              <div
+                className="relative max-w-full max-h-[calc(90vh-170px)] rounded-[6px] overflow-hidden shadow-2xl border border-[#27272a] flex items-center justify-center select-none"
+                style={{
+                  aspectRatio: `${imageNaturalSize.width} / ${imageNaturalSize.height}`,
+                }}
+              >
                 <img
+                  ref={imgRef}
                   src={imageUrl}
                   alt={`Step ${currentStepIndex + 1}`}
-                  className="max-w-full max-h-[calc(90vh-170px)] object-contain block"
+                  className="w-full h-full object-contain block select-none pointer-events-none"
+                  onLoad={handleImageLoad}
                 />
 
-                {/* AI 目标区域高亮悬浮聚焦框 */}
+                {/* AI 目标区域高亮悬浮聚焦框（与图片像素严格 1:1 投影） */}
                 {isAiOverlayVisible && currentStep?.boundingBox && (
                   <div
-                    className="absolute border-2 border-[#6366f1] bg-[#6366f1]/20 rounded-[3px] pointer-events-none transition-all duration-300"
+                    className="absolute border-2 border-[#6366f1] bg-[#6366f1]/20 rounded-[3px] pointer-events-none transition-all duration-300 z-10"
                     style={{
-                      left: `${(currentStep.boundingBox.x / 1280) * 100}%`,
-                      top: `${(currentStep.boundingBox.y / 800) * 100}%`,
-                      width: `${(currentStep.boundingBox.width / 1280) * 100}%`,
-                      height: `${(currentStep.boundingBox.height / 800) * 100}%`,
+                      left: `${(currentStep.boundingBox.x / imageNaturalSize.width) * 100}%`,
+                      top: `${(currentStep.boundingBox.y / imageNaturalSize.height) * 100}%`,
+                      width: `${(currentStep.boundingBox.width / imageNaturalSize.width) * 100}%`,
+                      height: `${(currentStep.boundingBox.height / imageNaturalSize.height) * 100}%`,
                     }}
                   >
-                    <div className="absolute -top-5 left-0 px-1 py-0.2 rounded bg-[#4f46e5] text-[9.5px] font-mono font-medium text-white shadow-xs flex items-center gap-1 whitespace-nowrap">
+                    <div
+                      className={`absolute left-0 px-1 py-0.2 rounded bg-[#4f46e5] text-[9.5px] font-mono font-medium text-white shadow-xs flex items-center gap-1 whitespace-nowrap z-20 ${
+                        currentStep.boundingBox.y / imageNaturalSize.height < 0.05
+                          ? 'top-full mt-1'
+                          : '-top-5'
+                      }`}
+                    >
                       <Sparkles size={9} />
-                      <span>Midscene 聚焦目标</span>
+                      <span>{currentStep.prompt ? currentStep.prompt.slice(0, 24) : 'AI 聚焦目标'}</span>
                     </div>
                   </div>
                 )}
