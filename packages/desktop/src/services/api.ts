@@ -281,6 +281,16 @@ export class DesktopApiService {
     this.listeners.get(event)?.forEach((cb) => cb(data));
   }
 
+  // 连接状态订阅：注册即回推当前快照（电平信号），避免初始化阶段早于订阅的状态变更丢失
+  public onConnectionChange(callback: (connected: boolean) => void): () => void {
+    const off = this.on('connection:change', callback);
+    if (isDev) {
+      console.log(`[UI:API] 订阅连接状态，当前快照: ${this.isConnected ? '已连接' : '未连接'}`);
+    }
+    callback(this.isConnected);
+    return off;
+  }
+
   public getConnectionStatus(): boolean {
     return this.isConnected;
   }
