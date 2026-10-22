@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Trash2, ArrowDown, Filter, Copy, Check, Terminal } from 'lucide-react';
 import { LogEntry, WorkflowDefinition } from '@openloop/core';
 import { resolveNodeMeta } from '../utils/nodeMeta';
@@ -24,14 +24,35 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
 }) => {
   const [selectedNodeFilter, setSelectedNodeFilter] = useState<string>('all');
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
+  const [isAtBottom, setIsAtBottom] = useState<boolean>(true);
   const [copied, setCopied] = useState<boolean>(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef<boolean>(true);
+
+  // 滚动至底部的辅助函数
+  const scrollToBottom = useCallback(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, []);
 
   useEffect(() => {
     if (activeNodeFilter) {
       setSelectedNodeFilter(activeNodeFilter);
+      setIsAtBottom(true);
+      isAtBottomRef.current = true;
+      scrollToBottom();
     }
-  }, [activeNodeFilter, isOpen]);
+  }, [activeNodeFilter, isOpen, scrollToBottom]);
+
+  // 打开抽屉时初始化定位到底部
+  useEffect(() => {
+    if (isOpen && scrollRef.current) {
+      scrollToBottom();
+      const raf = requestAnimationFrame(scrollToBottom);
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [isOpen, scrollToBottom]);
 
   const nodeIds = Array.from(new Set(logs.map((l) => l.nodeId)));
 
@@ -42,11 +63,69 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     return true;
   });
 
+  // 仅当用户处于最底端且开启自动滚动时，新日志到达才自动滚到底部
   useEffect(() => {
-    if (autoScroll && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (autoScroll && isAtBottomRef.current && scrollRef.current) {
+      scrollToBottom();
+      if (import.meta.env.DEV) {
+        console.log('[LogTerminalDrawer] 新日志到达，自动滚动至底部');
+      }
     }
-  }, [filteredLogs, autoScroll]);
+  }, [filteredLogs, autoScroll, scrollToBottom]);
+
+  // 监听容器滚动，精确区分「查看历史日志」与「处于底部跟随」状态
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // 距离底部 30px 内视为处于底端
+    const atBottom = distanceFromBottom <= 30;
+
+    if (atBottom !== isAtBottomRef.current) {
+      isAtBottomRef.current = atBottom;
+      setIsAtBottom(atBottom);
+
+      if (import.meta.env.DEV) {
+        if (atBottom) {
+          console.log('[LogTerminalDrawer] 用户回到最底端，恢复自动跟滚');
+        } else {
+          console.log('[LogTerminalDrawer] 用户查看历史日志，暂停自动跟滚，距离底部:', Math.round(distanceFromBottom));
+        }
+      }
+    }
+  }, []);
+
+  // 向上滚轮微调：即时取消底部锁定，避免新日志瞬时推送造成视口抖动
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY < 0 && isAtBottomRef.current) {
+      isAtBottomRef.current = false;
+      setIsAtBottom(false);
+      if (import.meta.env.DEV) {
+        console.log('[LogTerminalDrawer] 监测到向上滚轮动作，立即锁定当前查看视口');
+      }
+    }
+  }, []);
+
+  // 手动切换滚动状态或回到底部
+  const handleToggleScroll = () => {
+    if (!isAtBottom || !autoScroll) {
+      // 处于上方查看历史日志或之前已关闭滚动时，点击立即回到底部并恢复跟随
+      setAutoScroll(true);
+      setIsAtBottom(true);
+      isAtBottomRef.current = true;
+      scrollToBottom();
+      if (import.meta.env.DEV) {
+        console.log('[LogTerminalDrawer] 用户点击回到底部');
+      }
+    } else {
+      // 处于底部且正在自动滚动时，点击主动暂停
+      setAutoScroll(false);
+      if (import.meta.env.DEV) {
+        console.log('[LogTerminalDrawer] 用户手动暂停自动滚动');
+      }
+    }
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -94,8 +173,12 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
               <select
                 value={selectedNodeFilter}
                 onChange={(e) => {
-                  setSelectedNodeFilter(e.target.value);
-                  onFilterChange?.(e.target.value);
+                  const val = e.target.value;
+                  setSelectedNodeFilter(val);
+                  onFilterChange?.(val);
+                  setIsAtBottom(true);
+                  isAtBottomRef.current = true;
+                  scrollToBottom();
                 }}
                 className="bg-[#24242c] border border-[#383842] text-[#e3e3e8] text-[11px] rounded-[4px] px-1.5 py-[1px] outline-none max-w-[200px]"
               >
@@ -114,13 +197,20 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
 
           <div className="flex items-center gap-1.5">
             <button
-              onClick={() => setAutoScroll(!autoScroll)}
+              onClick={handleToggleScroll}
               className={`px-2 h-[22px] rounded-[4px] text-[10.5px] flex items-center gap-1 transition-all ${
-                autoScroll ? 'bg-[#312e81] text-[#c7d2fe]' : 'text-[#85858d] hover:text-white'
+                autoScroll && isAtBottom ? 'bg-[#312e81] text-[#c7d2fe]' : 'text-[#85858d] hover:text-white'
               }`}
+              title={
+                !isAtBottom
+                  ? '查看历史日志中，点击回到底部'
+                  : autoScroll
+                  ? '自动滚动已开启 (点击暂停)'
+                  : '自动滚动已暂停 (点击开启)'
+              }
             >
-              <ArrowDown size={11} />
-              <span>滚动</span>
+              <ArrowDown size={11} className={!isAtBottom ? 'text-[#818cf8]' : ''} />
+              <span>{isAtBottom ? '滚动' : '回到底部'}</span>
             </button>
 
             <button
@@ -132,7 +222,11 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
             </button>
 
             <button
-              onClick={onClearLogs}
+              onClick={() => {
+                onClearLogs();
+                setIsAtBottom(true);
+                isAtBottomRef.current = true;
+              }}
               className="w-[22px] h-[22px] rounded-[4px] text-[#85858d] hover:text-[#f87171] hover:bg-[#282830] flex items-center justify-center transition-colors"
               title="清空日志"
             >
@@ -152,6 +246,8 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
         {/* 终端内容区 */}
         <div
           ref={scrollRef}
+          onScroll={handleScroll}
+          onWheel={handleWheel}
           className="flex-1 p-3.5 font-mono text-[11.5px] overflow-y-auto space-y-1 select-text bg-[#18181c]"
         >
           {filteredLogs.length === 0 ? (
