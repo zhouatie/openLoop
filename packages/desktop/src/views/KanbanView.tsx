@@ -2016,8 +2016,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
               >
                 {/* 抽屉顶部头部 Header */}
                 <div className="px-5 pt-4 pb-3 border-b border-[#ececf0] bg-white shrink-0 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+                  <div className="flex items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
                       <button
                         type="button"
                         onClick={async () => {
@@ -2029,22 +2029,22 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             setTimeout(() => setDrawerIdCopied(false), 1500);
                           }
                         }}
-                        className={`group/drawer-id inline-flex items-center gap-1.5 font-mono text-[11px] px-2 py-0.5 rounded-[5px] border transition-all cursor-pointer shrink-0 select-none active:scale-95 ${
+                        className={`group/drawer-id inline-flex items-center gap-1.5 font-mono text-[11px] px-2 py-0.5 rounded-[5px] border transition-all cursor-pointer min-w-0 select-none active:scale-95 ${
                           drawerIdCopied
                             ? 'bg-[#ecfdf5] text-[#059669] border-[#a7f3d0]/80'
                             : 'bg-[#f4f4f6] hover:bg-[#ececf0] text-[#52525b] hover:text-[#1c1c21] border-[#e3e3e8] hover:border-[#d4d4d8]'
                         }`}
                         title={`任务编号: ${formatShortTaskId(curTask.id)}\n完整任务 ID: ${curTask.id} (点击复制)`}
                       >
-                        <span className="font-semibold text-[#4f46e5] text-[10.5px]">
+                        <span className="font-semibold text-[#4f46e5] text-[10.5px] shrink-0">
                           {formatShortTaskId(curTask.id)}
                         </span>
-                        <span className="text-[#c2c2c9]">·</span>
-                        <span className="select-all tracking-tight font-medium text-[#1c1c21] truncate max-w-[220px]">
+                        <span className="text-[#c2c2c9] shrink-0">·</span>
+                        <span className="select-all tracking-tight font-medium text-[#1c1c21] truncate min-w-0 max-w-[240px]">
                           {curTask.id}
                         </span>
                         {drawerIdCopied ? (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] text-[#059669] font-sans font-medium ml-0.5">
+                          <span className="inline-flex items-center gap-0.5 text-[10px] text-[#059669] font-sans font-medium ml-0.5 shrink-0">
                             <Check size={11} className="text-[#059669] shrink-0" />
                             <span>已复制</span>
                           </span>
@@ -2066,7 +2066,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 点击编辑任务:', curTask.id);
                           setEditingTask(curTask);
                         }}
-                        className="h-[26px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+                        className="h-[26px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0"
                         title="编辑此任务"
                       >
                         <Edit3 size={11} />
@@ -2077,14 +2077,17 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 点击删除任务:', curTask.id);
                           setTaskToDelete(curTask);
                         }}
-                        className="h-[26px] w-[26px] rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#fef2f2] text-[#85858d] hover:text-[#dc2626] hover:border-[#fecaca] flex items-center justify-center transition-all cursor-pointer shadow-sm"
+                        className="h-[26px] w-[26px] rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#fef2f2] text-[#85858d] hover:text-[#dc2626] hover:border-[#fecaca] flex items-center justify-center transition-all cursor-pointer shadow-sm shrink-0"
                         title="删除任务"
                       >
                         <Trash2 size={12} />
                       </button>
                       <button
-                        onClick={() => setSelectedTask(null)}
-                        className="h-[26px] w-[26px] rounded-[5px] hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer ml-0.5"
+                        onClick={() => {
+                          if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 点击关闭侧边栏:', curTask.id);
+                          setSelectedTask(null);
+                        }}
+                        className="h-[26px] w-[26px] rounded-[5px] hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer shrink-0"
                         title="关闭侧边栏"
                       >
                         <X size={15} />
@@ -2094,8 +2097,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                   {/* 如果是子工序，显示父需求溯源与跳回链接 */}
                   {curTask.kind === 'subtask' && curTask.parentTaskId && (
-                    <div className="flex items-center gap-1.5 text-[11px] text-[#71717a] bg-[#f4f4f6] px-2 py-1 rounded-[5px] border border-[#ececf0] mb-1">
-                      <span>所属父需求:</span>
+                    <div className="flex items-center gap-1.5 text-[11px] text-[#71717a] bg-[#f4f4f6] px-2 py-1 rounded-[5px] border border-[#ececf0] mb-1 min-w-0">
+                      <span className="shrink-0">所属父需求:</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -2105,7 +2108,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             setDrawerTab('subtasks');
                           }
                         }}
-                        className="font-medium text-[#4f46e5] hover:underline truncate max-w-[240px] cursor-pointer"
+                        className="font-medium text-[#4f46e5] hover:underline truncate min-w-0 flex-1 text-left cursor-pointer"
                         title="点击跳回父需求卡片"
                       >
                         {tasks.find((t) => t.id === curTask.parentTaskId)?.title || curTask.parentTaskId}
