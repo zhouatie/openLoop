@@ -35,6 +35,7 @@
     "gatekeeperAssess": false,
     "entitlements": "build/entitlements.mac.plist",
     "entitlementsInherit": "build/entitlements.mac.plist",
+    "additionalArguments": ["--timestamp=none"],
     "notarize": false,
     "target": [
       {
