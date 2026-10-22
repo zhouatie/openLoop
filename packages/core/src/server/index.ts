@@ -790,8 +790,41 @@ export class OpenLoopServer {
         if (title !== undefined) existing.title = title.trim();
         if (description !== undefined) existing.description = description.trim();
         if (triggerSource !== undefined) existing.triggerSource = triggerSource;
-        if (kind !== undefined) existing.kind = kind;
-        if (parentTaskId !== undefined) existing.parentTaskId = parentTaskId || undefined;
+        if (parentTaskId !== undefined) {
+          const nextParentId = parentTaskId ? String(parentTaskId).trim() : undefined;
+          if (nextParentId !== existing.parentTaskId) {
+            // 1. 若原先属于其他父任务，从原父任务中解绑
+            if (existing.parentTaskId) {
+              const oldParent = this.store.getTask(existing.parentTaskId);
+              if (oldParent) {
+                oldParent.subTaskIds = (oldParent.subTaskIds || []).filter((sid) => sid !== existing.id);
+                if (oldParent.subTaskIds.length === 0) oldParent.kind = 'single';
+                oldParent.updatedAt = Date.now();
+                this.store.saveTask(oldParent);
+                this.broadcast({ type: 'task:update', data: oldParent });
+              }
+            }
+            // 2. 若指定了新父任务，挂载至新父任务
+            if (nextParentId) {
+              const newParent = this.store.getTask(nextParentId);
+              if (newParent && !newParent.parentTaskId && newParent.kind !== 'subtask') {
+                newParent.kind = 'group';
+                const sids = newParent.subTaskIds || [];
+                if (!sids.includes(existing.id)) newParent.subTaskIds = [...sids, existing.id];
+                newParent.updatedAt = Date.now();
+                this.store.saveTask(newParent);
+                this.broadcast({ type: 'task:update', data: newParent });
+                existing.kind = 'subtask';
+                existing.parentTaskId = nextParentId;
+              }
+            } else {
+              existing.kind = 'single';
+              existing.parentTaskId = undefined;
+            }
+          }
+        } else if (kind !== undefined) {
+          existing.kind = kind;
+        }
         if (subTaskIds !== undefined) existing.subTaskIds = Array.isArray(subTaskIds) ? subTaskIds : undefined;
         if (dependencies !== undefined) existing.dependencies = Array.isArray(dependencies) ? dependencies : undefined;
         if (executionMode !== undefined) existing.executionMode = executionMode;
@@ -1110,6 +1143,219 @@ export class OpenLoopServer {
         }
         serverLogger.info(`[Tasks:PlanSubtasks] 为任务 ${taskId} 规划子工序方案:`, plan);
         return this.sendJson(res, 200, { success: true, plan }, reqMeta);
+      }
+
+      // Unlink Subtask (从任务组中脱离，恢复为独立单任务，不删除数据): POST /api/tasks/:id/subtasks/:subId/unlink
+      const taskUnlinkSubtaskMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/subtasks\/([a-zA-Z0-9_-]+)\/unlink$/);
+      if (taskUnlinkSubtaskMatch && method === 'POST') {
+        const parentId = taskUnlinkSubtaskMatch[1];
+        const subId = taskUnlinkSubtaskMatch[2];
+        const parent = this.store.getTask(parentId);
+        if (!parent) return this.sendJson(res, 404, { error: 'Parent task not found' }, reqMeta);
+
+        const subtask = this.store.getTask(subId);
+        if (!subtask) return this.sendJson(res, 404, { error: 'Subtask not found' }, reqMeta);
+
+        if (subtask.status === 'running') {
+          return this.sendJson(res, 400, { error: '正在运行中的子工序无法脱离任务组' }, reqMeta);
+        }
+
+        // 从父任务 subTaskIds 中移除
+        parent.subTaskIds = (parent.subTaskIds || []).filter((id) => id !== subId);
+        if (parent.subTaskIds.length === 0) {
+          parent.kind = 'single';
+        }
+        parent.updatedAt = Date.now();
+        this.store.saveTask(parent);
+
+        // 恢复子任务为独立单任务
+        subtask.kind = 'single';
+        subtask.parentTaskId = undefined;
+        if (subtask.context) {
+          delete subtask.context.parentTaskId;
+          delete subtask.context.parentGroupSnapshot;
+        }
+        subtask.updatedAt = Date.now();
+        this.store.saveTask(subtask);
+
+        this.broadcast({ type: 'task:update', data: parent });
+        this.broadcast({ type: 'task:update', data: subtask });
+
+        serverLogger.info(`[Tasks:UnlinkSubtask] 成功将子工序 ${subId} 从任务组 ${parent.id} 中解绑恢复为独立任务`);
+        return this.sendJson(res, 200, { success: true, parent, subtask }, reqMeta);
+      }
+
+      // Set Task Parent (选择成为某个任务的子任务 / 或解除归属): POST /api/tasks/:id/parent
+      const taskSetParentMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/parent$/);
+      if (taskSetParentMatch && method === 'POST') {
+        const taskId = taskSetParentMatch[1];
+        const task = this.store.getTask(taskId);
+        if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
+
+        if (task.status === 'running') {
+          return this.sendJson(res, 400, { error: '正在运行中的任务无法更改父任务归属' }, reqMeta);
+        }
+
+        const body = await this.parseJsonBody(req);
+        const { parentTaskId } = body;
+        const targetParentId = typeof parentTaskId === 'string' && parentTaskId.trim() ? parentTaskId.trim() : null;
+
+        // 若无需变更（已在同一父任务下或本来就为独立任务）
+        if (targetParentId === (task.parentTaskId || null)) {
+          return this.sendJson(res, 200, { success: true, task }, reqMeta);
+        }
+
+        let targetParent: Task | undefined;
+        let oldParent: Task | undefined;
+
+        if (targetParentId) {
+          if (targetParentId === taskId) {
+            return this.sendJson(res, 400, { error: '无法将任务自身设为父任务' }, reqMeta);
+          }
+
+          targetParent = this.store.getTask(targetParentId);
+          if (!targetParent) {
+            return this.sendJson(res, 404, { error: '目标父任务不存在' }, reqMeta);
+          }
+
+          if (targetParent.kind === 'subtask' || targetParent.parentTaskId) {
+            return this.sendJson(res, 400, { error: '子工序不能作为父任务（不支持多层任务嵌套）' }, reqMeta);
+          }
+
+          if (task.kind === 'group' && Array.isArray(task.subTaskIds) && task.subTaskIds.length > 0) {
+            return this.sendJson(res, 400, { error: '当前任务已有子工序，无法作为其他任务的子工序' }, reqMeta);
+          }
+
+          if (targetParent.status === 'running') {
+            return this.sendJson(res, 400, { error: '目标任务组正在执行中，无法动态添加子工序' }, reqMeta);
+          }
+        }
+
+        // 1. 若先前已有父任务，从旧父任务中解绑
+        if (task.parentTaskId && task.parentTaskId !== targetParentId) {
+          oldParent = this.store.getTask(task.parentTaskId);
+          if (oldParent) {
+            oldParent.subTaskIds = (oldParent.subTaskIds || []).filter((sid) => sid !== taskId);
+            if (oldParent.subTaskIds.length === 0) {
+              oldParent.kind = 'single';
+            }
+            oldParent.updatedAt = Date.now();
+            this.store.saveTask(oldParent);
+            this.broadcast({ type: 'task:update', data: oldParent });
+          }
+        }
+
+        // 2. 挂载到新父任务
+        if (targetParent) {
+          targetParent.kind = 'group';
+          const currentSubIds = targetParent.subTaskIds || [];
+          if (!currentSubIds.includes(taskId)) {
+            targetParent.subTaskIds = [...currentSubIds, taskId];
+          }
+          targetParent.updatedAt = Date.now();
+          this.store.saveTask(targetParent);
+          this.broadcast({ type: 'task:update', data: targetParent });
+
+          task.kind = 'subtask';
+          task.parentTaskId = targetParent.id;
+          task.context = {
+            ...(task.context || {}),
+            parentTaskId: targetParent.id,
+            parentGroupSnapshot: {
+              title: targetParent.title,
+              description: targetParent.description || '',
+              attachments: targetParent.attachments,
+            },
+          };
+        } else {
+          // 3. 解绑恢复为独立任务
+          task.kind = 'single';
+          task.parentTaskId = undefined;
+          if (task.context) {
+            delete task.context.parentTaskId;
+            delete task.context.parentGroupSnapshot;
+          }
+        }
+
+        task.updatedAt = Date.now();
+        this.store.saveTask(task);
+        this.broadcast({ type: 'task:update', data: task });
+
+        serverLogger.info(`[Tasks:SetParent] 成功将任务 ${taskId} 归属变更为: ${targetParentId || '独立任务'}`);
+        return this.sendJson(res, 200, { success: true, task, parent: targetParent, previousParent: oldParent }, reqMeta);
+      }
+
+      // Link Existing Tasks to Task/Group: POST /api/tasks/:id/link-subtasks
+      const taskLinkSubtasksMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/link-subtasks$/);
+      if (taskLinkSubtasksMatch && method === 'POST') {
+        const parentId = taskLinkSubtasksMatch[1];
+        const parent = this.store.getTask(parentId);
+        if (!parent) return this.sendJson(res, 404, { error: 'Parent task not found' }, reqMeta);
+
+        if (parent.kind === 'subtask' || parent.parentTaskId) {
+          return this.sendJson(res, 400, { error: '子工序不能作为父任务（不支持多层任务嵌套）' }, reqMeta);
+        }
+        if (parent.status === 'running') {
+          return this.sendJson(res, 400, { error: '目标任务组正在执行中，无法动态添加子工序' }, reqMeta);
+        }
+
+        const body = await this.parseJsonBody(req);
+        const { subTaskIds } = body;
+        if (!Array.isArray(subTaskIds) || subTaskIds.length === 0) {
+          return this.sendJson(res, 400, { error: 'subTaskIds array is required' }, reqMeta);
+        }
+
+        const linkedTasks: Task[] = [];
+        const validSubIds: string[] = [];
+
+        for (const subId of subTaskIds) {
+          if (!subId || subId === parentId) continue;
+          const subtask = this.store.getTask(subId);
+          if (!subtask) continue;
+          if (subtask.status === 'running') continue;
+          if (subtask.kind === 'group' && Array.isArray(subtask.subTaskIds) && subtask.subTaskIds.length > 0) continue;
+
+          // 若此前属于其他父任务，先从原父任务中解绑
+          if (subtask.parentTaskId && subtask.parentTaskId !== parentId) {
+            const oldParent = this.store.getTask(subtask.parentTaskId);
+            if (oldParent) {
+              oldParent.subTaskIds = (oldParent.subTaskIds || []).filter((id) => id !== subId);
+              if (oldParent.subTaskIds.length === 0) oldParent.kind = 'single';
+              oldParent.updatedAt = Date.now();
+              this.store.saveTask(oldParent);
+              this.broadcast({ type: 'task:update', data: oldParent });
+            }
+          }
+
+          subtask.kind = 'subtask';
+          subtask.parentTaskId = parent.id;
+          subtask.context = {
+            ...(subtask.context || {}),
+            parentTaskId: parent.id,
+            parentGroupSnapshot: {
+              title: parent.title,
+              description: parent.description || '',
+              attachments: parent.attachments,
+            },
+          };
+          subtask.updatedAt = Date.now();
+          this.store.saveTask(subtask);
+          this.broadcast({ type: 'task:update', data: subtask });
+          linkedTasks.push(subtask);
+          validSubIds.push(subId);
+        }
+
+        if (validSubIds.length > 0) {
+          parent.kind = 'group';
+          const set = new Set([...(parent.subTaskIds || []), ...validSubIds]);
+          parent.subTaskIds = Array.from(set);
+          parent.updatedAt = Date.now();
+          this.store.saveTask(parent);
+          this.broadcast({ type: 'task:update', data: parent });
+        }
+
+        serverLogger.info(`[Tasks:LinkSubtasks] 成功为任务组 ${parent.id} 关联 ${linkedTasks.length} 个已有任务`);
+        return this.sendJson(res, 200, { success: true, parent, linkedTasks }, reqMeta);
       }
 
       // Delete Subtask: DELETE /api/tasks/:id/subtasks/:subId
