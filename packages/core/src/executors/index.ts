@@ -2,7 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { WorkflowNode, WorkflowDefinition, Task, LogEntry, NodeRun, TaskSessionState, QaSuite, QaStep } from '../types';
+import { WorkflowNode, WorkflowDefinition, Task, LogEntry, NodeRun, TaskSessionState, QaSuite, QaStep, TaskAttachment } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
@@ -156,6 +156,9 @@ export class CliCommandExecutor implements NodeExecutor {
           NODE_ID: node.id,
           TASK_TITLE: ctx.task.title,
           TASK_DESCRIPTION: ctx.task.description || '',
+          TASK_PARENT_ID: ctx.task.parentTaskId || '',
+          TASK_GROUP_TITLE: getTaskParentGroup(ctx.task, ctx.store)?.title || '',
+          TASK_GROUP_DESCRIPTION: getTaskParentGroup(ctx.task, ctx.store)?.description || '',
           TASK_WORKSPACE: ctx.task.workspace || cwd,
         },
       });
@@ -346,9 +349,55 @@ export class CliCommandExecutor implements NodeExecutor {
   }
 }
 
-// 组装 Agent 节点执行 Prompt (多重变量兜底、需求模板包裹与附件路径注入)
-export function buildAgentPrompt(ctx: ExecutionContext, options: { awaitCompletion?: boolean } = {}): string {
-  const { node, task, variables = {}, settings = {} } = ctx;
+// 获取任务所属的任务组信息（支持从 store 实时检索或 context 快照兜底）
+export interface TaskParentGroupInfo {
+  id?: string;
+  title: string;
+  description?: string;
+  attachments?: TaskAttachment[];
+}
+
+export function getTaskParentGroup(task: Task, store?: any): TaskParentGroupInfo | undefined {
+  if (task.parentTaskId && store && typeof store.getTask === 'function') {
+    try {
+      const parent = store.getTask(task.parentTaskId);
+      if (parent) {
+        return {
+          id: parent.id,
+          title: parent.title,
+          description: parent.description,
+          attachments: parent.attachments,
+        };
+      }
+    } catch {
+      // 容错降级
+    }
+  }
+
+  if (task.context?.parentGroupSnapshot) {
+    const snap = task.context.parentGroupSnapshot;
+    return {
+      id: task.parentTaskId,
+      title: snap.title || '',
+      description: snap.description,
+      attachments: snap.attachments,
+    };
+  }
+
+  return undefined;
+}
+
+// 组装 Agent 节点执行 Prompt (多重变量兜底、需求模板包裹、任务组公共背景与附件路径注入)
+export function buildAgentPrompt(
+  ctx: ExecutionContext,
+  options: { awaitCompletion?: boolean; mergedAttachments?: TaskAttachment[] } = {}
+): string {
+  const { node, task, variables = {}, settings = {}, store } = ctx;
+
+  const parentGroup = getTaskParentGroup(task, store);
+  const groupTitle = parentGroup?.title?.trim() || '';
+  const groupDescription = parentGroup?.description?.trim() || '';
+
   const rawPrompt =
     node.config.prompt ||
     task.description ||
@@ -361,6 +410,10 @@ export function buildAgentPrompt(ctx: ExecutionContext, options: { awaitCompleti
       title: task.title,
       description: task.description || '',
       workflowId: task.workflowId,
+      groupTitle,
+      groupDescription,
+      parentTitle: groupTitle,
+      parentDescription: groupDescription,
     },
     ...variables,
   });
@@ -378,12 +431,56 @@ export function buildAgentPrompt(ctx: ExecutionContext, options: { awaitCompleti
     });
   }
 
-  // 若任务附带图片附件，注入本地物理文件路径提示，使 Agent 能够直接通过文件工具进行多模态视觉感知
-  if (task.attachments && task.attachments.length > 0) {
-    const attList = task.attachments
-      .map((att, i) => `  ${i + 1}. [${att.name}] (大小: ${(att.size / 1024).toFixed(1)} KB, 本地绝对路径: "${att.path}")`)
+  // 若属于任务组子任务，自动把所属任务组的公共描述作为公共背景上下文插入
+  if (parentGroup && (groupTitle || groupDescription)) {
+    const groupHeader = [
+      `【所属任务组公共背景与全局要求】`,
+      `任务组: ${groupTitle || '未命名任务组'}`,
+      groupDescription ? `任务组全局需求描述:\n${groupDescription}` : null,
+      `说明: 本工序为上述任务组的拆解子任务，所有子工序共享上述公共业务与全局规范，请结合当前工序具体目标协同实现。`,
+    ]
+      .filter(Boolean)
       .join('\n');
-    prompt += `\n\n【任务关联参考截图/附件】\n用户为此任务附带了以下图片资源，你可以直接通过本地工具读取这些路径以分析 UI 或报错：\n${attList}`;
+
+    prompt = `${groupHeader}\n\n========================================\n\n${prompt}`;
+  }
+
+  // 收集并合并附件（父任务组公共附件 + 当前子任务专属附件，按 id 去重）
+  const allAttachments: TaskAttachment[] = [];
+  const seenAttachmentIds = new Set<string>();
+
+  if (parentGroup?.attachments && Array.isArray(parentGroup.attachments)) {
+    for (const att of parentGroup.attachments) {
+      if (att && att.id && !seenAttachmentIds.has(att.id)) {
+        seenAttachmentIds.add(att.id);
+        allAttachments.push(att);
+      }
+    }
+  }
+  if (task.attachments && Array.isArray(task.attachments)) {
+    for (const att of task.attachments) {
+      if (att && att.id && !seenAttachmentIds.has(att.id)) {
+        seenAttachmentIds.add(att.id);
+        allAttachments.push(att);
+      }
+    }
+  }
+
+  if (options.mergedAttachments) {
+    options.mergedAttachments.length = 0;
+    options.mergedAttachments.push(...allAttachments);
+  }
+
+  // 若任务或所属任务组附带图片附件，注入本地物理文件路径提示，使 Agent 能够直接通过文件工具进行多模态视觉感知
+  if (allAttachments.length > 0) {
+    const attList = allAttachments
+      .map((att, i) => {
+        const isFromGroup = parentGroup?.attachments?.some((pa) => pa.id === att.id);
+        const sourceTag = isFromGroup ? ' [任务组公共图片]' : ' [本工序专属图片]';
+        return `  ${i + 1}. [${att.name}]${sourceTag} (大小: ${(att.size / 1024).toFixed(1)} KB, 本地绝对路径: "${att.path}")`;
+      })
+      .join('\n');
+    prompt += `\n\n【任务关联参考截图/附件（含任务组公共资源）】\n用户为此任务附带了以下图片资源，你可以直接通过本地工具读取这些路径以分析 UI 或报错：\n${attList}`;
   }
 
   // 完成协议：仅在 Agent 明确声明完成后，流水线才流转下游；否则停留在本节点等待用户回复
@@ -456,10 +553,11 @@ export class AgentExecutor implements NodeExecutor {
 
     // pi 引擎走内置 RPC 会话驱动
     if (agentProvider === 'pi') {
-      const prompt = buildAgentPrompt(ctx, { awaitCompletion: true });
+      const mergedAttachments: TaskAttachment[] = [];
+      const prompt = buildAgentPrompt(ctx, { awaitCompletion: true, mergedAttachments });
 
       executorLogger.info(
-        `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId} (工作区 CWD: ${cwd})`,
+        `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId} (工作区 CWD: ${cwd}, 附件数: ${mergedAttachments.length})`,
         { promptPreview: prompt.length > 200 ? prompt.slice(0, 200) + '...' : prompt, workspace: task.workspace },
         { taskId: task.id, nodeId: node.id }
       );
@@ -483,6 +581,7 @@ export class AgentExecutor implements NodeExecutor {
           thinking,
           cwd,
           initialPrompt: prompt,
+          initialAttachments: mergedAttachments.length > 0 ? mergedAttachments : undefined,
           awaitCompletionMarker: true,
           onLog: emitLog,
           onUpdate: (state) => {
@@ -545,8 +644,10 @@ export class AgentExecutor implements NodeExecutor {
     }
 
     // 其他引擎：使用节点自定义命令，否则使用系统内置的引擎命令
+    const mergedAttachments: TaskAttachment[] = [];
+    const promptForCommand = buildAgentPrompt(ctx, { mergedAttachments });
     const resolvedCommand =
-      node.config.command || resolveRunCommand(agentProvider, buildAgentPrompt(ctx), model);
+      node.config.command || resolveRunCommand(agentProvider, promptForCommand, model);
 
     if (!resolvedCommand) {
       const err = `[Agent 节点 ${node.id}] 引擎 [${agentProvider}] 没有内置执行命令，请在节点中填写自定义命令。`;

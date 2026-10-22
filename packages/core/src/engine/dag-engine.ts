@@ -1186,11 +1186,7 @@ export class DagEngine extends EventEmitter {
 
     const subTaskIds = taskGroup.subTaskIds || [];
     if (subTaskIds.length === 0) {
-      dagLogger.warn(`任务组 ${groupId} 未包含任何子任务，自动标记为已完成`, undefined, { taskId: groupId });
-      taskGroup.status = 'completed';
-      taskGroup.kanbanColumn = 'done';
-      this.store.saveTask(taskGroup);
-      this.emit('task:update', taskGroup);
+      dagLogger.warn(`任务组 ${groupId} 未包含任何子任务，保持等待添加工序状态`, undefined, { taskId: groupId });
       return;
     }
 
@@ -1223,10 +1219,26 @@ export class DagEngine extends EventEmitter {
       .map((id) => this.store.getTask(id))
       .filter(Boolean) as Task[];
 
-    // 默认继承父任务的工作区 (若子任务未明确指定)
+    // 默认继承父任务的工作区与快照 (若子任务未明确指定)
     for (const sub of subtasks) {
+      let changed = false;
       if (!sub.workspace && taskGroup.workspace) {
         sub.workspace = taskGroup.workspace;
+        changed = true;
+      }
+      if (!sub.context?.parentGroupSnapshot) {
+        sub.context = {
+          ...(sub.context || {}),
+          parentTaskId: groupId,
+          parentGroupSnapshot: {
+            title: taskGroup.title,
+            description: taskGroup.description || '',
+            attachments: taskGroup.attachments,
+          },
+        };
+        changed = true;
+      }
+      if (changed) {
         this.store.saveTask(sub);
       }
     }
