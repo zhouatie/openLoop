@@ -27,6 +27,7 @@ import { AgentAwaitingInputBar } from './AgentAwaitingInputBar';
 import { toast } from './Toast';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 import { ChatScrollToLatestButton } from './ChatScrollToLatestButton';
+import { AgentChatChangedFiles } from './AgentChatChangedFiles';
 
 export interface AgentSessionDrawerProps {
   isOpen: boolean;
@@ -398,6 +399,15 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
+              {taskId && (
+                <AgentChatChangedFiles
+                  taskId={taskId}
+                  taskTitle={taskTitle}
+                  isBusy={sessionState?.isBusy}
+                  sessionMessagesCount={sessionState?.messages?.length || 0}
+                />
+              )}
+
               {effectiveSessionId && (
                 <button
                   type="button"
