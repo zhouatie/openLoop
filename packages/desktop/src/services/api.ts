@@ -102,35 +102,139 @@ async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export class DesktopApiService {
-
   private ws: WebSocket | null = null;
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
   private isConnected = false;
+  private reconnectTimer: any = null;
+  private autoHealInterval: any = null;
+  private isChecking = false;
 
   constructor() {
     this.checkHttpConnection();
     this.connectWs();
+    this.initLifecycleAutoHeal();
   }
 
-  private async checkHttpConnection() {
-    try {
-      const res = await fetch(`${BASE_URL}/api/status`);
-      if (res.ok) {
-        this.isConnected = true;
-        this.emit('connection:change', true);
+  // 初始化窗口聚焦与可见性变化时的秒级自愈机制
+  private initLifecycleAutoHeal() {
+    if (typeof window === 'undefined') return;
+
+    const handleWake = () => {
+      if (!this.isConnected) {
+        if (isDev) console.log('[UI:API] 窗口唤醒/聚焦，触发后台服务轻量探活自愈');
+        this.retryConnection();
       }
+    };
+
+    window.addEventListener('focus', handleWake);
+    window.addEventListener('online', handleWake);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        handleWake();
+      }
+    });
+
+    // 轻量后台探活：仅当未连接时，每 2.5 秒尝试一次探活（连接成功后自动静默，零资源浪费）
+    this.autoHealInterval = setInterval(() => {
+      if (!this.isConnected && !this.isChecking) {
+        this.checkHttpConnection();
+      }
+    }, 2500);
+  }
+
+  public getBaseUrl(): string {
+    return BASE_URL;
+  }
+
+  public getWsUrl(): string {
+    return WS_URL;
+  }
+
+  public async checkHttpConnection(): Promise<boolean> {
+    if (this.isChecking) return this.isConnected;
+    this.isChecking = true;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1200);
+      const res = await fetch(`${BASE_URL}/api/status`, {
+        signal: controller.signal,
+        cache: 'no-store',
+      });
+      clearTimeout(timeoutId);
+
+      const ok = res.ok;
+      if (ok !== this.isConnected) {
+        this.isConnected = ok;
+        this.emit('connection:change', ok);
+        if (ok && (!this.ws || this.ws.readyState === WebSocket.CLOSED)) {
+          this.connectWs();
+        }
+      }
+      return ok;
     } catch {
-      // ignore
+      if (this.isConnected) {
+        this.isConnected = false;
+        this.emit('connection:change', false);
+      }
+      return false;
+    } finally {
+      this.isChecking = false;
     }
   }
 
+  // 立即重试连接（供用户点击与快速恢复链路调用）
+  public async retryConnection(): Promise<boolean> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const ok = await this.checkHttpConnection();
+    if (isDev) {
+      console.log(`[UI:API] 手动触发重试探活结果: ${ok ? '成功' : '失败'}`);
+    }
+    if (ok) {
+      this.connectWs();
+    }
+    return ok;
+  }
+
+  // 一键重启后台调度引擎（桌面原生调用 IPC，浏览器模式友好提示）
+  public async restartCoreServer(): Promise<{ success: boolean; port?: string; message?: string }> {
+    if (isDev) {
+      console.log('[UI:API] 触发重启核心调度服务');
+    }
+    if (window.electronAPI?.restartCoreServer) {
+      try {
+        const res = await window.electronAPI.restartCoreServer();
+        // 重启完成后主动立即探活更新状态
+        await this.retryConnection();
+        return res;
+      } catch (err: any) {
+        return { success: false, message: err?.message || '重启调用失败' };
+      }
+    }
+
+    // 浏览器 Web 模式：尝试探活
+    const ok = await this.retryConnection();
+    return {
+      success: ok,
+      message: ok ? '核心服务已恢复就绪' : 'Web 模式请在终端运行 pnpm run service:restart 重启服务',
+    };
+  }
+
   private connectWs() {
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
     try {
       this.ws = new WebSocket(WS_URL);
 
       this.ws.onopen = () => {
-        this.isConnected = true;
-        this.emit('connection:change', true);
+        if (!this.isConnected) {
+          this.isConnected = true;
+          this.emit('connection:change', true);
+        }
       };
 
       this.ws.onmessage = (event) => {
@@ -145,17 +249,21 @@ export class DesktopApiService {
       };
 
       this.ws.onclose = () => {
-        this.isConnected = false;
-        this.emit('connection:change', false);
-        // 3 秒后重试
-        setTimeout(() => this.connectWs(), 3000);
+        if (this.isConnected) {
+          this.isConnected = false;
+          this.emit('connection:change', false);
+        }
+        if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+        // 动态退避重连（2 秒）
+        this.reconnectTimer = setTimeout(() => this.connectWs(), 2000);
       };
 
       this.ws.onerror = () => {
         this.isConnected = false;
       };
     } catch {
-      setTimeout(() => this.connectWs(), 3000);
+      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = setTimeout(() => this.connectWs(), 2000);
     }
   }
 

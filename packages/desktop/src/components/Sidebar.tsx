@@ -16,6 +16,7 @@ import { PluginManifest } from '@openloop/core';
 import { useShortcuts } from '../context/ShortcutContext';
 import { APP_VERSION } from '../constants/version';
 import { getSortedSidebarPlugins } from '../utils/sidebarOrder';
+import { api } from '../services/api';
 
 interface SidebarProps {
   plugins: PluginManifest[];
@@ -56,6 +57,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [plugins, sidebarOrder]);
 
   const isSettingsActive = activePluginId.startsWith('settings');
+
+  const serverEndpoint = useMemo(() => {
+    try {
+      const url = new URL(api.getBaseUrl());
+      return url.host || '127.0.0.1:19888';
+    } catch {
+      return '127.0.0.1:19888';
+    }
+  }, []);
 
   const handleItemClick = (id: string) => {
     if (import.meta.env?.DEV) {
@@ -202,13 +212,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
           </button>
 
-          <div className="px-2 h-[22px] flex items-center gap-2 text-[11px] text-[#85858d] font-mono">
+          <div
+            onClick={() => {
+              if (!isDaemonConnected) {
+                api.retryConnection();
+              }
+            }}
+            title={
+              isDaemonConnected
+                ? `核心服务已就绪 (${serverEndpoint}) · v${APP_VERSION}`
+                : `核心服务未连接 · 点击立即重试探活`
+            }
+            className={`px-2 h-[22px] flex items-center gap-2 text-[11px] text-[#85858d] font-mono select-none ${
+              !isDaemonConnected ? 'cursor-pointer hover:text-[#18181b]' : ''
+            }`}
+          >
             <span
               className={`w-[7px] h-[7px] rounded-full shrink-0 ${
                 isDaemonConnected ? 'bg-[#189a58]' : 'bg-[#d64545] animate-pulse'
               }`}
             />
-            <span className="truncate">核心 127.0.0.1:19888</span>
+            <span className="truncate">核心 {serverEndpoint}</span>
           </div>
         </div>
       ) : (
@@ -230,11 +254,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
 
           <div
-            className="h-[22px] flex items-center justify-center"
+            onClick={() => {
+              if (!isDaemonConnected) {
+                api.retryConnection();
+              }
+            }}
+            className={`h-[22px] flex items-center justify-center ${
+              !isDaemonConnected ? 'cursor-pointer' : ''
+            }`}
             title={
               isDaemonConnected
-                ? `核心服务 127.0.0.1:19888 · v${APP_VERSION}`
-                : `核心服务未连接 · v${APP_VERSION}`
+                ? `核心服务 (${serverEndpoint}) · v${APP_VERSION}`
+                : `核心服务未连接 · 点击立即重试探活`
             }
           >
             <span

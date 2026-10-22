@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('system:openPrivacySetting', type),
   checkSystemStatus: () =>
     ipcRenderer.invoke('system:checkSystemStatus'),
+  restartCoreServer: () =>
+    ipcRenderer.invoke('system:restartCoreServer'),
+  getCoreServerStatus: () =>
+    ipcRenderer.invoke('system:getCoreServerStatus'),
   notify: (payload: { title: string; body: string }) =>
     ipcRenderer.invoke('notification:show', payload),
   send: (channel: string, data: any) => ipcRenderer.send(channel, data),

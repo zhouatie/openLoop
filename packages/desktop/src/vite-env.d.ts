@@ -13,6 +13,16 @@ interface Window {
       hasFullDiskAccess: boolean;
       tools: { name: string; command: string; available: boolean; path?: string }[];
     }>;
+    restartCoreServer?: () => Promise<{
+      success: boolean;
+      port: string;
+      message?: string;
+    }>;
+    getCoreServerStatus?: () => Promise<{
+      alive: boolean;
+      port: string;
+      pid?: number;
+    }>;
     notify?: (payload: { title: string; body: string }) => Promise<boolean>;
     send: (channel: string, data: any) => void;
     on: (channel: string, callback: (...args: any[]) => void) => () => void;

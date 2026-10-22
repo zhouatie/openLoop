@@ -45,22 +45,23 @@ if (!app.isPackaged) {
 }
 
 // 探测指定 URL / 端口是否存活
-function checkUrlAlive(urlStr: string): Promise<boolean> {
+function checkUrlAlive(urlStr: string, defaultPath = '/api/status'): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       const parsed = new URL(urlStr);
+      const reqPath = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : defaultPath;
       const req = http.get(
         {
           hostname: parsed.hostname || '127.0.0.1',
           port: parsed.port,
-          path: '/',
+          path: reqPath,
         },
         (res) => {
-          resolve(res.statusCode !== undefined);
+          resolve(res.statusCode !== undefined && res.statusCode < 500);
         }
       );
       req.on('error', () => resolve(false));
-      req.setTimeout(600, () => {
+      req.setTimeout(800, () => {
         req.destroy();
         resolve(false);
       });
@@ -183,6 +184,7 @@ async function ensureCoreServer() {
 
     coreProcess = spawn(nodeBinary, [coreCli], {
       cwd: coreCwd,
+      detached: process.platform !== 'win32',
       env: {
         ...process.env,
         PATH: customPath,
@@ -274,7 +276,21 @@ async function ensureCoreServer() {
 async function cleanupServer() {
   if (coreProcess) {
     try {
-      coreProcess.kill();
+      const pid = coreProcess.pid;
+      if (pid) {
+        if (process.platform === 'win32') {
+          try {
+            execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' });
+          } catch {}
+        } else {
+          try {
+            // 向独立进程组发送终止信号，清理全部子孙进程
+            process.kill(-pid, 'SIGTERM');
+          } catch {
+            coreProcess.kill('SIGTERM');
+          }
+        }
+      }
     } catch {}
     coreProcess = null;
   }
@@ -284,6 +300,55 @@ async function cleanupServer() {
     } catch {}
     embeddedServer = null;
   }
+}
+
+// 一键重启后台核心调度引擎（安全清理残留、平滑拉起新实例）
+async function restartCoreServer(): Promise<{ success: boolean; port: string; message?: string }> {
+  const targetPort = app.isPackaged ? '19888' : (process.env.OPENLOOP_PORT || '19889');
+  console.log(`[Desktop Main] Restarting Core Server on port ${targetPort}...`);
+
+  // 1. 先优雅停止当前托管的子进程与嵌入式服务
+  await cleanupServer();
+
+  // 2. 检查端口是否有残留孤儿进程（非主进程本身），如果有则定向释放
+  try {
+    if (process.platform === 'win32') {
+      const out = execSync(`netstat -ano | findstr :${targetPort}`, { encoding: 'utf-8' });
+      for (const line of out.trim().split('\n')) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid && pid !== '0') execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+      }
+    } else {
+      const pids = execSync(`lsof -t -i :${targetPort}`, { encoding: 'utf-8' }).trim().split('\n');
+      for (const pidStr of pids) {
+        const p = parseInt(pidStr, 10);
+        if (p && p !== process.pid) {
+          try {
+            process.kill(p, 'SIGTERM');
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  // 3. 等待端口释放（最多 500ms）
+  for (let i = 0; i < 5; i++) {
+    const alive = await checkUrlAlive(`http://127.0.0.1:${targetPort}/api/status`);
+    if (!alive) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  // 4. 重新拉起
+  await ensureCoreServer();
+
+  // 5. 探活验证
+  const aliveAfter = await checkUrlAlive(`http://127.0.0.1:${targetPort}/api/status`);
+  return {
+    success: aliveAfter,
+    port: targetPort,
+    message: aliveAfter ? '核心调度引擎已成功重启' : '核心调度引擎启动中，正在等待就绪',
+  };
 }
 
 function resolveRendererHtmlPath(): string {
@@ -482,11 +547,42 @@ ipcMain.handle('notification:show', (_event, payload: { title: string; body: str
   return true;
 });
 
+// 注册系统级 IPC：一键重启核心调度引擎
+ipcMain.handle('system:restartCoreServer', async () => {
+  if (!app.isPackaged) {
+    console.log('[Desktop Main] IPC: system:restartCoreServer received');
+  }
+  return await restartCoreServer();
+});
+
+// 注册系统级 IPC：获取核心调度引擎状态
+ipcMain.handle('system:getCoreServerStatus', async () => {
+  const targetPort = app.isPackaged ? '19888' : (process.env.OPENLOOP_PORT || '19889');
+  const alive = await checkUrlAlive(`http://127.0.0.1:${targetPort}/api/status`);
+  return {
+    alive,
+    port: targetPort,
+    pid: coreProcess?.pid,
+  };
+});
+
 app.whenReady().then(async () => {
   await ensureCoreServer();
   await createWindow();
 
-  app.on('activate', () => {
+  app.on('activate', async () => {
+    // macOS 特性：点击 Dock 唤醒时，若后台核心调度引擎未存活，自动触发自愈拉起
+    try {
+      const targetPort = app.isPackaged ? '19888' : (process.env.OPENLOOP_PORT || '19889');
+      const alive = await checkUrlAlive(`http://127.0.0.1:${targetPort}/api/status`);
+      if (!alive) {
+        console.log('[Desktop Main] Core Server inactive on macOS activate, auto-healing...');
+        await ensureCoreServer();
+      }
+    } catch (err: any) {
+      console.warn('[Desktop Main] Auto-heal Core Server notice:', err.message);
+    }
+
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
@@ -498,6 +594,10 @@ app.on('window-all-closed', async () => {
     await cleanupServer();
     app.quit();
   }
+});
+
+app.on('before-quit', async () => {
+  await cleanupServer();
 });
 
 app.on('will-quit', async () => {

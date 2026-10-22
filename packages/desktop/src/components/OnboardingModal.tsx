@@ -13,7 +13,9 @@ import {
   HardDrive,
   GitBranch,
   Layers,
+  RotateCcw,
 } from 'lucide-react';
+import { api } from '../services/api';
 
 interface ToolStatus {
   name: string;
@@ -44,6 +46,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   asPage = false,
 }) => {
   const [loading, setLoading] = useState<boolean>(true);
+  const [isRetrying, setIsRetrying] = useState<boolean>(false);
+  const [isRestarting, setIsRestarting] = useState<boolean>(false);
+  const [serverEndpoint, setServerEndpoint] = useState<string>('127.0.0.1:19888');
   const [status, setStatus] = useState<SystemStatus>({
     platform: 'darwin',
     nodeVersion: '',
@@ -76,6 +81,41 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       checkStatus();
     }
   }, [isOpen, checkStatus]);
+
+  useEffect(() => {
+    try {
+      const url = new URL(api.getBaseUrl());
+      setServerEndpoint(url.host || '127.0.0.1:19888');
+    } catch {
+      setServerEndpoint('127.0.0.1:19888');
+    }
+  }, []);
+
+  const handleRetryConnection = useCallback(async () => {
+    if (isRetrying || isRestarting) return;
+    setIsRetrying(true);
+    if (import.meta.env?.DEV) {
+      console.log('[Onboarding] 用户手动点击重试连接后台服务');
+    }
+    try {
+      await api.retryConnection();
+    } finally {
+      setTimeout(() => setIsRetrying(false), 500);
+    }
+  }, [isRetrying, isRestarting]);
+
+  const handleRestartCoreServer = useCallback(async () => {
+    if (isRestarting) return;
+    setIsRestarting(true);
+    if (import.meta.env?.DEV) {
+      console.log('[Onboarding] 用户触发一键重启后台 Core 引擎');
+    }
+    try {
+      await api.restartCoreServer();
+    } finally {
+      setTimeout(() => setIsRestarting(false), 800);
+    }
+  }, [isRestarting]);
 
   const handleOpenPrivacySettings = useCallback(async () => {
     if (window.electronAPI?.openPrivacySetting) {
@@ -275,7 +315,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 <div className="text-[12.5px] font-medium text-[#18181b] flex items-center gap-2">
                   <span>核心调度引擎 (Core Server)</span>
                   <span className="font-mono text-[10.5px] text-[#71717a]">
-                    127.0.0.1:19888
+                    {serverEndpoint}
                   </span>
                 </div>
                 <div className="text-[11px] text-[#8c8c94] mt-0.5">
@@ -290,10 +330,36 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 <span>就绪</span>
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10.5px] font-medium border border-[#fecaca]/60">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#ef4444]" />
-                <span>连接中</span>
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10.5px] font-medium border border-[#fecaca]/60">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#ef4444]" />
+                  <span>{isRestarting ? '重启中...' : isRetrying ? '探测中...' : '连接中'}</span>
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleRetryConnection}
+                    disabled={isRetrying || isRestarting}
+                    title="立即重新探活服务"
+                    className="h-[24px] px-2 rounded-[5px] border border-[#e3e3e8] bg-[#fafafc] hover:bg-[#f4f4f6] text-[#52525b] hover:text-[#18181b] text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50 active:scale-95 shadow-xs"
+                  >
+                    <RefreshCw size={11} className={isRetrying ? 'animate-spin' : ''} />
+                    <span>重试</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleRestartCoreServer}
+                    disabled={isRestarting || isRetrying}
+                    title="一键平滑重启后台核心服务"
+                    className="h-[24px] px-2 rounded-[5px] border border-[#fecaca]/70 bg-[#fff5f5] hover:bg-[#fee2e2] text-[#dc2626] text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50 active:scale-95 shadow-xs"
+                  >
+                    <RotateCcw size={11} className={isRestarting ? 'animate-spin' : ''} />
+                    <span>重启服务</span>
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
