@@ -3168,7 +3168,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
             {drawerTab === 'session' && (
               <div className="flex-1 flex flex-col min-h-0 pt-3">
                 {/* 顶部感知与控制条 */}
-                <div className="mb-2 px-3 py-2 rounded-[8px] bg-[#f9f9fb] border border-[#ececf0] flex items-center justify-between">
+                <div className="mb-2 px-3 py-2 rounded-[8px] bg-[#f9f9fb] border border-[#ececf0] flex items-center justify-between gap-1.5">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-2 h-2 rounded-full bg-[#7c3aed] inline-block shrink-0" />
                     <span className="text-[11.5px] font-semibold text-[#1c1c21] truncate">

@@ -469,7 +469,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
           </div>
 
           {/* 会话 ID 与快捷操作工具条 */}
-          <div className="mt-2.5 pt-2 border-t border-[#ececf0] flex items-center justify-between text-[11px] text-[#85858d]">
+          <div className="mt-2.5 pt-2 border-t border-[#ececf0] flex items-center justify-between gap-1.5 text-[11px] text-[#85858d]">
             <div className="flex items-center gap-1.5 font-mono truncate mr-2">
               <span>Session:</span>
               <span
