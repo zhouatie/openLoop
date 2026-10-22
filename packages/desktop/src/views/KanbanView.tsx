@@ -2106,7 +2106,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           setEditingTask(curTask);
                         }}
                         className="h-[26px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0"
-                        title="编辑此任务"
+                        title={curTask.kind === 'group' ? '编辑此任务组' : '编辑此任务'}
                       >
                         <Edit3 size={11} />
                         <span>编辑</span>

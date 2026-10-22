@@ -440,7 +440,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
               onEdit(task);
             }}
             className="p-1 rounded text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4]"
-            title="编辑任务"
+            title={isGroup ? '编辑任务组' : '编辑任务'}
           >
             <Edit3 size={11} />
           </button>
