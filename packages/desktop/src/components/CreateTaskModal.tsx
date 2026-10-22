@@ -82,6 +82,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
   const focusIndexRef = useRef<number | null>(null);
   const criteriaInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const handleSubmitRef = useRef<() => void>(() => {});
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [workflowId, setWorkflowId] = useState(workflows[0]?.id || '');
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>(defaultColumn);
@@ -225,16 +226,23 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   }, [criteriaList]);
 
-  // 按 Esc 键优先关闭下拉菜单，再关闭整个弹窗
+  // 键盘快捷键监听：Esc 优先关闭下拉菜单或弹窗，Command/Ctrl + Enter 提交保存
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
       if (e.key === 'Escape') {
         if (isDropdownOpen) {
           setIsDropdownOpen(false);
         } else {
           onClose();
         }
+      } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (import.meta.env?.DEV) {
+          console.log('[CreateTaskModal] 触发 Command + Enter 快捷键保存');
+        }
+        handleSubmitRef.current();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -427,6 +435,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   };
 
   const handleCriteriaKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      return;
+    }
     if (e.key === 'Enter') {
       e.preventDefault();
       setCriteriaList((prev) => {
@@ -499,9 +510,16 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || !workflowId) return;
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) {
+      e.preventDefault();
+    }
+    if (loading || !title.trim() || !workflowId) {
+      if (!title.trim()) {
+        titleInputRef.current?.focus();
+      }
+      return;
+    }
 
     const trimmedWorkspace = workspace.trim();
     if (isCurrentWfWsRequired && !trimmedWorkspace) {
@@ -576,6 +594,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       setLoading(false);
     }
   };
+
+  handleSubmitRef.current = handleSubmit;
 
   const getNodeSummaryBadges = (wf: WorkflowDefinition) => {
     const types = Array.from(new Set(wf.nodes.map((n) => n.type)));
@@ -1106,22 +1126,28 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           </div>
 
           {/* 底部按钮栏 */}
-          <div className="pt-2 flex items-center justify-end gap-1.5 border-t border-[#ececf0]">
-            <button
-              type="button"
-              onClick={onClose}
-              className="h-[26px] px-3 rounded-[5px] text-[#63636b] hover:bg-[#f1f1f4] hover:text-[#1c1c21] text-[11.5px] transition-colors"
-            >
-              取消
-            </button>
-            <button
-              type="submit"
-              disabled={loading || !title.trim()}
-              className="h-[26px] px-3.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 active:scale-95 disabled:opacity-40 transition-all shadow-sm"
-            >
-              <Play size={11} strokeWidth={2.4} />
-              <span>{loading ? '处理中...' : autoRun ? '立即启动' : '创建任务'}</span>
-            </button>
+          <div className="pt-2 flex items-center justify-between border-t border-[#ececf0]">
+            <span className="text-[10px] text-[#85858d]">
+              支持按 <kbd className="font-mono text-[9px] px-1 py-0.5 rounded bg-[#f1f1f4] border border-[#e3e3e8]">⌘</kbd> + <kbd className="font-mono text-[9px] px-1 py-0.5 rounded bg-[#f1f1f4] border border-[#e3e3e8]">Enter</kbd> 保存
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={onClose}
+                className="h-[26px] px-3 rounded-[5px] text-[#63636b] hover:bg-[#f1f1f4] hover:text-[#1c1c21] text-[11.5px] transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={loading || !title.trim()}
+                title="支持 ⌘ + Enter 保存"
+                className="h-[26px] px-3.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 active:scale-95 disabled:opacity-40 transition-all shadow-sm cursor-pointer"
+              >
+                <Play size={11} strokeWidth={2.4} />
+                <span>{loading ? '处理中...' : autoRun ? '立即启动' : '创建任务'}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>
