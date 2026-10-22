@@ -63,6 +63,7 @@ import { WorkspacePicker } from '../components/WorkspacePicker';
 import { AgentMarkdown } from '../components/AgentMarkdown';
 import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
 import { AgentAwaitingInputBar } from '../components/AgentAwaitingInputBar';
+import { AgentChatChangedFiles } from '../components/AgentChatChangedFiles';
 import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
 import { KanbanLaneList } from '../components/KanbanLaneList';
 import { toast } from '../components/Toast';
@@ -3152,6 +3153,14 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
+                    {/* 代码改动文件查看与审查 */}
+                    <AgentChatChangedFiles
+                      taskId={curTask.id}
+                      taskTitle={curTask.title}
+                      isBusy={sessionState?.isBusy}
+                      sessionMessagesCount={sessionState?.messages?.length || 0}
+                    />
+
                     {/* 会话状态微徽章 */}
                     {sessionState?.isBusy ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eff6ff] text-[#2563eb] text-[10px] font-medium border border-[#bfdbfe]/60">

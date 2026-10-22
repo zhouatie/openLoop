@@ -1486,7 +1486,8 @@ export class OpenLoopServer {
       if (taskDiffMatch && method === 'GET') {
         const taskId = taskDiffMatch[1];
         const task = this.store.getTask(taskId);
-        if (!task || !task.context?.worktree?.worktreeDir) {
+        const targetDir = task?.context?.worktree?.worktreeDir || task?.workspace;
+        if (!task || !targetDir) {
           return this.sendJson(
             res,
             200,
@@ -1500,10 +1501,10 @@ export class OpenLoopServer {
         }
 
         try {
-          const wt = task.context.worktree;
+          const baseBranch = task.context?.worktree?.baseBranch;
           const diffResult = WorktreeManager.getInstance().getWorktreeDiffDetail(
-            wt.worktreeDir,
-            wt.baseBranch
+            targetDir,
+            baseBranch
           );
           return this.sendJson(res, 200, diffResult, reqMeta);
         } catch (err: any) {
