@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import net from 'net';
 import http from 'http';
 import { spawn, execSync, ChildProcess } from 'child_process';
@@ -345,9 +346,16 @@ export class WorktreeManager {
     this.symlinkSharedPaths(repoRoot, worktreeDir, sharedPaths);
 
     // 5. 通用动态端口分配（结合编排配置的 basePort / portBases 与全局活跃端口注册表）
+    const hasCorePackage =
+      fs.existsSync(path.join(repoRoot, 'packages/core')) ||
+      fs.existsSync(path.join(worktreeDir, 'packages/core'));
     const portKeys = options.portKeys && options.portKeys.length > 0
-      ? options.portKeys
+      ? [...options.portKeys]
       : ['webPort', 'corePort'];
+
+    if (hasCorePackage && !portKeys.includes('corePort')) {
+      portKeys.push('corePort');
+    }
 
     const defaultBase = options.basePort || 5175;
 
@@ -355,7 +363,8 @@ export class WorktreeManager {
       const reservedPorts = this.getBusyOrReservedPorts();
       const allocated: Record<string, number> = {};
       for (const key of portKeys) {
-        const startPortForKey = options.portBases?.[key] || defaultBase;
+        // corePort 严格从 19890 开始动态分配，绝对保护 19888 (生产) 与 19889 (开发沙箱)
+        const startPortForKey = options.portBases?.[key] || (key === 'corePort' ? 19890 : defaultBase);
         const p = await this.getAvailablePort(startPortForKey, reservedPorts);
         allocated[key] = p;
         reservedPorts.add(p);
@@ -365,11 +374,37 @@ export class WorktreeManager {
       return allocated;
     });
 
-    const assignedCorePort = ports.corePort || (process.env.OPENLOOP_PORT ? parseInt(process.env.OPENLOOP_PORT, 10) : 19888);
+    // 绝对禁止回退到生产端口 19888，未显式指定时分配独立沙箱端口 (从 19890 起)
+    const assignedCorePort = ports.corePort || 19890;
     const primaryPort = ports.webPort || ports.port || ports.PORT || Object.values(ports)[0] || defaultBase;
     const targetUrl = `http://localhost:${primaryPort}?corePort=${assignedCorePort}`;
 
-    logger.info(`[Worktree:Ready] 隔离工作区就绪，分配端口: ${JSON.stringify(ports)}, 靶机通信 Core: ${assignedCorePort}`);
+    // 6. 独立沙箱数据底座隔离（保障全栈应用数据 100% 独立）
+    const storeDir = path.join(worktreeDir, '.openloop-data');
+    if (!fs.existsSync(storeDir)) {
+      try {
+        fs.mkdirSync(storeDir, { recursive: true });
+        // 单向快照种子：若宿主存在现有数据库，克隆一份只读快照供沙箱初始化，后续读写完全被限制在沙箱内
+        const hostDbCandidate = process.env.OPENLOOP_STORE_DIR
+          ? path.join(process.env.OPENLOOP_STORE_DIR, 'openloop.db')
+          : path.join(os.homedir(), '.openloop', 'openloop.db');
+        const targetDb = path.join(storeDir, 'openloop.db');
+        if (fs.existsSync(hostDbCandidate) && !fs.existsSync(targetDb)) {
+          fs.copyFileSync(hostDbCandidate, targetDb);
+          if (fs.existsSync(`${hostDbCandidate}-wal`)) {
+            try { fs.copyFileSync(`${hostDbCandidate}-wal`, `${targetDb}-wal`); } catch {}
+          }
+          if (fs.existsSync(`${hostDbCandidate}-shm`)) {
+            try { fs.copyFileSync(`${hostDbCandidate}-shm`, `${targetDb}-shm`); } catch {}
+          }
+          logger.info(`[Worktree:Store] 已完成沙箱数据底座快照隔离初始化 (来源: ${hostDbCandidate} -> 目标: ${targetDb})`);
+        }
+      } catch (err: any) {
+        logger.warn(`[Worktree:Store] 沙箱数据底座初始化提示: ${err.message}`);
+      }
+    }
+
+    logger.info(`[Worktree:Ready] 隔离工作区就绪，分配端口: ${JSON.stringify(ports)}, 靶机通信 Core: ${assignedCorePort}, 数据目录: ${storeDir}`);
 
     return {
       worktreeDir,
@@ -379,7 +414,123 @@ export class WorktreeManager {
       corePort: assignedCorePort,
       webPort: primaryPort,
       targetUrl,
+      storeDir,
     };
+  }
+
+  /**
+   * 为包含服务端的全栈沙箱项目启动独立的 Core 调度服务与数据底座
+   * 严格杜绝连接稳定版 (19888) 与污染稳定版数据 (~/.openloop)
+   */
+  public async ensureSandboxCoreServer(
+    taskId: string,
+    worktree: WorktreeContextInfo,
+    onLog?: (msg: string) => void
+  ): Promise<number> {
+    const worktreeDir = worktree.worktreeDir;
+    const hasCorePackage =
+      fs.existsSync(path.join(worktreeDir, 'packages/core')) &&
+      fs.existsSync(path.join(worktreeDir, 'packages/core/package.json'));
+
+    // 如果不是包含 Core 服务端的项目，返回已分配的 corePort 或默认安全端口
+    if (!hasCorePackage) {
+      return worktree.corePort || 19890;
+    }
+
+    // 1. 严格阻断生产端口 19888：若未分配或属于 19888，立即动态分配 19890+ 的独立沙箱核心端口
+    let corePort = worktree.corePort;
+    if (!corePort || corePort === 19888) {
+      const reservedPorts = this.getBusyOrReservedPorts();
+      corePort = await this.getAvailablePort(19890, reservedPorts);
+      worktree.corePort = corePort;
+      if (!worktree.ports) worktree.ports = {};
+      worktree.ports.corePort = corePort;
+      const primaryPort = worktree.webPort || worktree.ports.webPort || 5175;
+      worktree.targetUrl = `http://localhost:${primaryPort}?corePort=${corePort}`;
+      this.registerTaskPorts(taskId, [corePort]);
+      onLog?.(`[沙箱隔离] 生产端口阻断保护生效：已为沙箱分配独立核心端口 ${corePort}`);
+    }
+
+    // 2. 独立数据目录检查与单向快照初始化
+    const storeDir = worktree.storeDir || path.join(worktreeDir, '.openloop-data');
+    worktree.storeDir = storeDir;
+    if (!fs.existsSync(storeDir)) {
+      try {
+        fs.mkdirSync(storeDir, { recursive: true });
+      } catch {}
+    }
+    const targetDb = path.join(storeDir, 'openloop.db');
+    if (!fs.existsSync(targetDb)) {
+      const hostDbCandidate = process.env.OPENLOOP_STORE_DIR
+        ? path.join(process.env.OPENLOOP_STORE_DIR, 'openloop.db')
+        : path.join(os.homedir(), '.openloop', 'openloop.db');
+      if (fs.existsSync(hostDbCandidate)) {
+        try {
+          fs.copyFileSync(hostDbCandidate, targetDb);
+          if (fs.existsSync(`${hostDbCandidate}-wal`)) {
+            try { fs.copyFileSync(`${hostDbCandidate}-wal`, `${targetDb}-wal`); } catch {}
+          }
+          if (fs.existsSync(`${hostDbCandidate}-shm`)) {
+            try { fs.copyFileSync(`${hostDbCandidate}-shm`, `${targetDb}-shm`); } catch {}
+          }
+          onLog?.(`[沙箱隔离] 已从宿主环境克隆数据快照种子至 ${targetDb}，后续读写 100% 隔离`);
+        } catch (err: any) {
+          onLog?.(`[沙箱隔离] 克隆数据快照告警: ${err.message}`);
+        }
+      }
+    }
+
+    // 3. 探活已有沙箱 Core 进程，若已就绪直接复用
+    const isAlreadyAlive = await this.waitForHttpReady(`http://127.0.0.1:${corePort}/api/status`, 500);
+    if (isAlreadyAlive) {
+      onLog?.(`[沙箱 Core] 独立调度服务此前已就绪 (端口: ${corePort})`);
+      return corePort;
+    }
+
+    // 4. 清理残留并拉起
+    this.killPortIfBusy(corePort, { allowWorktreeDir: worktreeDir, forTaskId: taskId });
+
+    const coreScriptPath = path.join(worktreeDir, 'packages/core/dist/server-cli.js');
+    if (!fs.existsSync(coreScriptPath)) {
+      onLog?.(`[沙箱 Core] 首次启动编译 core 模块...`);
+      try {
+        execSync('pnpm --filter @openloop/core build', { cwd: worktreeDir, stdio: 'pipe' });
+      } catch (buildErr: any) {
+        onLog?.(`[沙箱 Core] 编译警告: ${buildErr.message}`);
+      }
+    }
+
+    onLog?.(`[沙箱 Core] 启动独立调度服务 (端口: ${corePort}, 数据目录: ${storeDir})`);
+    const isUnix = process.platform !== 'win32';
+    const coreChild = spawn(`node packages/core/dist/server-cli.js`, {
+      cwd: worktreeDir,
+      shell: true,
+      detached: isUnix,
+      env: {
+        ...process.env,
+        PORT: String(corePort),
+        OPENLOOP_PORT: String(corePort),
+        OPENLOOP_STORE_DIR: storeDir,
+      },
+      stdio: 'pipe',
+    });
+
+    TaskProcessManager.getInstance().register(taskId, coreChild, {
+      name: 'sandbox-core-server',
+      port: corePort,
+    });
+
+    coreChild.stdout?.on('data', (d) => onLog?.(`[Core] ${d.toString().trimEnd()}`));
+    coreChild.stderr?.on('data', (d) => onLog?.(`[Core:err] ${d.toString().trimEnd()}`));
+
+    const isReady = await this.waitForHttpReady(`http://127.0.0.1:${corePort}/api/status`, 15000);
+    if (isReady) {
+      onLog?.(`[沙箱 Core] ✔ 独立调度服务已成功就绪 (端口: ${corePort})`);
+    } else {
+      onLog?.(`[沙箱 Core 警告] 独立调度服务启动等待超时，请检查控制台输出`);
+    }
+
+    return corePort;
   }
 
   /**

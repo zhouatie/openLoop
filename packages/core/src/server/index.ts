@@ -1592,7 +1592,14 @@ export class OpenLoopServer {
           return this.sendJson(res, 200, { status: 'none', message: 'No worktree context' }, reqMeta);
         }
         const port = task.context.worktree.webPort || task.context.worktree.ports?.webPort || 5175;
-        const targetUrl = task.context.worktree.targetUrl || `http://localhost:${port}`;
+        let targetUrl = task.context.worktree.targetUrl || `http://localhost:${port}`;
+        // 生产端口安全纠正：若历史 targetUrl 包含了 19888，自动纠正为沙箱独立端口
+        if (targetUrl.includes('corePort=19888')) {
+          const safePort = task.context.worktree.corePort && task.context.worktree.corePort !== 19888
+            ? task.context.worktree.corePort
+            : 19890;
+          targetUrl = targetUrl.replace('corePort=19888', `corePort=${safePort}`);
+        }
         // 轻量极速端口探针 (<200ms)
         const isRunning = await new Promise<boolean>((resolve) => {
           const socket = new net.Socket();
@@ -1678,9 +1685,22 @@ export class OpenLoopServer {
 
         serverLogger.info(`[Sandbox:Start] 为任务 ${taskId} 启动靶机服务: ${cmd} (目录: ${worktreeDir}, 探活: ${targetUrl})`);
 
+        // 0. 沙箱全栈 Core 服务就绪（严格隔离稳定版 19888）
         const currentCorePort = String(
-          task.context.worktree.corePort || this.port || process.env.OPENLOOP_PORT || '19888'
+          await WorktreeManager.getInstance().ensureSandboxCoreServer(
+            taskId,
+            task.context.worktree,
+            (msg) => this.engine.log(taskId, 'node_env_prep', 'stdout', msg)
+          )
         );
+        ports.corePort = parseInt(currentCorePort, 10);
+        if (task.context.worktree.ports) {
+          task.context.worktree.ports.corePort = ports.corePort;
+        }
+        task.context.worktree.corePort = ports.corePort;
+        try {
+          this.store.saveTask(task);
+        } catch {}
 
         const isUnix = process.platform !== 'win32';
         const child = spawn(cmd, {
@@ -1710,10 +1730,11 @@ export class OpenLoopServer {
 
         // 4. 探活等待就绪
         const isReady = await WorktreeManager.getInstance().waitForHttpReady(targetUrl, warmupTimeoutMs);
-        const separator = targetUrl.includes('?') ? '&' : '?';
-        const browserTargetUrl = targetUrl.includes('corePort=')
-          ? targetUrl
-          : `${targetUrl}${separator}corePort=${currentCorePort}`;
+        let baseTargetUrl = targetUrl.replace(/([?&])corePort=\d+(&?)/, (_m: string, p1: string, p2: string) => (p2 ? p1 : ''));
+        if (baseTargetUrl.endsWith('?') || baseTargetUrl.endsWith('&')) {
+          baseTargetUrl = baseTargetUrl.slice(0, -1);
+        }
+        const browserTargetUrl = `${baseTargetUrl}${baseTargetUrl.includes('?') ? '&' : '?'}corePort=${currentCorePort}`;
 
         if (isReady) {
           serverLogger.info(`[Sandbox:Start] ✔ 任务 ${taskId} 靶机服务已就绪 (${browserTargetUrl})`);
@@ -1743,6 +1764,16 @@ export class OpenLoopServer {
         TaskProcessManager.stopAll(taskId);
         if (task?.context?.worktree?.webPort) {
           WorktreeManager.getInstance().killPortIfBusy(task.context.worktree.webPort);
+        }
+        if (task?.context?.worktree?.corePort) {
+          WorktreeManager.getInstance().killPortIfBusy(task.context.worktree.corePort);
+        }
+        if (task?.context?.worktree?.ports) {
+          for (const p of Object.values(task.context.worktree.ports)) {
+            if (typeof p === 'number') {
+              WorktreeManager.getInstance().killPortIfBusy(p);
+            }
+          }
         }
         WorktreeManager.unregisterTaskPorts(taskId);
         return this.sendJson(res, 200, { success: true, status: 'stopped' }, reqMeta);

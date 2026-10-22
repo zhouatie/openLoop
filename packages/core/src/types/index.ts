@@ -377,6 +377,7 @@ export interface WorktreeContextInfo {
   corePort?: number; // 兼容字段
   webPort?: number;  // 兼容字段
   targetUrl: string;
+  storeDir?: string; // 沙箱独立数据底座目录 (保证任务间及与稳定版彻底隔离)
   changedFiles?: string[];
   diffSummary?: string;
   diffResult?: TaskWorktreeDiffResult;

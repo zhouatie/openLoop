@@ -32,6 +32,21 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { formatCombo } = useShortcuts();
 
+  const currentCorePort = (() => {
+    if (typeof window !== 'undefined' && window.location) {
+      try {
+        const sp = new URLSearchParams(window.location.search);
+        const qPort = sp.get('corePort');
+        if (qPort && /^\d+$/.test(qPort)) return qPort;
+      } catch {}
+    }
+    return import.meta.env.VITE_CORE_PORT || (import.meta.env.DEV ? '19889' : '19888');
+  })();
+
+  const portNum = parseInt(currentCorePort, 10);
+  const isSandbox = portNum >= 19890;
+  const isDev = portNum === 19889;
+
   const handleToggleSidebarClick = () => {
     if (import.meta.env?.DEV) {
       console.log('[Header] 点击侧边栏切换按钮:', {
@@ -64,7 +79,15 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="text-[#1c1c21] font-medium">{title}</span>
         </div>
 
-        {import.meta.env.DEV && (
+        {isSandbox ? (
+          <span
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[5px] bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0] text-[10.5px] font-mono font-medium tracking-tight select-none"
+            title={`当前处于任务专属独立沙箱（端口 ${currentCorePort}），数据与稳定版完全隔离`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse" />
+            SANDBOX · {currentCorePort}
+          </span>
+        ) : isDev ? (
           <span
             className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[5px] bg-[#fef3c7] text-[#92400e] border border-[#fde68a] text-[10.5px] font-mono font-medium tracking-tight select-none"
             title="当前处于独立开发沙箱（端口 19889），不影响稳定版环境"
@@ -72,7 +95,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] animate-pulse" />
             DEV · 19889
           </span>
-        )}
+        ) : null}
       </div>
 
       {/* 右侧：动作按钮 */}

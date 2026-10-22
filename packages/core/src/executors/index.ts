@@ -819,8 +819,29 @@ export class EnvPrepareExecutor implements NodeExecutor {
 
     const ports = task.context?.worktree?.ports || {
       webPort: task.context?.worktree?.webPort || 5173,
-      corePort: task.context?.worktree?.corePort || 19888,
+      corePort: task.context?.worktree?.corePort || 19890,
     };
+
+    const wtManager = WorktreeManager.getInstance();
+
+    // 0. 全栈沙箱 Core 服务隔离就绪：若任务处于 Worktree 且存在服务端模块，优先就绪独立 Core
+    let currentCorePort = String(ports.corePort || '19890');
+    if (task.context?.worktree) {
+      const activeCorePort = await wtManager.ensureSandboxCoreServer(
+        task.id,
+        task.context.worktree,
+        (msg) => emitLog('system', msg)
+      );
+      currentCorePort = String(activeCorePort);
+      ports.corePort = activeCorePort;
+      if (!task.context.worktree.ports) task.context.worktree.ports = {};
+      task.context.worktree.ports.corePort = activeCorePort;
+      task.context.worktree.corePort = activeCorePort;
+      ctx.variables.ports = ports;
+      if (task.context.worktree.targetUrl) {
+        ctx.variables.testUrl = task.context.worktree.targetUrl;
+      }
+    }
 
     // 1. 若编排节点配置了后台服务拉起命令 (例如 npm run dev / pnpm dev / go run / python app.py)
     const rawCommand = node.config.command;
@@ -833,7 +854,6 @@ export class EnvPrepareExecutor implements NodeExecutor {
       });
 
       // 启动前安全清理当前工作区残留进程，严禁误杀其他并行任务
-      const wtManager = WorktreeManager.getInstance();
       if (ports.webPort) {
         wtManager.killPortIfBusy(ports.webPort, {
           allowWorktreeDir: task.context?.worktree?.worktreeDir || resolvedCwd,
@@ -844,7 +864,6 @@ export class EnvPrepareExecutor implements NodeExecutor {
       emitLog('system', `[服务启动] 执行服务拉起命令: ${cmd} (目录: ${resolvedCwd})`);
 
       const isUnix = process.platform !== 'win32';
-      const currentCorePort = String(ports.corePort || process.env.OPENLOOP_PORT || '19888');
 
       const child = spawn(cmd, {
         cwd: resolvedCwd,

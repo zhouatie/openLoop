@@ -272,8 +272,9 @@ export const WORKFLOW_RECIPES: WorkflowRecipe[] = [
     defaultName: '沙箱环境隔离',
     defaultConfig: {
       sharedPaths: ['node_modules'],
-      allocatePorts: ['webPort'],
+      allocatePorts: ['webPort', 'corePort'],
       basePort: 5175,
+      portBases: { webPort: 5175, corePort: 19890 },
     },
     description: '创建轻量 Git Worktree 分支与专属动态端口，支持并发任务安全运行。',
   },
