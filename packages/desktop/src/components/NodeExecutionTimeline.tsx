@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   CheckCircle2,
   XCircle,
@@ -24,6 +24,8 @@ import {
   Play,
   RotateCcw,
   CheckSquare,
+  SlidersHorizontal,
+  Undo2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Task, WorkflowDefinition, NodeRun, NodeStatus, WorkflowNode } from '@openloop/core';
@@ -49,6 +51,16 @@ interface NodeExecutionTimelineProps {
   isRetryingNode?: boolean;
   onCustomRetry?: (taskId: string, payload: { selectedNodeIds: string[]; fromNodeId?: string }) => void;
   isCustomRetrying?: boolean;
+  /** 任务级节点覆盖：仅当前任务生效，不写回流水线模板 */
+  onNodeOverride?: (
+    taskId: string,
+    payload: {
+      nodeId: string;
+      params?: Record<string, string> | null;
+      config?: Record<string, any> | null;
+      reset?: boolean;
+    }
+  ) => Promise<unknown> | void;
 }
 
 interface TimelineItem {
@@ -96,9 +108,26 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
   isRetryingNode = false,
   onCustomRetry,
   isCustomRetrying = false,
+  onNodeOverride,
 }) => {
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // 节点参数微调编辑器状态（单开，保证内存占用与视觉噪音最小）
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [draftParams, setDraftParams] = useState<Record<string, string>>({});
+  const [draftContent, setDraftContent] = useState<string>('');
+  const [contentField, setContentField] = useState<'command' | 'prompt'>('command');
+  const [showContentEditor, setShowContentEditor] = useState<boolean>(false);
+  const [overrideSaveState, setOverrideSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const overrideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingOverrideRef = useRef<{
+    nodeId: string;
+    params?: Record<string, string>;
+    config?: Record<string, any>;
+    reset?: boolean;
+  } | null>(null);
+  const savedTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 定制重试模式与勾选节点集合
   const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
@@ -312,6 +341,111 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  // ===== 任务级节点覆盖：失焦或停输 600ms 自动落盘，无需保存按钮 =====
+  const flushOverride = useCallback(() => {
+    if (overrideTimerRef.current) {
+      clearTimeout(overrideTimerRef.current);
+      overrideTimerRef.current = null;
+    }
+    const pending = pendingOverrideRef.current;
+    pendingOverrideRef.current = null;
+    if (!pending || !onNodeOverride) return;
+    if (import.meta.env?.DEV) {
+      console.log('[NodeExecutionTimeline] 落盘任务级节点覆盖:', pending);
+    }
+    setOverrideSaveState('saving');
+    Promise.resolve(onNodeOverride(task.id, pending))
+      .then(() => {
+        setOverrideSaveState('saved');
+        if (savedTipTimerRef.current) clearTimeout(savedTipTimerRef.current);
+        savedTipTimerRef.current = setTimeout(() => setOverrideSaveState('idle'), 1600);
+      })
+      .catch(() => setOverrideSaveState('idle'));
+  }, [onNodeOverride, task.id]);
+
+  const queueOverride = useCallback(
+    (payload: { nodeId: string; params?: Record<string, string>; config?: Record<string, any> }) => {
+      pendingOverrideRef.current = payload;
+      if (overrideTimerRef.current) clearTimeout(overrideTimerRef.current);
+      overrideTimerRef.current = setTimeout(() => flushOverride(), 600);
+    },
+    [flushOverride]
+  );
+
+  // 卸载时只清理定时器，不向已卸载组件回写状态
+  useEffect(
+    () => () => {
+      if (overrideTimerRef.current) clearTimeout(overrideTimerRef.current);
+      if (savedTipTimerRef.current) clearTimeout(savedTipTimerRef.current);
+    },
+    []
+  );
+
+  // 参数的模板原值：任务上下文 > 流水线变量，用于展示当前生效值与还原
+  const resolveTemplateParamValue = (key: string): string => {
+    const raw = task.context?.[key] ?? workflow?.variables?.[key] ?? '';
+    return raw === undefined || raw === null ? '' : String(raw);
+  };
+
+  const openParamEditor = (item: TimelineItem) => {
+    if (editingNodeId === item.id) {
+      flushOverride();
+      setEditingNodeId(null);
+      return;
+    }
+    flushOverride();
+    const cfg: any = item.wfNode?.config || {};
+    const override: any = task.context?.nodeOverrides?.[item.id] || {};
+    const decls: any[] = Array.isArray(cfg.editableParams) ? cfg.editableParams : [];
+    const nextParams: Record<string, string> = {};
+    decls.forEach((d) => {
+      if (!d?.key) return;
+      nextParams[d.key] = override?.params?.[d.key] ?? resolveTemplateParamValue(d.key);
+    });
+    const field: 'command' | 'prompt' = cfg.command ? 'command' : 'prompt';
+    setDraftParams(nextParams);
+    setContentField(field);
+    setDraftContent(String(override?.config?.[field] ?? cfg[field] ?? ''));
+    setShowContentEditor(false);
+    setEditingNodeId(item.id);
+    if (import.meta.env?.DEV) {
+      console.log('[NodeExecutionTimeline] 打开节点参数微调:', item.id, nextParams);
+    }
+  };
+
+  const handleParamInput = (nodeId: string, key: string, value: string) => {
+    const nextParams = { ...draftParams, [key]: value };
+    setDraftParams(nextParams);
+    queueOverride({ nodeId, params: nextParams });
+  };
+
+  const handleContentInput = (nodeId: string, value: string) => {
+    setDraftContent(value);
+    queueOverride({ nodeId, config: { [contentField]: value } });
+  };
+
+  const handleResetOverride = (item: TimelineItem) => {
+    if (overrideTimerRef.current) {
+      clearTimeout(overrideTimerRef.current);
+      overrideTimerRef.current = null;
+    }
+    pendingOverrideRef.current = null;
+    const cfg: any = item.wfNode?.config || {};
+    const decls: any[] = Array.isArray(cfg.editableParams) ? cfg.editableParams : [];
+    const nextParams: Record<string, string> = {};
+    decls.forEach((d) => {
+      if (d?.key) nextParams[d.key] = resolveTemplateParamValue(d.key);
+    });
+    setDraftParams(nextParams);
+    setDraftContent(String(cfg[contentField] ?? ''));
+    if (import.meta.env?.DEV) {
+      console.log('[NodeExecutionTimeline] 还原节点模板:', item.id);
+    }
+    if (onNodeOverride) {
+      Promise.resolve(onNodeOverride(task.id, { nodeId: item.id, reset: true })).catch(() => {});
+    }
+  };
+
   const renderTypeBadge = (item: TimelineItem) => {
     const { label, Icon, tint } = item.isGit
       ? { label: 'Git 提交', Icon: GitCommit, tint: 'text-[#52525b]' }
@@ -521,6 +655,12 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
           const isExpanded = !!expandedNodes[item.id];
           const hasArtifacts = item.run?.artifacts && item.run.artifacts.length > 0;
           const hasError = !!item.run?.error;
+          const nodeOverride: any = task.context?.nodeOverrides?.[item.id];
+          const hasOverride = !!nodeOverride;
+          const editableParams: any[] = Array.isArray(item.wfNode?.config?.editableParams)
+            ? item.wfNode!.config.editableParams!
+            : [];
+          const isEditingParams = editingNodeId === item.id;
           const isCurrentApprovalNode =
             item.status === 'waiting_approval' && task.status === 'waiting_approval';
 
@@ -536,6 +676,8 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                 className={`rounded-[8px] border transition-all ${
                   isCustomMode && !selectedNodes.has(item.id)
                     ? 'opacity-65 border-dashed border-[#d4d4d8] bg-[#fbfbfd]'
+                    : isEditingParams
+                    ? 'border-[#d8d6fb] bg-white shadow-[0_2px_8px_rgba(79,70,229,0.08)]'
                     : item.status === 'running'
                     ? 'border-[#c7d2fe] bg-[#fafaff] shadow-[0_2px_8px_rgba(79,70,229,0.06)]'
                     : item.status === 'waiting_approval'
@@ -571,6 +713,15 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                         {item.name}
                       </span>
                       {renderTypeBadge(item)}
+                      {hasOverride && (
+                        <span
+                          className="inline-flex items-center gap-1 text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1 py-[0.5px] rounded-[3px] shrink-0"
+                          title={`本任务已覆盖该节点 ${Object.keys(nodeOverride.params || {}).length} 个参数 / ${Object.keys(nodeOverride.config || {}).length} 项配置，流水线模板未改动`}
+                        >
+                          <span className="w-1 h-1 rounded-full bg-[#4f46e5]" />
+                          <span>本任务覆盖</span>
+                        </span>
+                      )}
                     </div>
                     <div className="shrink-0 flex items-center gap-1.5">
                       {renderStatusBadge(item.status)}
@@ -679,6 +830,22 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                             </button>
                           )}
 
+                          {/* 任务级节点参数微调：仅本任务生效 */}
+                          {onNodeOverride && (
+                            <button
+                              type="button"
+                              onClick={() => openParamEditor(item)}
+                              className={`${MICRO_BTN} ${
+                                hasOverride || isEditingParams
+                                  ? 'text-[#4f46e5] bg-[#eeedfd]'
+                                  : 'text-[#85858d] hover:text-[#4f46e5] hover:bg-[#eeedfd]'
+                              }`}
+                              title="微调该节点参数（仅本任务生效，流水线模板不变）"
+                            >
+                              <SlidersHorizontal size={11} />
+                            </button>
+                          )}
+
                           {/* 查看节点日志 */}
                           <button
                             type="button"
@@ -742,6 +909,116 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                     </div>
                   </div>
                 </div>
+
+                {/* 节点参数微调编辑器：内联展开，不影响抽屉高度基准 */}
+                {isEditingParams && onNodeOverride && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        flushOverride();
+                        setEditingNodeId(null);
+                      }
+                    }}
+                    className="border-t border-[#ececf0] bg-white p-2.5 rounded-b-[8px] space-y-2 animate-in fade-in-50 duration-150 select-none"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <SlidersHorizontal size={11} className="text-[#4f46e5] shrink-0" />
+                        <span className="text-[10.5px] font-medium text-[#1c1c21] shrink-0">节点参数微调</span>
+                        <span className="text-[10px] text-[#85858d] truncate">仅本任务生效，模板不变</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {overrideSaveState === 'saving' && (
+                          <span className="text-[10px] text-[#85858d] flex items-center gap-1">
+                            <Loader2 size={9} className="animate-spin" />
+                            <span>保存中</span>
+                          </span>
+                        )}
+                        {overrideSaveState === 'saved' && (
+                          <span className="text-[10px] text-[#059669] flex items-center gap-1">
+                            <Check size={9} />
+                            <span>已保存</span>
+                          </span>
+                        )}
+                        {hasOverride && (
+                          <button
+                            type="button"
+                            onClick={() => handleResetOverride(item)}
+                            className="text-[10px] text-[#85858d] hover:text-[#1c1c21] flex items-center gap-1 cursor-pointer transition-colors"
+                            title="清除本任务覆盖，回落到流水线模板原值"
+                          >
+                            <Undo2 size={10} />
+                            <span>还原模板</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            flushOverride();
+                            setEditingNodeId(null);
+                          }}
+                          className="h-[21px] px-2 rounded-[4px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[10.5px] font-medium cursor-pointer transition-colors"
+                        >
+                          完成
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 节点声明的可调参数：自动渲染为一行一参 */}
+                    {editableParams.map((p) => (
+                      <div key={p.key} className="flex items-center gap-2">
+                        <label
+                          className="w-[76px] shrink-0 text-[10.5px] text-[#63636b] truncate"
+                          title={`{{${p.key}}}${p.hint ? ` · ${p.hint}` : ''}`}
+                        >
+                          {p.label || p.key}
+                        </label>
+                        <input
+                          type="text"
+                          value={draftParams[p.key] ?? ''}
+                          placeholder={p.placeholder || `{{${p.key}}}`}
+                          spellCheck={false}
+                          onChange={(e) => handleParamInput(item.id, p.key, e.target.value)}
+                          onBlur={() => flushOverride()}
+                          className="flex-1 min-w-0 h-[26px] px-2 rounded-[5px] border border-[#e3e3e8] hover:border-[#d4d4d8] focus:border-[#a5a5b0] bg-white font-mono text-[10.5px] text-[#1c1c21] outline-none transition-colors"
+                        />
+                      </div>
+                    ))}
+
+                    {editableParams.length === 0 && !showContentEditor && (
+                      <div className="text-[10.5px] text-[#85858d] leading-relaxed">
+                        该节点未声明可调参数。可展开「调整执行指令」临时改写整段命令或 Prompt。
+                      </div>
+                    )}
+
+                    {/* 高级入口：直接改写节点命令 / Prompt */}
+                    <button
+                      type="button"
+                      onClick={() => setShowContentEditor((v) => !v)}
+                      className="text-[10.5px] text-[#63636b] hover:text-[#4f46e5] flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <ChevronDown
+                        size={11}
+                        className={`transform transition-transform duration-200 ${
+                          showContentEditor ? 'rotate-180' : ''
+                        }`}
+                      />
+                      <span>{showContentEditor ? '收起执行指令' : '调整执行指令 (高级)'}</span>
+                    </button>
+
+                    {showContentEditor && (
+                      <textarea
+                        value={draftContent}
+                        spellCheck={false}
+                        onChange={(e) => handleContentInput(item.id, e.target.value)}
+                        onBlur={() => flushOverride()}
+                        className="w-full min-h-[88px] max-h-[320px] p-2 rounded-[5px] border border-[#e3e3e8] hover:border-[#d4d4d8] focus:border-[#a5a5b0] bg-[#fafafc] font-mono text-[10px] leading-[1.55] text-[#1c1c21] outline-none resize-y transition-colors"
+                        placeholder="留空则回落到模板原命令"
+                      />
+                    )}
+                  </div>
+                )}
 
                 {/* 展开的详情面板 */}
                 {isExpanded && (
@@ -808,14 +1085,24 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                       </div>
                     )}
 
-                    {/* 配置与指令信息 */}
+                    {/* 配置与指令信息（优先展示本任务生效的覆盖值） */}
                     {item.wfNode?.config?.command && (
                       <div>
                         <div className="text-[10px] text-[#85858d] mb-1 font-medium flex items-center justify-between">
-                          <span>执行 Shell 指令:</span>
+                          <span className="flex items-center gap-1.5">
+                            <span>{nodeOverride?.config?.command ? '执行 Shell 指令 (本任务覆盖):' : '执行 Shell 指令:'}</span>
+                            {nodeOverride?.config?.command && (
+                              <span className="text-[9px] text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1 rounded-[3px]">
+                                已覆盖
+                              </span>
+                            )}
+                          </span>
                           <button
                             onClick={() =>
-                              copyText(`cmd-${item.id}`, item.wfNode!.config.command || '')
+                              copyText(
+                                `cmd-${item.id}`,
+                                String(nodeOverride?.config?.command ?? item.wfNode!.config.command ?? '')
+                              )
                             }
                             className="text-[#85858d] hover:text-[#1c1c21] flex items-center gap-0.5"
                           >
@@ -828,7 +1115,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                           </button>
                         </div>
                         <div className="font-mono text-[10px] text-[#1c1c21] bg-[#f8f8fa] p-2 rounded-[5px] border border-[#ececf0] whitespace-pre-wrap break-all select-all">
-                          {item.wfNode.config.command}
+                          {nodeOverride?.config?.command ?? item.wfNode.config.command}
                         </div>
                       </div>
                     )}

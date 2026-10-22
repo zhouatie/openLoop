@@ -83,9 +83,31 @@ export interface NodeConfig {
 
   // 工作区约束
   requireWorkspace?: boolean;
+
+  // 任务级可调参数声明：UI 据此在任务详情自动生成输入框，调整仅在当前任务生效
+  editableParams?: NodeEditableParam[];
   
   // 自定义扩展属性
   customData?: Record<string, any>;
+}
+
+/**
+ * 节点声明的任务级可调参数
+ * 值是插值变量，执行时优先级高于任务上下文与流水线变量
+ */
+export interface NodeEditableParam {
+  key: string;          // 变量名，节点命令中以 {{key}} 引用
+  label: string;        // 中文展示名
+  placeholder?: string; // 输入占位提示
+  hint?: string;        // 补充说明
+}
+
+/**
+ * 任务级节点覆盖：仅对单个任务生效，不写回流水线模板
+ */
+export interface TaskNodeOverride {
+  config?: Partial<NodeConfig>;      // 覆盖节点配置字段（如 command / prompt）
+  params?: Record<string, string>;   // 覆盖节点声明的可调参数
 }
 
 export interface ToolExecutionRecord {
@@ -276,7 +298,7 @@ export interface Task {
   updatedAt: number;
   currentNodeId?: string;
   nodeRuns: Record<string, NodeRun>;
-  context: Record<string, any>; // 运行时上下文，节点间传参
+  context: Record<string, any>; // 运行时上下文，节点间传参 (含 nodeOverrides 任务级节点覆盖)
 
   // 任务组 (Task Group) 扩展属性
   kind?: TaskKind;                             // 任务形态: single(单任务) | group(任务组根节点) | subtask(子任务)

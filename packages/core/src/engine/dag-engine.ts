@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import { ChildProcess } from 'child_process';
 import { Store } from '../store';
-import { Task, WorkflowDefinition, WorkflowNode, WorkflowEdge, LogEntry, KanbanColumn, TaskSessionState } from '../types';
+import { Task, WorkflowDefinition, WorkflowNode, WorkflowEdge, LogEntry, KanbanColumn, TaskSessionState, TaskNodeOverride } from '../types';
 import { ExecutorRegistry, ExecutionContext } from '../executors';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
@@ -272,6 +272,23 @@ export class DagEngine extends EventEmitter {
 
     task.currentNodeId = node.id;
 
+    // 任务级节点覆盖：仅在本任务内替换节点配置与参数，流水线模板保持只读
+    const nodeOverride: TaskNodeOverride | undefined = task.context?.nodeOverrides?.[node.id];
+    const effectiveNode: WorkflowNode = nodeOverride?.config
+      ? { ...node, config: { ...node.config, ...nodeOverride.config } }
+      : node;
+    const overrideParams =
+      nodeOverride?.params && Object.keys(nodeOverride.params).length > 0
+        ? nodeOverride.params
+        : undefined;
+    if (nodeOverride) {
+      dagLogger.info(
+        `节点 [${node.name}] 命中任务级覆盖 (字段: ${Object.keys(nodeOverride.config || {}).join(', ') || '无'}, 参数: ${Object.keys(nodeOverride.params || {}).join(', ') || '无'})`,
+        undefined,
+        { taskId: task.id, nodeId: node.id }
+      );
+    }
+
     // 动态调整看板泳道以反映当前流程阶段：人工审批节点进入待验收，其他运行中节点统一处于执行中泳道
     if (node.type === 'qa-approval') {
       task.kanbanColumn = 'qa_review';
@@ -300,7 +317,7 @@ export class DagEngine extends EventEmitter {
 
     dagLogger.info(
       `调度节点 [${node.name}] (${node.type})，泳道流转为: ${task.kanbanColumn}`,
-      { nodeConfig: node.config },
+      { nodeConfig: effectiveNode.config },
       { taskId: task.id, nodeId: node.id }
     );
     this.log(task.id, node.id, 'system', `>>> 开始执行节点 [${node.name}] (${node.type})`);
@@ -309,7 +326,7 @@ export class DagEngine extends EventEmitter {
     const abortController = this.abortControllers.get(task.id);
     const ctx: ExecutionContext = {
       task,
-      node,
+      node: effectiveNode,
       settings,
       abortSignal: abortController?.signal,
       registerChildProcess: (child: ChildProcess) => {
@@ -329,6 +346,7 @@ export class DagEngine extends EventEmitter {
         },
         ...workflow.variables,
         ...task.context,
+        ...overrideParams,
         inputs: task.context,
       },
       emitLog: (stream, message) => {

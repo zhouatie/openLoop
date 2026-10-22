@@ -1833,6 +1833,75 @@ export class OpenLoopServer {
         }
       }
 
+      // Task node override: /api/tasks/:id/node-override
+      // 任务级节点覆盖：仅本任务生效，不写回流水线模板（O(1) 改写 context.nodeOverrides 单键）
+      const taskNodeOverrideMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/node-override$/);
+      if (taskNodeOverrideMatch && method === 'POST') {
+        const taskId = taskNodeOverrideMatch[1];
+        const body = await this.parseJsonBody(req);
+        const nodeId = String(body?.nodeId || '').trim();
+        if (!nodeId) return this.sendJson(res, 400, { error: '缺少 nodeId' }, reqMeta);
+
+        const task = this.store.getTask(taskId);
+        if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
+
+        const workflow = this.store.getWorkflow(task.workflowId);
+        if (workflow && !workflow.nodes.some((n) => n.id === nodeId)) {
+          return this.sendJson(res, 400, { error: `流水线中不存在节点: ${nodeId}` }, reqMeta);
+        }
+
+        if (!task.context) task.context = {};
+        const overrides: Record<string, any> = { ...(task.context.nodeOverrides || {}) };
+        const current = { ...(overrides[nodeId] || {}) };
+
+        if (body?.reset === true) {
+          delete overrides[nodeId];
+        } else {
+          if (body?.params !== undefined) {
+            const params: Record<string, string> = {};
+            if (body.params && typeof body.params === 'object') {
+              for (const [k, v] of Object.entries(body.params)) {
+                const key = String(k).trim();
+                const value = v === undefined || v === null ? '' : String(v);
+                // 空值等同于清除该参数，避免残留空字符串覆盖掉模板默认值
+                if (key && value !== '') params[key] = value;
+              }
+            }
+            if (Object.keys(params).length > 0) current.params = params;
+            else delete current.params;
+          }
+          if (body?.config !== undefined) {
+            const patch: Record<string, any> = { ...(current.config || {}) };
+            if (body.config && typeof body.config === 'object') {
+              for (const [k, v] of Object.entries(body.config)) {
+                // 传 null 表示清除该字段覆盖，回落到模板原值
+                if (v === null) delete patch[k];
+                else patch[k] = v;
+              }
+            } else {
+              for (const k of Object.keys(patch)) delete patch[k];
+            }
+            if (Object.keys(patch).length > 0) current.config = patch;
+            else delete current.config;
+          }
+          if (Object.keys(current).length > 0) overrides[nodeId] = current;
+          else delete overrides[nodeId];
+        }
+
+        if (Object.keys(overrides).length > 0) task.context.nodeOverrides = overrides;
+        else delete task.context.nodeOverrides;
+
+        task.updatedAt = Date.now();
+        this.store.saveTask(task);
+        serverLogger.info(
+          `[Tasks:NodeOverride] 更新任务级节点覆盖: ${taskId}, Node: ${nodeId}, 剩余覆盖节点: ${Object.keys(overrides).length}`,
+          { nodeId, reset: body?.reset === true },
+          { taskId }
+        );
+        this.broadcast({ type: 'task:update', data: task });
+        return this.sendJson(res, 200, task, reqMeta);
+      }
+
       // Task custom retry: /api/tasks/:id/custom-retry
       const taskCustomRetryMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/custom-retry$/);
       if (taskCustomRetryMatch && method === 'POST') {

@@ -712,6 +712,26 @@ export class DesktopApiService {
     });
   }
 
+  // 任务级节点覆盖：只改本任务执行时的节点配置/参数，流水线模板不受影响
+  async setTaskNodeOverride(
+    id: string,
+    payload: {
+      nodeId: string;
+      params?: Record<string, string> | null;
+      config?: Record<string, any> | null;
+      reset?: boolean;
+    }
+  ): Promise<Task> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 更新任务级节点覆盖 [${id}]:`, payload);
+    }
+    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/node-override`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getTaskSandboxStatus(id: string): Promise<{ status: 'running' | 'stopped' | 'none'; port?: number; targetUrl?: string }> {
     if (import.meta.env?.DEV) {
       console.log(`[UI:API] 探测任务 [${id}] 沙箱靶机状态`);

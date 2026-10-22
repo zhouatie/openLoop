@@ -1123,6 +1123,35 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
 
+  // 任务级节点覆盖：仅改变本任务下次执行的节点参数，流水线模板保持不变
+  const handleNodeOverride = async (
+    taskId: string,
+    payload: {
+      nodeId: string;
+      params?: Record<string, string> | null;
+      config?: Record<string, any> | null;
+      reset?: boolean;
+    }
+  ) => {
+    if (import.meta.env?.DEV) {
+      console.log(`[KanbanView] 更新任务 [${taskId}] 节点级覆盖:`, payload);
+    }
+    try {
+      const updated = await api.setTaskNodeOverride(taskId, payload);
+      if (updated) {
+        onTaskUpdate?.(updated);
+        if (selectedTask?.id === taskId) setSelectedTask(updated);
+      }
+      return updated;
+    } catch (e: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 节点级覆盖保存失败:', e);
+      }
+      toast.error(`参数保存失败: ${e?.message || '未知错误'}`);
+      throw e;
+    }
+  };
+
   const handleMoveTaskColumn = async (taskId: string, targetCol: KanbanColumn) => {
     const currentTask = tasks.find((t) => t.id === taskId);
     if (!currentTask) return;
@@ -2488,6 +2517,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           isRetryingNode={retryingNodeKey?.startsWith(curTask.id)}
                           onCustomRetry={handleCustomRetry}
                           isCustomRetrying={isCustomRetrying}
+                          onNodeOverride={handleNodeOverride}
                         />
                       </div>
                     </div>
