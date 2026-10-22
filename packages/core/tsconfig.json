@@ -4,6 +4,8 @@
     "module": "CommonJS",
     "moduleResolution": "node",
     "declaration": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,

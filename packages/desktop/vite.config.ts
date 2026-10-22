@@ -29,5 +29,23 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('@xyflow')) {
+              return 'vendor-flow';
+            }
+            if (id.includes('lucide-react') || id.includes('prismjs') || id.includes('react-markdown')) {
+              return 'vendor-ui';
+            }
+            if (id.includes('/react/') || id.includes('/react-dom/')) {
+              return 'vendor-react';
+            }
+          }
+        },
+      },
+    },
   },
 });

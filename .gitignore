@@ -11,6 +11,8 @@ dist-electron/
 release/
 out/
 build/icons/*.iconset/
+*.tsbuildinfo
+
 
 # Pi & logs
 *.log

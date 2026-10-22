@@ -3,6 +3,8 @@
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "node",
+    "incremental": true,
+    "tsBuildInfoFile": "./dist-electron/.tsbuildinfo",
     "outDir": "./dist-electron",
     "rootDir": "./electron",
     "strict": true,
