@@ -40,15 +40,17 @@ function formatBytes(bytes) {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 }
 
-function resolveSigningIdentity() {
+function resolveSigningIdentity(mode) {
   if (process.env.CSC_NAME) return process.env.CSC_NAME;
+  // 发布产物（DMG/ZIP）始终使用 ad-hoc，禁止本机自签名证书进入发布链路
+  if (mode !== 'install') return '-';
   try {
     const out = execSync('security find-identity -v -p codesigning', { encoding: 'utf-8' });
     const names = [...out.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
     // 仅当存在以 openLoop Local 命名的专属本地签名时才复用（锁定系统权限）
     const localCert = names.find((n) => n.startsWith(PREFERRED_IDENTITY));
     if (localCert) return localCert;
-    // 默认回退为 '-'（离线 ad-hoc 极速签名），彻底避免误用 Apple 开发者证书触发网络握手超时
+    // 未安装本地证书时回退为 '-'（离线 ad-hoc 极速签名），避免误用 Apple 开发者证书触发网络握手超时
     return '-';
   } catch {
     return '-';
@@ -94,7 +96,7 @@ function runStep(title, command, options = {}) {
 // ==========================================
 async function executeBuild(mode) {
   const hostArch = getHostArch();
-  const identity = resolveSigningIdentity();
+  const identity = resolveSigningIdentity(mode);
   const signArg = identity ? ` --config.mac.identity="${identity}"` : '';
 
   console.log('\n' + c.cyan + '┌────────────────────────────────────────────────────────┐' + c.reset);
@@ -113,7 +115,13 @@ async function executeBuild(mode) {
   console.log(
     `${c.dim}  • 签名身份 :${c.reset} ${identity ? `${c.green}${identity}${c.reset}` : `${c.yellow}ad-hoc (无固定签名)${c.reset}`}`
   );
-  console.log(`${c.dim}  • 增量缓存 :${c.reset} ${c.green}已启用 (TypeScript Incremental)${c.reset}\n`);
+  console.log(`${c.dim}  • 增量缓存 :${c.reset} ${c.green}已启用 (TypeScript Incremental)${c.reset}`);
+  if (mode === 'install' && identity === '-') {
+    console.log(
+      `${c.dim}  • 权限提示 :${c.reset} ${c.yellow}未安装 "${PREFERRED_IDENTITY}" 证书，ad-hoc 签名会让 macOS 重置磁盘权限${c.reset}`
+    );
+  }
+  console.log('');
 
   const totalStart = Date.now();
   const stepDurations = [];
