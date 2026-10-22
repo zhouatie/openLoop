@@ -610,6 +610,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
         {isAcceptanceOpen && activeTask && (
           <VisualAcceptanceModal
             task={activeTask}
+            workflow={workflows.find((w) => w.id === activeTask.workflowId)}
             onClose={() => setIsAcceptanceOpen(false)}
             onTaskUpdated={(updated) => setActiveTask(updated)}
             onApproved={() => {

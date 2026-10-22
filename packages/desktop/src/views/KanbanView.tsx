@@ -68,7 +68,7 @@ import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
 import { QaArtifactSelectorModal } from '../components/qa/QaArtifactSelectorModal';
 import { KanbanLaneList } from '../components/KanbanLaneList';
 import { toast } from '../components/Toast';
-import { resolveNodeMeta } from '../utils/nodeMeta';
+import { resolveNodeMeta, resolveQaTestNodeId } from '../utils/nodeMeta';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 import {
@@ -3853,9 +3853,19 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         {hasQaArtifacts && (
                           <button
                             type="button"
-                            onClick={() => handleRetryNode(curTask.id, 'node_qa_test')}
+                            onClick={() => {
+                              const targetQaNodeId = resolveQaTestNodeId(curTask, wfDef);
+                              if (import.meta.env?.DEV) {
+                                console.log('[KanbanView:AgentPanel] 点击重测 QA 节点:', {
+                                  taskId: curTask.id,
+                                  workflowId: curTask.workflowId,
+                                  targetQaNodeId,
+                                });
+                              }
+                              handleRetryNode(curTask.id, targetQaNodeId);
+                            }}
                             disabled={retryingNodeKey?.startsWith(curTask.id)}
-                            className="h-[22px] px-2 rounded-[5px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[10.5px] font-medium flex items-center gap-1 transition-all"
+                            className="h-[22px] px-2 rounded-[5px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[10.5px] font-medium flex items-center gap-1 transition-all cursor-pointer"
                             title="修改代码后直接重新跑 QA 自动化测试与截帧"
                           >
                             <RotateCcw size={10} className={retryingNodeKey?.startsWith(curTask.id) ? 'animate-spin' : ''} />
@@ -3957,6 +3967,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       {visualAcceptanceTask && (
         <VisualAcceptanceModal
           task={visualAcceptanceTask}
+          workflow={wfMap.get(visualAcceptanceTask.workflowId)}
           onClose={() => setVisualAcceptanceTask(null)}
           onTaskUpdated={(updated) => {
             setVisualAcceptanceTask(updated);
