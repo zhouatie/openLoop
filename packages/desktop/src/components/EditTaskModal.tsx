@@ -52,6 +52,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
 
   // 初始化或当 task 改变时同步表单
   useEffect(() => {
@@ -225,6 +226,15 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
               placeholder={currentWf?.taskTemplate?.titlePlaceholder || '请输入任务名称'}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Tab' && !e.shiftKey) {
+                  e.preventDefault();
+                  descriptionInputRef.current?.focus();
+                  if (import.meta.env?.DEV) {
+                    console.log('[EditTaskModal] 任务名称 Tab 键聚焦到任务说明与提示词');
+                  }
+                }
+              }}
               className="w-full h-[30px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2.5 text-[12px] text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all"
             />
           </div>
@@ -391,6 +401,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
                 )}
             </div>
             <TaskPromptArea
+              ref={descriptionInputRef}
               value={description}
               onChange={setDescription}
               attachments={attachments}

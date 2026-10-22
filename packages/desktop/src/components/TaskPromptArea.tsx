@@ -32,18 +32,24 @@ export interface TaskPromptAreaProps {
   rows?: number;
   disabled?: boolean;
   maxAttachmentCount?: number;
+  id?: string;
 }
 
-export const TaskPromptArea: React.FC<TaskPromptAreaProps> = ({
-  value,
-  onChange,
-  attachments,
-  onAttachmentsChange,
-  placeholder = '任务背景、特定需求描述或传给 Agent 的 Prompt 覆盖项...',
-  rows = 3,
-  disabled = false,
-  maxAttachmentCount = 8,
-}) => {
+export const TaskPromptArea = React.forwardRef<HTMLTextAreaElement, TaskPromptAreaProps>(
+  (
+    {
+      value,
+      onChange,
+      attachments,
+      onAttachmentsChange,
+      placeholder = '任务背景、特定需求描述或传给 Agent 的 Prompt 覆盖项...',
+      rows = 3,
+      disabled = false,
+      maxAttachmentCount = 8,
+      id,
+    },
+    ref
+  ) => {
   const [isDragging, setIsDragging] = useState(false);
   const [pendingUploads, setPendingUploads] = useState<PendingUploadItem[]>([]);
   const [activeLightbox, setActiveLightbox] = useState<
@@ -297,7 +303,15 @@ export const TaskPromptArea: React.FC<TaskPromptAreaProps> = ({
 
         {/* 文本输入框 */}
         <textarea
-          ref={textareaRef}
+          ref={(node) => {
+            (textareaRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = node;
+            if (typeof ref === 'function') {
+              ref(node);
+            } else if (ref) {
+              (ref as React.MutableRefObject<HTMLTextAreaElement | null>).current = node;
+            }
+          }}
+          id={id}
           rows={rows}
           placeholder={placeholder}
           value={value}
@@ -452,4 +466,6 @@ export const TaskPromptArea: React.FC<TaskPromptAreaProps> = ({
       />
     </div>
   );
-};
+});
+
+TaskPromptArea.displayName = 'TaskPromptArea';
