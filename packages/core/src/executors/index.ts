@@ -1396,7 +1396,11 @@ export class QaApprovalExecutor implements NodeExecutor {
     if (task.context?.worktree?.worktreeDir) {
       try {
         const wtManager = WorktreeManager.getInstance();
-        const diffInfo = wtManager.getWorktreeDiff(task.context.worktree.worktreeDir, task.context.worktree.baseBranch);
+        const diffInfo = wtManager.getWorktreeDiff(
+          task.context.worktree.worktreeDir,
+          task.context.worktree.baseBranch,
+          task.context.worktree.baseCommit
+        );
         task.context.worktree.changedFiles = diffInfo.changedFiles;
         task.context.worktree.diffSummary = diffInfo.diffSummary;
         if (diffInfo.diffResult) {

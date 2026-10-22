@@ -1619,9 +1619,11 @@ export class OpenLoopServer {
 
         try {
           const baseBranch = task.context?.worktree?.baseBranch;
+          const baseCommit = task.context?.worktree?.baseCommit;
           const diffResult = WorktreeManager.getInstance().getWorktreeDiffDetail(
             targetDir,
-            baseBranch
+            baseBranch,
+            baseCommit
           );
           return this.sendJson(res, 200, diffResult, reqMeta);
         } catch (err: any) {
