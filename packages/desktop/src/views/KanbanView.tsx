@@ -3297,7 +3297,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     sessionState.messages.map((msg, msgIdx) => {
                       if (msg.role === 'user') {
                         // 检测是否包含 UI 自动化测试产物附加块
-                        const qaMarkerMatch = msg.content?.match(/\[(?:系统自动附加|用户主动附带|附带)：?最新 UI 自动化测试产物\]/);
+                        const qaMarkerMatch = msg.content?.match(/\[(?:系统自动附加|用户主动附带|附带)：?(?:最新 UI 自动化测试产物|UI 自动化测试验收产物.*?)\]/);
                         const qaMarkerIndex = qaMarkerMatch ? msg.content.indexOf(qaMarkerMatch[0]) : -1;
                         const userText = qaMarkerIndex !== -1 ? msg.content.slice(0, qaMarkerIndex).trim() : msg.content;
                         const qaText = qaMarkerIndex !== -1 ? msg.content.slice(qaMarkerIndex).trim() : '';
@@ -3332,7 +3332,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               {msg.attachments && msg.attachments.length > 0 && (
                                 <div className={`flex flex-wrap gap-1.5 ${msg.content ? 'mt-2 pt-2 border-t border-[#e6e6ec]' : ''}`}>
                                   {msg.attachments.map((att) => {
-                                    const displayUrl = api.getAttachmentUrl(att.url);
+                                    const displayUrl = api.getAttachmentUrl(att.url || att.path || '');
                                     return (
                                       <div
                                         key={att.id}

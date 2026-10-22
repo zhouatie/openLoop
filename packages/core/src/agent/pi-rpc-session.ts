@@ -254,8 +254,18 @@ export class PiRpcSessionInstance extends EventEmitter {
             : String(msg.content || '');
 
           // 避免重复推入相同的 user 消息
+          // 当通过 sendPrompt / steer 发送时，已在前置乐观推入 messages（并包含 attachments 结构化数据）
+          // Pi RPC 进程回调的 userText 可能会追加【用户随附参考图片】说明
           const lastMsg = this.messages[this.messages.length - 1];
-          if (!lastMsg || lastMsg.role !== 'user' || lastMsg.content !== userText) {
+          const isAlreadyTracked =
+            lastMsg &&
+            lastMsg.role === 'user' &&
+            (lastMsg.content === userText ||
+              (Boolean(lastMsg.content) && userText.startsWith(lastMsg.content)) ||
+              (Boolean(lastMsg.attachments && lastMsg.attachments.length > 0) &&
+                userText.includes('【用户随附参考图片】')));
+
+          if (!isAlreadyTracked && (!lastMsg || lastMsg.role !== 'user')) {
             this.messages.push({
               id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
               role: 'user',
