@@ -41,6 +41,8 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [isAiOverlayVisible, setIsAiOverlayVisible] = useState(true);
+  const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number }>({ width: 1280, height: 800 });
+  const imgRef = useRef<HTMLImageElement>(null);
   const timerRef = useRef<any>(null);
 
   // 加载数据
@@ -148,6 +150,25 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
     ? api.getArtifactUrl(currentStep.screenshotRelPath)
     : currentStep?.screenshotUrl || '';
   const reportUrl = run.reportRelPath ? api.getArtifactUrl(run.reportRelPath) : run.reportUrl;
+
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const { naturalWidth, naturalHeight } = e.currentTarget;
+    if (naturalWidth > 0 && naturalHeight > 0) {
+      if (import.meta.env?.DEV) {
+        console.log('[QaRunDetailView] 截帧原始尺寸解析成功:', { naturalWidth, naturalHeight });
+      }
+      setImageNaturalSize({ width: naturalWidth, height: naturalHeight });
+    }
+  };
+
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
+      setImageNaturalSize({
+        width: imgRef.current.naturalWidth,
+        height: imgRef.current.naturalHeight,
+      });
+    }
+  }, [imageUrl]);
 
   return (
     <div className="flex-1 h-full flex flex-col overflow-hidden bg-[#f4f4f6] select-none">
@@ -379,36 +400,51 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
                           {suite?.targetUrl || 'http://localhost:3000'}
                         </div>
                       </div>
-                      <span className="text-[10px] font-mono text-[#a1a1aa]">1280 x 800</span>
+                      <span className="text-[10px] font-mono text-[#a1a1aa]">{imageNaturalSize.width} x {imageNaturalSize.height}</span>
                     </>
                   )}
                 </div>
 
                 {/* 截图本体 */}
-                <div className="relative overflow-hidden bg-white flex items-center justify-center">
-                  <img
-                    src={imageUrl}
-                    alt={`Step ${currentStepIndex + 1}`}
-                    className="max-w-full max-h-[calc(100vh-250px)] object-contain block"
-                  />
+                <div className="relative overflow-hidden bg-white flex items-center justify-center p-2 min-h-[300px]">
+                  <div
+                    className="relative max-w-full max-h-[calc(100vh-250px)] flex items-center justify-center select-none"
+                    style={{
+                      aspectRatio: `${imageNaturalSize.width} / ${imageNaturalSize.height}`,
+                    }}
+                  >
+                    <img
+                      ref={imgRef}
+                      src={imageUrl}
+                      alt={`Step ${currentStepIndex + 1}`}
+                      className="w-full h-full object-contain block select-none pointer-events-none rounded-[4px] border border-[#e3e3e8]"
+                      onLoad={handleImageLoad}
+                    />
 
-                  {/* AI 目标区域高亮标注框 */}
-                  {isAiOverlayVisible && currentStep?.boundingBox && (
-                    <div
-                      className="absolute border-2 border-[#4f46e5] bg-[#4f46e5]/10 rounded-[3px] pointer-events-none transition-all duration-200"
-                      style={{
-                        left: `${(currentStep.boundingBox.x / 1280) * 100}%`,
-                        top: `${(currentStep.boundingBox.y / 800) * 100}%`,
-                        width: `${(currentStep.boundingBox.width / 1280) * 100}%`,
-                        height: `${(currentStep.boundingBox.height / 800) * 100}%`,
-                      }}
-                    >
-                      <div className="absolute -top-5 left-0 px-1 py-0.2 rounded bg-[#1c1c21] text-[9px] font-mono font-medium text-white shadow-xs flex items-center gap-1 whitespace-nowrap">
-                        <Sparkles size={8} className="text-[#818cf8]" />
-                        <span>AI 聚焦目标</span>
+                    {/* AI 目标区域高亮标注框（与图片像素严格 1:1 投影） */}
+                    {isAiOverlayVisible && currentStep?.boundingBox && (
+                      <div
+                        className="absolute border-2 border-[#4f46e5] bg-[#4f46e5]/10 rounded-[3px] pointer-events-none transition-all duration-200 z-10"
+                        style={{
+                          left: `${(currentStep.boundingBox.x / imageNaturalSize.width) * 100}%`,
+                          top: `${(currentStep.boundingBox.y / imageNaturalSize.height) * 100}%`,
+                          width: `${(currentStep.boundingBox.width / imageNaturalSize.width) * 100}%`,
+                          height: `${(currentStep.boundingBox.height / imageNaturalSize.height) * 100}%`,
+                        }}
+                      >
+                        <div
+                          className={`absolute left-0 px-1 py-0.2 rounded bg-[#1c1c21] text-[9px] font-mono font-medium text-white shadow-xs flex items-center gap-1 whitespace-nowrap z-20 ${
+                            currentStep.boundingBox.y / imageNaturalSize.height < 0.05
+                              ? 'top-full mt-1'
+                              : '-top-5'
+                          }`}
+                        >
+                          <Sparkles size={8} className="text-[#818cf8]" />
+                          <span>{currentStep.prompt ? currentStep.prompt.slice(0, 24) : 'AI 聚焦目标'}</span>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (

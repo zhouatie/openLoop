@@ -83,6 +83,7 @@ export class IosDriver implements QaDriver {
     let passed = true;
     let errorMessage: string | undefined;
     let thought = '';
+    let targetBox: { x: number; y: number; width: number; height: number } | undefined;
 
     if (this.isMidsceneReady && this.agent) {
       try {
@@ -94,16 +95,18 @@ export class IosDriver implements QaDriver {
         passed = fallback.passed;
         errorMessage = fallback.passed ? undefined : shortError(midsceneErr);
         thought = fallback.thought;
+        targetBox = fallback.targetBox;
       }
     } else {
       const fallback = await this.executeWdaFallbackAction(prompt);
       passed = fallback.passed;
       errorMessage = fallback.errorMessage;
       thought = fallback.thought;
+      targetBox = fallback.targetBox;
     }
 
     const screenshotBuffer = await this.captureScreenshot();
-    return { passed, thought, errorMessage, screenshotBuffer };
+    return { passed, thought, errorMessage, targetBox, screenshotBuffer };
   }
 
   async executeWaitFor(prompt: string, timeoutMs?: number): Promise<QaStepExecutionResult> {
@@ -147,6 +150,7 @@ export class IosDriver implements QaDriver {
     let passed = true;
     let errorMessage: string | undefined;
     let thought = '';
+    let targetBox: { x: number; y: number; width: number; height: number } | undefined;
 
     if (this.isMidsceneReady && this.agent) {
       try {
@@ -185,11 +189,25 @@ export class IosDriver implements QaDriver {
           ? `页面源码树中已确认文案存在: ${targets.join(' / ')}`
           : `页面源码树中缺失文案: ${missing.join(' / ')}`;
         errorMessage = passed ? undefined : thought;
+        if (passed) {
+          const tree = await this.fetchWdaSourceTree();
+          const node = flattenWdaNodes(tree).find(
+            (n) =>
+              n.visible !== false &&
+              n.rect &&
+              n.rect.width > 0 &&
+              n.rect.height > 0 &&
+              [n.label, n.value, n.name].some((v) => typeof v === 'string' && v.includes(targets[0]))
+          );
+          if (node?.rect) {
+            targetBox = node.rect;
+          }
+        }
       }
     }
 
     const screenshotBuffer = await this.captureScreenshot();
-    return { passed, thought, errorMessage, screenshotBuffer };
+    return { passed, thought, errorMessage, targetBox, screenshotBuffer };
   }
 
   getActiveDeviceSerial(): string {
@@ -266,7 +284,11 @@ export class IosDriver implements QaDriver {
   }
 
   /** 按页面源码树文案定位并点击，逐个尝试被引号包裹的目标 */
-  private async tapByElementTexts(targets: string[]): Promise<{ passed: boolean; thought: string }> {
+  private async tapByElementTexts(targets: string[]): Promise<{
+    passed: boolean;
+    thought: string;
+    targetBox?: { x: number; y: number; width: number; height: number };
+  }> {
     if (targets.length === 0) {
       return { passed: false, thought: '操作未能完成：模型规划失败且指令中没有可定位的界面文案' };
     }
@@ -286,7 +308,16 @@ export class IosDriver implements QaDriver {
       try {
         await this.device.tap(x, y);
         logger.info(`[IosDriver] 页面源码树定位点击成功: ${target}`);
-        return { passed: true, thought: `模型规划失败，已按页面源码树定位并点击「${target}」(${x}, ${y})` };
+        return {
+          passed: true,
+          thought: `模型规划失败，已按页面源码树定位并点击「${target}」(${x}, ${y})`,
+          targetBox: {
+            x: node.rect.x,
+            y: node.rect.y,
+            width: node.rect.width,
+            height: node.rect.height,
+          },
+        };
       } catch (err: any) {
         logger.warn(`[IosDriver] 页面源码树点击「${target}」失败: ${err?.message}`);
       }
@@ -300,7 +331,12 @@ export class IosDriver implements QaDriver {
   /** 无视觉模型时的 WDA 页面源码树直通执行器 */
   private async executeWdaFallbackAction(
     prompt: string
-  ): Promise<{ passed: boolean; thought: string; errorMessage?: string }> {
+  ): Promise<{
+    passed: boolean;
+    thought: string;
+    errorMessage?: string;
+    targetBox?: { x: number; y: number; width: number; height: number };
+  }> {
     const promptLower = prompt.toLowerCase();
     try {
       if (promptLower.includes('home') || promptLower.includes('主屏') || promptLower.includes('桌面')) {

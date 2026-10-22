@@ -67,6 +67,49 @@ function findChromeExecutable(): string | null {
   return null;
 }
 
+// 辅助定位页面中的可交互输入框或文本域（支持按字段语义、同级/父级容器匹配）
+async function locateInputElement(page: any, fieldLabel?: string) {
+  if (fieldLabel) {
+    const candidates = [
+      page.getByLabel(fieldLabel, { exact: false }).first(),
+      page.getByPlaceholder(fieldLabel, { exact: false }).first(),
+      page.locator('div, section, label, tr, form').filter({ hasText: fieldLabel }).locator('input:not([type="hidden"]), textarea').last(),
+      page.locator(`text="${fieldLabel}" >> xpath=..//input:not([type="hidden"])`).first(),
+      page.locator(`text="${fieldLabel}" >> xpath=../following-sibling::*//input:not([type="hidden"])`).first(),
+    ];
+    for (const cand of candidates) {
+      if (await cand.isVisible().catch(() => false)) {
+        return cand;
+      }
+    }
+  }
+  const first = page.locator('input:not([type="hidden"]), textarea').first();
+  if (await first.isVisible().catch(() => false)) {
+    return first;
+  }
+  return null;
+}
+
+// 辅助定位页面中的可点击交互元素
+async function locateClickableElement(page: any, text: string) {
+  const locators = [
+    page.getByRole('button', { name: text, exact: true }).first(),
+    page.getByRole('tab', { name: text, exact: false }).first(),
+    page.locator(`button:has-text("${text}")`).first(),
+    page.locator(`[role="button"]:has-text("${text}")`).first(),
+    page.locator(`[role="tab"]:has-text("${text}")`).first(),
+    page.getByText(text, { exact: true }).first(),
+    page.locator(`a:has-text("${text}")`).first(),
+    page.getByText(text, { exact: false }).first(),
+  ];
+  for (const loc of locators) {
+    if (await loc.isVisible().catch(() => false)) {
+      return loc;
+    }
+  }
+  return null;
+}
+
 export class WebPlaywrightDriver implements QaDriver {
   readonly platform = 'web' as const;
 
@@ -135,28 +178,83 @@ export class WebPlaywrightDriver implements QaDriver {
     let targetBox: { x: number; y: number; width: number; height: number } | undefined;
     let thought = '';
 
-    if (promptLower.includes('输入') || promptLower.includes('fill') || promptLower.includes('type')) {
-      const textMatch = prompt.match(/输入[“"「]?([^”"」]+)[”"」]?/i);
-      const inputText = textMatch ? textMatch[1].trim() : 'openLoop QA Test';
-      const inputEl = this.page.locator('input:not([type="hidden"]), textarea').first();
-      if (await inputEl.isVisible().catch(() => false)) {
-        const box = await inputEl.boundingBox().catch(() => null);
-        if (box) targetBox = box;
-        await inputEl.fill(inputText).catch(() => {});
-        thought = `定位到输入框并输入文本「${inputText}」`;
+    const isClearAction =
+      promptLower.includes('清空') ||
+      promptLower.includes('clear') ||
+      promptLower.includes('置空') ||
+      promptLower.includes('留空');
+    const isInputAction =
+      !isClearAction &&
+      (promptLower.includes('输入') || promptLower.includes('fill') || promptLower.includes('type'));
+
+    if (isClearAction) {
+      const quoteMatch = prompt.match(/[“"「]([^”"」]+)[”"」]/i);
+      const fieldLabel = quoteMatch ? quoteMatch[1].trim() : '';
+      const inputEl = await locateInputElement(this.page, fieldLabel);
+      if (inputEl) {
+        const boxBefore = await inputEl.boundingBox().catch(() => null);
+        await inputEl.fill('').catch(() => {});
+        const boxAfter = await inputEl.boundingBox().catch(() => null);
+        targetBox = boxAfter || boxBefore;
+        thought = fieldLabel
+          ? `定位到「${fieldLabel}」输入框并成功清空内容`
+          : `定位到页面输入框并清空内容`;
       } else {
-        thought = `未定位到可用输入框，保持视口`;
+        thought = fieldLabel
+          ? `未在页面定位到「${fieldLabel}」对应输入框，保持视口`
+          : `未定位到可用输入框，保持视口`;
+      }
+    } else if (isInputAction) {
+      const allQuotes = Array.from(prompt.matchAll(/[“"「]([^”"」]+)[”"」]/g)).map((m) => m[1].trim());
+      let fieldLabel = '';
+      let inputText = '';
+      if (allQuotes.length >= 2) {
+        fieldLabel = allQuotes[0];
+        inputText = allQuotes[1];
+      } else if (allQuotes.length === 1) {
+        if (prompt.match(/在[“"「][^”"」]+[”"」](?:输入框)?(?:中)?输入/i)) {
+          fieldLabel = allQuotes[0];
+        } else {
+          inputText = allQuotes[0];
+        }
+      }
+      if (!inputText) {
+        const match = prompt.match(/输入(?:为|内容)?[“"「]?([^”"」\s,，]+)[”"」]?/i);
+        inputText = match ? match[1].trim() : 'openLoop QA Test';
+      }
+
+      const inputEl = await locateInputElement(this.page, fieldLabel);
+      if (inputEl) {
+        const boxBefore = await inputEl.boundingBox().catch(() => null);
+        await inputEl.fill(inputText).catch(() => {});
+        const boxAfter = await inputEl.boundingBox().catch(() => null);
+        targetBox = boxAfter || boxBefore;
+        thought = fieldLabel
+          ? `在「${fieldLabel}」输入框中输入「${inputText}」`
+          : `定位到输入框并输入文本「${inputText}」`;
+      } else {
+        thought = fieldLabel
+          ? `未在页面定位到「${fieldLabel}」对应输入框，保持视口`
+          : `未定位到可用输入框，保持视口`;
       }
     } else if (promptLower.includes('滚动') || promptLower.includes('scroll')) {
       await this.page.evaluate(() => window.scrollBy({ top: 300, behavior: 'smooth' }));
       thought = `执行视口平滑向下滚动 300px`;
       await new Promise((r) => setTimeout(r, 400));
     } else {
-      // 提取目标交互元素文本（优先匹配引号、书名号，严防误点无意义单字或助词）
-      const quoteMatch = prompt.match(/[“"「]([^”"」]+)[”"」]/i);
-      let targetText = quoteMatch ? quoteMatch[1].trim() : '';
+      // 提取全部引号文案，支持复合步骤（如：点击左侧导航「设置」并切换至「自动化测试」标签页）
+      const allQuotes = Array.from(prompt.matchAll(/[“"「]([^”"」]+)[”"」]/g)).map((m) => m[1].trim());
+      const isCompoundAction =
+        allQuotes.length >= 2 &&
+        (prompt.includes('并') || prompt.includes('然后') || prompt.includes('再') || prompt.includes('->'));
 
-      if (!targetText) {
+      const targetList = isCompoundAction
+        ? allQuotes
+        : allQuotes.length > 0
+        ? [allQuotes[0]]
+        : [];
+
+      if (targetList.length === 0) {
         const actionMatch =
           prompt.match(/(?:点击|切换|进入|打开)(?:按钮|菜单|链接|Tab|标签|至)?\s*([^\s,，]+)/i) ||
           prompt.match(/click\s+['"]([^'"]+)['"]/i) ||
@@ -165,42 +263,38 @@ export class WebPlaywrightDriver implements QaDriver {
           const candidate = actionMatch[1].trim();
           const stopWords = ['子', '某个', '对应', '相关', '一个', '当前', '对应项'];
           if (!stopWords.includes(candidate) && candidate.length >= 2) {
-            targetText = candidate;
+            targetList.push(candidate);
           }
         }
       }
 
-      let clicked = false;
-      if (targetText) {
-        const locators = [
-          this.page.getByRole('button', { name: targetText, exact: true }).first(),
-          this.page.locator(`button:has-text("${targetText}")`).first(),
-          this.page.locator(`[role="button"]:has-text("${targetText}")`).first(),
-          this.page.getByRole('tab', { name: targetText, exact: false }).first(),
-          this.page.getByText(targetText, { exact: true }).first(),
-          this.page.locator(`a:has-text("${targetText}")`).first(),
-          this.page.getByText(targetText, { exact: false }).first(),
-        ];
+      let clickedCount = 0;
+      const thoughts: string[] = [];
 
-        for (const loc of locators) {
-          const visible = await loc.isVisible().catch(() => false);
-          if (visible) {
-            const box = await loc.boundingBox().catch(() => null);
-            if (box) targetBox = box;
-            await loc.click({ timeout: 2000 }).catch(() => {});
-            clicked = true;
-            thought = `在页面中定位到元素「${targetText}」，执行真实点击交互`;
-            await new Promise((r) => setTimeout(r, 800));
-            break;
-          }
+      for (const targetText of targetList) {
+        const loc = await locateClickableElement(this.page, targetText);
+        if (loc) {
+          const boxBefore = await loc.boundingBox().catch(() => null);
+          await loc.click({ timeout: 2000 }).catch(() => {});
+          const boxAfter = await loc.boundingBox().catch(() => null);
+          targetBox = boxAfter || boxBefore;
+          clickedCount++;
+          thoughts.push(`点击交互「${targetText}」`);
+          await new Promise((r) => setTimeout(r, 600));
+        } else {
+          thoughts.push(`未定位到「${targetText}」`);
         }
       }
 
-      if (!clicked) {
-        thought = targetText ? `页面未定位到「${targetText}」，保持当前视口` : `页面无需进一步交互，已处于就绪状态`;
+      if (clickedCount > 0) {
+        thought = `在页面中依次完成: ${thoughts.join('，')}`;
+      } else {
+        thought = targetList.length > 0
+          ? `页面未定位到目标元素「${targetList.join(' / ')}」，保持当前视口`
+          : `页面无需进一步交互，已处于就绪状态`;
       }
 
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 400));
     }
 
     const screenshotBuffer = await this.captureScreenshot();
@@ -269,6 +363,7 @@ export class WebPlaywrightDriver implements QaDriver {
     let passed = true;
     let thought = '';
     let errorMessage: string | undefined;
+    let targetBox: { x: number; y: number; width: number; height: number } | undefined;
 
     // 提取显式期望的目标文本（如引号中的错误信息或特定字符串）
     const match =
@@ -315,6 +410,11 @@ export class WebPlaywrightDriver implements QaDriver {
       passed = hasText;
       if (passed) {
         thought = `页面成功包含预期文本「${targetText}」，断言通过`;
+        const loc = await locateClickableElement(this.page, targetText);
+        if (loc) {
+          const box = await loc.boundingBox().catch(() => null);
+          if (box) targetBox = box;
+        }
       } else {
         errorMessage = `页面未包含预期文本「${targetText}」`;
         thought = errorMessage;
@@ -329,6 +429,7 @@ export class WebPlaywrightDriver implements QaDriver {
       passed,
       thought,
       errorMessage,
+      targetBox,
       screenshotBuffer,
     };
   }

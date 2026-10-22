@@ -143,6 +143,7 @@ export class AndroidDriver implements QaDriver {
     let thought = '';
     let passed = true;
     let errorMessage: string | undefined;
+    let targetBox: { x: number; y: number; width: number; height: number } | undefined;
 
     if (this.isMidsceneReady && this.agent) {
       try {
@@ -156,6 +157,7 @@ export class AndroidDriver implements QaDriver {
         for (const target of quoted) {
           const pos = await this.findTextCoordsByUiAutomator(target);
           if (!pos) continue;
+          if (pos.box) targetBox = pos.box;
           try {
             await execAsync(`adb -s ${this.deviceSerial} shell input tap ${pos.x} ${pos.y}`);
             passed = true;
@@ -175,12 +177,14 @@ export class AndroidDriver implements QaDriver {
         }
       }
     } else {
-      thought = await this.executeAdbFallbackAction(prompt);
+      const fallback = await this.executeAdbFallbackAction(prompt);
+      thought = fallback.thought;
+      targetBox = fallback.targetBox;
     }
 
     const screenshotBuffer = await this.captureScreenshot();
 
-    return { passed, thought, errorMessage, screenshotBuffer };
+    return { passed, thought, errorMessage, targetBox, screenshotBuffer };
   }
 
   async executeWaitFor(prompt: string, timeoutMs?: number): Promise<QaStepExecutionResult> {
@@ -228,6 +232,7 @@ export class AndroidDriver implements QaDriver {
     let thought = '';
     let passed = true;
     let errorMessage: string | undefined;
+    let targetBox: { x: number; y: number; width: number; height: number } | undefined;
 
     if (this.isMidsceneReady && this.agent) {
       try {
@@ -266,6 +271,9 @@ export class AndroidDriver implements QaDriver {
       passed = fallbackRes.passed;
       thought = fallbackRes.thought;
       errorMessage = fallbackRes.errorMessage;
+      if (fallbackRes.targetBox) {
+        targetBox = fallbackRes.targetBox;
+      }
     }
 
     const screenshotBuffer = await this.captureScreenshot();
@@ -274,6 +282,7 @@ export class AndroidDriver implements QaDriver {
       passed,
       thought,
       errorMessage,
+      targetBox,
       screenshotBuffer,
     };
   }
@@ -326,7 +335,10 @@ export class AndroidDriver implements QaDriver {
   /**
    * 兜底 ADB 动作执行器（在无 LLM Key 或 Midscene 不可用时保障通用交互）
    */
-  private async executeAdbFallbackAction(prompt: string): Promise<string> {
+  private async executeAdbFallbackAction(prompt: string): Promise<{
+    thought: string;
+    targetBox?: { x: number; y: number; width: number; height: number };
+  }> {
     const promptLower = prompt.toLowerCase();
     const midX = Math.round(this.viewport.width / 2);
     const midY = Math.round(this.viewport.height / 2);
@@ -334,33 +346,33 @@ export class AndroidDriver implements QaDriver {
     try {
       if (promptLower.includes('返回') || promptLower.includes('back')) {
         await execAsync(`adb -s ${this.deviceSerial} shell input keyevent 4`);
-        return '执行 Android 物理返回键 (KEYCODE_BACK)';
+        return { thought: '执行 Android 物理返回键 (KEYCODE_BACK)' };
       }
 
       if (promptLower.includes('home') || promptLower.includes('主屏') || promptLower.includes('桌面')) {
         await execAsync(`adb -s ${this.deviceSerial} shell input keyevent 3`);
-        return '执行 Android 桌面键 (KEYCODE_HOME)';
+        return { thought: '执行 Android 桌面键 (KEYCODE_HOME)' };
       }
 
       if (promptLower.includes('输入') || promptLower.includes('type') || promptLower.includes('fill')) {
         const textMatch = prompt.match(/输入[“"「]?([^”"」]+)[”"」]?/i) || prompt.match(/type\s+['"]?([^'"]+)['"]?/i);
         const inputText = textMatch ? textMatch[1].trim() : 'openLoop';
         await execAsync(`adb -s ${this.deviceSerial} shell input text ${toAdbInputText(inputText)}`);
-        return `在当前聚焦控件输入文本: "${inputText}"`;
+        return { thought: `在当前聚焦控件输入文本: "${inputText}"` };
       }
 
       if (promptLower.includes('向上滑动') || promptLower.includes('scroll down') || promptLower.includes('上滑')) {
         const startY = Math.round(this.viewport.height * 0.7);
         const endY = Math.round(this.viewport.height * 0.3);
         await execAsync(`adb -s ${this.deviceSerial} shell input swipe ${midX} ${startY} ${midX} ${endY} 350`);
-        return `向上滑动视口内容 (${midX}, ${startY} -> ${midX}, ${endY})`;
+        return { thought: `向上滑动视口内容 (${midX}, ${startY} -> ${midX}, ${endY})` };
       }
 
       if (promptLower.includes('向下滑动') || promptLower.includes('scroll up') || promptLower.includes('下滑')) {
         const startY = Math.round(this.viewport.height * 0.3);
         const endY = Math.round(this.viewport.height * 0.7);
         await execAsync(`adb -s ${this.deviceSerial} shell input swipe ${midX} ${startY} ${midX} ${endY} 350`);
-        return `向下滑动视口内容 (${midX}, ${startY} -> ${midX}, ${endY})`;
+        return { thought: `向下滑动视口内容 (${midX}, ${startY} -> ${midX}, ${endY})` };
       }
 
       // 提取被点击的目标文本，尝试通过 UIAutomator dump 查坐标
@@ -371,22 +383,30 @@ export class AndroidDriver implements QaDriver {
         const pos = await this.findTextCoordsByUiAutomator(targetText);
         if (pos) {
           await execAsync(`adb -s ${this.deviceSerial} shell input tap ${pos.x} ${pos.y}`);
-          return `通过 UIAutomator 定位到文本「${targetText}」(${pos.x}, ${pos.y}) 并执行点击`;
+          return {
+            thought: `通过 UIAutomator 定位到文本「${targetText}」(${pos.x}, ${pos.y}) 并执行点击`,
+            targetBox: pos.box,
+          };
         }
       }
 
       // 默认点击屏幕中央
       await execAsync(`adb -s ${this.deviceSerial} shell input tap ${midX} ${midY}`);
-      return `执行屏幕居中轻触点击 (${midX}, ${midY}): ${prompt}`;
+      return { thought: `执行屏幕居中轻触点击 (${midX}, ${midY}): ${prompt}` };
     } catch (err: any) {
-      return `ADB 交互执行异常: ${err.message}`;
+      return { thought: `ADB 交互执行异常: ${err.message}` };
     }
   }
 
   /**
    * 兜底 ADB 断言执行器
    */
-  private async executeAdbFallbackAssert(prompt: string): Promise<{ passed: boolean; thought: string; errorMessage?: string }> {
+  private async executeAdbFallbackAssert(prompt: string): Promise<{
+    passed: boolean;
+    thought: string;
+    errorMessage?: string;
+    targetBox?: { x: number; y: number; width: number; height: number };
+  }> {
     try {
       // 检查设备是否崩溃或黑屏无响应
       const { stdout: topActivity } = await execAsync(`adb -s ${this.deviceSerial} shell "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'"`, { timeout: 3000 });
@@ -407,6 +427,7 @@ export class AndroidDriver implements QaDriver {
           return {
             passed: true,
             thought: `在屏幕中定位到断言目标「${textToFind}」，位置 (${pos.x}, ${pos.y})`,
+            targetBox: pos.box,
           };
         } else {
           return {
@@ -456,7 +477,11 @@ export class AndroidDriver implements QaDriver {
   /**
    * 通过 UIAutomator dump 文本查找中心坐标
    */
-  private async findTextCoordsByUiAutomator(text: string): Promise<{ x: number; y: number } | null> {
+  private async findTextCoordsByUiAutomator(text: string): Promise<{
+    x: number;
+    y: number;
+    box?: { x: number; y: number; width: number; height: number };
+  } | null> {
     try {
       // 生成当前界面的 dump xml
       await execAsync(`adb -s ${this.deviceSerial} shell uiautomator dump /data/local/tmp/uidump.xml`, { timeout: 3000 });
@@ -473,6 +498,12 @@ export class AndroidDriver implements QaDriver {
         return {
           x: Math.round((x1 + x2) / 2),
           y: Math.round((y1 + y2) / 2),
+          box: {
+            x: x1,
+            y: y1,
+            width: Math.max(1, x2 - x1),
+            height: Math.max(1, y2 - y1),
+          },
         };
       }
     } catch {}
