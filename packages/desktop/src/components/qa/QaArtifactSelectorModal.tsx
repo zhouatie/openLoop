@@ -281,14 +281,19 @@ export const QaArtifactSelectorModal: React.FC<QaArtifactSelectorModalProps> = (
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        if (import.meta.env?.DEV) {
+          console.log('[QaArtifactSelectorModal] 按 Escape 关闭选择弹窗，阻断底层侧边栏响应');
+        }
         onClose();
       } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
         handleConfirm();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, handleConfirm, onClose]);
 
   if (!isOpen) return null;

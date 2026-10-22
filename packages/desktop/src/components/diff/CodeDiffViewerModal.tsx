@@ -128,12 +128,15 @@ export const CodeDiffViewerModal: React.FC<CodeDiffViewerModalProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
         if (import.meta.env?.DEV) console.log('[DiffReviewModal] 按 ESC 关闭弹窗');
         onClose();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [onClose]);
 
   // 过滤后的文件列表

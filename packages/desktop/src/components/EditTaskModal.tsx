@@ -72,6 +72,9 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
         if (isDropdownOpen) {
           setIsDropdownOpen(false);
         } else {
@@ -79,8 +82,8 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         }
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, isDropdownOpen, onClose]);
 
   // 点击外部收起下拉框
