@@ -261,6 +261,15 @@ export class DagEngine extends EventEmitter {
     workflow: WorkflowDefinition,
     node: WorkflowNode
   ): Promise<void> {
+    // 任务已被手动终止：不再调度任何节点，避免旧快照把终止状态覆盖回执行中
+    if (this.store.getTask(task.id)?.status === 'cancelled') {
+      dagLogger.info(`任务 ${task.id} 已终止，跳过节点 [${node.name}] 调度`, undefined, {
+        taskId: task.id,
+        nodeId: node.id,
+      });
+      return;
+    }
+
     task.currentNodeId = node.id;
 
     // 动态调整看板泳道以反映当前流程阶段：人工审批节点进入待验收，其他运行中节点统一处于执行中泳道
@@ -326,6 +335,11 @@ export class DagEngine extends EventEmitter {
         this.log(task.id, node.id, stream, message);
       },
       onSessionUpdate: (state: TaskSessionState) => {
+        // 任务已被终止：丢弃终止瞬间迟到的会话状态，避免以旧快照写回执行中
+        if (abortController?.signal.aborted) {
+          dagLogger.debug(`任务 ${task.id} 已终止，忽略迟到的会话状态回写`, undefined, { taskId: task.id });
+          return;
+        }
         if (!task.context) task.context = {};
         task.context.chatMessages = state.messages;
         if (state.model) task.context.model = state.model;
@@ -379,7 +393,7 @@ export class DagEngine extends EventEmitter {
     const duration = run.finishedAt - (run.startedAt || run.finishedAt);
 
     // 如果任务已经被手动终止 (cancelled)，保持已终止状态，直接退出流转
-    if (latestTask && latestTask.status === 'cancelled') {
+    if (abortController?.signal.aborted || latestTask?.status === 'cancelled') {
       dagLogger.info(`任务 ${task.id} 状态已为 cancelled，退出调度流转`, undefined, {
         taskId: task.id,
         nodeId: node.id,
