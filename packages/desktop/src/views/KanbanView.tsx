@@ -2287,56 +2287,128 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       </div>
 
                       {/* 模块 2: 任务需求与说明 */}
-                      <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#1c1c21]">
-                            <AlignLeft size={12} className="text-[#71717a]" />
-                            <span>任务需求与提示词</span>
-                          </div>
-                          {curTask.attachments && curTask.attachments.length > 0 && (
-                            <span className="text-[10px] text-[#71717a] font-mono bg-[#f4f4f6] px-1.5 py-0.5 rounded-[4px] border border-[#e3e3e8]">
-                              {curTask.attachments.length} 张参考图
-                            </span>
-                          )}
-                        </div>
+                      {(() => {
+                        const isSubtask = curTask.kind === 'subtask' && Boolean(curTask.parentTaskId);
+                        const parentTaskObj = isSubtask
+                          ? tasks.find((t) => t.id === curTask.parentTaskId)
+                          : undefined;
+                        const parentGroupSnapshot = curTask.context?.parentGroupSnapshot;
+                        const parentGroupTitle = parentTaskObj?.title || parentGroupSnapshot?.title;
+                        const parentGroupDescription = parentTaskObj?.description || parentGroupSnapshot?.description;
+                        const parentGroupAttachments: TaskAttachment[] =
+                          parentTaskObj?.attachments || parentGroupSnapshot?.attachments || [];
 
-                        <div className="p-3 rounded-[6px] border border-[#ececf0] bg-[#fafafc] text-[#374151] text-[12px] leading-relaxed whitespace-pre-wrap select-text max-h-[220px] overflow-y-auto">
-                          {curTask.description ? (
-                            curTask.description
-                          ) : (
-                            <span className="text-[#a1a1aa] italic">未设置说明与 Prompt 提示词</span>
-                          )}
-                        </div>
-
-                        {/* 图片附件画廊 */}
-                        {curTask.attachments && curTask.attachments.length > 0 && (
-                          <div className="pt-1 flex items-center gap-2 overflow-x-auto py-1 scrollbar-thin">
-                            {curTask.attachments.map((att) => {
-                              const displayUrl = api.getAttachmentUrl(att.url);
-                              return (
-                                <div
-                                  key={att.id}
-                                  onClick={() => {
-                                    if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 预览附件图片:', att.name);
-                                    setActiveDetailImage(att);
-                                  }}
-                                  className="group relative w-[52px] h-[52px] shrink-0 rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden shadow-sm hover:border-[#4f46e5] cursor-pointer transition-all"
-                                  title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击大图预览`}
-                                >
-                                  <img
-                                    src={displayUrl}
-                                    alt={att.name}
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
-                                  />
-                                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                    <ZoomIn size={12} className="text-white" />
+                        return (
+                          <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-2.5">
+                            {/* 如果是子工序且存在父任务组公共信息，展示全局公共背景与共享参考图 */}
+                            {isSubtask && (parentGroupDescription || parentGroupAttachments.length > 0) && (
+                              <div className="rounded-[6px] border border-[#d8d6fb] bg-[#f8f8ff] p-2.5 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#4f46e5]">
+                                    <Layers size={11.5} />
+                                    <span className="truncate max-w-[280px]">
+                                      任务组公共背景: {parentGroupTitle || '所属任务组'}
+                                    </span>
                                   </div>
+                                  <span className="text-[9.5px] font-mono text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded shrink-0">
+                                    全工序共享
+                                  </span>
                                 </div>
-                              );
-                            })}
+
+                                {parentGroupDescription && (
+                                  <div className="text-[11px] text-[#4338ca] leading-relaxed whitespace-pre-wrap select-text max-h-[110px] overflow-y-auto bg-white/75 p-2 rounded-[5px] border border-[#e0defc]">
+                                    {parentGroupDescription}
+                                  </div>
+                                )}
+
+                                {parentGroupAttachments.length > 0 && (
+                                  <div className="space-y-1">
+                                    <span className="text-[10px] text-[#6366f1] font-medium flex items-center gap-1">
+                                      <span>任务组共享参考图 ({parentGroupAttachments.length})</span>
+                                    </span>
+                                    <div className="flex items-center gap-2 overflow-x-auto py-0.5 scrollbar-thin">
+                                      {parentGroupAttachments.map((att) => {
+                                        const displayUrl = api.getAttachmentUrl(att.url);
+                                        return (
+                                          <div
+                                            key={att.id}
+                                            onClick={() => {
+                                              if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 预览任务组公共附件图片:', att.name);
+                                              setActiveDetailImage(att);
+                                            }}
+                                            className="group relative w-[46px] h-[46px] shrink-0 rounded-[5px] border border-[#d8d6fb] bg-white overflow-hidden shadow-2xs hover:border-[#4f46e5] cursor-pointer transition-all"
+                                            title={`${att.name} (任务组公共图片)\n${(att.size / 1024).toFixed(0)} KB\n点击大图预览`}
+                                          >
+                                            <img
+                                              src={displayUrl}
+                                              alt={att.name}
+                                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
+                                            />
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                              <ZoomIn size={11} className="text-white" />
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#1c1c21]">
+                                <AlignLeft size={12} className="text-[#71717a]" />
+                                <span>
+                                  {isSubtask ? '本工序专属需求与提示词' : '任务需求与提示词'}
+                                </span>
+                              </div>
+                              {curTask.attachments && curTask.attachments.length > 0 && (
+                                <span className="text-[10px] text-[#71717a] font-mono bg-[#f4f4f6] px-1.5 py-0.5 rounded-[4px] border border-[#e3e3e8]">
+                                  {curTask.attachments.length} 张参考图
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="p-3 rounded-[6px] border border-[#ececf0] bg-[#fafafc] text-[#374151] text-[12px] leading-relaxed whitespace-pre-wrap select-text max-h-[220px] overflow-y-auto">
+                              {curTask.description ? (
+                                curTask.description
+                              ) : (
+                                <span className="text-[#a1a1aa] italic">未设置专属说明（继承任务组公共描述）</span>
+                              )}
+                            </div>
+
+                            {/* 图片附件画廊 */}
+                            {curTask.attachments && curTask.attachments.length > 0 && (
+                              <div className="pt-1 flex items-center gap-2 overflow-x-auto py-1 scrollbar-thin">
+                                {curTask.attachments.map((att) => {
+                                  const displayUrl = api.getAttachmentUrl(att.url);
+                                  return (
+                                    <div
+                                      key={att.id}
+                                      onClick={() => {
+                                        if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 预览附件图片:', att.name);
+                                        setActiveDetailImage(att);
+                                      }}
+                                      className="group relative w-[52px] h-[52px] shrink-0 rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden shadow-sm hover:border-[#4f46e5] cursor-pointer transition-all"
+                                      title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击大图预览`}
+                                    >
+                                      <img
+                                        src={displayUrl}
+                                        alt={att.name}
+                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
+                                      />
+                                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                        <ZoomIn size={12} className="text-white" />
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
+                        );
+                      })()}
 
                       {/* 模块 3: 流水线节点执行时序 */}
                       <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-3">

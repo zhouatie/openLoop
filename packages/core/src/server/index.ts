@@ -694,6 +694,11 @@ export class OpenLoopServer {
               context: {
                 ...(rawSub.context || {}),
                 parentTaskId: groupId,
+                parentGroupSnapshot: {
+                  title: title || `任务组 #${Date.now()}`,
+                  description: description || '',
+                  attachments: Array.isArray(attachments) ? attachments : undefined,
+                },
               },
             };
 
@@ -737,7 +742,7 @@ export class OpenLoopServer {
           this.broadcast({ type: 'task:new', data: child });
         }
 
-        if (shouldAutoRun) {
+        if (shouldAutoRun && (!isGroup || finalSubTaskIds.length > 0)) {
           serverLogger.info(`[Tasks:AutoRun] 异步启动任务调度: ${task.id}`, undefined, { taskId: task.id });
           setImmediate(() => {
             this.engine.runTask(task.id).catch((err) => {
@@ -745,6 +750,8 @@ export class OpenLoopServer {
               console.error(`Task ${task.id} failed:`, err);
             });
           });
+        } else if (isGroup && finalSubTaskIds.length === 0) {
+          serverLogger.info(`[Tasks:Create] 任务组 ${task.id} 尚未包含子工序，保持等待添加工序状态，暂不自动调度`);
         }
 
         return this.sendJson(res, 201, task, reqMeta);
@@ -976,6 +983,11 @@ export class OpenLoopServer {
           nodeRuns: {},
           context: {
             parentTaskId: parent.id,
+            parentGroupSnapshot: {
+              title: parent.title,
+              description: parent.description || '',
+              attachments: parent.attachments,
+            },
           },
         };
 
@@ -1050,6 +1062,11 @@ export class OpenLoopServer {
             context: {
               ...(raw.context || {}),
               parentTaskId: parent.id,
+              parentGroupSnapshot: {
+                title: parent.title,
+                description: parent.description || '',
+                attachments: parent.attachments,
+              },
             },
           };
 

@@ -4,6 +4,7 @@ import {
   Play,
   Workflow,
   ChevronDown,
+  ChevronRight,
   Check,
   Bot,
   Target,
@@ -19,6 +20,8 @@ import {
   ArrowUp,
   ArrowDown,
   Trash2,
+  AlignLeft,
+  GitFork,
 } from 'lucide-react';
 import type { WorkflowDefinition, NodeType, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { WorkflowRecommender } from '../utils/workflowRecommender';
@@ -40,6 +43,13 @@ const parseCriteriaText = (text: string): string[] => {
     .map((line) => line.replace(/^[-*•\d.]+\s*(\[[ xX]\]\s*)?/, '').trim())
     .filter(Boolean);
 };
+
+interface DraftSubTask {
+  id: string;
+  title: string;
+  description: string;
+  workflowId?: string;
+}
 
 interface CreateTaskModalProps {
   isOpen: boolean;
@@ -92,9 +102,19 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [workflowSearch, setWorkflowSearch] = useState('');
   
-  // AI 自主工序编排与流水线推荐状态
   const [autoDecompose, setAutoDecompose] = useState(true);
   const [userManuallySelectedWf, setUserManuallySelectedWf] = useState(false);
+
+  // 任务形态切换：普通任务 (single) vs 任务组 (group)
+  const [taskKind, setTaskKind] = useState<'single' | 'group'>('single');
+  // 任务组编排执行模式: 串行(serial) | 并行(parallel) | DAG依赖(dag)
+  const [executionMode, setExecutionMode] = useState<'serial' | 'parallel' | 'dag'>('serial');
+  // 任务组最大并发数
+  const [concurrencyLimit, setConcurrencyLimit] = useState<number>(3);
+  // 任务组初始子工序列表
+  const [groupSubtasks, setGroupSubtasks] = useState<DraftSubTask[]>([]);
+  // 展开编辑描述的子工序 ID 集合
+  const [expandedSubDesc, setExpandedSubDesc] = useState<Record<string, boolean>>({});
 
   // 毫秒级根据用户键入的任务标题计算流水线推荐 (只依赖 title 与 workspace，绝不依赖 description 模板)
   const recommendations = useMemo(() => {
@@ -510,6 +530,45 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   };
 
+  const handleAddSubtask = () => {
+    const nextIdx = groupSubtasks.length + 1;
+    const newSub: DraftSubTask = {
+      id: `temp_sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: `工序 #${nextIdx}: `,
+      description: '',
+      workflowId: workflowId || workflows[0]?.id || '',
+    };
+    setGroupSubtasks((prev) => [...prev, newSub]);
+    if (import.meta.env?.DEV) {
+      console.log('[CreateTaskModal] 添加初始子工序:', newSub);
+    }
+  };
+
+  const handleUpdateSubtask = (id: string, patch: Partial<DraftSubTask>) => {
+    setGroupSubtasks((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    );
+  };
+
+  const handleRemoveSubtask = (id: string) => {
+    setGroupSubtasks((prev) => prev.filter((item) => item.id !== id));
+    if (import.meta.env?.DEV) {
+      console.log('[CreateTaskModal] 删除初始子工序:', id);
+    }
+  };
+
+  const handleMoveSubtask = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= groupSubtasks.length) return;
+    setGroupSubtasks((prev) => {
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[target];
+      next[target] = temp;
+      return next;
+    });
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) {
       e.preventDefault();
@@ -531,32 +590,76 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     const acceptanceCriteria = cleanCriteria.length > 0 ? cleanCriteria.join('\n') : undefined;
 
     setLoading(true);
-    if (import.meta.env?.DEV) {
-      console.log('[CreateTaskModal] 提交创建任务:', {
-        title: title.trim(),
-        workflowId,
-        kanbanColumn,
-        workspace: trimmedWorkspace || '未指定(留空)',
-        acceptanceCriteria,
-        qaInstructions: cleanCriteria.length > 0 ? cleanCriteria : undefined,
-        autoRun,
-        autoDecompose,
-      });
-    }
+
     try {
-      await onCreate({
-        title: title.trim(),
-        workflowId,
-        description: description.trim(),
-        acceptanceCriteria,
-        qaInstructions: cleanCriteria.length > 0 ? cleanCriteria : undefined,
-        autoRun,
-        kanbanColumn,
-        workspace: trimmedWorkspace || undefined,
-        attachments: attachments.length > 0 ? attachments : undefined,
-        kind: 'single',
-        autoDecompose,
-      });
+      if (taskKind === 'group') {
+        const cleanSubtasks = groupSubtasks
+          .filter((st) => st.title.trim())
+          .map((st, idx) => ({
+            id: st.id,
+            title: st.title.trim(),
+            description: st.description.trim() || undefined,
+            workflowId: st.workflowId || workflowId,
+            dependencies:
+              executionMode === 'serial' && idx > 0
+                ? [groupSubtasks[idx - 1].id]
+                : undefined,
+          }));
+
+        if (import.meta.env?.DEV) {
+          console.log('[CreateTaskModal] 提交创建任务组:', {
+            title: title.trim(),
+            workflowId,
+            kanbanColumn,
+            workspace: trimmedWorkspace || '未指定(留空)',
+            executionMode,
+            concurrencyLimit,
+            subtasksCount: cleanSubtasks.length,
+            autoRun: autoRun && cleanSubtasks.length > 0,
+          });
+        }
+
+        await onCreate({
+          title: title.trim(),
+          workflowId,
+          description: description.trim(),
+          autoRun: autoRun && cleanSubtasks.length > 0,
+          kanbanColumn,
+          workspace: trimmedWorkspace || undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
+          kind: 'group',
+          executionMode,
+          concurrencyLimit,
+          subtasks: cleanSubtasks.length > 0 ? cleanSubtasks : undefined,
+        });
+      } else {
+        if (import.meta.env?.DEV) {
+          console.log('[CreateTaskModal] 提交创建普通任务:', {
+            title: title.trim(),
+            workflowId,
+            kanbanColumn,
+            workspace: trimmedWorkspace || '未指定(留空)',
+            acceptanceCriteria,
+            qaInstructions: cleanCriteria.length > 0 ? cleanCriteria : undefined,
+            autoRun,
+            autoDecompose,
+          });
+        }
+
+        await onCreate({
+          title: title.trim(),
+          workflowId,
+          description: description.trim(),
+          acceptanceCriteria,
+          qaInstructions: cleanCriteria.length > 0 ? cleanCriteria : undefined,
+          autoRun,
+          kanbanColumn,
+          workspace: trimmedWorkspace || undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
+          kind: 'single',
+          autoDecompose,
+        });
+      }
 
       // 保存本地记忆与 LRU 最近使用列表
       try {
@@ -587,6 +690,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       setDescription('');
       setCriteriaList([]);
       setAttachments([]);
+      setGroupSubtasks([]);
+      setTaskKind('single');
       setWorkflowSearch('');
       setIsDropdownOpen(false);
       onClose();
@@ -645,13 +750,22 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       }}
     >
       <div
-        className="w-[465px] max-h-[92vh] flex flex-col bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.14)] text-[#1c1c21] transition-all duration-200 overflow-hidden"
+        className={`${
+          taskKind === 'group' ? 'w-[510px]' : 'w-[465px]'
+        } max-h-[92vh] flex flex-col bg-white border border-[#e3e3e8] rounded-[10px] p-4 shadow-[0_16px_40px_rgba(20,22,30,0.14)] text-[#1c1c21] transition-all duration-200 overflow-hidden`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* 顶部标题栏 */}
-        <div className="flex items-center justify-between pb-2.5 border-b border-[#ececf0] shrink-0">
+        <div className="flex items-center justify-between pb-2 border-b border-[#ececf0] shrink-0">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-[13px] text-[#1c1c21]">新建任务</h3>
+            <h3 className="font-semibold text-[13px] text-[#1c1c21]">
+              {taskKind === 'group' ? '创建任务组' : '新建任务'}
+            </h3>
+            {taskKind === 'group' && (
+              <span className="text-[10px] text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded font-medium">
+                公共上下文 & 全局素材共享
+              </span>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -661,11 +775,45 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           </button>
         </div>
 
+        {/* 任务形态分段切换：普通任务 vs 任务组 */}
+        <div className="flex items-center p-0.5 rounded-[6px] bg-[#f1f1f4] border border-[#e3e3e8] mt-2.5">
+          <button
+            type="button"
+            onClick={() => {
+              setTaskKind('single');
+              if (import.meta.env?.DEV) console.log('[CreateTaskModal] 切换为普通任务形态');
+            }}
+            className={`flex-1 h-[26px] rounded-[4px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              taskKind === 'single'
+                ? 'bg-white text-[#1c1c21] shadow-xs font-semibold'
+                : 'text-[#63636b] hover:text-[#1c1c21]'
+            }`}
+          >
+            <Bot size={12} className={taskKind === 'single' ? 'text-[#4f46e5]' : 'text-[#71717a]'} />
+            <span>普通任务</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTaskKind('group');
+              if (import.meta.env?.DEV) console.log('[CreateTaskModal] 切换为任务组形态');
+            }}
+            className={`flex-1 h-[26px] rounded-[4px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              taskKind === 'group'
+                ? 'bg-white text-[#4f46e5] shadow-xs font-semibold'
+                : 'text-[#63636b] hover:text-[#1c1c21]'
+            }`}
+          >
+            <Layers size={12} className={taskKind === 'group' ? 'text-[#4f46e5]' : 'text-[#71717a]'} />
+            <span>任务组 (多工序协作)</span>
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} className="mt-3 space-y-2.5 text-[11.5px] overflow-y-auto pr-1 flex-1">
-          {/* 任务名称 */}
+          {/* 任务名称 / 任务组名称 */}
           <div>
             <label className="block text-[11px] font-medium text-[#63636b] mb-1">
-              任务名称
+              {taskKind === 'group' ? '任务组名称' : '任务名称'}
             </label>
             <input
               ref={titleInputRef}
@@ -673,7 +821,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               autoFocus
               required
               placeholder={
-                currentWf?.taskTemplate?.titlePlaceholder || '例如: 购物车结算全链路回归与截图验收'
+                taskKind === 'group'
+                  ? '例如: 结算模块微服务化重构与自动化回归'
+                  : currentWf?.taskTemplate?.titlePlaceholder || '例如: 购物车结算全链路回归与截图验收'
               }
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -860,13 +1010,23 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             )}
           </div>
 
-          {/* 任务说明与提示词 */}
+          {/* 任务说明与提示词 / 任务组全局需求说明 */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-[11px] font-medium text-[#63636b]">
-                任务说明与提示词
+              <label className="text-[11px] font-medium text-[#63636b] flex items-center gap-1.5">
+                <span>
+                  {taskKind === 'group'
+                    ? '任务组全局需求说明与公共上下文 (所有子工序共享)'
+                    : '任务说明与提示词'}
+                </span>
+                {taskKind === 'group' && (
+                  <span className="text-[9.5px] text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1 py-[0.5px] rounded font-normal">
+                    Agent 自动注入
+                  </span>
+                )}
               </label>
-              {currentWf?.taskTemplate?.descriptionTemplate &&
+              {taskKind === 'single' &&
+                currentWf?.taskTemplate?.descriptionTemplate &&
                 description.trim() !== currentWf.taskTemplate.descriptionTemplate.trim() && (
                   <button
                     type="button"
@@ -891,180 +1051,376 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               onChange={setDescription}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
+              placeholder={
+                taskKind === 'group'
+                  ? '输入任务组全局背景、通用架构规范与业务上下文。所有子工序启动 Agent 节点修改代码时，都会把此描述与公共参考图跟随 Prompt 一起注入，所有子任务均可共享感知...'
+                  : undefined
+              }
               disabled={loading}
-              rows={4}
+              rows={taskKind === 'group' ? 3 : 4}
             />
           </div>
 
-          {/* 验收预期 / UI 自动化测试用例 (List UI) */}
-          <div className="border border-[#e3e3e8] rounded-[6px] bg-[#fafafc] overflow-hidden">
-            <div className="w-full px-3 py-1.5 flex items-center justify-between text-[11px] font-medium text-[#63636b] select-none">
-              <div
-                onClick={() => setIsCriteriaOpen(!isCriteriaOpen)}
-                className="flex items-center gap-1.5 cursor-pointer hover:text-[#1c1c21] transition-colors flex-1 min-w-0"
-              >
-                <Target size={12} className="text-[#63636b] shrink-0" />
-                <span className="truncate">验收预期 / UI 自动化用例 (可选)</span>
-                {criteriaList.some((c) => c.trim()) && (
-                  <span className="px-1.5 py-[0.5px] rounded-[3px] bg-[#eeedfd] text-[#4f46e5] text-[9.5px] font-mono font-medium border border-[#d8d6fb] shrink-0">
-                    {criteriaList.filter((c) => c.trim()).length} 项
-                  </span>
-                )}
+          {/* 任务组专属：工序流转模式与并发数 */}
+          {taskKind === 'group' && (
+            <div className="rounded-[6px] border border-[#e3e3e8] bg-[#fafafc] p-2 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-[#4b4b53] flex items-center gap-1.5">
+                  <GitFork size={12} className="text-[#4f46e5]" />
+                  <span>工序流转编排模式</span>
+                </span>
+                <span className="text-[10px] text-[#85858d]">
+                  {executionMode === 'serial'
+                    ? '串行推进（前序完成自动流转下一工序）'
+                    : executionMode === 'parallel'
+                    ? `全速并发执行 (并发上限 ${concurrencyLimit})`
+                    : `DAG 依赖拓扑推进 (并发上限 ${concurrencyLimit})`}
+                </span>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {currentWf?.taskTemplate?.acceptanceTemplate && isCriteriaTemplateDifferent && (
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center p-0.5 rounded-[5px] bg-[#f1f1f4] border border-[#e3e3e8] flex-1">
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const parsed = parseCriteriaText(currentWf.taskTemplate!.acceptanceTemplate!);
-                      setCriteriaList(parsed);
-                      setIsCriteriaOpen(true);
-                      if (import.meta.env?.DEV) {
-                        console.log('[CreateTaskModal] 手动套用工作流验收模板:', currentWf.name, parsed);
-                      }
-                      toast.success('已应用流程验收标准模板');
+                    onClick={() => {
+                      setExecutionMode('serial');
+                      if (import.meta.env?.DEV) console.log('[CreateTaskModal] 切换为串行编排');
                     }}
-                    className="h-[19px] px-1.5 rounded-[4px] bg-white hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                    className={`flex-1 h-[22px] rounded-[4px] text-[10.5px] transition-all font-medium cursor-pointer ${
+                      executionMode === 'serial'
+                        ? 'bg-white text-[#4f46e5] shadow-xs'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
                   >
-                    <Sparkles size={9} />
-                    <span>套用验收模板</span>
+                    串行模式 (推荐)
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExecutionMode('parallel');
+                      if (import.meta.env?.DEV) console.log('[CreateTaskModal] 切换为并发编排');
+                    }}
+                    className={`flex-1 h-[22px] rounded-[4px] text-[10.5px] transition-all font-medium cursor-pointer ${
+                      executionMode === 'parallel'
+                        ? 'bg-white text-[#4f46e5] shadow-xs'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    并发模式
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExecutionMode('dag');
+                      if (import.meta.env?.DEV) console.log('[CreateTaskModal] 切换为 DAG 编排');
+                    }}
+                    className={`flex-1 h-[22px] rounded-[4px] text-[10.5px] transition-all font-medium cursor-pointer ${
+                      executionMode === 'dag'
+                        ? 'bg-white text-[#4f46e5] shadow-xs'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    DAG 拓扑
+                  </button>
+                </div>
+                {executionMode !== 'serial' && (
+                  <div className="flex items-center gap-1 text-[10.5px] shrink-0 text-[#63636b]">
+                    <span>并发限制:</span>
+                    <select
+                      value={concurrencyLimit}
+                      onChange={(e) => setConcurrencyLimit(Number(e.target.value))}
+                      className="h-[22px] bg-white border border-[#e3e3e8] rounded-[4px] px-1.5 text-[11px] text-[#1c1c21] outline-none cursor-pointer"
+                    >
+                      <option value={1}>1</option>
+                      <option value={2}>2</option>
+                      <option value={3}>3</option>
+                      <option value={5}>5</option>
+                    </select>
+                  </div>
                 )}
-                <button
-                  type="button"
-                  onClick={handleGenerateQaPlan}
-                  disabled={isGeneratingQa || !title.trim()}
-                  className="h-[19px] px-2 rounded-[4px] bg-white hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] border border-[#e3e3e8] hover:border-[#c7d2fe] text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed select-none active:scale-95 shadow-2xs"
-                  title={!title.trim() ? '请先填写任务名称' : '根据标题与说明智能生成验收用例'}
-                >
-                  {isGeneratingQa ? (
-                    <Loader2 size={10} className="animate-spin text-[#4f46e5]" />
-                  ) : (
-                    <Sparkles size={10} className="text-[#4f46e5]" />
-                  )}
-                  <span>{isGeneratingQa ? 'AI 规划中...' : 'AI 规划用例'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsCriteriaOpen(!isCriteriaOpen)}
-                  className="p-0.5 hover:text-[#1c1c21] transition-colors cursor-pointer"
-                >
-                  <ChevronDown
-                    size={12}
-                    className={`transition-transform duration-150 ${isCriteriaOpen ? 'rotate-180' : ''}`}
-                  />
-                </button>
               </div>
             </div>
+          )}
 
-            {isCriteriaOpen && (
-              <div className="p-2.5 pt-1.5 border-t border-[#f1f1f4] bg-white animate-in fade-in duration-100">
-                <div className="flex items-center justify-between text-[10px] text-[#85858d] mb-2 leading-relaxed">
-                  <span>每项为一个明确的操作或断言，支持按回车键快速新增</span>
-                  {criteriaList.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleClearAllCriteria}
-                      className="text-[#85858d] hover:text-[#dc2626] transition-colors cursor-pointer"
-                    >
-                      清空
-                    </button>
-                  )}
+          {/* 任务组专属：初始子工序规划 */}
+          {taskKind === 'group' && (
+            <div className="border border-[#e3e3e8] rounded-[6px] bg-white overflow-hidden shadow-3xs">
+              <div className="px-3 py-1.5 bg-[#fafafc] border-b border-[#ececf0] flex items-center justify-between select-none">
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#4b4b53]">
+                  <Layers size={11} className="text-[#4f46e5]" />
+                  <span>初始子工序规划</span>
+                  <span className="text-[10px] font-mono text-[#85858d]">
+                    ({groupSubtasks.length} 项)
+                  </span>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleAddSubtask}
+                  className="inline-flex items-center gap-1 text-[10.5px] font-medium text-[#4f46e5] hover:text-[#4338ca] hover:bg-[#eeedfd] px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                >
+                  <Plus size={10.5} strokeWidth={2.4} />
+                  <span>添加工序</span>
+                </button>
+              </div>
 
-                {criteriaList.length === 0 ? (
-                  <div className="py-2.5 px-3 rounded-[5px] bg-[#fafafc] border border-dashed border-[#e3e3e8] text-center mb-2">
-                    <p className="text-[10.5px] text-[#85858d]">
-                      暂无用例；留空运行期将由 AI 自动推断规划，或点击下方添加
+              <div className="p-2 space-y-1.5 max-h-[170px] overflow-y-auto">
+                {groupSubtasks.length === 0 ? (
+                  <div className="py-2.5 px-3 rounded-[5px] bg-[#fafafc] border border-dashed border-[#e3e3e8] text-center text-[#85858d]">
+                    <p className="text-[11px] leading-relaxed">
+                      💡 当前未添加初始工序。你可以直接创建<span className="font-semibold text-[#1c1c21]">空任务组</span>，稍后在看板中随时追加子工序或使用 AI 规划拆解。
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-1.5 mb-2 max-h-[160px] overflow-y-auto pr-0.5">
-                    {criteriaList.map((criterion, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center gap-1.5 group/step bg-[#fafafc] hover:bg-[#f5f5f7] border border-[#e3e3e8] hover:border-[#d1d1d8] rounded-[5px] p-1 pl-1.5 transition-all shadow-3xs"
-                      >
+                  groupSubtasks.map((st, idx) => (
+                    <div
+                      key={st.id}
+                      className="rounded-[5px] border border-[#e3e3e8] bg-[#fafafc] hover:bg-white hover:border-[#d1d1d8] transition-all p-1.5 space-y-1 shadow-3xs group/item"
+                    >
+                      <div className="flex items-center gap-1.5">
                         <span className="w-4 h-4 rounded-[3px] bg-[#ececf0] text-[#71717a] text-[9.5px] font-mono font-medium flex items-center justify-center shrink-0 select-none">
-                          {index + 1}
+                          {idx + 1}
                         </span>
                         <input
-                          ref={(el) => {
-                            criteriaInputRefs.current[index] = el;
-                          }}
                           type="text"
-                          value={criterion}
-                          onChange={(e) => handleUpdateCriteria(index, e.target.value)}
-                          onKeyDown={(e) => handleCriteriaKeyDown(index, e)}
-                          placeholder={
-                            index === 0
-                              ? '例如：打开主页面并校验核心指标渲染正常'
-                              : '例如：点击提交按钮，校验页面无报错提示'
-                          }
+                          value={st.title}
+                          onChange={(e) => handleUpdateSubtask(st.id, { title: e.target.value })}
+                          placeholder={`例如: 工序 ${idx + 1} 实现核心模块代码`}
                           className="flex-1 h-[25px] bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[4px] px-2 text-[11px] text-[#1c1c21] placeholder-[#85858d] outline-none transition-all shadow-3xs"
                         />
-                        <div className="flex items-center gap-0.5 opacity-60 group-hover/step:opacity-100 transition-opacity shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedSubDesc((prev) => ({ ...prev, [st.id]: !prev[st.id] }))
+                          }
+                          className={`w-5 h-5 rounded flex items-center justify-center text-[10px] cursor-pointer transition-colors ${
+                            st.description.trim() || expandedSubDesc[st.id]
+                              ? 'text-[#4f46e5] bg-[#eeedfd]'
+                              : 'text-[#85858d] hover:bg-[#ececf0]'
+                          }`}
+                          title="展开/收起工序细节说明"
+                        >
+                          <AlignLeft size={10.5} />
+                        </button>
+                        <div className="flex items-center gap-0.5 opacity-60 group-hover/item:opacity-100 transition-opacity shrink-0">
                           <button
                             type="button"
-                            disabled={index === 0}
-                            onClick={() => handleMoveCriteria(index, -1)}
+                            disabled={idx === 0}
+                            onClick={() => handleMoveSubtask(idx, -1)}
                             className="w-5 h-5 rounded hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed"
-                            title="上移此步"
+                            title="上移此工序"
                           >
                             <ArrowUp size={10.5} />
                           </button>
                           <button
                             type="button"
-                            disabled={index === criteriaList.length - 1}
-                            onClick={() => handleMoveCriteria(index, 1)}
+                            disabled={idx === groupSubtasks.length - 1}
+                            onClick={() => handleMoveSubtask(idx, 1)}
                             className="w-5 h-5 rounded hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed"
-                            title="下移此步"
+                            title="下移此工序"
                           >
                             <ArrowDown size={10.5} />
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleRemoveCriteria(index)}
+                            onClick={() => handleRemoveSubtask(st.id)}
                             className="w-5 h-5 rounded hover:bg-[#fee2e2] text-[#85858d] hover:text-[#dc2626] flex items-center justify-center transition-colors cursor-pointer"
-                            title="删除此步"
+                            title="删除此工序"
                           >
                             <Trash2 size={10.5} />
                           </button>
                         </div>
                       </div>
-                    ))}
-                  </div>
+
+                      {expandedSubDesc[st.id] && (
+                        <div className="pt-0.5 pl-5 pr-1">
+                          <textarea
+                            value={st.description}
+                            onChange={(e) => handleUpdateSubtask(st.id, { description: e.target.value })}
+                            placeholder="此工序专有细节说明（可选，留空则完全继承任务组公共描述）..."
+                            rows={2}
+                            className="w-full bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[4px] p-1.5 text-[10.5px] text-[#1c1c21] placeholder-[#85858d] outline-none resize-none shadow-3xs"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))
                 )}
-
-                <button
-                  type="button"
-                  onClick={handleAddCriteria}
-                  className="w-full h-[26px] rounded-[5px] border border-dashed border-[#d1d1d8] hover:border-[#4f46e5] hover:bg-[#eeedfd]/30 text-[#63636b] hover:text-[#4f46e5] text-[11px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer select-none active:scale-[0.99]"
-                >
-                  <Plus size={11} strokeWidth={2.4} />
-                  <span>添加验收用例</span>
-                </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          {/* 自适应智能工序编排微开关 */}
-          <div className="flex items-center justify-between py-1.5 px-2.5 rounded-[6px] bg-[#fafafc] border border-[#ececf0]">
-            <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-[#4b4b53] hover:text-[#1c1c21]">
-              <input
-                type="checkbox"
-                checked={autoDecompose}
-                onChange={(e) => setAutoDecompose(e.target.checked)}
-                className="w-3.5 h-3.5 rounded border-[#c8c8d0] text-[#1c1c21] focus:ring-0 focus:ring-offset-0 cursor-pointer accent-[#1c1c21]"
-              />
-              <span className="flex items-center gap-1">
-                <Sparkles size={11} className="text-[#4f46e5]" />
-                <span>复杂任务由 AI 自主拆解与编排多工序（自适应串并行任务组）</span>
-              </span>
-            </label>
-            <span className="text-[10px] text-[#85858d]">自适应</span>
-          </div>
+          {/* 普通任务专属：验收预期 / UI 自动化测试用例 (List UI) */}
+          {taskKind === 'single' && (
+            <div className="border border-[#e3e3e8] rounded-[6px] bg-[#fafafc] overflow-hidden">
+              <div className="w-full px-3 py-1.5 flex items-center justify-between text-[11px] font-medium text-[#63636b] select-none">
+                <div
+                  onClick={() => setIsCriteriaOpen(!isCriteriaOpen)}
+                  className="flex items-center gap-1.5 cursor-pointer hover:text-[#1c1c21] transition-colors flex-1 min-w-0"
+                >
+                  <Target size={12} className="text-[#63636b] shrink-0" />
+                  <span className="truncate">验收预期 / UI 自动化用例 (可选)</span>
+                  {criteriaList.some((c) => c.trim()) && (
+                    <span className="px-1.5 py-[0.5px] rounded-[3px] bg-[#eeedfd] text-[#4f46e5] text-[9.5px] font-mono font-medium border border-[#d8d6fb] shrink-0">
+                      {criteriaList.filter((c) => c.trim()).length} 项
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {currentWf?.taskTemplate?.acceptanceTemplate && isCriteriaTemplateDifferent && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const parsed = parseCriteriaText(currentWf.taskTemplate!.acceptanceTemplate!);
+                        setCriteriaList(parsed);
+                        setIsCriteriaOpen(true);
+                        if (import.meta.env?.DEV) {
+                          console.log('[CreateTaskModal] 手动套用工作流验收模板:', currentWf.name, parsed);
+                        }
+                        toast.success('已应用流程验收标准模板');
+                      }}
+                      className="h-[19px] px-1.5 rounded-[4px] bg-white hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                    >
+                      <Sparkles size={9} />
+                      <span>套用验收模板</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleGenerateQaPlan}
+                    disabled={isGeneratingQa || !title.trim()}
+                    className="h-[19px] px-2 rounded-[4px] bg-white hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] border border-[#e3e3e8] hover:border-[#c7d2fe] text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed select-none active:scale-95 shadow-2xs"
+                    title={!title.trim() ? '请先填写任务名称' : '根据标题与说明智能生成验收用例'}
+                  >
+                    {isGeneratingQa ? (
+                      <Loader2 size={10} className="animate-spin text-[#4f46e5]" />
+                    ) : (
+                      <Sparkles size={10} className="text-[#4f46e5]" />
+                    )}
+                    <span>{isGeneratingQa ? 'AI 规划中...' : 'AI 规划用例'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsCriteriaOpen(!isCriteriaOpen)}
+                    className="p-0.5 hover:text-[#1c1c21] transition-colors cursor-pointer"
+                  >
+                    <ChevronDown
+                      size={12}
+                      className={`transition-transform duration-150 ${isCriteriaOpen ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {isCriteriaOpen && (
+                <div className="p-2.5 pt-1.5 border-t border-[#f1f1f4] bg-white animate-in fade-in duration-100">
+                  <div className="flex items-center justify-between text-[10px] text-[#85858d] mb-2 leading-relaxed">
+                    <span>每项为一个明确的操作或断言，支持按回车键快速新增</span>
+                    {criteriaList.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllCriteria}
+                        className="text-[#85858d] hover:text-[#dc2626] transition-colors cursor-pointer"
+                      >
+                        清空
+                      </button>
+                    )}
+                  </div>
+
+                  {criteriaList.length === 0 ? (
+                    <div className="py-2.5 px-3 rounded-[5px] bg-[#fafafc] border border-dashed border-[#e3e3e8] text-center mb-2">
+                      <p className="text-[10.5px] text-[#85858d]">
+                        暂无用例；留空运行期将由 AI 自动推断规划，或点击下方添加
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 mb-2 max-h-[160px] overflow-y-auto pr-0.5">
+                      {criteriaList.map((criterion, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center gap-1.5 group/step bg-[#fafafc] hover:bg-[#f5f5f7] border border-[#e3e3e8] hover:border-[#d1d1d8] rounded-[5px] p-1 pl-1.5 transition-all shadow-3xs"
+                        >
+                          <span className="w-4 h-4 rounded-[3px] bg-[#ececf0] text-[#71717a] text-[9.5px] font-mono font-medium flex items-center justify-center shrink-0 select-none">
+                            {index + 1}
+                          </span>
+                          <input
+                            ref={(el) => {
+                              criteriaInputRefs.current[index] = el;
+                            }}
+                            type="text"
+                            value={criterion}
+                            onChange={(e) => handleUpdateCriteria(index, e.target.value)}
+                            onKeyDown={(e) => handleCriteriaKeyDown(index, e)}
+                            placeholder={
+                              index === 0
+                                ? '例如：打开主页面并校验核心指标渲染正常'
+                                : '例如：点击提交按钮，校验页面无报错提示'
+                            }
+                            className="flex-1 h-[25px] bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[4px] px-2 text-[11px] text-[#1c1c21] placeholder-[#85858d] outline-none transition-all shadow-3xs"
+                          />
+                          <div className="flex items-center gap-0.5 opacity-60 group-hover/step:opacity-100 transition-opacity shrink-0">
+                            <button
+                              type="button"
+                              disabled={index === 0}
+                              onClick={() => handleMoveCriteria(index, -1)}
+                              className="w-5 h-5 rounded hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed"
+                              title="上移此步"
+                            >
+                              <ArrowUp size={10.5} />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={index === criteriaList.length - 1}
+                              onClick={() => handleMoveCriteria(index, 1)}
+                              className="w-5 h-5 rounded hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed"
+                              title="下移此步"
+                            >
+                              <ArrowDown size={10.5} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCriteria(index)}
+                              className="w-5 h-5 rounded hover:bg-[#fee2e2] text-[#85858d] hover:text-[#dc2626] flex items-center justify-center transition-colors cursor-pointer"
+                              title="删除此步"
+                            >
+                              <Trash2 size={10.5} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleAddCriteria}
+                    className="w-full h-[26px] rounded-[5px] border border-dashed border-[#d1d1d8] hover:border-[#4f46e5] hover:bg-[#eeedfd]/30 text-[#63636b] hover:text-[#4f46e5] text-[11px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer select-none active:scale-[0.99]"
+                  >
+                    <Plus size={11} strokeWidth={2.4} />
+                    <span>添加验收用例</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 普通任务专属：自适应智能工序编排微开关 */}
+          {taskKind === 'single' && (
+            <div className="flex items-center justify-between py-1.5 px-2.5 rounded-[6px] bg-[#fafafc] border border-[#ececf0]">
+              <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-[#4b4b53] hover:text-[#1c1c21]">
+                <input
+                  type="checkbox"
+                  checked={autoDecompose}
+                  onChange={(e) => setAutoDecompose(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded border-[#c8c8d0] text-[#1c1c21] focus:ring-0 focus:ring-offset-0 cursor-pointer accent-[#1c1c21]"
+                />
+                <span className="flex items-center gap-1">
+                  <Sparkles size={11} className="text-[#4f46e5]" />
+                  <span>复杂任务由 AI 自主拆解与编排多工序（自适应串并行任务组）</span>
+                </span>
+              </label>
+              <span className="text-[10px] text-[#85858d]">自适应</span>
+            </div>
+          )}
 
           {/* 紧凑单行：初始泳道分段切换 (Segmented Control) 与 立即调度 Switch */}
           <div className="flex items-center justify-between gap-2 pt-1 pb-0.5">
@@ -1106,19 +1462,29 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             <div
               onClick={() => setAutoRun(!autoRun)}
               className="flex items-center gap-1.5 cursor-pointer select-none shrink-0"
-              title={kanbanColumn === 'inbox' ? '暂存于 Inbox，建议手动调度' : '创建后立即触发 DAG 执行'}
+              title={
+                taskKind === 'group' && groupSubtasks.length === 0
+                  ? '当前未添加子工序，创建为等待工序状态'
+                  : kanbanColumn === 'inbox'
+                  ? '暂存于 Inbox，建议手动调度'
+                  : '创建后立即触发调度执行'
+              }
             >
               <span className="text-[11px] text-[#63636b] hover:text-[#1c1c21] transition-colors">
                 立即启动
               </span>
               <div
                 className={`w-[28px] h-[16px] rounded-full flex items-center px-[2px] transition-colors duration-150 ${
-                  autoRun ? 'bg-[#1c1c21]' : 'bg-[#d1d1d8]'
+                  autoRun && (taskKind === 'single' || groupSubtasks.length > 0)
+                    ? 'bg-[#1c1c21]'
+                    : 'bg-[#d1d1d8]'
                 }`}
               >
                 <div
                   className={`w-[12px] h-[12px] rounded-full bg-white shadow-sm transition-transform duration-150 ${
-                    autoRun ? 'translate-x-[12px]' : 'translate-x-0'
+                    autoRun && (taskKind === 'single' || groupSubtasks.length > 0)
+                      ? 'translate-x-[12px]'
+                      : 'translate-x-0'
                   }`}
                 />
               </div>
@@ -1145,7 +1511,19 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                 className="h-[26px] px-3.5 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1 active:scale-95 disabled:opacity-40 transition-all shadow-sm cursor-pointer"
               >
                 <Play size={11} strokeWidth={2.4} />
-                <span>{loading ? '处理中...' : autoRun ? '立即启动' : '创建任务'}</span>
+                <span>
+                  {loading
+                    ? '处理中...'
+                    : taskKind === 'group'
+                    ? autoRun && groupSubtasks.length > 0
+                      ? '立即启动任务组'
+                      : groupSubtasks.length > 0
+                      ? `创建任务组 (${groupSubtasks.length}个工序)`
+                      : '创建任务组'
+                    : autoRun
+                    ? '立即启动'
+                    : '创建任务'}
+                </span>
               </button>
             </div>
           </div>
