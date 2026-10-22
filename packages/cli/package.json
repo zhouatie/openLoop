@@ -1,6 +1,6 @@
 {
   "name": "@openloop/cli",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Command-line interface for openLoop automation platform",
   "bin": {
     "openloop": "./dist/index.js"

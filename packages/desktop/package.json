@@ -1,6 +1,6 @@
 {
   "name": "@openloop/desktop",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Desktop Application for openLoop Automation Platform",
   "main": "dist-electron/main.js",
   "scripts": {
