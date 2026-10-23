@@ -28,6 +28,11 @@ export class IosDeviceManager {
     }
   }
 
+  /** 解析实际生效的 WDA 地址（用例配置 > 环境变量 > 默认端点） */
+  static resolveEndpoint(endpoint?: string): string {
+    return this.normalizeEndpoint(endpoint || process.env.MIDSCENE_IOS_WDA_URL);
+  }
+
   /** 检查 iOS 自动化运行环境（仅 macOS + Xcode 可用） */
   static async checkEnvironment(): Promise<{ available: boolean; message?: string }> {
     if (process.platform !== 'darwin') {

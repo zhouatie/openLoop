@@ -13,6 +13,7 @@ import {
   SelectedQaArtifacts,
   AndroidDeviceInfo,
   IosDevicesSnapshot,
+  DeviceLeaseSnapshot,
   AutomationTask,
   AutomationLogRecord,
   TaskWorktreeDiffResult,
@@ -996,7 +997,7 @@ export class DesktopApiService {
     return !!res.success;
   }
 
-  async runQaSuite(payload: { suiteId: string; targetUrl?: string }): Promise<QaRunRecord> {
+  async runQaSuite(payload: { suiteId: string; targetUrl?: string; ownerId?: string }): Promise<QaRunRecord> {
     if (import.meta.env?.DEV) {
       console.log('[UI:QA] 发起 Midscene 测试执行:', payload);
     }
@@ -1089,6 +1090,11 @@ export class DesktopApiService {
     }
     const query = endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : '';
     return requestJson<IosDevicesSnapshot>(`${BASE_URL}/api/qa/devices/ios${query}`);
+  }
+
+  async getDeviceLeases(): Promise<DeviceLeaseSnapshot[]> {
+    const data = await requestJson<{ leases: DeviceLeaseSnapshot[] }>(`${BASE_URL}/api/qa/device-leases`);
+    return data.leases || [];
   }
 
   async clearQaRuns(params?: { suiteId?: string; olderThanDays?: number; keepLatestPerSuite?: number; runIds?: string[] }): Promise<{ deletedCount: number }> {

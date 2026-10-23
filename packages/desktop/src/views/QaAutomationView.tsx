@@ -3,8 +3,10 @@ import {
   History,
   Target,
   Plus,
+  Smartphone,
+  Clock,
 } from 'lucide-react';
-import { QaSuite, QaRunRecord } from '@openloop/core';
+import { QaSuite, QaRunRecord, DeviceLeaseSnapshot } from '@openloop/core';
 import { api } from '../services/api';
 import { QaRunsListView } from './qa/QaRunsListView';
 import { QaRunDetailView } from './qa/QaRunDetailView';
@@ -40,6 +42,7 @@ export const QaAutomationView: React.FC = () => {
 
   const [runs, setRuns] = useState<QaRunRecord[]>([]);
   const [suites, setSuites] = useState<QaSuite[]>([]);
+  const [deviceLeases, setDeviceLeases] = useState<DeviceLeaseSnapshot[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   // 弹窗状态
@@ -96,6 +99,20 @@ export const QaAutomationView: React.FC = () => {
       loadData();
     });
 
+    return () => {
+      unsub();
+    };
+  }, []);
+
+  // 设备租约队列：展示 iOS 设备当前占用者与排队任务，避免重复发起争用
+  useEffect(() => {
+    api.getDeviceLeases().then(setDeviceLeases).catch(() => {});
+    const unsub = api.on('qa:device_leases', (data: any) => {
+      if (import.meta.env?.DEV) {
+        console.log('[QaAutomationView] 设备队列更新:', data?.leases);
+      }
+      setDeviceLeases(data?.leases || []);
+    });
     return () => {
       unsub();
     };
@@ -253,6 +270,37 @@ export const QaAutomationView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* 设备队列条：仅在设备被占用或有人排队时出现 */}
+      {deviceLeases.length > 0 && (
+        <div className="px-6 pt-1.5 shrink-0 flex flex-col gap-1">
+          {deviceLeases.map((lease) => (
+            <div
+              key={lease.key}
+              className="flex items-center gap-2 h-[28px] px-2.5 rounded-[6px] bg-white border border-[#e3e3e8] text-[11px] overflow-hidden"
+            >
+              <Smartphone size={11} className="text-[#63636b] shrink-0" />
+              <span className="font-mono text-[10.5px] text-[#71717a] shrink-0">
+                {lease.key.replace(/^https?:\/\//, '')}
+              </span>
+              <span className="text-[#1c1c21] font-medium truncate">
+                {lease.holder?.label || '空闲'}
+              </span>
+              {lease.waiting.length > 0 && (
+                <>
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fffbeb] text-[#b45309] text-[10px] font-medium border border-[#fde68a]/70 shrink-0">
+                    <Clock size={10} strokeWidth={2.2} />
+                    <span>排队 {lease.waiting.length}</span>
+                  </span>
+                  <span className="text-[#85858d] truncate">
+                    {lease.waiting.map((waiter) => waiter.label).join(' · ')}
+                  </span>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 主视图内容区域 */}
       <div className="flex-1 overflow-y-auto px-6 pb-6 pt-2">

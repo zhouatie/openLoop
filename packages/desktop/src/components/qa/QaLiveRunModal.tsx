@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Play, CheckCircle2, XCircle, Loader2, Eye, Terminal, Smartphone, Globe } from 'lucide-react';
-import { QaSuite, QaRunRecord } from '@openloop/core';
+import { X, Play, CheckCircle2, XCircle, Loader2, Eye, Terminal, Smartphone, Globe, Clock } from 'lucide-react';
+import { QaSuite, QaRunRecord, DeviceLeaseSnapshot } from '@openloop/core';
 import { api } from '../../services/api';
 
 interface QaLiveRunModalProps {
@@ -33,6 +33,40 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
       : `[Midscene:Nav] 打开目标地址: ${suite.targetUrl}`,
   ]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [queueInfo, setQueueInfo] = useState<{ position: number; ahead: number } | null>(null);
+  // 单次执行的唯一归属标识，避免与同一用例的其他执行混淆队列位次
+  const [runOwnerId] = useState(() => `qa_live_${suite.id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+
+  // iOS 设备单实例：实时获取本用例在设备队列中的位次
+  useEffect(() => {
+    if (!isIos) return;
+    const apply = (leases: DeviceLeaseSnapshot[] = []) => {
+      const mine = leases
+        .flatMap((lease) => lease.waiting.map((waiter, index) => ({ waiter, index })))
+        .find((item) => item.waiter.ownerId === runOwnerId);
+      setQueueInfo(mine ? { position: mine.index + 1, ahead: mine.index } : null);
+    };
+
+    api.getDeviceLeases().then(apply).catch(() => {});
+    const unsub = api.on('qa:device_leases', (data: any) => {
+      if (import.meta.env?.DEV) {
+        console.log('[QaLiveRunModal] 设备队列更新:', data?.leases);
+      }
+      apply(data?.leases || []);
+    });
+    return () => {
+      unsub();
+    };
+  }, [isIos, runOwnerId]);
+
+  // 位次变化时同步到控制台日志
+  useEffect(() => {
+    if (!queueInfo) return;
+    setLogs((prev) => [
+      ...prev,
+      `[Midscene:Queue] iOS 设备使用中，排队第 ${queueInfo.position} 位（前方 ${queueInfo.ahead} 个任务）`,
+    ]);
+  }, [queueInfo?.position]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -82,6 +116,7 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
         const res = await api.runQaSuite({
           suiteId: suite.id,
           targetUrl: suite.targetUrl,
+          ownerId: runOwnerId,
         });
 
         if (!isCancelled) {
@@ -142,8 +177,8 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
                   {suite.name} · 执行中
                 </h3>
                 <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-[4px] bg-[#f4f4f5] text-[#52525b] text-[10px] font-medium border border-[#e3e3e8]">
-                  {isAndroid ? <Smartphone size={10} /> : <Globe size={10} />}
-                  <span>{isAndroid ? 'Android' : 'Web'}</span>
+                  {isMobilePlatform ? <Smartphone size={10} /> : <Globe size={10} />}
+                  <span>{isIos ? 'iOS' : isAndroid ? 'Android' : 'Web'}</span>
                 </span>
               </div>
               <p className="text-[11px] text-[#85858d] font-mono mt-0.5">
@@ -158,6 +193,14 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
             <X size={14} />
           </button>
         </div>
+
+        {/* iOS 设备排队提示 */}
+        {queueInfo && (
+          <div className="px-4 py-2 bg-[#fffbeb] border-b border-[#fde68a]/60 flex items-center gap-1.5 text-[11.5px] text-[#b45309] shrink-0">
+            <Clock size={12} className="shrink-0" />
+            <span>正在等待 iOS 设备：第 {queueInfo.position} 位，前方 {queueInfo.ahead} 个任务</span>
+          </div>
+        )}
 
         {/* 步骤状态序列 */}
         <div className="p-4 border-b border-[#f4f4f6] space-y-2">
@@ -238,8 +281,12 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
             )}
             {isRunning && (
               <span className="text-[11.5px] text-[#71717a] flex items-center gap-1.5">
-                <Loader2 size={12} className="animate-spin text-[#4f46e5]" />
-                <span>Midscene AI 视觉定位执行中...</span>
+                {queueInfo ? <Clock size={12} className="text-[#b45309]" /> : <Loader2 size={12} className="animate-spin text-[#4f46e5]" />}
+                <span>
+                  {queueInfo
+                    ? `等待 iOS 设备（第 ${queueInfo.position} 位）`
+                    : 'Midscene AI 视觉定位执行中...'}
+                </span>
               </span>
             )}
           </div>

@@ -28,6 +28,7 @@ import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
 import { IosDeviceManager } from '../qa/ios-device-manager';
+import { DeviceLeasePool } from '../qa/device-lease-pool';
 import { isQaPlatform } from '../qa/qa-driver';
 import { applyQaModelEnv } from '../qa/model-env';
 import { configureQaRuntimePaths } from '../qa/runtime-paths';
@@ -78,6 +79,7 @@ export class OpenLoopServer {
   private wss?: WebSocketServer;
   private clients: Set<WebSocket> = new Set();
   private staticDir?: string;
+  private unsubscribeDeviceLeases?: () => void;
 
   constructor(options: ServerOptions = {}) {
     this.port = options.port || 19888;
@@ -132,6 +134,11 @@ export class OpenLoopServer {
     });
     this.scheduler.on('task:new', (task) => {
       this.broadcastTaskNew(task);
+    });
+
+    // 设备租约队列推流：多任务争用同一 iOS 设备时，界面实时展示占用者与排队位次
+    this.unsubscribeDeviceLeases = DeviceLeasePool.subscribe(() => {
+      this.broadcast({ type: 'qa:device_leases', data: { leases: DeviceLeasePool.getSnapshots() } });
     });
   }
 
@@ -221,6 +228,7 @@ export class OpenLoopServer {
 
   public async stop(): Promise<void> {
     this.scheduler.stop();
+    this.unsubscribeDeviceLeases?.();
 
     for (const ws of this.clients) {
       ws.close();
@@ -2404,6 +2412,10 @@ export class OpenLoopServer {
         return this.sendJson(res, resDis.success ? 200 : 400, resDis, reqMeta);
       }
 
+      if (pathname === '/api/qa/device-leases' && method === 'GET') {
+        return this.sendJson(res, 200, { leases: DeviceLeasePool.getSnapshots() }, reqMeta);
+      }
+
       if (pathname === '/api/qa/devices/ios' && method === 'GET') {
         const endpoint = parsedUrl.searchParams.get('endpoint') || undefined;
         const snapshot = await IosDeviceManager.getSnapshot(endpoint);
@@ -2521,6 +2533,7 @@ export class OpenLoopServer {
           artifactBaseDir: path.join(this.store.getDataDir(), 'artifacts'),
           serverBaseUrl: `http://${this.host}:${this.port}`,
           platform: suite.platform,
+          ownerId: body.ownerId,
           onStepStart: (stepIndex, step) => {
             this.broadcast({
               type: 'qa:step_start',
