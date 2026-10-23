@@ -28,7 +28,8 @@ export function hasCodeChange(messages?: SessionChatMessage[]): boolean {
 /** 最后一条 Agent 回复内容：快捷运行弹窗据此展示中止原因 */
 export function lastAssistantContent(messages?: SessionChatMessage[]): string | undefined {
   if (!Array.isArray(messages)) return undefined;
-  return messages.filter((msg) => msg.role === 'assistant' && msg.content).pop()?.content;
+  const last = messages.filter((msg) => msg.role === 'assistant' && (msg.content || msg.errorMessage)).pop();
+  return last?.content || last?.errorMessage;
 }
 
 /**

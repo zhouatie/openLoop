@@ -55,6 +55,7 @@ export class PiRpcSessionInstance extends EventEmitter {
   public thinking?: string;
   public pendingModel?: string;
   public modelError?: string;
+  public lastError?: string;
 
   private modelPattern?: string;
   private pendingThinking?: string;
@@ -181,7 +182,15 @@ export class PiRpcSessionInstance extends EventEmitter {
       if (this.active && !this.initialPromptSent) {
         this.initialPromptSent = true;
         this.sendPrompt(options.initialPrompt, options.initialAttachments).catch((err) => {
-          logger.error(`发送初始 Prompt 失败: ${err.message}`, undefined, { taskId: this.taskId });
+          const errMsg = err?.message || '发送初始 Prompt 失败';
+          logger.error(`发送初始 Prompt 失败: ${errMsg}`, undefined, { taskId: this.taskId });
+          this.emitLog('stderr', `[Agent 报错] ${errMsg}`);
+          this.lastError = errMsg;
+          if (this.onFinishedCallback && !this.executionCompleted) {
+            this.executionCompleted = true;
+            this.awaitingInput = false;
+            this.onFinishedCallback(errMsg);
+          }
         });
       }
     }, 400);
@@ -328,6 +337,16 @@ export class PiRpcSessionInstance extends EventEmitter {
             status: 'running',
           });
           this.notifyUpdate();
+        } else if (ev.type === 'error') {
+          const errText = ev.error?.message || ev.error || ev.reason || '流式输出异常';
+          const errMsg = typeof errText === 'string' ? errText : JSON.stringify(errText);
+          this.lastError = errMsg;
+          this.emitLog('stderr', `[Agent 报错] ${errMsg}`);
+          if (this.currentAssistantMessage) {
+            this.currentAssistantMessage.errorMessage = errMsg;
+            this.currentAssistantMessage.stopReason = 'error';
+          }
+          this.notifyUpdate();
         }
         break;
       }
@@ -388,20 +407,64 @@ export class PiRpcSessionInstance extends EventEmitter {
       }
 
       case 'message_end': {
+        const msg = record.message;
+        const rawContent = msg?.content;
+        const contentText = typeof rawContent === 'string'
+          ? rawContent
+          : Array.isArray(rawContent)
+            ? rawContent.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('')
+            : '';
+
         if (this.currentAssistantMessage) {
           this.currentAssistantMessage.isStreaming = false;
           this.currentAssistantMessage.isThinking = false;
-          if (record.message?.content && typeof record.message.content === 'string') {
-            if (record.message.content.includes(PIPELINE_DONE_MARKER)) this.doneMarkerSeen = true;
-            this.currentAssistantMessage.content = this.stripDoneMarker(record.message.content);
+          if (contentText) {
+            if (contentText.includes(PIPELINE_DONE_MARKER)) this.doneMarkerSeen = true;
+            this.currentAssistantMessage.content = this.stripDoneMarker(contentText);
             // 将 Agent 生成的最终结论同步打入终端日志，便于在终端抽屉中闭环查看
             const summaryText = this.currentAssistantMessage.content.trim();
             if (summaryText) {
               this.emitLog('stdout', `[Agent 输出] ${summaryText.slice(0, 300)}${summaryText.length > 300 ? '...' : ''}`);
             }
           }
+          if (msg?.errorMessage || msg?.stopReason === 'error') {
+            const errorText = msg?.errorMessage || '模型调用失败';
+            this.lastError = errorText;
+            this.currentAssistantMessage.errorMessage = errorText;
+            this.currentAssistantMessage.stopReason = msg?.stopReason || 'error';
+            this.emitLog('stderr', `[Agent 报错] 模型接口异常: ${errorText}`);
+          }
           this.notifyUpdate();
+        } else if (msg?.errorMessage || msg?.stopReason === 'error') {
+          const errorText = msg?.errorMessage || '模型调用失败';
+          this.lastError = errorText;
+          this.emitLog('stderr', `[Agent 报错] 模型接口异常: ${errorText}`);
         }
+        break;
+      }
+
+      case 'turn_end': {
+        const msg = record.message;
+        if (msg?.errorMessage || msg?.stopReason === 'error') {
+          const errorText = msg.errorMessage || '模型调用失败';
+          this.lastError = errorText;
+          if (this.currentAssistantMessage) {
+            this.currentAssistantMessage.errorMessage = errorText;
+            this.currentAssistantMessage.stopReason = msg.stopReason || 'error';
+          }
+        }
+        break;
+      }
+
+      case 'error': {
+        const errorText = record.message || record.error || 'RPC 内部错误';
+        this.lastError = errorText;
+        this.emitLog('stderr', `[Pi RPC 错误] ${errorText}`);
+        if (this.currentAssistantMessage) {
+          this.currentAssistantMessage.errorMessage = errorText;
+          this.currentAssistantMessage.stopReason = 'error';
+        }
+        this.notifyUpdate();
         break;
       }
 
@@ -425,7 +488,14 @@ export class PiRpcSessionInstance extends EventEmitter {
 
         // 首次提示执行结束且没有在等待排队消息时，通知节点执行完成
         if (this.initialPromptSent && !this.executionCompleted && !record.aborted && !this.isPaused) {
-          if (this.awaitCompletionMarker && !this.doneMarkerSeen) {
+          if (this.lastError) {
+            // 本轮执行发生模型或系统报错，直接标记失败并通知错误，绝不能误判为“等待用户确认”
+            this.executionCompleted = true;
+            this.awaitingInput = false;
+            if (this.onFinishedCallback) {
+              this.onFinishedCallback(this.lastError);
+            }
+          } else if (this.awaitCompletionMarker && !this.doneMarkerSeen) {
             // 未声明完成：视为仍在向用户确认信息，节点保持运行并等待用户回复，绝不流转下游
             if (!this.awaitingInput) {
               this.awaitingInput = true;
@@ -472,6 +542,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.isBusy = true;
     this.awaitingInput = false;
     this.doneMarkerSeen = false;
+    this.lastError = undefined;
 
     // 前置压入用户消息展示
     this.messages.push({
@@ -511,6 +582,7 @@ export class PiRpcSessionInstance extends EventEmitter {
   public async steer(message: string, attachments?: TaskAttachment[]): Promise<any> {
     this.isPaused = false;
     this.awaitingInput = false;
+    this.lastError = undefined;
     // 立即压入用户消息
     this.messages.push({
       id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -576,6 +648,7 @@ export class PiRpcSessionInstance extends EventEmitter {
    */
   public async resume(): Promise<boolean> {
     this.isPaused = false;
+    this.lastError = undefined;
     try {
       await this.sendPrompt('请继续完成刚才的工作。');
       return true;
@@ -765,6 +838,7 @@ export class PiRpcSessionInstance extends EventEmitter {
       model: this.model,
       pendingModel: this.pendingModel,
       modelError: this.modelError,
+      lastError: this.lastError,
       sessionId: this.sessionId,
       piSessionId: this.sessionId,
       resumeCommand: `pi --session ${this.sessionId}`,
