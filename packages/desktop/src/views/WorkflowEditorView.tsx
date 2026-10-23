@@ -3458,6 +3458,17 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                             </div>
                           )}
 
+                          {/* 报错提示 */}
+                          {msg.errorMessage && (
+                            <div className="p-3 rounded-[9px] bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] text-[12px] flex items-start gap-2 shadow-2xs">
+                              <AlertCircle size={15} className="shrink-0 mt-0.5 text-[#dc2626]" />
+                              <div className="flex-1 min-w-0 break-words">
+                                <div className="font-medium text-[11.5px] text-[#991b1b] mb-0.5">模型接口异常</div>
+                                <div className="font-mono text-[11px] text-[#dc2626] whitespace-pre-wrap">{msg.errorMessage}</div>
+                              </div>
+                            </div>
+                          )}
+
                           {/* 结构化 Action 卡片 (画布预演与一键合入) */}
                           {actionPayload && (
                             <div className="p-3 rounded-[9px] bg-[#f8f9ff] border border-[#c7d2fe] shadow-xs space-y-2">

@@ -129,6 +129,8 @@ export interface SessionChatMessage {
   tools?: ToolExecutionRecord[];
   timestamp: number;
   attachments?: TaskAttachment[];
+  errorMessage?: string;
+  stopReason?: string;
 }
 
 export interface TaskSessionState {
@@ -143,6 +145,7 @@ export interface TaskSessionState {
   model?: string;
   pendingModel?: string; // 待生效模型（运行时无法立即切换时暂存）
   modelError?: string; // 最近一次运行时模型切换的失败原因
+  lastError?: string; // 最近一次执行或模型接口报错
   sessionId?: string;
   piSessionId?: string; // 兼容字段
   resumeCommand?: string;

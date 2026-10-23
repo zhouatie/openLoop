@@ -1707,6 +1707,17 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                 />
               </div>
             )}
+
+            {/* 报错提示 */}
+            {msg.errorMessage && (
+              <div className="p-3 rounded-[9px] bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] text-[12px] flex items-start gap-2 shadow-2xs">
+                <AlertCircle size={15} className="shrink-0 mt-0.5 text-[#dc2626]" />
+                <div className="flex-1 min-w-0 break-words">
+                  <div className="font-medium text-[11.5px] text-[#991b1b] mb-0.5">模型接口异常</div>
+                  <div className="font-mono text-[11px] text-[#dc2626] whitespace-pre-wrap">{msg.errorMessage}</div>
+                </div>
+              </div>
+            )}
           </div>
         );
                     })
@@ -3798,6 +3809,14 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eef2ff] text-[#4338ca] text-[10px] font-medium border border-[#c7d2fe]">
                             <MessageSquare size={10} />
                             <span>{hasSessionCodeChanges ? '待确认放行' : '等待方案确认'}</span>
+                          </span>
+                        );
+                      }
+                      if (sessionState?.lastError) {
+                        return (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10px] font-medium border border-[#fecaca]/60">
+                            <AlertCircle size={10} />
+                            <span>调用异常</span>
                           </span>
                         );
                       }
