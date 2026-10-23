@@ -410,6 +410,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   };
   const [previewArtifact, setPreviewArtifact] = useState<{ name: string; path: string } | null>(null);
   const [activeDetailImage, setActiveDetailImage] = useState<TaskAttachment | null>(null);
+  const [activeDetailImageList, setActiveDetailImageList] = useState<TaskAttachment[]>([]);
   const [selectedWorkflowFilter, setSelectedWorkflowFilter] = useState<string>('all');
   const [isWfDropdownOpen, setIsWfDropdownOpen] = useState(false);
   const wfDropdownRef = useRef<HTMLDivElement>(null);
@@ -1582,7 +1583,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       return (
                         <div
                           key={att.id}
-                          onClick={() => setActiveDetailImage(att)}
+                          onClick={() => {
+                            if (import.meta.env?.DEV) console.log('[KanbanView:Chat] 预览消息附件图片:', att.name);
+                            setActiveDetailImageList(msg.attachments || []);
+                            setActiveDetailImage(att);
+                          }}
                           className="group relative w-[60px] h-[60px] rounded-[6px] border border-[#d8d8de] bg-white overflow-hidden shadow-xs hover:border-[#4f46e5] cursor-pointer transition-all"
                           title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击放大查看`}
                         >
@@ -2774,6 +2779,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                           key={att.id}
                                           onClick={() => {
                                             if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 预览任务组公共附件图片:', att.name);
+                                            setActiveDetailImageList(parentGroupAttachments);
                                             setActiveDetailImage(att);
                                           }}
                                           className="group relative w-[46px] h-[46px] shrink-0 rounded-[5px] border border-[#d8d6fb] bg-white overflow-hidden shadow-2xs hover:border-[#4f46e5] cursor-pointer transition-all"
@@ -2828,6 +2834,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                     key={att.id}
                                     onClick={() => {
                                       if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 预览附件图片:', att.name);
+                                      setActiveDetailImageList(curTask.attachments || []);
                                       setActiveDetailImage(att);
                                     }}
                                     className="group relative w-[52px] h-[52px] shrink-0 rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden shadow-sm hover:border-[#4f46e5] cursor-pointer transition-all"
@@ -3962,7 +3969,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             <div
                               key={att.id}
                               className="group relative w-[46px] h-[46px] shrink-0 rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden shadow-xs hover:border-[#4f46e5] transition-all cursor-pointer select-none"
-                              onClick={() => setActiveDetailImage(att)}
+                              onClick={() => {
+                                setActiveDetailImageList(chatAttachments);
+                                setActiveDetailImage(att);
+                              }}
                               title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击放大查看`}
                             >
                               <img src={displayUrl} alt={att.name} className="w-full h-full object-cover" />
@@ -4001,6 +4011,18 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               if (pending.status === 'error') {
                                 handleRetryChatUpload(pending);
                               } else {
+                                const validPendingList: TaskAttachment[] = pendingChatUploads
+                                  .filter((p) => p.status !== 'error')
+                                  .map((p) => ({
+                                    name: p.name,
+                                    url: p.previewUrl,
+                                    size: p.size,
+                                    id: p.tempId,
+                                    mimeType: p.file.type,
+                                    path: '',
+                                    createdAt: Date.now(),
+                                  }));
+                                setActiveDetailImageList(validPendingList);
                                 setActiveDetailImage({
                                   name: pending.name,
                                   url: pending.previewUrl,
@@ -4336,7 +4358,16 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       <ImageLightboxModal
         isOpen={!!activeDetailImage}
         attachment={activeDetailImage}
-        onClose={() => setActiveDetailImage(null)}
+        images={activeDetailImageList.length > 0 ? activeDetailImageList : (activeDetailImage ? [activeDetailImage] : [])}
+        onIndexChange={(newIdx) => {
+          if (activeDetailImageList[newIdx]) {
+            setActiveDetailImage(activeDetailImageList[newIdx]);
+          }
+        }}
+        onClose={() => {
+          setActiveDetailImage(null);
+          setActiveDetailImageList([]);
+        }}
       />
 
       {/* 通用删除确认弹窗 */}

@@ -659,6 +659,13 @@ export const QaArtifactSelectorModal: React.FC<QaArtifactSelectorModalProps> = (
         <ImageLightboxModal
           isOpen={true}
           attachment={{ name: activeLightbox.name, url: activeLightbox.url, path: activeLightbox.path }}
+          images={screenshots.map((s) => ({ name: s.name, url: s.url, path: s.relPath }))}
+          onIndexChange={(newIdx) => {
+            const target = screenshots[newIdx];
+            if (target) {
+              setActiveLightbox({ name: target.name, url: target.url, path: target.relPath });
+            }
+          }}
           onClose={() => setActiveLightbox(null)}
         />
       )}
