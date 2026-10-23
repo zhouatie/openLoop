@@ -19,6 +19,7 @@ import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
 import { PluginSandboxContainer } from './components/PluginSandboxContainer';
 import { api } from './services/api';
+import { toTaskSummary } from '@openloop/core/task-summary';
 import { Task, WorkflowDefinition, LogEntry, PluginManifest, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { Puzzle } from 'lucide-react';
 import { BUILTIN_PLUGINS, BUILTIN_VIEW_TITLES } from './constants/builtinPlugins';
@@ -203,20 +204,21 @@ export const AppContent: React.FC = () => {
     const unsubTaskUpdate = api.on('task:update', (updatedTask: Task) => {
       // 自动化直连运行的隐藏载体任务不进入看板列表
       if (updatedTask.context?.hiddenFromKanban) return;
+      const summary = toTaskSummary(updatedTask);
       setTasks((prev) => {
-        const idx = prev.findIndex((t) => t.id === updatedTask.id);
+        const idx = prev.findIndex((t) => t.id === summary.id);
         if (idx >= 0) {
           const next = [...prev];
-          next[idx] = updatedTask;
+          next[idx] = summary;
           return next;
         }
-        return [updatedTask, ...prev];
+        return [summary, ...prev];
       });
     });
 
     const unsubTaskNew = api.on('task:new', (newTask: Task) => {
       if (newTask.context?.hiddenFromKanban) return;
-      setTasks((prev) => [newTask, ...prev]);
+      setTasks((prev) => [toTaskSummary(newTask), ...prev]);
     });
 
     const unsubLog = api.on('log:new', (newLog: LogEntry) => {
@@ -308,14 +310,16 @@ export const AppContent: React.FC = () => {
   };
 
   const handleTaskUpdate = (updatedTask: Task) => {
+    // 接口回包携带完整上下文，入库前统一投影为摘要，避免超大会话留在看板状态中
+    const summary = toTaskSummary(updatedTask);
     setTasks((prev) => {
-      const idx = prev.findIndex((t) => t.id === updatedTask.id);
+      const idx = prev.findIndex((t) => t.id === summary.id);
       if (idx >= 0) {
         const next = [...prev];
-        next[idx] = updatedTask;
+        next[idx] = summary;
         return next;
       }
-      return [updatedTask, ...prev];
+      return [summary, ...prev];
     });
   };
 

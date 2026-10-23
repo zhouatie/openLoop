@@ -6,7 +6,7 @@ import os from 'os';
 import { spawn, exec } from 'child_process';
 import util from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
-import { Store } from '../store';
+import { Store, toTaskSummary } from '../store';
 import { DagEngine } from '../engine/dag-engine';
 import {
   Task,
@@ -102,7 +102,7 @@ export class OpenLoopServer {
 
   private setupEngineEvents() {
     this.engine.on('task:update', (task: Task) => {
-      this.broadcast({ type: 'task:update', data: task });
+      this.broadcastTaskUpdate(task);
     });
 
     this.engine.on('node:status', (data) => {
@@ -131,8 +131,17 @@ export class OpenLoopServer {
       this.broadcast({ type: 'automation:log', data });
     });
     this.scheduler.on('task:new', (task) => {
-      this.broadcast({ type: 'task:new', data: task });
+      this.broadcastTaskNew(task);
     });
+  }
+
+  // 任务事件按摘要推流：剔除超大会话与 Diff 明细，避免每条实时事件都搬运数 MB 数据
+  private broadcastTaskUpdate(task: Task | { id: string; deleted: true }) {
+    this.broadcast({ type: 'task:update', data: toTaskSummary(task as Task) });
+  }
+
+  private broadcastTaskNew(task: Task) {
+    this.broadcast({ type: 'task:new', data: toTaskSummary(task) });
   }
 
   private broadcast(payload: any) {
@@ -597,8 +606,10 @@ export class OpenLoopServer {
 
       // Tasks
       if (pathname === '/api/tasks' && method === 'GET') {
-        // 直连流水线的隐藏载体任务不进入看板
-        const tasks = this.store.getTasks().filter((t) => !t.context?.hiddenFromKanban);
+        const startedAt = Date.now();
+        // 直连流水线的隐藏载体任务不进入看板；同时只下发任务摘要（剔除会话与 Diff 明细）
+        const tasks = this.store.getTaskSummaries().filter((t) => !t.context?.hiddenFromKanban);
+        serverLogger.debug(`[Tasks:List] 看板任务摘要就绪: ${tasks.length} 个, 耗时 ${Date.now() - startedAt}ms`);
         return this.sendJson(res, 200, tasks, reqMeta);
       }
 
@@ -740,9 +751,9 @@ export class OpenLoopServer {
         );
 
         this.store.saveTask(task);
-        this.broadcast({ type: 'task:new', data: task });
+        this.broadcastTaskNew(task);
         for (const child of createdSubtasks) {
-          this.broadcast({ type: 'task:new', data: child });
+          this.broadcastTaskNew(child);
         }
 
         if (shouldAutoRun && (!isGroup || finalSubTaskIds.length > 0)) {
@@ -804,7 +815,7 @@ export class OpenLoopServer {
                 if (oldParent.subTaskIds.length === 0) oldParent.kind = 'single';
                 oldParent.updatedAt = Date.now();
                 this.store.saveTask(oldParent);
-                this.broadcast({ type: 'task:update', data: oldParent });
+                this.broadcastTaskUpdate(oldParent);
               }
             }
             // 2. 若指定了新父任务，挂载至新父任务
@@ -816,7 +827,7 @@ export class OpenLoopServer {
                 if (!sids.includes(existing.id)) newParent.subTaskIds = [...sids, existing.id];
                 newParent.updatedAt = Date.now();
                 this.store.saveTask(newParent);
-                this.broadcast({ type: 'task:update', data: newParent });
+                this.broadcastTaskUpdate(newParent);
                 existing.kind = 'subtask';
                 existing.parentTaskId = nextParentId;
               }
@@ -887,7 +898,7 @@ export class OpenLoopServer {
         existing.updatedAt = Date.now();
         serverLogger.info(`[Tasks:Update] 更新任务信息: ${taskId}`, { updatedFields: Object.keys(body) }, { taskId });
         this.store.saveTask(existing);
-        this.broadcast({ type: 'task:update', data: existing });
+        this.broadcastTaskUpdate(existing);
         return this.sendJson(res, 200, existing, reqMeta);
       }
 
@@ -980,9 +991,9 @@ export class OpenLoopServer {
         // 3. 级联删除数据库记录 (tasks, logs, qa_runs, task_node_runs)
         const deleted = this.store.deleteTask(taskId);
         if (deleted) {
-          this.broadcast({ type: 'task:update', data: { id: taskId, deleted: true } });
+          this.broadcastTaskUpdate({ id: taskId, deleted: true });
           for (const subId of subtaskIds) {
-            this.broadcast({ type: 'task:update', data: { id: subId, deleted: true } });
+            this.broadcastTaskUpdate({ id: subId, deleted: true });
           }
           return this.sendJson(res, 200, { success: true, id: taskId }, reqMeta);
         }
@@ -1035,8 +1046,8 @@ export class OpenLoopServer {
         this.store.saveTask(childTask);
         this.store.saveTask(parent);
 
-        this.broadcast({ type: 'task:new', data: childTask });
-        this.broadcast({ type: 'task:update', data: parent });
+        this.broadcastTaskNew(childTask);
+        this.broadcastTaskUpdate(parent);
 
         serverLogger.info(`[Tasks:AddSubtask] 成功为任务组 ${parent.id} 添加子任务: ${childTask.id} (${childTask.title})`);
         return this.sendJson(res, 201, { success: true, subtask: childTask, parent }, reqMeta);
@@ -1118,9 +1129,9 @@ export class OpenLoopServer {
         this.store.saveTask(parent);
 
         for (const child of createdList) {
-          this.broadcast({ type: 'task:new', data: child });
+          this.broadcastTaskNew(child);
         }
-        this.broadcast({ type: 'task:update', data: parent });
+        this.broadcastTaskUpdate(parent);
 
         serverLogger.info(`[Tasks:BatchSubtasks] 成功为任务组 ${parent.id} 批量添加 ${createdList.length} 个子工序`);
         return this.sendJson(res, 201, { success: true, subtasks: createdList, parent }, reqMeta);
@@ -1181,8 +1192,8 @@ export class OpenLoopServer {
         subtask.updatedAt = Date.now();
         this.store.saveTask(subtask);
 
-        this.broadcast({ type: 'task:update', data: parent });
-        this.broadcast({ type: 'task:update', data: subtask });
+        this.broadcastTaskUpdate(parent);
+        this.broadcastTaskUpdate(subtask);
 
         serverLogger.info(`[Tasks:UnlinkSubtask] 成功将子工序 ${subId} 从任务组 ${parent.id} 中解绑恢复为独立任务`);
         return this.sendJson(res, 200, { success: true, parent, subtask }, reqMeta);
@@ -1244,7 +1255,7 @@ export class OpenLoopServer {
             }
             oldParent.updatedAt = Date.now();
             this.store.saveTask(oldParent);
-            this.broadcast({ type: 'task:update', data: oldParent });
+            this.broadcastTaskUpdate(oldParent);
           }
         }
 
@@ -1257,7 +1268,7 @@ export class OpenLoopServer {
           }
           targetParent.updatedAt = Date.now();
           this.store.saveTask(targetParent);
-          this.broadcast({ type: 'task:update', data: targetParent });
+          this.broadcastTaskUpdate(targetParent);
 
           task.kind = 'subtask';
           task.parentTaskId = targetParent.id;
@@ -1282,7 +1293,7 @@ export class OpenLoopServer {
 
         task.updatedAt = Date.now();
         this.store.saveTask(task);
-        this.broadcast({ type: 'task:update', data: task });
+        this.broadcastTaskUpdate(task);
 
         serverLogger.info(`[Tasks:SetParent] 成功将任务 ${taskId} 归属变更为: ${targetParentId || '独立任务'}`);
         return this.sendJson(res, 200, { success: true, task, parent: targetParent, previousParent: oldParent }, reqMeta);
@@ -1326,7 +1337,7 @@ export class OpenLoopServer {
               if (oldParent.subTaskIds.length === 0) oldParent.kind = 'single';
               oldParent.updatedAt = Date.now();
               this.store.saveTask(oldParent);
-              this.broadcast({ type: 'task:update', data: oldParent });
+              this.broadcastTaskUpdate(oldParent);
             }
           }
 
@@ -1343,7 +1354,7 @@ export class OpenLoopServer {
           };
           subtask.updatedAt = Date.now();
           this.store.saveTask(subtask);
-          this.broadcast({ type: 'task:update', data: subtask });
+          this.broadcastTaskUpdate(subtask);
           linkedTasks.push(subtask);
           validSubIds.push(subId);
         }
@@ -1354,7 +1365,7 @@ export class OpenLoopServer {
           parent.subTaskIds = Array.from(set);
           parent.updatedAt = Date.now();
           this.store.saveTask(parent);
-          this.broadcast({ type: 'task:update', data: parent });
+          this.broadcastTaskUpdate(parent);
         }
 
         serverLogger.info(`[Tasks:LinkSubtasks] 成功为任务组 ${parent.id} 关联 ${linkedTasks.length} 个已有任务`);
@@ -1387,7 +1398,7 @@ export class OpenLoopServer {
         // 删除子任务
         this.store.deleteTask(subId);
         this.broadcast({ type: 'task:delete', data: { id: subId } });
-        this.broadcast({ type: 'task:update', data: parent });
+        this.broadcastTaskUpdate(parent);
 
         serverLogger.info(`[Tasks:DeleteSubtask] 成功从任务 ${parent.id} 移除子工序 ${subId}`);
         return this.sendJson(res, 200, { success: true, parent }, reqMeta);
@@ -1713,7 +1724,7 @@ export class OpenLoopServer {
               currentTask.context.awaitingInput = nextAwaiting;
               this.store.saveTask(currentTask);
               if (prevAwaiting !== nextAwaiting) {
-                this.broadcast({ type: 'task:update', data: currentTask });
+                this.broadcastTaskUpdate(currentTask);
               }
             }
             this.broadcast({
@@ -1898,7 +1909,7 @@ export class OpenLoopServer {
           { nodeId, reset: body?.reset === true },
           { taskId }
         );
-        this.broadcast({ type: 'task:update', data: task });
+        this.broadcastTaskUpdate(task);
         return this.sendJson(res, 200, task, reqMeta);
       }
 

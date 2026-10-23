@@ -16,6 +16,7 @@ import {
 } from '../types';
 
 export { SqliteStore };
+export { toTaskSummary, hasCodeChange, lastAssistantContent } from './task-summary';
 
 /**
  * openLoop 统一持久化存储管理器（已升级为 SQLite 底座，支持 WAL 高并发与平滑迁移）
@@ -59,6 +60,11 @@ export class Store {
   // Tasks
   public getTasks(): Task[] {
     return this.sqlite.getTasks();
+  }
+
+  // 看板 / 列表专用：剔除超大会话与 Diff 明细的任务摘要
+  public getTaskSummaries(): Task[] {
+    return this.sqlite.getTaskSummaries();
   }
 
   public getTask(id: string): Task | undefined {

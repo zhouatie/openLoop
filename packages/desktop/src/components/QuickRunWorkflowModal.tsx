@@ -20,6 +20,11 @@ import { VisualAcceptanceModal } from './qa/VisualAcceptanceModal';
 // 依赖任务描述做 AI 推理的节点类型；仅包含此类节点的流水线才必须填写需求 Prompt
 const PROMPT_DEPENDENT_NODE_TYPES: NodeType[] = ['agent', 'qa-planner', 'midscene'];
 
+// 实时事件只携带摘要（最后一条 Agent 回复）；详情接口仍返回完整会话，两者兼容
+const readLastAssistantMessage = (task: Task): string | undefined =>
+  task.context?.lastAssistantMessage ??
+  (task.context?.chatMessages || []).filter((m: any) => m.role === 'assistant' && m.content).pop()?.content;
+
 interface QuickRunWorkflowModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -184,10 +189,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
             setIsRunning(false);
             const runs = Object.values(updatedTask.nodeRuns || {});
             const failedRun = runs.find((r) => r.status === 'failed');
-            const lastAssistantMsg = (updatedTask.context?.chatMessages || [])
-              .filter((m: any) => m.role === 'assistant' && m.content)
-              .pop();
-            const abortReasonFromMsg = lastAssistantMsg?.content;
+            const abortReasonFromMsg = readLastAssistantMessage(updatedTask);
 
             const errMsg =
               abortReasonFromMsg &&
@@ -232,10 +234,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
 
             const runs = Object.values(current.nodeRuns || {});
             const failedRun = runs.find((r) => r.status === 'failed');
-            const lastAssistantMsg = (current.context?.chatMessages || [])
-              .filter((m: any) => m.role === 'assistant' && m.content)
-              .pop();
-            const abortReasonFromMsg = lastAssistantMsg?.content;
+            const abortReasonFromMsg = readLastAssistantMessage(current);
 
             const errMsg =
               abortReasonFromMsg &&
