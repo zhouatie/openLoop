@@ -996,7 +996,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                 {isAwaitingInput ? (
                   <span className="text-[9.5px] font-semibold tracking-wider px-1.5 py-[1px] rounded bg-white/90 border border-[#c7d2fe] text-[#4338ca] flex items-center gap-1 shrink-0">
                     <MessageSquare size={9.5} />
-                    <span>{hasCodeChanges ? '待确认放行' : '等待确认'}</span>
+                    <span>{hasCodeChanges ? '待确认放行' : '等待回复'}</span>
                   </span>
                 ) : (
                   <span className={`text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/90 border ${visual.badgeBorder} ${visual.badgeText} flex items-center gap-1 shrink-0`}>
@@ -1035,7 +1035,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
               <span className="truncate">{activeName}</span>
               {isAwaitingInput && (
                 <span className="text-[10px] text-[#4f46e5] font-normal shrink-0">
-                  {hasCodeChanges ? '(待确认放行)' : '(需确认方案)'}
+                  {hasCodeChanges ? '(待确认放行)' : '(等待回复)'}
                 </span>
               )}
             </div>

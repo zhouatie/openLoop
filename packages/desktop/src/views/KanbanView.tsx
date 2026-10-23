@@ -3808,7 +3808,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         return (
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eef2ff] text-[#4338ca] text-[10px] font-medium border border-[#c7d2fe]">
                             <MessageSquare size={10} />
-                            <span>{hasSessionCodeChanges ? '待确认放行' : '等待方案确认'}</span>
+                            <span>{hasSessionCodeChanges ? '待确认放行' : '等待回复'}</span>
                           </span>
                         );
                       }
@@ -3901,7 +3901,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                     return (
                       <>
-                        {showAwaitingBar && (
+                        {showAwaitingBar && hasSessionCodeChanges && (
                           <AgentAwaitingInputBar
                             hasCodeChanges={hasSessionCodeChanges}
                             onConfirmComplete={handleConfirmCompleteNode}
