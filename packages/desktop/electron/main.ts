@@ -9,6 +9,33 @@ let mainWindow: BrowserWindow | null = null;
 let coreProcess: ChildProcess | null = null;
 let embeddedServer: any = null;
 
+// Core 服务日志落盘：打包应用从 Finder 启动时 fd 指向 /dev/null，必须显式重定向才能事后排查
+const CORE_LOG_MAX_BYTES = 5 * 1024 * 1024;
+let coreLogFd: number | null = null;
+
+// 用同步 fd 而非 WriteStream：spawn 的 stdio 只接受已打开的文件描述符
+function getCoreLogFd(storeDir: string): number {
+  if (coreLogFd !== null) return coreLogFd;
+  const logPath = path.join(storeDir, 'logs', 'core.log');
+  try {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    if (fs.existsSync(logPath) && fs.statSync(logPath).size > CORE_LOG_MAX_BYTES) {
+      fs.renameSync(logPath, `${logPath}.1`);
+    }
+  } catch {}
+  coreLogFd = fs.openSync(logPath, 'a');
+  return coreLogFd;
+}
+
+// 主进程关键事件同时写入同一日志文件，保证中断现场可追溯
+function logMain(message: string): void {
+  console.log(`[Desktop Main] ${message}`);
+  if (coreLogFd === null) return;
+  try {
+    fs.writeSync(coreLogFd, `${new Date().toISOString()} [Desktop Main] ${message}\n`);
+  } catch {}
+}
+
 // 全面同步用户 macOS 登录 Shell 环境变量（彻底解决 GUI 启动时 command not found 问题）
 function syncSystemShellEnv() {
   if (process.platform !== 'darwin') return;
@@ -155,12 +182,45 @@ function resolveCoreCliPath(): string | null {
   return null;
 }
 
+// Core 异常退出自动拉起（原生崩溃无法被 JS 捕获，只能由父进程兜底）
+const CORE_RESTART_WINDOW_MS = 10 * 60 * 1000;
+const CORE_RESTART_LIMIT = 3;
+let coreRestartTimestamps: number[] = [];
+
+function watchCoreExit(child: ChildProcess): void {
+  child.on('exit', (code, signal) => {
+    logMain(`Core Server exited (${signal ? `signal=${signal}` : `code=${code}`})`);
+
+    // 主动停止或被新实例替换时不再拉起
+    if (coreProcess !== child) return;
+    coreProcess = null;
+
+    const now = Date.now();
+    coreRestartTimestamps = coreRestartTimestamps.filter((t) => now - t < CORE_RESTART_WINDOW_MS);
+    if (coreRestartTimestamps.length >= CORE_RESTART_LIMIT) {
+      logMain('Core Server 10 分钟内连续退出 3 次，停止自动重启');
+      return;
+    }
+
+    coreRestartTimestamps.push(now);
+    logMain('Core Server 异常退出，1 秒后自动重启');
+    setTimeout(() => {
+      ensureCoreServer().catch((err) => logMain(`Core Server 自动重启失败: ${err.message}`));
+    }, 1000);
+  });
+}
+
+// 解析 Core 数据目录（打包版锁定 ~/.openloop，开发版使用隔离目录）
+function resolveCoreStoreDir(): string {
+  return app.isPackaged
+    ? path.join(os.homedir(), '.openloop')
+    : (process.env.OPENLOOP_STORE_DIR || path.join(os.homedir(), '.openloop-dev'));
+}
+
 // 确保 Core 调度服务运行（环境隔离：打包版锁定 19888，开发版使用 19889）
 async function ensureCoreServer() {
   const targetPort = app.isPackaged ? '19888' : (process.env.OPENLOOP_PORT || '19889');
-  const targetStoreDir = app.isPackaged
-    ? path.join(os.homedir(), '.openloop')
-    : (process.env.OPENLOOP_STORE_DIR || path.join(os.homedir(), '.openloop-dev'));
+  const targetStoreDir = resolveCoreStoreDir();
 
   const isCoreAlive = await checkUrlAlive(`http://127.0.0.1:${targetPort}`);
   if (isCoreAlive) {
@@ -182,6 +242,7 @@ async function ensureCoreServer() {
     // 设置合理的 cwd 确保 Node 能顺畅向上解析 monorepo node_modules
     const coreCwd = path.dirname(path.dirname(coreCli));
 
+    const coreLogFd = getCoreLogFd(targetStoreDir);
     coreProcess = spawn(nodeBinary, [coreCli], {
       cwd: coreCwd,
       detached: process.platform !== 'win32',
@@ -192,12 +253,13 @@ async function ensureCoreServer() {
         OPENLOOP_PORT: targetPort,
         OPENLOOP_STORE_DIR: targetStoreDir,
       },
-      stdio: 'inherit',
+      stdio: ['ignore', coreLogFd, coreLogFd],
     });
 
     coreProcess.on('error', (err) => {
       console.warn('[Desktop Main] Core Server process notice:', err.message);
     });
+    watchCoreExit(coreProcess);
 
     // 轮询等待服务就绪（最多 3 秒），确保窗口打开时接口已准备好
     for (let i = 0; i < 30; i++) {
@@ -253,6 +315,7 @@ async function ensureCoreServer() {
     const targetCli = cliCandidates.find((p) => fs.existsSync(p));
     if (targetCli) {
       console.log('[Desktop Main] Spawning Core Server via Electron runtime:', targetCli);
+      const coreLogFd = getCoreLogFd(targetStoreDir);
       coreProcess = spawn(process.execPath, [targetCli], {
         env: {
           ...process.env,
@@ -261,11 +324,12 @@ async function ensureCoreServer() {
           OPENLOOP_STORE_DIR: targetStoreDir,
           ELECTRON_RUN_AS_NODE: '1',
         },
-        stdio: 'inherit',
+        stdio: ['ignore', coreLogFd, coreLogFd],
       });
       coreProcess.on('error', (err) => {
         console.warn('[Desktop Main] Core process fallback error:', err.message);
       });
+      watchCoreExit(coreProcess);
     }
   } catch (err: any) {
     console.error('[Desktop Main] All Core Server launch strategies failed:', err.message);
@@ -305,7 +369,7 @@ async function cleanupServer() {
 // 一键重启后台核心调度引擎（安全清理残留、平滑拉起新实例）
 async function restartCoreServer(): Promise<{ success: boolean; port: string; message?: string }> {
   const targetPort = app.isPackaged ? '19888' : (process.env.OPENLOOP_PORT || '19889');
-  console.log(`[Desktop Main] Restarting Core Server on port ${targetPort}...`);
+  logMain(`Restarting Core Server on port ${targetPort}...`);
 
   // 1. 先优雅停止当前托管的子进程与嵌入式服务
   await cleanupServer();
