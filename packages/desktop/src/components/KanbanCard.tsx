@@ -41,6 +41,7 @@ import { api } from '../services/api';
 import { openInDefaultBrowser } from '../utils/openExternalBrowser';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
+import { orderSubTasksForDisplay } from '../utils/subtaskOrder';
 
 interface RunningNodeVisual {
   label: string;
@@ -285,11 +286,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
     }
   };
 
-  // 列表按最新添加在前展示，编号仍沿用创建顺序
-  const displaySubtasks = useMemo(
-    () => childSubtasks.map((st, idx) => ({ st, orderNo: idx + 1 })).reverse(),
-    [childSubtasks],
-  );
+  const displaySubtasks = useMemo(() => orderSubTasksForDisplay(childSubtasks), [childSubtasks]);
 
   const groupCompletedCount = childSubtasks.filter((s) => s.status === 'completed').length;
   const groupTotalCount = childSubtasks.length || task.subTaskIds?.length || 0;
