@@ -1258,6 +1258,25 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
 
+  // 任务组卡片内直接追加工序：接口回包就地合并，避免整块看板重拉
+  const handleAddSubtask = async (parentId: string, params: { title: string; workflowId?: string }) => {
+    try {
+      if (import.meta.env?.DEV) {
+        console.log('[KanbanView:SubtaskQuickAdd] 追加工序:', { parentId, ...params });
+      }
+      const res = await api.addSubTask(parentId, params);
+      onTaskUpdate?.(res.subtask);
+      onTaskUpdate?.(res.parent);
+      setSelectedTask((prev) => (prev && prev.id === parentId ? res.parent : prev));
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView:SubtaskQuickAdd] 追加工序失败:', err);
+      }
+      toast.error(`添加工序失败: ${err?.message || '未知错误'}`);
+      throw err;
+    }
+  };
+
   const handleUnlinkSubtask = async (parentId: string, subtaskId: string) => {
     try {
       if (import.meta.env?.DEV) {
@@ -1957,6 +1976,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         onApprove={handleApprove}
                         onSetParentTask={(t) => setParentSelectTask(t)}
                         onUnlinkSubtask={handleUnlinkSubtask}
+                        onAddSubtask={handleAddSubtask}
                       />
                     )}
                   </div>
