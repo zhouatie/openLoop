@@ -64,6 +64,7 @@ import { NodeExecutionTimeline } from '../components/NodeExecutionTimeline';
 import { ImageLightboxModal } from '../components/ImageLightboxModal';
 import { TaskPromptArea } from '../components/TaskPromptArea';
 import { WorkspacePicker } from '../components/WorkspacePicker';
+import { WorkflowPicker } from '../components/WorkflowPicker';
 import { AgentMarkdown } from '../components/AgentMarkdown';
 import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
 import { AgentAwaitingInputBar } from '../components/AgentAwaitingInputBar';
@@ -2967,17 +2968,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                   <div className="grid grid-cols-2 gap-2">
                                     <div>
                                       <label className="block text-[10.5px] font-medium text-[#71717a] mb-0.5">执行流水线 (支持异构)</label>
-                                      <select
+                                      <WorkflowPicker
                                         value={manualTargetWfId}
-                                        onChange={(e) => setManualSubtaskWorkflowId(e.target.value)}
-                                        className="w-full h-[26px] px-1.5 text-[11px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[5px] text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5]"
-                                      >
-                                        {workflows.map((wf) => (
-                                          <option key={wf.id} value={wf.id}>
-                                            {wf.name} ({wf.id})
-                                          </option>
-                                        ))}
-                                      </select>
+                                        onChange={setManualSubtaskWorkflowId}
+                                        workflows={workflows}
+                                      />
                                     </div>
 
                                     <div>
