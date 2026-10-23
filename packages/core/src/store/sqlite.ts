@@ -24,6 +24,27 @@ import { createLogger } from '../logger';
 
 const storeLogger = createLogger('Store:SQLite');
 
+/**
+ * 任务摘要查询：列清单与 tasks 表保持一致（不含原始 context_json）。
+ * - json_remove 在 SQLite 内部剔除超大字段，避免数十 MB 字符串进入 Node 堆
+ * - has_code_changes 仅为执行中任务计算，供看板卡片提示「待确认放行」
+ */
+const TASK_SUMMARY_SQL = `
+  SELECT t.id, t.title, t.description, t.workflow_id, t.status, t.kanban_column, t.current_node_id,
+         json_remove(t.context_json, '$.chatMessages', '$.worktree.diffResult') AS context_json,
+         t.workspace, t.attachments_json, t.trigger_source, t.kind, t.parent_task_id, t.sub_task_ids_json,
+         t.dependencies_json, t.execution_mode, t.concurrency_limit, t.auto_decompose, t.created_at, t.updated_at,
+         CASE WHEN t.status = 'running' THEN EXISTS (
+           SELECT 1
+           FROM json_each(json_extract(t.context_json, '$.chatMessages')) AS msg,
+                json_each(json_extract(msg.value, '$.tools')) AS tool
+           WHERE json_extract(tool.value, '$.name') IN ('edit', 'write', 'patch')
+             AND COALESCE(json_extract(tool.value, '$.status'), 'success') <> 'error'
+         ) ELSE 0 END AS has_code_changes
+  FROM tasks AS t
+  ORDER BY t.created_at DESC
+`;
+
 
 export class SqliteStore {
   private db: Database.Database;
@@ -780,7 +801,27 @@ export class SqliteStore {
   public getTasks(): Task[] {
     const taskRows = this.db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as any[];
     if (taskRows.length === 0) return [];
+    const runsByTask = this.buildNodeRunsByTask();
+    return taskRows.map((tr) => this.mapTaskRow(tr, runsByTask));
+  }
 
+  /**
+   * 看板初始化 / 任务列表使用的轻量查询：
+   * 在 SQLite 侧直接剔除超大 JSON 字段（Agent 全量会话、逐文件 Diff 明细），
+   * 只把任务摘要送回 Node 与网络层，避免每次刷新搬运数十 MB 数据。
+   */
+  public getTaskSummaries(): Task[] {
+    const taskRows = this.db.prepare(TASK_SUMMARY_SQL).all() as any[];
+    if (taskRows.length === 0) return [];
+    const runsByTask = this.buildNodeRunsByTask();
+    return taskRows.map((tr) => {
+      const task = this.mapTaskRow(tr, runsByTask);
+      if (tr.has_code_changes) task.context.hasCodeChanges = true;
+      return task;
+    });
+  }
+
+  private buildNodeRunsByTask(): Map<string, Record<string, NodeRun>> {
     const nodeRunRows = this.db.prepare('SELECT * FROM task_node_runs').all() as any[];
     const runsByTask = new Map<string, Record<string, NodeRun>>();
 
@@ -800,32 +841,34 @@ export class SqliteStore {
       };
     }
 
-    return taskRows.map((tr) => {
-      const parsedContext = tr.context_json ? JSON.parse(tr.context_json) : {};
-      return {
-        id: tr.id,
-        title: tr.title,
-        description: tr.description || undefined,
-        workflowId: tr.workflow_id,
-        status: tr.status,
-        kanbanColumn: tr.kanban_column,
-        currentNodeId: tr.current_node_id || undefined,
-        context: parsedContext,
-        workspace: tr.workspace || undefined,
-        attachments: tr.attachments_json ? JSON.parse(tr.attachments_json) : undefined,
-        triggerSource: tr.trigger_source || parsedContext?.triggerSource || 'kanban',
-        kind: tr.kind || 'single',
-        parentTaskId: tr.parent_task_id || undefined,
-        subTaskIds: tr.sub_task_ids_json ? JSON.parse(tr.sub_task_ids_json) : undefined,
-        dependencies: tr.dependencies_json ? JSON.parse(tr.dependencies_json) : undefined,
-        executionMode: tr.execution_mode || undefined,
-        concurrencyLimit: typeof tr.concurrency_limit === 'number' ? tr.concurrency_limit : undefined,
-        autoDecompose: tr.auto_decompose !== null && tr.auto_decompose !== undefined ? Boolean(tr.auto_decompose) : true,
-        createdAt: tr.created_at,
-        updatedAt: tr.updated_at,
-        nodeRuns: runsByTask.get(tr.id) || {},
-      };
-    });
+    return runsByTask;
+  }
+
+  private mapTaskRow(tr: any, runsByTask: Map<string, Record<string, NodeRun>>): Task {
+    const parsedContext = tr.context_json ? JSON.parse(tr.context_json) : {};
+    return {
+      id: tr.id,
+      title: tr.title,
+      description: tr.description || undefined,
+      workflowId: tr.workflow_id,
+      status: tr.status,
+      kanbanColumn: tr.kanban_column,
+      currentNodeId: tr.current_node_id || undefined,
+      context: parsedContext,
+      workspace: tr.workspace || undefined,
+      attachments: tr.attachments_json ? JSON.parse(tr.attachments_json) : undefined,
+      triggerSource: tr.trigger_source || parsedContext?.triggerSource || 'kanban',
+      kind: tr.kind || 'single',
+      parentTaskId: tr.parent_task_id || undefined,
+      subTaskIds: tr.sub_task_ids_json ? JSON.parse(tr.sub_task_ids_json) : undefined,
+      dependencies: tr.dependencies_json ? JSON.parse(tr.dependencies_json) : undefined,
+      executionMode: tr.execution_mode || undefined,
+      concurrencyLimit: typeof tr.concurrency_limit === 'number' ? tr.concurrency_limit : undefined,
+      autoDecompose: tr.auto_decompose !== null && tr.auto_decompose !== undefined ? Boolean(tr.auto_decompose) : true,
+      createdAt: tr.created_at,
+      updatedAt: tr.updated_at,
+      nodeRuns: runsByTask.get(tr.id) || {},
+    };
   }
 
   public getTask(id: string): Task | undefined {

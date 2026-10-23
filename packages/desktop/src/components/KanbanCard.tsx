@@ -832,12 +832,8 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
         const activeName = currentNodeMeta?.name || currentNode?.name || '自动化工序执行中';
         const isCurrentNodeAgent = activeType === 'agent';
         const isAwaitingInput = !!task.context?.awaitingInput && isCurrentNodeAgent;
-        const hasCodeChanges =
-          Array.isArray(task.context?.chatMessages) &&
-          task.context.chatMessages.some((msg: any) =>
-            Array.isArray(msg.tools) &&
-            msg.tools.some((t: any) => (t.name === 'edit' || t.name === 'write' || t.name === 'patch') && !t.isError)
-          );
+        // 看板只接收任务摘要，是否已产生代码改动由服务端派生（避免前端全量扫描会话）
+        const hasCodeChanges = !!task.context?.hasCodeChanges;
 
         return (
           <div
