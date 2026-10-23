@@ -1,10 +1,24 @@
 import { Store } from '../store';
 import { Task, WorkflowDefinition, TaskExecutionMode } from '../types';
-import { DecompositionResult, SubtaskPlan } from '../engine/task-decomposer';
 import { PiRpcSessionInstance } from './pi-rpc-session';
 import { createLogger } from '../logger';
 
 const logger = createLogger('SubtaskPlanner');
+
+export interface SubtaskPlan {
+  title: string;
+  workflowId?: string;
+  description?: string;
+  dependencies?: string[];
+}
+
+export interface DecompositionResult {
+  shouldDecompose: boolean;
+  reason?: string;
+  executionMode?: TaskExecutionMode;
+  concurrencyLimit?: number;
+  subtasks?: SubtaskPlan[];
+}
 
 /** AI 规划工序的超时兜底，避免前端无限等待 */
 const PLAN_TIMEOUT_MS = 180_000;

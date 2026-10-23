@@ -370,7 +370,6 @@ export class DesktopApiService {
     dependencies?: string[];
     executionMode?: 'serial' | 'parallel' | 'dag';
     concurrencyLimit?: number;
-    autoDecompose?: boolean;
     subtasks?: Array<{ id?: string; title: string; workflowId?: string; description?: string; dependencies?: string[]; workspace?: string }>;
   }): Promise<Task> {
     if (import.meta.env?.DEV) {

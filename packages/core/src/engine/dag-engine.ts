@@ -7,7 +7,6 @@ import { ExecutorRegistry, ExecutionContext } from '../executors';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager } from '../agent/pi-rpc-session';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
-import { TaskDecomposer } from './task-decomposer';
 
 const dagLogger = createLogger('Engine:DAG');
 
@@ -100,77 +99,6 @@ export class DagEngine extends EventEmitter {
     if (!workflow) {
       dagLogger.error(`启动任务失败: 关联工作流 ${task.workflowId} 未找到`, undefined, { taskId });
       throw new Error(`Workflow ${task.workflowId} not found`);
-    }
-
-    // 智能工序自适应评估：若允许自动拆解，AI/启发式评估是否需要原地升格为任务组 (串行/并行/DAG)
-    if (!task.parentTaskId && task.kind !== 'subtask' && task.autoDecompose !== false) {
-      const allWorkflows = this.store.getWorkflows();
-      const plan = TaskDecomposer.getInstance().analyze(task, workflow, allWorkflows);
-      if (plan.shouldDecompose && plan.subtasks && plan.subtasks.length >= 2) {
-        dagLogger.info(
-          `任务 ${taskId} 经评估属于复合需求，就地升格为任务组: ${plan.reason} (工序数: ${plan.subtasks.length}, 模式: ${plan.executionMode})`,
-          undefined,
-          { taskId }
-        );
-        this.log(
-          task.id,
-          'SYSTEM',
-          'system',
-          `✨ [AI 智能工序编排] 识别到该任务为多工序复合需求，已自动拆解为 ${plan.subtasks.length} 个工序 (${
-            plan.executionMode === 'parallel' ? '全并行并发' : plan.executionMode === 'dag' ? 'DAG 拓扑' : '串行顺序推进'
-          })`
-        );
-
-        // 升格当前任务
-        task.kind = 'group';
-        task.executionMode = plan.executionMode || 'serial';
-        task.concurrencyLimit = plan.concurrencyLimit || 3;
-        task.status = 'running';
-        task.kanbanColumn = 'in_progress';
-
-        const subTaskIds: string[] = [];
-        const subIdMap = new Map<string, string>();
-
-        for (let i = 0; i < plan.subtasks.length; i++) {
-          const subTaskId = `task_${Date.now()}_sub_${i + 1}_${Math.random().toString(36).substring(2, 6)}`;
-          subIdMap.set(`sub_${i + 1}`, subTaskId);
-          subTaskIds.push(subTaskId);
-        }
-
-        for (let i = 0; i < plan.subtasks.length; i++) {
-          const p = plan.subtasks[i];
-          const subTaskId = subTaskIds[i];
-          const resolvedDeps = (p.dependencies || [])
-            .map((dep) => subIdMap.get(dep) || dep)
-            .filter((d) => subTaskIds.includes(d));
-
-          const subtask: Task = {
-            id: subTaskId,
-            title: p.title,
-            description: p.description || task.description,
-            workflowId: p.workflowId || task.workflowId,
-            status: 'pending',
-            kanbanColumn: 'in_progress',
-            workspace: task.workspace,
-            parentTaskId: task.id,
-            dependencies: resolvedDeps,
-            kind: 'subtask',
-            createdAt: Date.now() + i,
-            updatedAt: Date.now() + i,
-            nodeRuns: {},
-            context: { ...task.context, parentTaskId: task.id },
-          };
-          this.store.saveTask(subtask);
-          this.emit('task:create', subtask);
-        }
-
-        task.subTaskIds = subTaskIds;
-        this.store.saveTask(task);
-        this.emit('task:update', task);
-
-        // 无缝由任务组拓扑调度器接管子工序推进
-        return this.runTaskGroup(task);
-      }
     }
 
     if (this.runningTasks.has(taskId)) {

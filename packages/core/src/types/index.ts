@@ -307,7 +307,6 @@ export interface Task {
   dependencies?: string[];                    // 前置依赖的同组子任务 ID 列表 (串行/DAG编排专用)
   executionMode?: TaskExecutionMode;          // 任务组编排执行模式: serial(纯串行) | parallel(纯并行) | dag(自定义依赖)
   concurrencyLimit?: number;                  // 任务组内最大并行并发数 (默认 3)
-  autoDecompose?: boolean;                    // 启动执行时是否允许由 AI 自动评估复杂度并拆解为多工序任务组
 }
 
 export interface PluginManifest {

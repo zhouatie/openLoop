@@ -70,7 +70,6 @@ interface CreateTaskModalProps {
     kind?: 'single' | 'group' | 'subtask';
     executionMode?: 'serial' | 'parallel' | 'dag';
     concurrencyLimit?: number;
-    autoDecompose?: boolean;
     subtasks?: Array<{ id?: string; title: string; workflowId?: string; description?: string; dependencies?: string[] }>;
   }) => Promise<void>;
 }
@@ -102,7 +101,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [workflowSearch, setWorkflowSearch] = useState('');
   
-  const [autoDecompose, setAutoDecompose] = useState(true);
   const [userManuallySelectedWf, setUserManuallySelectedWf] = useState(false);
 
   // 任务形态切换：普通任务 (single) vs 任务组 (group)
@@ -642,7 +640,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             acceptanceCriteria,
             qaInstructions: cleanCriteria.length > 0 ? cleanCriteria : undefined,
             autoRun,
-            autoDecompose,
           });
         }
 
@@ -657,7 +654,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           workspace: trimmedWorkspace || undefined,
           attachments: attachments.length > 0 ? attachments : undefined,
           kind: 'single',
-          autoDecompose,
         });
       }
 
@@ -1400,25 +1396,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   </button>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* 普通任务专属：自适应智能工序编排微开关 */}
-          {taskKind === 'single' && (
-            <div className="flex items-center justify-between py-1.5 px-2.5 rounded-[6px] bg-[#fafafc] border border-[#ececf0]">
-              <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-[#4b4b53] hover:text-[#1c1c21]">
-                <input
-                  type="checkbox"
-                  checked={autoDecompose}
-                  onChange={(e) => setAutoDecompose(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded border-[#c8c8d0] text-[#1c1c21] focus:ring-0 focus:ring-offset-0 cursor-pointer accent-[#1c1c21]"
-                />
-                <span className="flex items-center gap-1">
-                  <Sparkles size={11} className="text-[#4f46e5]" />
-                  <span>复杂任务由 AI 自主拆解与编排多工序（自适应串并行任务组）</span>
-                </span>
-              </label>
-              <span className="text-[10px] text-[#85858d]">自适应</span>
             </div>
           )}
 
