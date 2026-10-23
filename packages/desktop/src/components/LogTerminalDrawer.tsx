@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { X, Trash2, ArrowDown, Copy, Check, Terminal, Search, RotateCcw } from 'lucide-react';
+import { X, Trash2, ArrowDown, Copy, Check, Terminal, Search, RotateCcw, Clock } from 'lucide-react';
 import { LogEntry, WorkflowDefinition } from '@openloop/core';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 
@@ -17,6 +17,47 @@ export interface LogScope {
   taskId?: string;
   nodeId?: string;
 }
+
+const formatClock = (value: number): string =>
+  new Date(value).toLocaleTimeString('zh-CN', { hour12: false });
+
+/** 实时时钟：面板打开时每秒刷新当前时间，便于对照日志里「等待 20s」这类描述判断还要多久 */
+const LiveClock: React.FC = () => {
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    if (import.meta.env.DEV) {
+      console.log('[LogTerminalDrawer] 实时时钟已启动，每秒刷新当前时间');
+    }
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <span className="flex items-center gap-1 font-mono text-[10.5px] text-[#85858d] select-none" title="当前时间（每秒刷新）">
+      <Clock size={11} />
+      <span>{formatClock(now)}</span>
+    </span>
+  );
+};
+
+/** 最新一条日志距今的秒数：等待类日志不再需要自己心算 */
+const ElapsedSince: React.FC<{ timestamp: number }> = ({ timestamp }) => {
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
+  if (seconds < 3) return null;
+  return (
+    <span className="text-[#71717a] text-[10.5px] shrink-0 select-none" title="最新日志距今已过去的时间">
+      +{seconds}s
+    </span>
+  );
+};
 
 // 关键词高亮辅助函数
 const highlightMatch = (text: string, query: string): React.ReactNode => {
@@ -255,7 +296,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     const text = filteredLogs
       .map((l) => {
         const meta = resolveNodeMeta(l.nodeId, undefined, workflows);
-        return `[${new Date(l.timestamp).toLocaleTimeString()}] [${meta.name} (${l.nodeId})] ${l.message}`;
+        return `[${formatClock(l.timestamp)}] [${meta.name} (${l.nodeId})] ${l.message}`;
       })
       .join('\n');
     navigator.clipboard.writeText(text);
@@ -364,6 +405,8 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0 ml-2">
+            <LiveClock />
+
             <button
               onClick={handleToggleScroll}
               className={`px-2 h-[22px] rounded-[4px] text-[10.5px] flex items-center gap-1 transition-all ${
@@ -438,8 +481,8 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
               </div>
             )
           ) : (
-            filteredLogs.map((log) => {
-              const timeStr = new Date(log.timestamp).toLocaleTimeString();
+            filteredLogs.map((log, index) => {
+              const timeStr = formatClock(log.timestamp);
               let color = 'text-[#e4e4e7]';
               if (log.stream === 'stderr') color = 'text-[#f87171] font-semibold';
               if (log.stream === 'system') color = 'text-[#38bdf8]';
@@ -458,6 +501,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
                   <span className={`${color} whitespace-pre-wrap break-all`}>
                     {highlightMatch(log.message, trimmedQuery)}
                   </span>
+                  {index === filteredLogs.length - 1 && <ElapsedSince timestamp={log.timestamp} />}
                 </div>
               );
             })
