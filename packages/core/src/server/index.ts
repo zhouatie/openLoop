@@ -2452,6 +2452,13 @@ export class OpenLoopServer {
         return this.sendJson(res, 200, saved, reqMeta);
       }
 
+      const qaSuiteMatch = pathname.match(/^\/api\/qa\/suites\/([a-zA-Z0-9_-]+)$/);
+      if (qaSuiteMatch && method === 'GET') {
+        const suite = this.store.getQaSuiteById(qaSuiteMatch[1]);
+        if (!suite) return this.sendJson(res, 404, { error: 'QA Suite Not Found' }, reqMeta);
+        return this.sendJson(res, 200, suite, reqMeta);
+      }
+
       if (pathname.startsWith('/api/qa/suites/') && method === 'DELETE') {
         const id = decodeURIComponent(pathname.replace('/api/qa/suites/', ''));
         serverLogger.info(`[QA:DeleteSuite] 删除测试套件: ${id}`);
