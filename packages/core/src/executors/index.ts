@@ -1265,7 +1265,7 @@ export class MidsceneExecutor implements NodeExecutor {
           } else {
             emitLog(
               'stdout',
-              `[Midscene 步骤 ${index + 1}] ⚠ AI 视觉判断未通过（仅供人工参考，流程继续）: ${record.error || record.thought || '未通过'}`
+              `[Midscene 步骤 ${index + 1}] ✖ 未通过（节点将判定失败）: ${record.error || record.thought || '未通过'}`
             );
           }
         },
@@ -1329,7 +1329,7 @@ export class MidsceneExecutor implements NodeExecutor {
           `[Midscene UI 测试] 操作回放已完成: ${runRecord.totalSteps} 步, 耗时 ${(runRecord.durationMs / 1000).toFixed(2)}s, 产出 ${artifacts.length} 个快照，请在验收门禁肉眼确认截图效果`
         );
       } else {
-        emitLog('stderr', `[Midscene UI 测试] 自动化执行中断: ${runRecord.error || '测试驱动不可用'}`);
+        emitLog('stderr', `[Midscene UI 测试] 未通过: ${runRecord.error || '测试驱动不可用'}`);
       }
 
       return {
