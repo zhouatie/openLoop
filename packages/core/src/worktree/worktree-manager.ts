@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import net from 'net';
+import Database from 'better-sqlite3';
 import http from 'http';
 import { spawn, execSync, ChildProcess } from 'child_process';
 import { WorktreeContextInfo, FileDiffItem, TaskWorktreeDiffResult, Task } from '../types';
@@ -1261,19 +1262,20 @@ export class WorktreeManager {
   }
 
   /**
-   * 使用操作系统级 COW（Copy-On-Write / Reflink）执行瞬间克隆
-   * 在 macOS APFS / Linux Btrfs/XFS 上耗时为 0 毫秒，且零额外物理磁盘占用
+   * 使用 SQLite 官方快照语义克隆数据库（VACUUM INTO）
+   * 严禁直接拷贝文件：WAL 模式下单独复制 .db 与 -wal / -shm 会产出页账目不匹配的残库
    */
-  private cloneFileCoW(src: string, dst: string): void {
+  private snapshotDatabase(src: string, dst: string): void {
+    const db = new Database(src, { readonly: true, fileMustExist: true });
     try {
-      fs.copyFileSync(src, dst, fs.constants.COPYFILE_FICLONE);
-    } catch {
-      fs.copyFileSync(src, dst);
+      db.exec(`VACUUM INTO '${dst.replace(/'/g, "''")}'`);
+    } finally {
+      db.close();
     }
   }
 
   /**
-   * 为任务初始化沙箱数据底座（利用 COW 瞬间克隆宿主数据库快照，数据 100% 保真且写隔离）
+   * 为任务初始化沙箱数据底座（使用 SQLite 快照克隆宿主数据库，数据保真且写隔离）
    */
   public initTaskSandboxStore(taskId: string, onLog?: (msg: string) => void): string {
     const storeDir = this.getTaskSandboxStoreDir(taskId);
@@ -1293,14 +1295,8 @@ export class WorktreeManager {
 
       if (fs.existsSync(hostDbCandidate)) {
         try {
-          this.cloneFileCoW(hostDbCandidate, targetDb);
-          if (fs.existsSync(`${hostDbCandidate}-wal`)) {
-            try { this.cloneFileCoW(`${hostDbCandidate}-wal`, `${targetDb}-wal`); } catch {}
-          }
-          if (fs.existsSync(`${hostDbCandidate}-shm`)) {
-            try { this.cloneFileCoW(`${hostDbCandidate}-shm`, `${targetDb}-shm`); } catch {}
-          }
-          const msg = `[沙箱隔离] 已使用 COW 写时复制瞬时克隆宿主数据底座至 ${targetDb} (零物理磁盘增量，数据 100% 保真)`;
+          this.snapshotDatabase(hostDbCandidate, targetDb);
+          const msg = `[沙箱隔离] 已使用 SQLite 快照 (VACUUM INTO) 克隆宿主数据底座至 ${targetDb}`;
           logger.info(`[Worktree:Store] ${msg}`);
           onLog?.(msg);
         } catch (err: any) {

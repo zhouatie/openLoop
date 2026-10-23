@@ -2,6 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// better-sqlite3 是 packages/core 的依赖，从 core 解析避免 pnpm 非提升布局下找不到
+const Database = require(require.resolve('better-sqlite3', { paths: [path.join(__dirname, '../packages/core')] }));
+
 const prodDir = path.join(os.homedir(), '.openloop');
 const devDir = path.join(os.homedir(), '.openloop-dev');
 
@@ -18,16 +21,26 @@ if (!fs.existsSync(devDir)) {
   fs.mkdirSync(devDir, { recursive: true });
 }
 
-// 安全拷贝数据库文件（保留原文件，只做单向快照）
+// 使用 SQLite 官方快照语义克隆（VACUUM INTO）
+// 不要直接拷贝 .db / -wal / -shm：WAL 模式下三份文件非原子，会产出页账目不匹配的残库
 try {
-  fs.copyFileSync(prodDbPath, devDbPath);
-  
-  // 若存在 wal / shm 临时文件一并安全同步
-  if (fs.existsSync(`${prodDbPath}-wal`)) {
-    fs.copyFileSync(`${prodDbPath}-wal`, `${devDbPath}-wal`);
+  for (const suffix of ['', '-wal', '-shm']) {
+    const stale = devDbPath + suffix;
+    if (fs.existsSync(stale)) fs.rmSync(stale, { force: true });
   }
-  if (fs.existsSync(`${prodDbPath}-shm`)) {
-    fs.copyFileSync(`${prodDbPath}-shm`, `${devDbPath}-shm`);
+
+  const src = new Database(prodDbPath, { readonly: true, fileMustExist: true });
+  try {
+    src.exec(`VACUUM INTO '${devDbPath.replace(/'/g, "''")}'`);
+  } finally {
+    src.close();
+  }
+
+  const check = new Database(devDbPath, { readonly: true });
+  const integrity = check.pragma('integrity_check', { simple: true });
+  check.close();
+  if (integrity !== 'ok') {
+    throw new Error(`克隆结果未通过完整性检查: ${integrity}`);
   }
 
   console.log('\x1b[32m%s\x1b[0m', '✔ 数据库快照克隆成功！');

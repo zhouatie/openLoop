@@ -62,11 +62,33 @@ export class SqliteStore {
     // 初始化 SQLite 连接
     this.db = new Database(this.dbFilePath);
     storeLogger.info(`SQLite 数据底座就绪: ${this.dbFilePath}`);
+    this.assertDatabaseHealthy();
     this.initDatabase();
     this.migrateFromJsonStoreIfPresent();
   }
 
+  /**
+   * 启动自检：损坏时给出明确提示，避免业务接口随机抛 SQLITE_CORRUPT
+   * 常见损坏为页账目错乱 (database disk image is malformed)，需重建快照修复
+   */
+  private assertDatabaseHealthy() {
+    try {
+      const result = this.db.pragma('quick_check', { simple: true });
+      if (result !== 'ok') {
+        storeLogger.error(
+          `SQLite 数据文件未通过完整性自检，写入将失败: ${this.dbFilePath}\n` +
+            `  自检结果: ${result}\n` +
+            `  修复方式: 停止服务后执行 sqlite3 "${this.dbFilePath}" "VACUUM INTO '${this.dbFilePath}.repair'"，校验通过后替换原文件`
+        );
+      }
+    } catch (e: any) {
+      storeLogger.error(`SQLite 启动自检异常: ${e.message}`);
+    }
+  }
+
   private initDatabase() {
+    // 等待锁最多 5 秒，避免多进程共用同一库时直接抛 SQLITE_BUSY
+    this.db.pragma('busy_timeout = 5000');
     // 启用高性能 WAL (Write-Ahead Logging) 模式与常规同步
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
