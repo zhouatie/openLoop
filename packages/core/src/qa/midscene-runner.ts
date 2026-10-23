@@ -4,6 +4,8 @@ import { QaSuite, QaStep, QaRunRecord, StepTimelineRecord } from '../types';
 import { createLogger } from '../logger';
 import { QaDriver, QaPlatform, QaStepExecutionResult } from './qa-driver';
 import { QaDriverFactory } from './qa-driver-factory';
+import { DeviceLease, DeviceLeasePool } from './device-lease-pool';
+import { IosDeviceManager } from './ios-device-manager';
 
 const qaLogger = createLogger('QAMidsceneRunner');
 
@@ -11,6 +13,8 @@ export interface RunnerOptions {
   artifactBaseDir: string;
   serverBaseUrl?: string;
   platform?: QaPlatform;
+  /** 本次执行归属标识，用于精确定位设备排队项 */
+  ownerId?: string;
   signal?: AbortSignal;
   /** 复用已由前置节点拉起的页面，不再自行拉起应用 */
   skipLaunch?: boolean;
@@ -93,6 +97,30 @@ export class MidsceneRunner {
     this.options = options;
   }
 
+  /** iOS 一台设备只能被一个执行流驱动，执行前先取得设备租约，其余任务按 FIFO 排队 */
+  private async acquireIosLease(suite: QaSuite): Promise<DeviceLease | null> {
+    if ((this.options.platform || suite.platform) !== 'ios') return null;
+    const endpoint = IosDeviceManager.resolveEndpoint(suite.wdaEndpoint);
+    let lastPosition = 0;
+
+    const lease = await DeviceLeasePool.acquire(endpoint, {
+      label: suite.name || suite.id,
+      ownerId: this.options.ownerId || suite.id,
+      signal: this.options.signal,
+      onWait: (info) => {
+        if (info.position === lastPosition) return;
+        lastPosition = info.position;
+        const eta = info.estimatedWaitMs ? `，预计等待约 ${Math.ceil(info.estimatedWaitMs / 1000)}s` : '';
+        this.options.onLog?.(
+          `[QA 设备] iOS 设备 ${endpoint} 使用中，排队第 ${info.position} 位（前方 ${info.ahead} 个任务${eta}）`,
+          'warn'
+        );
+      },
+    });
+    this.options.onLog?.(`[QA 设备] 已获得 iOS 设备租约: ${endpoint}`);
+    return lease;
+  }
+
   public async runSuite(suite: QaSuite, taskId?: string): Promise<QaRunRecord> {
     const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const runDir = path.join(this.options.artifactBaseDir, runId);
@@ -124,12 +152,14 @@ export class MidsceneRunner {
     let driver: QaDriver | null = null;
     let driverReady = false;
     let driverInitError: string | undefined;
+    let lease: DeviceLease | null = null;
 
     try {
       if (this.options.signal?.aborted) {
         throw new Error('测试执行已提前中止 (Task cancelled)');
       }
 
+      lease = await this.acquireIosLease(suite);
       driver = QaDriverFactory.createDriver(platform);
 
       if (this.options.signal) {
@@ -267,6 +297,7 @@ export class MidsceneRunner {
       if (driver) {
         await driver.close().catch(() => {});
       }
+      lease?.release();
     }
 
     // 任一步骤未通过即判定套件失败，避免全部步骤失败时节点仍显示成功

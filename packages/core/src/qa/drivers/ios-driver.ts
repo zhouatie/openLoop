@@ -23,7 +23,7 @@ export class IosDriver implements QaDriver {
 
   async initialize(options: QaDriverOptions): Promise<void> {
     this.bundleId = options.appPackage;
-    this.endpoint = IosDeviceManager.normalizeEndpoint(options.wdaEndpoint || process.env.MIDSCENE_IOS_WDA_URL);
+    this.endpoint = IosDeviceManager.resolveEndpoint(options.wdaEndpoint);
     logger.info(`[IosDriver] 初始化 iOS 驱动, 目标应用: ${this.bundleId || '未指定'}, WDA: ${this.endpoint}`);
 
     const environment = await IosDeviceManager.checkEnvironment();
