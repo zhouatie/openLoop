@@ -285,6 +285,12 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
     }
   };
 
+  // 列表按最新添加在前展示，编号仍沿用创建顺序
+  const displaySubtasks = useMemo(
+    () => childSubtasks.map((st, idx) => ({ st, orderNo: idx + 1 })).reverse(),
+    [childSubtasks],
+  );
+
   const groupCompletedCount = childSubtasks.filter((s) => s.status === 'completed').length;
   const groupTotalCount = childSubtasks.length || task.subTaskIds?.length || 0;
   const groupProgressPct = groupTotalCount > 0 ? Math.round((groupCompletedCount / groupTotalCount) * 100) : (task.status === 'completed' ? 100 : 0);
@@ -625,126 +631,6 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
 
           {isExpanded && (
             <div className="p-1.5 space-y-1 border-t border-[#ececf0] bg-[#fafafc]">
-              {childSubtasks.map((st, idx) => {
-                let statusBadge = (
-                  <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#f4f4f6] text-[#71717a] text-[9.5px] font-medium border border-[#e3e3e8]">
-                    <Clock size={8.5} />
-                    <span>PENDING</span>
-                  </span>
-                );
-                if (st.status === 'running') {
-                  statusBadge = (
-                    <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#eff6ff] text-[#2563eb] text-[9.5px] font-medium border border-[#bfdbfe]/60">
-                      <Loader2 size={8.5} className="animate-spin" />
-                      <span>RUNNING</span>
-                    </span>
-                  );
-                } else if (st.status === 'waiting_approval') {
-                  statusBadge = (
-                    <span
-                      className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#fffbeb] text-[#b45309] text-[9.5px] font-medium border border-[#fde68a]"
-                      title="待人工验收门禁"
-                    >
-                      <Clock size={8.5} className="animate-pulse" />
-                      <span>REVIEW</span>
-                    </span>
-                  );
-                } else if (st.status === 'completed') {
-                  statusBadge = (
-                    <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#ecfdf5] text-[#059669] text-[9.5px] font-medium border border-[#a7f3d0]/60">
-                      <CheckCircle2 size={8.5} />
-                      <span>PASSED</span>
-                    </span>
-                  );
-                } else if (st.status === 'failed') {
-                  statusBadge = (
-                    <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#fef2f2] text-[#dc2626] text-[9.5px] font-medium border border-[#fecaca]/60">
-                      <AlertCircle size={8.5} />
-                      <span>FAILED</span>
-                    </span>
-                  );
-                } else if (st.status === 'cancelled') {
-                  statusBadge = (
-                    <span
-                      className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#f4f4f6] text-[#71717a] text-[9.5px] font-medium border border-[#e3e3e8]"
-                      title="已取消"
-                    >
-                      <XCircle size={8.5} />
-                      <span>CANCELLED</span>
-                    </span>
-                  );
-                }
-
-                return (
-                  <div
-                    key={st.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelect(st);
-                    }}
-                    className={`flex items-center justify-between gap-1.5 px-1.5 py-1 rounded-[5px] bg-white border transition-all cursor-pointer group/sub ${
-                      st.status === 'waiting_approval'
-                        ? 'border-[#fde68a] bg-[#fffdfa] hover:border-[#f59e0b]'
-                        : 'border-[#ececf0] hover:border-[#d8d6fb]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                      <span className="font-mono text-[9.5px] text-[#85858d] shrink-0">
-                        #{idx + 1}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[11px] text-[#1c1c21] truncate font-medium group-hover/sub:text-[#4f46e5]">
-                          {st.title}
-                        </div>
-                        <div className="text-[9.5px] text-[#85858d] truncate mt-0.5">
-                          ⚡ {workflows.find((w) => w.id === st.workflowId)?.name || st.workflowId}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {statusBadge}
-                      {st.status === 'waiting_approval' && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelect(st);
-                          }}
-                          className="w-5 h-5 rounded hover:bg-[#fef3c7] text-[#b45309] flex items-center justify-center transition-colors"
-                          title="查看并处理验收门禁"
-                        >
-                          <Eye size={10} />
-                        </button>
-                      )}
-                      {onUnlinkSubtask && st.status !== 'running' && task.status !== 'running' && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onUnlinkSubtask(task.id, st.id);
-                          }}
-                          className="w-5 h-5 rounded hover:bg-[#fef2f2] text-[#85858d] hover:text-[#dc2626] flex items-center justify-center transition-colors"
-                          title="脱离任务组，恢复为独立任务"
-                        >
-                          <Unlink size={10} />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenLogs(st.id);
-                        }}
-                        className="w-5 h-5 rounded hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#1c1c21] flex items-center justify-center transition-colors"
-                        title="查看子工序实时日志"
-                      >
-                        <Terminal size={10} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-
               {/* 就地快捷追加工序：回车连续录入，Esc 收起 */}
               {isQuickAdding && canAddSubtask ? (
                 <form
@@ -814,6 +700,127 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                   <span>添加子工序</span>
                 </button>
               ) : null}
+
+              {displaySubtasks.map(({ st, orderNo }) => {
+                let statusBadge = (
+                  <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#f4f4f6] text-[#71717a] text-[9.5px] font-medium border border-[#e3e3e8]">
+                    <Clock size={8.5} />
+                    <span>PENDING</span>
+                  </span>
+                );
+                if (st.status === 'running') {
+                  statusBadge = (
+                    <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#eff6ff] text-[#2563eb] text-[9.5px] font-medium border border-[#bfdbfe]/60">
+                      <Loader2 size={8.5} className="animate-spin" />
+                      <span>RUNNING</span>
+                    </span>
+                  );
+                } else if (st.status === 'waiting_approval') {
+                  statusBadge = (
+                    <span
+                      className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#fffbeb] text-[#b45309] text-[9.5px] font-medium border border-[#fde68a]"
+                      title="待人工验收门禁"
+                    >
+                      <Clock size={8.5} className="animate-pulse" />
+                      <span>REVIEW</span>
+                    </span>
+                  );
+                } else if (st.status === 'completed') {
+                  statusBadge = (
+                    <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#ecfdf5] text-[#059669] text-[9.5px] font-medium border border-[#a7f3d0]/60">
+                      <CheckCircle2 size={8.5} />
+                      <span>PASSED</span>
+                    </span>
+                  );
+                } else if (st.status === 'failed') {
+                  statusBadge = (
+                    <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#fef2f2] text-[#dc2626] text-[9.5px] font-medium border border-[#fecaca]/60">
+                      <AlertCircle size={8.5} />
+                      <span>FAILED</span>
+                    </span>
+                  );
+                } else if (st.status === 'cancelled') {
+                  statusBadge = (
+                    <span
+                      className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#f4f4f6] text-[#71717a] text-[9.5px] font-medium border border-[#e3e3e8]"
+                      title="已取消"
+                    >
+                      <XCircle size={8.5} />
+                      <span>CANCELLED</span>
+                    </span>
+                  );
+                }
+
+                return (
+                  <div
+                    key={st.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect(st);
+                    }}
+                    className={`flex items-center justify-between gap-1.5 px-1.5 py-1 rounded-[5px] bg-white border transition-all cursor-pointer group/sub ${
+                      st.status === 'waiting_approval'
+                        ? 'border-[#fde68a] bg-[#fffdfa] hover:border-[#f59e0b]'
+                        : 'border-[#ececf0] hover:border-[#d8d6fb]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <span className="font-mono text-[9.5px] text-[#85858d] shrink-0">
+                        #{orderNo}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] text-[#1c1c21] truncate font-medium group-hover/sub:text-[#4f46e5]">
+                          {st.title}
+                        </div>
+                        <div className="text-[9.5px] text-[#85858d] truncate mt-0.5">
+                          ⚡ {workflows.find((w) => w.id === st.workflowId)?.name || st.workflowId}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {statusBadge}
+                      {st.status === 'waiting_approval' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelect(st);
+                          }}
+                          className="w-5 h-5 rounded hover:bg-[#fef3c7] text-[#b45309] flex items-center justify-center transition-colors"
+                          title="查看并处理验收门禁"
+                        >
+                          <Eye size={10} />
+                        </button>
+                      )}
+                      {onUnlinkSubtask && st.status !== 'running' && task.status !== 'running' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUnlinkSubtask(task.id, st.id);
+                          }}
+                          className="w-5 h-5 rounded hover:bg-[#fef2f2] text-[#85858d] hover:text-[#dc2626] flex items-center justify-center transition-colors"
+                          title="脱离任务组，恢复为独立任务"
+                        >
+                          <Unlink size={10} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenLogs(st.id);
+                        }}
+                        className="w-5 h-5 rounded hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#1c1c21] flex items-center justify-center transition-colors"
+                        title="查看子工序实时日志"
+                      >
+                        <Terminal size={10} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
             </div>
           )}
         </div>
