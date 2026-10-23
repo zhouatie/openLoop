@@ -80,6 +80,7 @@ import {
 import { cleanTaskTemplate } from '../utils/workflowTemplate';
 import { api } from '../services/api';
 import { layoutWorkflowDag } from '../utils/dagLayout';
+import { autoResizeTextarea } from '../utils/autoResizeTextarea';
 import { EditWorkflowModal } from '../components/EditWorkflowModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AgentMarkdown } from '../components/AgentMarkdown';
@@ -3816,11 +3817,11 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                         <div>
                           <label className="block text-[#85858d] mb-1">执行提示词 / Prompt</label>
                           <textarea
-                            rows={6}
+                            ref={(el) => autoResizeTextarea(el)}
                             value={selectedNodeData.config?.prompt || ''}
                             onChange={(e) => updateSelectedNodeConfig('prompt', e.target.value)}
                             placeholder="描述给 AI Agent 的明确指令与任务约束..."
-                            className="w-full min-h-[130px] bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 rounded-[8px] p-2.5 text-[12px] leading-relaxed text-[#1c1c21] outline-none resize-y transition-all"
+                            className="w-full min-h-[130px] bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 rounded-[8px] p-2.5 text-[12px] leading-relaxed text-[#1c1c21] outline-none resize-none transition-colors"
                           />
                         </div>
                       </>
@@ -3899,11 +3900,11 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                       <div>
                         <label className="block text-[#85858d] mb-1">审批提示说明</label>
                         <textarea
-                          rows={3}
+                          ref={(el) => autoResizeTextarea(el)}
                           value={selectedNodeData.config?.approvalPrompt || ''}
                           onChange={(e) => updateSelectedNodeConfig('approvalPrompt', e.target.value)}
                           placeholder="说明人工验收或 QA 审批的标准与重点事项..."
-                          className="w-full min-h-[80px] bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 rounded-[8px] p-2.5 text-[12px] leading-relaxed text-[#1c1c21] outline-none resize-y transition-all"
+                          className="w-full min-h-[80px] bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 rounded-[8px] p-2.5 text-[12px] leading-relaxed text-[#1c1c21] outline-none resize-none transition-colors"
                         />
                       </div>
                     )}
@@ -3982,11 +3983,11 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                         </button>
                       </div>
                       <textarea
-                        rows={7}
+                        ref={(el) => autoResizeTextarea(el, 480)}
                         value={selectedNodeData.config?.command || ''}
                         onChange={(e) => updateSelectedNodeConfig('command', e.target.value)}
                         placeholder="# 在此编写要执行的 Shell / CLI 脚本命令..."
-                        className="w-full min-h-[160px] bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 rounded-[8px] p-2.5 font-mono text-[11px] leading-relaxed text-[#1c1c21] outline-none resize-y transition-all"
+                        className="w-full min-h-[160px] bg-[#f9f9fb] focus:bg-white border border-[#e3e3e8] focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 rounded-[8px] p-2.5 font-mono text-[11px] leading-relaxed text-[#1c1c21] outline-none resize-none transition-colors"
                       />
                     </div>
                   </div>
