@@ -83,6 +83,21 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
   const isMobilePlatform = isAndroid || isIos;
   const mobileTarget = suite?.appPackage || run?.deviceSerial || run?.suiteName || '目标应用';
   const platformLabel = isAndroid ? 'Android' : isIos ? 'iOS' : 'Web';
+  const isPassed = run?.status === 'passed';
+  const imageUrl = currentStep?.screenshotRelPath
+    ? api.getArtifactUrl(currentStep.screenshotRelPath)
+    : currentStep?.screenshotUrl || '';
+  const reportUrl = run?.reportRelPath ? api.getArtifactUrl(run.reportRelPath) : run?.reportUrl;
+
+  // 截帧尺寸软恢复：切帧后浏览器命中缓存时 onLoad 可能不触发，这里兜底读取已加载尺寸
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
+      setImageNaturalSize({
+        width: imgRef.current.naturalWidth,
+        height: imgRef.current.naturalHeight,
+      });
+    }
+  }, [imageUrl]);
 
   // 自动回放定时器
   useEffect(() => {
@@ -145,12 +160,6 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
     );
   }
 
-  const isPassed = run.status === 'passed';
-  const imageUrl = currentStep?.screenshotRelPath
-    ? api.getArtifactUrl(currentStep.screenshotRelPath)
-    : currentStep?.screenshotUrl || '';
-  const reportUrl = run.reportRelPath ? api.getArtifactUrl(run.reportRelPath) : run.reportUrl;
-
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const { naturalWidth, naturalHeight } = e.currentTarget;
     if (naturalWidth > 0 && naturalHeight > 0) {
@@ -160,15 +169,6 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
       setImageNaturalSize({ width: naturalWidth, height: naturalHeight });
     }
   };
-
-  useEffect(() => {
-    if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
-      setImageNaturalSize({
-        width: imgRef.current.naturalWidth,
-        height: imgRef.current.naturalHeight,
-      });
-    }
-  }, [imageUrl]);
 
   return (
     <div className="flex-1 h-full flex flex-col overflow-hidden bg-[#f4f4f6] select-none">
