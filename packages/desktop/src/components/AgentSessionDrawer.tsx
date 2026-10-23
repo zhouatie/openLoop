@@ -403,7 +403,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
               ) : sessionState?.awaitingInput ? (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eef2ff] text-[#4338ca] text-[10px] font-medium border border-[#c7d2fe]">
                   <MessageSquare size={10} />
-                  <span>{hasCodeChanges ? '待确认放行' : '等待方案确认'}</span>
+                  <span>{hasCodeChanges ? '待确认放行' : '等待回复'}</span>
                 </span>
               ) : sessionState?.lastError ? (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10px] font-medium border border-[#fecaca]/60">
@@ -792,7 +792,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
             </div>
           ) : (
             <>
-              {sessionState?.awaitingInput && (
+              {sessionState?.awaitingInput && hasCodeChanges && (
                 <AgentAwaitingInputBar
                   hasCodeChanges={hasCodeChanges}
                   onConfirmComplete={handleConfirmComplete}
