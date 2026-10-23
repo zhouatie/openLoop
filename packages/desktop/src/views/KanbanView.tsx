@@ -397,6 +397,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     if (selectedTask) {
       api.getTaskSession(selectedTask.id)
         .then((state) => {
+          if (import.meta.env?.DEV) {
+            console.log('[KanbanView:Drawer] 拉取会话状态:', {
+              taskId: selectedTask.id,
+              isBusy: state.isBusy,
+              messages: state.messages.length,
+            });
+          }
           setSessionState(state);
           // 若任务正在执行中且处于 agent 状态，或已有历史消息，可智能保留或建议查看
         })
@@ -2227,7 +2234,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     >
                       <Bot size={12} className={sessionState?.isBusy ? 'text-[#4f46e5]' : ''} />
                       <span>实时对话</span>
-                      {(sessionState?.isBusy || curTask.status === 'running') && (
+                      {(sessionState?.isBusy) && (
                         <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-pulse" />
                       )}
                       {(sessionState?.messages?.length || 0) > 0 && (
