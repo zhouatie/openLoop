@@ -462,6 +462,12 @@ export const TaskPromptArea = React.forwardRef<HTMLTextAreaElement, TaskPromptAr
       <ImageLightboxModal
         isOpen={!!activeLightbox}
         attachment={activeLightbox}
+        images={attachments}
+        onIndexChange={(newIdx) => {
+          if (attachments[newIdx]) {
+            setActiveLightbox(attachments[newIdx]);
+          }
+        }}
         onClose={() => setActiveLightbox(null)}
       />
     </div>

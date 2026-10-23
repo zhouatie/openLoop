@@ -68,6 +68,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
   const [isQaSelectorOpen, setIsQaSelectorOpen] = useState<boolean>(false);
   const [selectedQaArtifacts, setSelectedQaArtifacts] = useState<SelectedQaArtifacts | null>(null);
   const [activeLightbox, setActiveLightbox] = useState<{ name: string; url: string } | null>(null);
+  const [activeLightboxImages, setActiveLightboxImages] = useState<{ name: string; url: string }[]>([]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -551,7 +552,15 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                               return (
                                 <div
                                   key={att.id || attIdx}
-                                  onClick={() => imgUrl && setActiveLightbox({ name: att.name, url: imgUrl })}
+                                  onClick={() => {
+                                    if (imgUrl) {
+                                      const allImgs = (msg.attachments || [])
+                                        .map((a) => ({ name: a.name, url: api.getArtifactUrl(a.url || a.path || '') }))
+                                        .filter((a) => !!a.url);
+                                      setActiveLightboxImages(allImgs);
+                                      setActiveLightbox({ name: att.name, url: imgUrl });
+                                    }
+                                  }}
                                   className="group/att relative w-[54px] h-[38px] rounded-[4px] border border-[#d8d6fb] overflow-hidden bg-black/5 cursor-pointer"
                                   title={`${att.name} (点击放大预览)`}
                                 >
@@ -858,7 +867,11 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                           <div className="absolute inset-0 bg-black/35 opacity-0 group-hover/sc:opacity-100 transition-opacity flex items-center justify-center gap-1">
                             <button
                               type="button"
-                              onClick={() => setActiveLightbox({ name: sc.name, url: sc.url })}
+                              onClick={() => {
+                                const scList = selectedQaArtifacts.screenshots.map((s) => ({ name: s.name, url: s.url }));
+                                setActiveLightboxImages(scList);
+                                setActiveLightbox({ name: sc.name, url: sc.url });
+                              }}
                               className="text-white hover:scale-110 transition-transform cursor-pointer"
                               title="放大预览"
                             >
@@ -1004,7 +1017,16 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
         <ImageLightboxModal
           isOpen={true}
           attachment={{ name: activeLightbox.name, url: activeLightbox.url }}
-          onClose={() => setActiveLightbox(null)}
+          images={activeLightboxImages.length > 0 ? activeLightboxImages : undefined}
+          onIndexChange={(newIdx) => {
+            if (activeLightboxImages[newIdx]) {
+              setActiveLightbox(activeLightboxImages[newIdx]);
+            }
+          }}
+          onClose={() => {
+            setActiveLightbox(null);
+            setActiveLightboxImages([]);
+          }}
         />
       )}
     </div>
