@@ -1181,14 +1181,19 @@ export class MidsceneExecutor implements NodeExecutor {
       const assertKeywords = ['检查', '校验', '验证', '确认', '是否', '包含', '断言', '正常渲染', '无报错'];
       // 等待类用例转轮询等待，避免页面尚在加载时断言抢跑导致误判
       const waitKeywords = ['等待', '等到', '等待至', '静候', '直到'];
+      // 引号内是业务数据（任务名、菜单名等），不参与意图判定，避免「移除自动拆分验证任务」里的「验证」把动作误判成断言
+      const stripQuotedText = (text: string) =>
+        text.replace(/「[^」]*」|『[^』]*』|“[^”]*”|‘[^’]*’|"[^"]*"|'[^']*'|`[^`]*`/g, ' ');
+      const hasAny = (keywords: string[], text: string) => keywords.some((k) => text.includes(k));
 
       for (const rawInst of instructions) {
         const inst = rawInst.trim();
         if (!inst) continue;
 
         // 如果单行同时包含动作词与断言词，且包含标点符号，智能拆分为两步连续执行
-        const hasAction = actionKeywords.some((k) => inst.includes(k));
-        const hasAssert = assertKeywords.some((k) => inst.includes(k));
+        const bareInst = stripQuotedText(inst);
+        const hasAction = hasAny(actionKeywords, bareInst);
+        const hasAssert = hasAny(assertKeywords, bareInst);
         const hasWait = waitKeywords.some((k) => inst.startsWith(k));
 
         if (hasWait && !hasAction) {
@@ -1200,11 +1205,13 @@ export class MidsceneExecutor implements NodeExecutor {
           const splitParts = inst.split(/[,，;；\n]+/).map((s) => s.trim()).filter(Boolean);
           if (splitParts.length >= 2) {
             for (const part of splitParts) {
-              const partHasAction = actionKeywords.some((k) => part.includes(k));
-              const partHasAssert = assertKeywords.some((k) => part.includes(k));
+              const barePart = stripQuotedText(part);
+              const partHasAction = hasAny(actionKeywords, barePart);
+              const partHasAssert = hasAny(assertKeywords, barePart);
+              // 动作词优先：操作意图先执行，断言只在没有操作动词时成立
               steps.push({
                 id: `step_${stepCounter++}`,
-                type: partHasAction && !partHasAssert ? 'action' : partHasAssert ? 'assert' : 'action',
+                type: !partHasAction && partHasAssert ? 'assert' : 'action',
                 prompt: part,
               });
             }

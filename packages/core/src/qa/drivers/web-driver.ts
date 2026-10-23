@@ -344,33 +344,36 @@ export class WebPlaywrightDriver implements QaDriver {
     // 2. 检查断言类型：反向断言 (Negative Assertion)、健康检查或常规正向断言
     const promptLower = prompt.toLowerCase();
 
+    // 正向期望词：命中则说明该断言要求页面出现可见结果，不能被否定分支或健康检查分支吞成空跑
+    const hasPositiveExpectation = /出现|包含|成功|显示|展示|新增/.test(prompt);
+
     // 判断是否为反向断言（期望页面不包含、无某错误或消除某异常）
     const isNegativeAssert =
-      prompt.includes('无') ||
-      prompt.includes('不包含') ||
-      prompt.includes('未出现') ||
-      prompt.includes('不存在') ||
-      prompt.includes('消除');
+      !hasPositiveExpectation &&
+      (prompt.includes('无') ||
+        prompt.includes('不包含') ||
+        prompt.includes('未出现') ||
+        prompt.includes('不存在') ||
+        prompt.includes('消除'));
 
     // 检查是否为通用健康检查
     const isHealthCheck =
-      /无.*(?:报错|异常|错误|crash)/i.test(prompt) ||
-      promptLower.includes('健康') ||
-      promptLower.includes('首屏') ||
-      promptLower.includes('加载') ||
-      promptLower.includes('渲染正常');
+      !hasPositiveExpectation &&
+      (/无.*(?:报错|异常|错误|crash)/i.test(prompt) ||
+        promptLower.includes('健康') ||
+        promptLower.includes('首屏') ||
+        promptLower.includes('加载') ||
+        promptLower.includes('渲染正常'));
 
     let passed = true;
     let thought = '';
     let errorMessage: string | undefined;
     let targetBox: { x: number; y: number; width: number; height: number } | undefined;
 
-    // 提取显式期望的目标文本（如引号中的错误信息或特定字符串）
+    // 提取显式期望的目标文本：优先取引号内的具体文案，无引号时取「包含/出现/存在」后的短语并遇到标点即截断
     const match =
-      prompt.match(/包含[“"「]?([^”"」]+)[”"」]?/i) ||
-      prompt.match(/出现[“"「]?([^”"」]+)[”"」]?/i) ||
-      prompt.match(/存在[“"「]?([^”"」]+)[”"」]?/i) ||
-      prompt.match(/[“"「]([^”"」]+)[”"」]/i);
+      prompt.match(/[“"「]([^”"」]+)[”"」]/) ||
+      prompt.match(/(?:包含|出现|存在|显示|展示)\s*([^”"」「，,。；;！!？?\s]+)/);
     const targetText = match ? match[1].trim() : '';
 
     if (isNegativeAssert) {

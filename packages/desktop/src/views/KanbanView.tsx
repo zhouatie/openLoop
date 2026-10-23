@@ -79,6 +79,7 @@ import { LinkExistingTasksModal } from '../components/LinkExistingTasksModal';
 import { toast } from '../components/Toast';
 import { resolveNodeMeta, resolveQaTestNodeId } from '../utils/nodeMeta';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
+import { orderSubTasksForDisplay } from '../utils/subtaskOrder';
 import {
   DEFAULT_DETAIL_WIDTH,
   clampDetailWidth,
@@ -3102,10 +3103,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       const groupSubtasks = (curTask.subTaskIds || [])
                         .map((id) => tasks.find((t) => t.id === id))
                         .filter(Boolean) as Task[];
-                      // 列表按最新添加在前展示，编号仍沿用创建顺序
-                      const displayGroupSubtasks = groupSubtasks
-                        .map((st, idx) => ({ st, orderNo: idx + 1 }))
-                        .reverse();
+                      const displayGroupSubtasks = orderSubTasksForDisplay(groupSubtasks);
                       const groupPassed = groupSubtasks.filter((s) => s.status === 'completed').length;
                       const groupTotal = groupSubtasks.length;
                       const groupPct = groupTotal > 0 ? Math.round((groupPassed / groupTotal) * 100) : 0;
