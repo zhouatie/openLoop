@@ -749,16 +749,19 @@ export class QaPlannerExecutor implements NodeExecutor {
     const { task, node, emitLog, settings = {} } = ctx;
     emitLog('system', `>>> 开始执行节点 [${node.name || 'QA 黑盒用例设计'}] (qa-planner)`);
 
-    // 优先复用人工预设验收用例：若创建任务时已配置，直接复用并跳过 AI 规划
-    if (Array.isArray(task.context?.qaInstructions) && task.context.qaInstructions.length > 0) {
-      const steps = task.context.qaInstructions;
-      if (!task.context.qaPlan) {
-        task.context.qaPlan = {
-          role: '人工预设用例 (任务配置)',
-          createdAt: Date.now(),
-          steps,
-        };
-      }
+    // 优先复用人工预设验收用例：若已配置则直接复用并跳过 AI 规划。
+    // 内存中的 task 是流水线启动时的快照，必须回读库中最新值，否则会漏掉运行期间用户保存的用例。
+    const latestInstructions = ctx.store?.getTask(task.id)?.context?.qaInstructions;
+    const presetSteps = Array.isArray(latestInstructions) ? latestInstructions.map((s) => String(s)) : [];
+    if (presetSteps.length > 0) {
+      if (!task.context) task.context = {};
+      task.context.qaInstructions = presetSteps;
+      const steps = presetSteps;
+      task.context.qaPlan = {
+        role: '人工预设用例 (任务配置)',
+        createdAt: Date.now(),
+        steps,
+      };
       if (ctx.store) {
         ctx.store.saveTask(task);
       }
@@ -1148,9 +1151,11 @@ export class MidsceneExecutor implements NodeExecutor {
       const dataDir = ctx.store?.getDataDir?.() || path.join(os.homedir(), '.openloop');
 
       // 1. 优先读取任务定制验收用例（用户在任务创建时输入，或 Agent 编码完成后智能规划输出）
+      // 回读库中最新值，确保使用用户在运行期间刚保存的用例
+      const latestInstructions = ctx.store?.getTask(task.id)?.context?.qaInstructions;
       let instructions: string[] = [];
-      if (Array.isArray(task.context?.qaInstructions) && task.context.qaInstructions.length > 0) {
-        instructions = [...task.context.qaInstructions];
+      if (Array.isArray(latestInstructions) && latestInstructions.length > 0) {
+        instructions = latestInstructions.map((s) => String(s));
         emitLog('system', `[Midscene UI 测试] 载入定制验收用例 (${instructions.length} 步)`);
       } else if (node.config.instructions && node.config.instructions.length > 0) {
         instructions = [...node.config.instructions];

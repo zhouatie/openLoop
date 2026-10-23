@@ -871,6 +871,27 @@ export class SqliteStore {
     };
   }
 
+  /** 局部更新任务上下文：只写入指定字段，避免整列覆盖其它并发写入 */
+  public updateTaskContext(taskId: string, patch: Record<string, any>): Record<string, any> | undefined {
+    const row = this.db.prepare('SELECT context_json FROM tasks WHERE id = ?').get(taskId) as any;
+    if (!row) return undefined;
+    const merged = { ...this.parseContextJson(row.context_json), ...patch };
+    this.db
+      .prepare('UPDATE tasks SET context_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(merged), Date.now(), taskId);
+    return merged;
+  }
+
+  private parseContextJson(raw?: string | null): Record<string, any> {
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
   public getTask(id: string): Task | undefined {
     const tr = this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as any;
     if (!tr) return undefined;
@@ -921,6 +942,15 @@ export class SqliteStore {
   public saveTask(task: Task): Task {
     task.updatedAt = Date.now();
     if (!task.createdAt) task.createdAt = task.updatedAt;
+
+    // 上下文按字段合并：内存任务对象可能是流水线启动时的旧快照，
+    // 直接整列覆盖会丢弃运行期间由 HTTP 写入的字段（如用户刚保存的 qaInstructions）。
+    // 内存快照持有的字段优先，未持有的字段保留库中最新值。
+    const storedRow = this.db.prepare('SELECT context_json FROM tasks WHERE id = ?').get(task.id) as any;
+    if (storedRow?.context_json) {
+      const storedContext = this.parseContextJson(storedRow.context_json);
+      task.context = { ...storedContext, ...(task.context || {}) };
+    }
 
     const upsertTask = this.db.prepare(`
       INSERT INTO tasks (

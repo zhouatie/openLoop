@@ -75,6 +75,10 @@ export class Store {
     return this.sqlite.saveTask(task);
   }
 
+  public updateTaskContext(taskId: string, patch: Record<string, any>): Record<string, any> | undefined {
+    return this.sqlite.updateTaskContext(taskId, patch);
+  }
+
   public updateTaskColumn(taskId: string, column: KanbanColumn): void {
     this.sqlite.updateTaskColumn(taskId, column);
   }

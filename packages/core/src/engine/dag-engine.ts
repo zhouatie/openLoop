@@ -359,13 +359,14 @@ export class DagEngine extends EventEmitter {
           return;
         }
         if (!task.context) task.context = {};
-        task.context.chatMessages = state.messages;
-        if (state.model) task.context.model = state.model;
         const prevAwaiting = !!task.context.awaitingInput;
         // 仅当当前正在执行的节点是 agent 类型时，才同步 task.context.awaitingInput
         const nextAwaiting = node.type === 'agent' ? !!state.awaitingInput : false;
-        task.context.awaitingInput = nextAwaiting;
-        this.store.saveTask(task);
+        // 只局部写入会话字段，避免高频会话回调把运行中由别处写入的上下文整列覆盖
+        const patch: Record<string, any> = { chatMessages: state.messages, awaitingInput: nextAwaiting };
+        if (state.model) patch.model = state.model;
+        Object.assign(task.context, patch);
+        this.store.updateTaskContext(task.id, patch);
         if (prevAwaiting !== nextAwaiting) {
           this.emit('task:update', task);
         }
