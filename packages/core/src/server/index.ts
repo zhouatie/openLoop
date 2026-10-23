@@ -1479,10 +1479,12 @@ export class OpenLoopServer {
         }
 
         // 无常驻 RPC 进程时，从持久化 context 中读取历史消息
+        // isBusy 只表示智能体会话本身在执行：无常驻会话时任务即便处于 running
+        // （例如正在跑 CLI / Hook 节点），智能体也未启动
         const historicalState: TaskSessionState = {
           taskId,
           active: false,
-          isBusy: task.status === 'running',
+          isBusy: false,
           isPaused: false,
           awaitingInput: isCurrentAgentRunning ? !!task.context?.awaitingInput : false,
           messages: task.context?.chatMessages || [],
