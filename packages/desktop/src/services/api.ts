@@ -791,6 +791,10 @@ export class DesktopApiService {
     return requestJson<LogEntry[]>(`${BASE_URL}/api/tasks/${id}/logs`);
   }
 
+  async getGlobalLogs(limit = 2000): Promise<LogEntry[]> {
+    return requestJson<LogEntry[]>(`${BASE_URL}/api/logs?limit=${limit}`);
+  }
+
   // Plugins
   async getPlugins(): Promise<PluginManifest[]> {
     return requestJson<PluginManifest[]>(`${BASE_URL}/api/plugins`);
