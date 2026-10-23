@@ -70,6 +70,7 @@ import { AgentAwaitingInputBar } from '../components/AgentAwaitingInputBar';
 import { AgentChatChangedFiles } from '../components/AgentChatChangedFiles';
 import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
 import { QaArtifactSelectorModal } from '../components/qa/QaArtifactSelectorModal';
+import { TaskQaInstructionsCard } from '../components/qa/TaskQaInstructionsCard';
 import { KanbanLaneList } from '../components/KanbanLaneList';
 import { SelectParentTaskModal } from '../components/SelectParentTaskModal';
 import { LinkExistingTasksModal } from '../components/LinkExistingTasksModal';
@@ -2491,7 +2492,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         );
                       })()}
 
-                      {/* 模块 3: 流水线节点执行时序 */}
+                      {/* 模块 3: 验收用例 (随时可查看与修改) */}
+                      <TaskQaInstructionsCard
+                        task={curTask}
+                        onTaskUpdated={(updated) => onTaskUpdate?.(updated)}
+                      />
+
+                      {/* 模块 4: 流水线节点执行时序 */}
                       <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#1c1c21]">
