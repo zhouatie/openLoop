@@ -9,8 +9,13 @@ interface LogTerminalDrawerProps {
   logs: LogEntry[];
   onClearLogs: () => void;
   workflows?: WorkflowDefinition[];
-  activeNodeFilter?: string;
-  onFilterChange?: (nodeId: string) => void;
+  /** 日志作用域：无 taskId 为全局日志，有 taskId 为任务日志，nodeId 再聚焦到节点 */
+  scope?: LogScope;
+}
+
+export interface LogScope {
+  taskId?: string;
+  nodeId?: string;
 }
 
 // 关键词高亮辅助函数
@@ -55,10 +60,9 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
   logs,
   onClearLogs,
   workflows,
-  activeNodeFilter,
-  onFilterChange,
+  scope,
 }) => {
-  const [selectedNodeFilter, setSelectedNodeFilter] = useState<string>('all');
+  const [selectedNodeFilter, setSelectedNodeFilter] = useState<string>(scope?.nodeId || 'all');
   const [selectedStreamFilter, setSelectedStreamFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
@@ -74,14 +78,15 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     }
   }, []);
 
+  // 作用域变化（全局 / 任务 / 节点切换）时重置过滤与搜索，并定位到最新日志
   useEffect(() => {
-    if (activeNodeFilter) {
-      setSelectedNodeFilter(activeNodeFilter);
-      setIsAtBottom(true);
-      isAtBottomRef.current = true;
-      scrollToBottom();
-    }
-  }, [activeNodeFilter, isOpen, scrollToBottom]);
+    setSelectedNodeFilter(scope?.nodeId || 'all');
+    setSelectedStreamFilter('all');
+    setSearchQuery('');
+    setIsAtBottom(true);
+    isAtBottomRef.current = true;
+    scrollToBottom();
+  }, [scope?.taskId, scope?.nodeId, isOpen, scrollToBottom]);
 
   // 打开抽屉时初始化定位到底部
   useEffect(() => {
@@ -92,14 +97,22 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     }
   }, [isOpen, scrollToBottom]);
 
+  // 作用域内的日志集合：任务作用域仅保留该任务的日志（可再在节点下拉内收窄）
+  const scopedLogs = useMemo(
+    () => (scope?.taskId ? logs.filter((l) => l.taskId === scope.taskId) : logs),
+    [logs, scope?.taskId]
+  );
+
+  const scopeLabel = scope?.taskId ? (scope.nodeId ? '节点日志' : '任务日志') : '全局日志';
+
   const nodeIds = useMemo(
-    () => Array.from(new Set(logs.map((l) => l.nodeId).filter(Boolean))),
-    [logs]
+    () => Array.from(new Set(scopedLogs.map((l) => l.nodeId).filter(Boolean))),
+    [scopedLogs]
   );
 
   const filteredLogs = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return logs.filter((log) => {
+    return scopedLogs.filter((log) => {
       if (selectedNodeFilter !== 'all' && log.nodeId !== selectedNodeFilter) {
         return false;
       }
@@ -117,7 +130,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
       }
       return true;
     });
-  }, [logs, selectedNodeFilter, selectedStreamFilter, searchQuery, workflows]);
+  }, [scopedLogs, selectedNodeFilter, selectedStreamFilter, searchQuery, workflows]);
 
   const isFiltered =
     selectedNodeFilter !== 'all' || selectedStreamFilter !== 'all' || !!searchQuery.trim();
@@ -210,7 +223,6 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
 
   const handleNodeFilterChange = (value: string) => {
     setSelectedNodeFilter(value);
-    onFilterChange?.(value);
     setIsAtBottom(true);
     isAtBottomRef.current = true;
     scrollToBottom();
@@ -223,7 +235,6 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     setSearchQuery('');
     setSelectedStreamFilter('all');
     setSelectedNodeFilter('all');
-    onFilterChange?.('all');
     if (import.meta.env.DEV) {
       console.log('[LogTerminalDrawer] 重置所有筛选与搜索条件');
     }
@@ -268,7 +279,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
             <div className="flex items-center gap-1.5 text-[11.5px] font-mono text-[#e3e3e8] shrink-0">
               <Terminal size={13} className="text-[#818cf8]" />
               <span>
-                实时执行终端 ({isFiltered ? `${filteredLogs.length}/${logs.length}` : `${logs.length}`} 条)
+                {scopeLabel} ({isFiltered ? `${filteredLogs.length}/${scopedLogs.length}` : `${scopedLogs.length}`} 条)
               </span>
             </div>
 
@@ -408,8 +419,10 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
           className="flex-1 p-3.5 font-mono text-[11.5px] overflow-y-auto space-y-1 select-text bg-[#18181c]"
         >
           {filteredLogs.length === 0 ? (
-            logs.length === 0 ? (
-              <div className="text-[#63636b] italic py-6 text-center">暂无日志流</div>
+            scopedLogs.length === 0 ? (
+              <div className="text-[#63636b] italic py-6 text-center">
+                {scope?.taskId ? '该任务暂无日志输出' : '暂无日志流'}
+              </div>
             ) : (
               <div className="text-[#85858d] py-8 text-center text-[11.5px] flex flex-col items-center justify-center gap-2 select-none">
                 <Search size={18} className="text-[#4b4b53]" />

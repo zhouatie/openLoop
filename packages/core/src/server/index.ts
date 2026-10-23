@@ -2172,6 +2172,12 @@ export class OpenLoopServer {
         return this.sendJson(res, 200, { success: true, message: '全局沙箱与端口已全部清空' }, reqMeta);
       }
 
+      // Global logs: /api/logs?limit=
+      if (pathname === '/api/logs' && method === 'GET') {
+        const limit = Number(parsedUrl.searchParams.get('limit')) || undefined;
+        return this.sendJson(res, 200, this.store.getLogs(undefined, undefined, limit), reqMeta);
+      }
+
       // Task logs: /api/tasks/:id/logs
       const taskLogsMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/logs$/);
       if (taskLogsMatch && method === 'GET') {

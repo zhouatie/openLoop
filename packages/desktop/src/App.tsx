@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
-import { LogTerminalDrawer } from './components/LogTerminalDrawer';
+import { LogTerminalDrawer, LogScope } from './components/LogTerminalDrawer';
 import { CreateTaskModal } from './components/CreateTaskModal';
 import { QuickRunWorkflowModal } from './components/QuickRunWorkflowModal';
 import { OnboardingModal } from './components/OnboardingModal';
@@ -33,7 +33,7 @@ export const AppContent: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isLogsOpen, setIsLogsOpen] = useState<boolean>(false);
   const [unreadLogsCount, setUnreadLogsCount] = useState<number>(0);
-  const [activeNodeFilter, setActiveNodeFilter] = useState<string>('all');
+  const [logScope, setLogScope] = useState<LogScope>({});
   const [selectedWorkspaceFilter, setSelectedWorkspaceFilter] = useState<string>(() => {
     try {
       return localStorage.getItem('openloop_kanban_selected_workspace_filter') || 'all';
@@ -236,30 +236,49 @@ export const AppContent: React.FC = () => {
 
   useTaskNotifications(tasks);
 
+  // 合并历史日志（按时间排序去重），与实时 WebSocket 流共用同一份数据源
+  const mergeLogs = useCallback((incoming: LogEntry[]) => {
+    if (!incoming?.length) return;
+    setLogs((prev) => {
+      const existingIds = new Set(prev.map((l) => l.id));
+      const fresh = incoming.filter((l) => !existingIds.has(l.id));
+      if (!fresh.length) return prev;
+      return [...prev, ...fresh].sort((a, b) => a.timestamp - b.timestamp);
+    });
+  }, []);
+
   const handleOpenTaskLogs = async (taskId: string, nodeId?: string) => {
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[App] handleOpenTaskLogs:', { taskId, nodeId });
+    if (import.meta.env?.DEV) {
+      console.log('[App] 打开任务/节点日志:', { taskId, nodeId });
     }
+    // 任务作用域：只展示该任务的日志，nodeId 进一步收窄到节点
+    setLogScope({ taskId, nodeId });
+    setIsLogsOpen(true);
+    setUnreadLogsCount(0);
     try {
-      const taskLogs = await api.getTaskLogs(taskId);
-      setLogs((prev) => {
-        const existingIds = new Set(prev.map((l) => l.id));
-        const newOnes = taskLogs.filter((l) => !existingIds.has(l.id));
-        return [...prev, ...newOnes];
-      });
-      setActiveNodeFilter(nodeId || 'all');
-      setIsLogsOpen(true);
-      setUnreadLogsCount(0);
-    } catch {
-      setActiveNodeFilter(nodeId || 'all');
-      setIsLogsOpen(true);
+      mergeLogs(await api.getTaskLogs(taskId));
+    } catch (err) {
+      if (import.meta.env?.DEV) {
+        console.warn('[App] 拉取任务历史日志失败，保留实时日志流:', err);
+      }
     }
   };
 
-  const handleToggleLogs = () => {
-    setIsLogsOpen(!isLogsOpen);
-    if (!isLogsOpen) {
-      setUnreadLogsCount(0);
+  const handleToggleLogs = async () => {
+    if (isLogsOpen) {
+      setIsLogsOpen(false);
+      return;
+    }
+    // 顶部入口为全局作用域：展示所有任务的日志
+    setLogScope({});
+    setIsLogsOpen(true);
+    setUnreadLogsCount(0);
+    try {
+      mergeLogs(await api.getGlobalLogs());
+    } catch (err) {
+      if (import.meta.env?.DEV) {
+        console.warn('[App] 拉取全局历史日志失败，保留实时日志流:', err);
+      }
     }
   };
 
@@ -482,8 +501,7 @@ export const AppContent: React.FC = () => {
         logs={logs}
         onClearLogs={() => setLogs([])}
         workflows={workflows}
-        activeNodeFilter={activeNodeFilter}
-        onFilterChange={setActiveNodeFilter}
+        scope={logScope}
       />
 
       {/* 新手环境与权限授权向导 */}
