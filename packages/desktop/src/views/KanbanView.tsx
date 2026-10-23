@@ -52,6 +52,7 @@ import {
   GitMerge,
   Unlink,
   Link2,
+  PanelRight,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage, TaskAttachment, SelectedQaArtifacts } from '@openloop/core';
 import { guessImageMimeType } from '@openloop/core/media-mime';
@@ -79,6 +80,14 @@ import { toast } from '../components/Toast';
 import { resolveNodeMeta, resolveQaTestNodeId } from '../utils/nodeMeta';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
 import { orderSubTasksForDisplay } from '../utils/subtaskOrder';
+import {
+  DEFAULT_DETAIL_WIDTH,
+  clampDetailWidth,
+  readAgentPaneOpen,
+  readDetailWidth,
+  saveAgentPaneOpen,
+  saveDetailWidth,
+} from '../utils/taskWorkbench';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 import {
   ColumnSortRule,
@@ -319,6 +328,64 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       toast.error(`拉起终端失败: ${err?.message || '未知错误'}`);
     }
   };
+  // 任务详情工作台：宽度拖拽（双击复位）与 Agent 协作流常驻开关，均本地记忆
+  const [detailWidth, setDetailWidth] = useState<number>(() => readDetailWidth());
+  const [isAgentPaneOpen, setIsAgentPaneOpen] = useState<boolean>(() => readAgentPaneOpen());
+  const [isResizingDetail, setIsResizingDetail] = useState(false);
+  const detailPanelRef = useRef<HTMLDivElement | null>(null);
+  const detailDragWidthRef = useRef<number>(DEFAULT_DETAIL_WIDTH);
+
+  const applyDetailWidth = (width: number) => {
+    // 通过 CSS 变量直接下发宽度，拖拽过程零 React 重渲染
+    detailPanelRef.current?.style.setProperty('--openloop-workbench-width', `${width}px`);
+  };
+
+  const handleDetailResizeStart = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    detailDragWidthRef.current = detailWidth;
+    setIsResizingDetail(true);
+  };
+
+  useEffect(() => {
+    if (!isResizingDetail) return;
+    const handleMove = (event: MouseEvent) => {
+      const next = clampDetailWidth(window.innerWidth - event.clientX);
+      detailDragWidthRef.current = next;
+      applyDetailWidth(next);
+    };
+    const handleUp = () => {
+      const next = detailDragWidthRef.current;
+      setIsResizingDetail(false);
+      setDetailWidth(next);
+      saveDetailWidth(next);
+      if (import.meta.env?.DEV) console.log('[KanbanView:Workbench] 拖拽调整工作台宽度:', next);
+    };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [isResizingDetail]);
+
+  const handleResetDetailWidth = () => {
+    const next = clampDetailWidth(DEFAULT_DETAIL_WIDTH);
+    applyDetailWidth(next);
+    setDetailWidth(next);
+    saveDetailWidth(next);
+    if (import.meta.env?.DEV) console.log('[KanbanView:Workbench] 双击复位工作台宽度:', next);
+  };
+
+  const handleToggleAgentPane = () => {
+    setIsAgentPaneOpen((prev) => {
+      const next = !prev;
+      saveAgentPaneOpen(next);
+      if (import.meta.env?.DEV) console.log('[KanbanView:Workbench] 切换 Agent 协作流常驻栏:', next);
+      return next;
+    });
+  };
+
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [skippingTaskId, setSkippingTaskId] = useState<string | null>(null);
@@ -353,8 +420,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [isSubmittingQuickIdea, setIsSubmittingQuickIdea] = useState(false);
   const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
 
-  // 任务侧边栏 Tab 与 Agent 会话实时交互状态
-  const [drawerTab, setDrawerTab] = useState<'overview' | 'timeline' | 'subtasks' | 'session'>('overview');
+  // 任务详情工作台：左侧档案视图（懒加载 + 常驻缓存）与右侧 Agent 协作流同屏
+  const [drawerTab, setDrawerTab] = useState<'overview' | 'timeline' | 'subtasks'>('overview');
+  const [visitedPanes, setVisitedPanes] = useState<Record<string, boolean>>({ overview: true });
   const [drawerIdCopied, setDrawerIdCopied] = useState(false);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [isAddingSubtask, setIsAddingSubtask] = useState(false);
@@ -388,7 +456,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     scrollToBottom: scrollChatToBottom,
   } = useChatAutoScroll({
     dataKey: sessionState,
-    isActive: drawerTab === 'session' && !!selectedTask,
+    isActive: !!selectedTask && isAgentPaneOpen,
     resetKey: selectedTask?.id,
   });
 
@@ -453,6 +521,46 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   // 精细选择 QA 自动化测试产物状态
   const [isQaSelectorOpen, setIsQaSelectorOpen] = useState(false);
   const [selectedQaArtifacts, setSelectedQaArtifacts] = useState<SelectedQaArtifacts | null>(null);
+
+  // 懒加载 + 常驻缓存：档案视图首次访问后即保留 DOM，后续切换零重渲染抖动
+  useEffect(() => {
+    if (!selectedTask) return;
+    setVisitedPanes((prev) => (prev[drawerTab] ? prev : { ...prev, [drawerTab]: true }));
+  }, [drawerTab, selectedTask?.id]);
+
+  // Esc 关闭工作台；输入中或叠加弹窗时让行，避免误关
+  useEffect(() => {
+    if (!selectedTask) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (
+        editingTask ||
+        taskToDelete ||
+        visualAcceptanceTask ||
+        parentSelectTask ||
+        linkExistingParentTask ||
+        activeDetailImage ||
+        isQaSelectorOpen
+      ) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
+      if (import.meta.env?.DEV) console.log('[KanbanView:Workbench] Esc 关闭任务工作台:', selectedTask.id);
+      setSelectedTask(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    selectedTask?.id,
+    editingTask,
+    taskToDelete,
+    visualAcceptanceTask,
+    parentSelectTask,
+    linkExistingParentTask,
+    activeDetailImage,
+    isQaSelectorOpen,
+  ]);
 
   // 结合全局 tasks 获取最新任务上下文信息
   const activeTask = selectedTask ? (tasks.find((t) => t.id === selectedTask.id) || selectedTask) : null;
@@ -1416,6 +1524,190 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     ? workspaceFilteredTasks.length
     : workspaceFilteredTasks.filter((t) => t.workflowId === selectedWorkflowFilter).length;
 
+  // 会话消息流单独缓存：输入框逐键输入不触发历史消息与 Markdown 重渲染
+  const chatMessageList = useMemo(() => {
+    if (!sessionState?.messages || sessionState.messages.length === 0) {
+      return (
+      <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-6 text-[#85858d]">
+        <div className="w-11 h-11 rounded-[10px] bg-[#f4f4f6] border border-[#e3e3e8] flex items-center justify-center mb-2.5">
+          <Bot size={20} className="text-[#85858d]" />
+        </div>
+        <div className="text-[12.5px] font-medium text-[#1c1c21] mb-1">Agent 实时交互会话</div>
+        <div className="text-[11px] text-[#85858d] leading-relaxed max-w-[280px]">
+          启动任务后，智能体的深度思考、工具调用与代码生成将在此毫秒级流式展现；您亦可在下方随时插话或纠偏。
+        </div>
+      </div>
+);
+    }
+    return (
+      sessionState.messages.map((msg, msgIdx) => {
+        if (msg.role === 'user') {
+          // 检测是否包含 UI 自动化测试产物附加块
+          const qaMarkerMatch = msg.content?.match(/\[(?:系统自动附加|用户主动附带|附带)：?(?:最新 UI 自动化测试产物|UI 自动化测试验收产物.*?)\]/);
+          const qaMarkerIndex = qaMarkerMatch ? msg.content.indexOf(qaMarkerMatch[0]) : -1;
+          const userText = qaMarkerIndex !== -1 ? msg.content.slice(0, qaMarkerIndex).trim() : msg.content;
+          const qaText = qaMarkerIndex !== -1 ? msg.content.slice(qaMarkerIndex).trim() : '';
+
+          return (
+            <div key={msg.id} className="flex justify-end">
+              <div className="max-w-[85%] rounded-[9px] px-3.5 py-2.5 bg-[#f4f4f6] border border-[#e3e3e8] text-[#1c1c21] text-[12px] leading-relaxed shadow-sm">
+                <div className="text-[9.5px] font-mono text-[#85858d] mb-1 text-right">YOU</div>
+                {userText && <div className="whitespace-pre-wrap">{userText}</div>}
+
+                {/* 自动化测试产物折叠卡片 */}
+                {qaText && (
+                  <div className={`${userText ? 'mt-2 pt-2 border-t border-[#e6e6ec]' : ''}`}>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedQaAttachments((prev) => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[5px] bg-[#eeedfd] border border-[#c7d2fe] text-[#4f46e5] text-[10.5px] font-medium hover:bg-[#e0e0fc] transition-colors cursor-pointer"
+                    >
+                      <FlaskConical size={10.5} />
+                      <span>随附 UI 自动化测试产物</span>
+                      {expandedQaAttachments[msg.id] ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                    </button>
+                    {expandedQaAttachments[msg.id] && (
+                      <div className="mt-1.5 p-2 rounded-[5px] bg-white border border-[#e3e3e8] font-mono text-[10px] text-[#63636b] leading-relaxed whitespace-pre-wrap max-h-[160px] overflow-y-auto">
+                        {qaText}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 用户随附图片缩略图画廊 */}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className={`flex flex-wrap gap-1.5 ${msg.content ? 'mt-2 pt-2 border-t border-[#e6e6ec]' : ''}`}>
+                    {msg.attachments.map((att) => {
+                      const displayUrl = api.getAttachmentUrl(att.url || att.path || '');
+                      return (
+                        <div
+                          key={att.id}
+                          onClick={() => setActiveDetailImage(att)}
+                          className="group relative w-[60px] h-[60px] rounded-[6px] border border-[#d8d8de] bg-white overflow-hidden shadow-xs hover:border-[#4f46e5] cursor-pointer transition-all"
+                          title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击放大查看`}
+                        >
+                          <img
+                            src={displayUrl}
+                            alt={att.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <ZoomIn size={12} className="text-white" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div key={msg.id} className="space-y-2">
+            {/* 深度思考模块 Thinking */}
+            {msg.thinking && (
+              <div className="rounded-[7px] border border-[#e8e8ed] bg-[#fafafc] overflow-hidden text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (import.meta.env.DEV) {
+                      console.log('[KanbanView:AgentChat] 切换思考过程展开:', { msgId: msg.id, current: !!expandedThinking[msg.id] });
+                    }
+                    setExpandedThinking((p) => ({ ...p, [msg.id]: !p[msg.id] }));
+                  }}
+                  className="w-full px-2.5 py-1.5 flex items-center justify-between text-[#63636b] hover:bg-[#f1f1f4] transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles size={11} className={msg.isThinking ? 'text-[#7c3aed] animate-spin' : 'text-[#7c3aed]'} />
+                    <span className="font-medium text-[11px]">
+                      {msg.isThinking ? '智能体深度思考中...' : '深度思考过程'}
+                    </span>
+                    {msg.isThinking && <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-pulse" />}
+                  </div>
+                  {expandedThinking[msg.id] ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                </button>
+                {expandedThinking[msg.id] && (
+                  <div className="p-2.5 border-t border-[#e8e8ed] bg-[#f5f5f8] font-mono text-[10.5px] text-[#63636b] leading-relaxed whitespace-pre-wrap max-h-[200px] overflow-y-auto">
+                    {msg.thinking}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 工具调用卡片 Tools */}
+            {msg.tools && msg.tools.length > 0 && (
+              <div className="space-y-1.5">
+                {msg.tools.map((tool) => (
+                  <div key={tool.id} className="rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden text-[11px]">
+                    <div
+                      onClick={() => {
+                        if (import.meta.env.DEV) {
+                          console.log('[KanbanView:AgentChat] 切换工具输出展开:', { toolId: tool.id, toolName: tool.name });
+                        }
+                        setExpandedTools((p) => ({ ...p, [tool.id]: !p[tool.id] }));
+                      }}
+                      className="px-2.5 py-1.5 flex items-center justify-between cursor-pointer hover:bg-[#f9f9fb] transition-colors"
+                    >
+                      <div className="flex items-center gap-1.5 truncate mr-2">
+                        <Terminal size={11} className="text-[#4f46e5] shrink-0" />
+                        <span className="font-mono font-semibold text-[#1c1c21]">{tool.name}</span>
+                        {tool.args && (
+                          <span className="font-mono text-[#85858d] truncate max-w-[200px]">
+                            {typeof tool.args === 'string' ? tool.args : JSON.stringify(tool.args)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {tool.status === 'running' ? (
+                          <span className="text-[#4f46e5] flex items-center gap-1 text-[10px]">
+                            <Loader2 size={10} className="animate-spin text-[#4f46e5]" />
+                            执行中
+                          </span>
+                        ) : tool.status === 'success' ? (
+                          <span className="text-[#189a58] flex items-center gap-0.5 text-[10px]">
+                            <Check size={10.5} />
+                            {tool.durationMs ? `${(tool.durationMs / 1000).toFixed(1)}s` : '完成'}
+                          </span>
+                        ) : (
+                          <span className="text-[#d64545] flex items-center gap-0.5 text-[10px]">
+                            <AlertCircle size={10.5} />
+                            失败
+                          </span>
+                        )}
+                        {expandedTools[tool.id] ? <ChevronDown size={11} className="text-[#85858d]" /> : <ChevronRight size={11} className="text-[#85858d]" />}
+                      </div>
+                    </div>
+                    {expandedTools[tool.id] && (
+                      <div className="p-2 border-t border-[#ececf0] bg-[#1c1c21] text-[#e3e3e8] font-mono text-[10px] leading-relaxed max-h-[160px] overflow-y-auto">
+                        {tool.result ? (
+                          <pre className="whitespace-pre-wrap">{typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2)}</pre>
+                        ) : (
+                          <span className="text-[#85858d]">暂无输出内容</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Assistant 回复正文 */}
+            {msg.content && (
+              <div className="p-3 rounded-[9px] bg-white border border-[#e3e3e8] shadow-sm select-text">
+                <AgentMarkdown
+                  content={msg.content}
+                  isStreaming={!!sessionState?.isBusy && msgIdx === sessionState.messages.length - 1}
+                />
+              </div>
+            )}
+          </div>
+        );
+                    })
+    );
+  }, [sessionState, expandedThinking, expandedTools, expandedQaAttachments]);
+
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">
       {/* 1:1 magpie 风格次级工具栏 (Sub-header) */}
@@ -2041,10 +2333,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         </div>
       )}
 
-      {/* 任务详情侧抽屉与背景蒙层 */}
+      {/* 任务详情工作台：左侧任务档案与右侧 Agent 协作流同屏并置 */}
       {selectedTask && (
         <div
-          className="fixed inset-0 z-50 flex justify-end bg-black/30 backdrop-blur-[2px] animate-in fade-in duration-100"
+          className="fixed inset-0 z-50 flex justify-end bg-black/25 backdrop-blur-[2px] animate-in fade-in duration-100"
           onClick={() => setSelectedTask(null)}
         >
           {(() => {
@@ -2056,16 +2348,49 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
               curTask.context?.worktree ||
               Object.values(curTask.nodeRuns || {}).some((r) => r.artifacts && r.artifacts.length > 0)
             );
+            // 档案视图切换：懒加载首帧 + 常驻隐藏，切换不丢失滚动位置与展开状态
+            const paneClass = (active: boolean) =>
+              `flex-1 min-h-0 p-5 overflow-y-auto space-y-3.5 text-[12px]${active ? '' : ' hidden'}`;
+            const wfNodes = wfDef?.nodes || [];
+            const finishedNodeCount = wfNodes.filter((node) => {
+              const run = curTask.nodeRuns?.[node.id];
+              return run?.status === 'success' || run?.status === 'skipped';
+            }).length;
+            const nodePercent = wfNodes.length > 0 ? Math.round((finishedNodeCount / wfNodes.length) * 100) : 0;
+            const currentNodeMeta = curTask.currentNodeId
+              ? resolveNodeMeta(curTask.currentNodeId, wfDef, workflows)
+              : null;
 
             return (
               <div
+                ref={(node) => {
+                  detailPanelRef.current = node;
+                  if (node) node.style.setProperty('--openloop-workbench-width', `${detailWidth}px`);
+                }}
                 onClick={(e) => e.stopPropagation()}
-                className="w-[540px] max-w-[92vw] h-full bg-[#f8f8fa] border-l border-[#e3e3e8] shadow-[0_20px_50px_rgba(15,23,42,0.18)] flex flex-col animate-in slide-in-from-right duration-150 relative z-10"
+                style={{ width: 'var(--openloop-workbench-width, 1180px)' }}
+                className={`relative z-10 flex h-full max-w-[calc(100vw-24px)] flex-col border-l border-[#e3e3e8] bg-[#f8f8fa] shadow-[0_20px_50px_rgba(15,23,42,0.18)] animate-in slide-in-from-right duration-150 ${
+                  isResizingDetail ? 'select-none' : ''
+                }`}
               >
-                {/* 抽屉顶部头部 Header */}
-                <div className="px-5 pt-4 pb-3 border-b border-[#ececf0] bg-white shrink-0 space-y-2.5">
+                {/* 左边缘拖拽调宽热区：拖拽即时跟手，双击复位 */}
+                <div
+                  onMouseDown={handleDetailResizeStart}
+                  onDoubleClick={handleResetDetailWidth}
+                  className="group absolute left-0 top-0 z-20 flex h-full w-2 cursor-col-resize items-center justify-center"
+                  title="拖拽调整工作台宽度 · 双击复位"
+                >
+                  <span
+                    className={`h-12 w-[2px] rounded-full transition-colors ${
+                      isResizingDetail ? 'bg-[#4f46e5]' : 'bg-[#dcdce2] group-hover:bg-[#4f46e5]'
+                    }`}
+                  />
+                </div>
+
+                {/* 顶栏：编号 · 状态 · 标题 · 主操作横向平铺，随工作台宽度自适应 */}
+                <div className="px-4 pt-3 pb-2.5 pl-5 border-b border-[#ececf0] bg-white shrink-0 space-y-2">
                   <div className="flex items-center justify-between gap-2.5">
-                    <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                    <div className="flex items-center gap-2 min-w-0 shrink-0 max-w-[52%]">
                       <button
                         type="button"
                         onClick={async () => {
@@ -2108,6 +2433,14 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       </span>
                     </div>
 
+                    {/* 任务标题：铺满中段，超长自动省略并悬浮呈现全文 */}
+                    <h3
+                      className="flex-1 min-w-0 truncate text-[13.5px] font-semibold text-[#1c1c21] tracking-tight select-text"
+                      title={curTask.title}
+                    >
+                      {curTask.title}
+                    </h3>
+
                     <div className="flex items-center gap-1.5 shrink-0">
                       {curTask.status !== 'running' && !(curTask.kind === 'group' && Array.isArray(curTask.subTaskIds) && curTask.subTaskIds.length > 0) && (
                         <button
@@ -2144,12 +2477,24 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         <Trash2 size={12} />
                       </button>
                       <button
+                        onClick={handleToggleAgentPane}
+                        className={`h-[26px] px-2 rounded-[5px] border text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0 ${
+                          isAgentPaneOpen
+                            ? 'border-[#d8d6fb] bg-[#eeedfd] text-[#4f46e5]'
+                            : 'border-[#e3e3e8] bg-white text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f4f4f6]'
+                        }`}
+                        title={isAgentPaneOpen ? '收起 Agent 协作流，专注任务档案' : '展开 Agent 协作流，与任务同屏对话'}
+                      >
+                        <PanelRight size={11} />
+                        <span>Agent</span>
+                      </button>
+                      <button
                         onClick={() => {
-                          if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 点击关闭侧边栏:', curTask.id);
+                          if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 点击关闭工作台:', curTask.id);
                           setSelectedTask(null);
                         }}
                         className="h-[26px] w-[26px] rounded-[5px] hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] flex items-center justify-center transition-colors cursor-pointer shrink-0"
-                        title="关闭侧边栏"
+                        title="关闭工作台 (Esc)"
                       >
                         <X size={15} />
                       </button>
@@ -2189,88 +2534,94 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     </div>
                   )}
 
-                  {/* 任务主标题 */}
-                  <h3 className="text-[14px] font-semibold text-[#1c1c21] leading-snug break-words tracking-tight select-text">
-                    {curTask.title}
-                  </h3>
-
-                  {/* 抽屉 Segmented Control 多 Tab 切换 */}
-                  <div className="flex items-center p-0.5 rounded-[6px] bg-[#f1f1f4] border border-[#e3e3e8]">
-                    <button
-                      onClick={() => setDrawerTab('overview')}
-                      className={`flex-1 h-[26px] rounded-[4px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                        drawerTab === 'overview'
-                          ? 'bg-white text-[#1c1c21] shadow-sm font-semibold'
-                          : 'text-[#63636b] hover:text-[#1c1c21]'
-                      }`}
-                    >
-                      <Layers size={12} />
-                      <span>任务概览</span>
-                    </button>
-                    <button
-                      onClick={() => setDrawerTab('timeline')}
-                      className={`flex-1 h-[26px] rounded-[4px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                        drawerTab === 'timeline'
-                          ? 'bg-white text-[#1c1c21] shadow-sm font-semibold'
-                          : 'text-[#63636b] hover:text-[#1c1c21]'
-                      }`}
-                      title="查看流水线各节点的执行时序、参数与产物"
-                    >
-                      <GitCommit size={12} />
-                      <span>执行轨迹</span>
-                      {recordedNodeCount > 0 && (
-                        <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded-full bg-[#ececf0] text-[#63636b]">
-                          {recordedNodeCount}
-                        </span>
-                      )}
-                    </button>
-                    {curTask.kind !== 'subtask' && (
-                      <button
-                        onClick={() => setDrawerTab('subtasks')}
-                        className={`flex-1 h-[26px] rounded-[4px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                          drawerTab === 'subtasks'
-                            ? 'bg-white text-[#4f46e5] shadow-sm font-semibold'
-                            : 'text-[#63636b] hover:text-[#1c1c21]'
-                        }`}
-                      >
-                        <Layers size={12} className={drawerTab === 'subtasks' ? 'text-[#4f46e5]' : 'text-[#71717a]'} />
-                        <span>工序演进</span>
-                        {(curTask.subTaskIds || []).length > 0 ? (
-                          <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded-full bg-[#eeedfd] text-[#4f46e5] font-semibold">
-                            {(curTask.subTaskIds || []).length}
-                          </span>
-                        ) : (
-                          <span className="text-[9.5px] text-[#85858d] bg-[#ececf0] px-1 py-[0.5px] rounded font-normal">
-                            裂变
-                          </span>
-                        )}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setDrawerTab('session')}
-                      className={`flex-1 h-[26px] rounded-[4px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all relative cursor-pointer ${
-                        drawerTab === 'session'
-                          ? 'bg-white text-[#1c1c21] shadow-sm font-semibold'
-                          : 'text-[#63636b] hover:text-[#1c1c21]'
-                      }`}
-                    >
-                      <Bot size={12} className={sessionState?.isBusy ? 'text-[#4f46e5]' : ''} />
-                      <span>实时对话</span>
-                      {(sessionState?.isBusy) && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-pulse" />
-                      )}
-                      {(sessionState?.messages?.length || 0) > 0 && (
-                        <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded-full bg-[#ececf0] text-[#63636b]">
-                          {sessionState?.messages.length}
-                        </span>
-                      )}
-                    </button>
-                  </div>
                 </div>
 
-                {/* TAB 1: 任务概览 */}
-                {drawerTab === 'overview' && (
-                  <div className="flex-1 p-5 overflow-y-auto space-y-3.5 text-[12px]">
+                {/* 主体：左侧任务档案（常驻不卸载） + 右侧 Agent 协作流（全程同屏） */}
+                <div className="flex-1 flex min-h-0">
+                  <main className="flex-1 min-w-0 flex flex-col">
+                    {/* 档案视图切换：切换不卸载、不丢滚动位置 */}
+                    <div className="h-[40px] pl-4 pr-3 flex items-center justify-between gap-2 shrink-0 bg-white border-b border-[#ececf0]">
+                      <div className="flex items-center p-0.5 rounded-[6px] bg-[#f1f1f4] border border-[#e3e3e8]">
+                        <button
+                          onClick={() => setDrawerTab('overview')}
+                          className={`h-[26px] px-2.5 rounded-[4px] text-[11.5px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                            drawerTab === 'overview' ? 'bg-white text-[#1c1c21] shadow-sm font-semibold' : 'text-[#63636b] hover:text-[#1c1c21]'
+                          }`}
+                        >
+                          <Layers size={12} />
+                          <span>任务概览</span>
+                        </button>
+                        <button
+                          onClick={() => setDrawerTab('timeline')}
+                          className={`h-[26px] px-2.5 rounded-[4px] text-[11.5px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                            drawerTab === 'timeline' ? 'bg-white text-[#1c1c21] shadow-sm font-semibold' : 'text-[#63636b] hover:text-[#1c1c21]'
+                          }`}
+                          title="查看流水线各节点的执行时序、参数与产物"
+                        >
+                          <GitCommit size={12} />
+                          <span>执行轨迹</span>
+                          {recordedNodeCount > 0 && (
+                            <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded-full bg-[#ececf0] text-[#63636b]">
+                              {recordedNodeCount}
+                            </span>
+                          )}
+                        </button>
+                        {curTask.kind !== 'subtask' && (
+                          <button
+                            onClick={() => setDrawerTab('subtasks')}
+                            className={`h-[26px] px-2.5 rounded-[4px] text-[11.5px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                              drawerTab === 'subtasks' ? 'bg-white text-[#4f46e5] shadow-sm font-semibold' : 'text-[#63636b] hover:text-[#1c1c21]'
+                            }`}
+                          >
+                            <Layers size={12} className={drawerTab === 'subtasks' ? 'text-[#4f46e5]' : 'text-[#71717a]'} />
+                            <span>工序演进</span>
+                            {(curTask.subTaskIds || []).length > 0 ? (
+                              <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded-full bg-[#eeedfd] text-[#4f46e5] font-semibold">
+                                {(curTask.subTaskIds || []).length}
+                              </span>
+                            ) : (
+                              <span className="text-[9.5px] text-[#85858d] bg-[#ececf0] px-1 py-[0.5px] rounded font-normal">裂变</span>
+                            )}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* 当前节点焦点与整条流水线进度微带 */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div
+                          className="flex items-center gap-1.5 min-w-0"
+                          title={`当前节点：${currentNodeMeta?.name || '流水线就绪'} · 已完成 ${finishedNodeCount}/${wfNodes.length} 个节点`}
+                        >
+                          <span className="text-[10px] font-mono text-[#85858d] shrink-0">
+                            {finishedNodeCount}/{wfNodes.length}
+                          </span>
+                          <span className="text-[10.5px] text-[#52525b] truncate max-w-[160px]">
+                            {currentNodeMeta?.name || '流水线就绪'}
+                          </span>
+                          <div className="w-[44px] h-[3px] rounded-full bg-[#ececf0] overflow-hidden shrink-0">
+                            <div
+                              className="h-full rounded-full bg-[#4f46e5] transition-[width] duration-300"
+                              style={{ width: `${nodePercent}%` }}
+                            />
+                          </div>
+                        </div>
+                        {!isAgentPaneOpen && (
+                          <button
+                            type="button"
+                            onClick={handleToggleAgentPane}
+                            className="h-[24px] px-2 rounded-[5px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[10.5px] font-medium flex items-center gap-1 transition-all cursor-pointer shrink-0"
+                            title="展开 Agent 协作流"
+                          >
+                            <Bot size={11} />
+                            <span>Agent</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* TAB 1: 任务概览 */}
+                    {visitedPanes.overview && (
+                      <div className={paneClass(drawerTab === 'overview')}>
                     {/* 模块 1: 核心属性与规格面板 */}
                     <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-3">
                       <div className="grid grid-cols-2 gap-x-4 gap-y-3">
@@ -2504,12 +2855,12 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       task={curTask}
                       onTaskUpdated={(updated) => onTaskUpdate?.(updated)}
                     />
-                  </div>
-                )}
+                      </div>
+                    )}
 
-                {/* TAB 2: 节点执行轨迹 */}
-                {drawerTab === 'timeline' && (
-                  <div className="flex-1 p-5 overflow-y-auto space-y-3.5 text-[12px]">
+                    {/* TAB 2: 节点执行轨迹 */}
+                    {visitedPanes.timeline && (
+                      <div className={paneClass(drawerTab === 'timeline')}>
                     <NodeExecutionTimeline
                       task={curTask}
                       workflow={wfDef}
@@ -2526,12 +2877,12 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       isCustomRetrying={isCustomRetrying}
                       onNodeOverride={handleNodeOverride}
                     />
-                  </div>
-                )}
+                      </div>
+                    )}
 
-                {/* 底部操作区：任务概览与执行轨迹共用 */}
-                {(drawerTab === 'overview' || drawerTab === 'timeline') && (
-                  <div className="h-[52px] px-4 border-t border-[#e3e3e8] bg-[#fafafc] flex items-center justify-between shrink-0 select-none">
+                    {/* 底部操作区：任务档案视图共用 */}
+                    {drawerTab !== 'subtasks' && (
+                  <div className="min-h-[52px] px-4 py-1.5 border-t border-[#e3e3e8] bg-[#fafafc] flex flex-wrap items-center justify-between gap-y-1 shrink-0 select-none">
                     {/* 左侧辅助入口：实时控制台日志 */}
                     <div className="flex items-center gap-1.5 min-w-0">
                       <button
@@ -2743,11 +3094,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       )}
                     </div>
                   </div>
-                )}
+                    )}
 
-                {/* TAB 3: 任务组与工序自然生长演进 */}
-                {drawerTab === 'subtasks' && (
-                  <div className="flex-1 p-5 overflow-y-auto space-y-3.5 text-[12px]">
+                    {/* TAB 3: 任务组与工序自然生长演进 */}
+                    {visitedPanes.subtasks && (
+                      <div className={paneClass(drawerTab === 'subtasks')}>
                     {(() => {
                       const groupSubtasks = (curTask.subTaskIds || [])
                         .map((id) => tasks.find((t) => t.id === id))
@@ -3371,14 +3722,18 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         </>
                       );
                     })()}
-                  </div>
-                )}
+                      </div>
+                    )}
+                  </main>
 
-            {/* TAB 4: Agent 实时会话与双向交互 */}
-            {drawerTab === 'session' && (
-              <div className="flex-1 flex flex-col min-h-0 pt-3">
+                  {/* 右栏：Agent 协作流全程同屏，翻档与对话互不打断 */}
+                  {isAgentPaneOpen && (
+                    <>
+                      <div className="w-px shrink-0 bg-[#ececf0]" />
+                      <aside className="w-[clamp(340px,42%,600px)] shrink-0 flex flex-col min-h-0 bg-white px-3 pb-3">
+                        <div className="flex-1 flex flex-col min-h-0 pt-2">
                 {/* 顶部感知与控制条 */}
-                <div className="mb-2 px-3 py-2 rounded-[8px] bg-[#f9f9fb] border border-[#ececf0] flex items-center justify-between gap-1.5">
+                <div className="mb-2 px-3 py-2 rounded-[8px] bg-[#f9f9fb] border border-[#ececf0] flex flex-wrap items-center justify-between gap-1.5 gap-y-1">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-2 h-2 rounded-full bg-[#7c3aed] inline-block shrink-0" />
                     <span className="text-[11.5px] font-semibold text-[#1c1c21] truncate">
@@ -3493,183 +3848,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     onWheel={handleChatWheel}
                     className="flex-1 overflow-y-auto pr-1 space-y-3 min-h-0 text-[12px]"
                   >
-                  {(!sessionState?.messages || sessionState.messages.length === 0) ? (
-                    <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-6 text-[#85858d]">
-                      <div className="w-11 h-11 rounded-[10px] bg-[#f4f4f6] border border-[#e3e3e8] flex items-center justify-center mb-2.5">
-                        <Bot size={20} className="text-[#85858d]" />
-                      </div>
-                      <div className="text-[12.5px] font-medium text-[#1c1c21] mb-1">Agent 实时交互会话</div>
-                      <div className="text-[11px] text-[#85858d] leading-relaxed max-w-[280px]">
-                        启动任务后，智能体的深度思考、工具调用与代码生成将在此毫秒级流式展现；您亦可在下方随时插话或纠偏。
-                      </div>
-                    </div>
-                  ) : (
-                    sessionState.messages.map((msg, msgIdx) => {
-                      if (msg.role === 'user') {
-                        // 检测是否包含 UI 自动化测试产物附加块
-                        const qaMarkerMatch = msg.content?.match(/\[(?:系统自动附加|用户主动附带|附带)：?(?:最新 UI 自动化测试产物|UI 自动化测试验收产物.*?)\]/);
-                        const qaMarkerIndex = qaMarkerMatch ? msg.content.indexOf(qaMarkerMatch[0]) : -1;
-                        const userText = qaMarkerIndex !== -1 ? msg.content.slice(0, qaMarkerIndex).trim() : msg.content;
-                        const qaText = qaMarkerIndex !== -1 ? msg.content.slice(qaMarkerIndex).trim() : '';
-
-                        return (
-                          <div key={msg.id} className="flex justify-end">
-                            <div className="max-w-[85%] rounded-[9px] px-3.5 py-2.5 bg-[#f4f4f6] border border-[#e3e3e8] text-[#1c1c21] text-[12px] leading-relaxed shadow-sm">
-                              <div className="text-[9.5px] font-mono text-[#85858d] mb-1 text-right">YOU</div>
-                              {userText && <div className="whitespace-pre-wrap">{userText}</div>}
-
-                              {/* 自动化测试产物折叠卡片 */}
-                              {qaText && (
-                                <div className={`${userText ? 'mt-2 pt-2 border-t border-[#e6e6ec]' : ''}`}>
-                                  <button
-                                    type="button"
-                                    onClick={() => setExpandedQaAttachments((prev) => ({ ...prev, [msg.id]: !prev[msg.id] }))}
-                                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[5px] bg-[#eeedfd] border border-[#c7d2fe] text-[#4f46e5] text-[10.5px] font-medium hover:bg-[#e0e0fc] transition-colors cursor-pointer"
-                                  >
-                                    <FlaskConical size={10.5} />
-                                    <span>随附 UI 自动化测试产物</span>
-                                    {expandedQaAttachments[msg.id] ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                                  </button>
-                                  {expandedQaAttachments[msg.id] && (
-                                    <div className="mt-1.5 p-2 rounded-[5px] bg-white border border-[#e3e3e8] font-mono text-[10px] text-[#63636b] leading-relaxed whitespace-pre-wrap max-h-[160px] overflow-y-auto">
-                                      {qaText}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* 用户随附图片缩略图画廊 */}
-                              {msg.attachments && msg.attachments.length > 0 && (
-                                <div className={`flex flex-wrap gap-1.5 ${msg.content ? 'mt-2 pt-2 border-t border-[#e6e6ec]' : ''}`}>
-                                  {msg.attachments.map((att) => {
-                                    const displayUrl = api.getAttachmentUrl(att.url || att.path || '');
-                                    return (
-                                      <div
-                                        key={att.id}
-                                        onClick={() => setActiveDetailImage(att)}
-                                        className="group relative w-[60px] h-[60px] rounded-[6px] border border-[#d8d8de] bg-white overflow-hidden shadow-xs hover:border-[#4f46e5] cursor-pointer transition-all"
-                                        title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击放大查看`}
-                                      >
-                                        <img
-                                          src={displayUrl}
-                                          alt={att.name}
-                                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
-                                        />
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                          <ZoomIn size={12} className="text-white" />
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div key={msg.id} className="space-y-2">
-                          {/* 深度思考模块 Thinking */}
-                          {msg.thinking && (
-                            <div className="rounded-[7px] border border-[#e8e8ed] bg-[#fafafc] overflow-hidden text-[11px]">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (import.meta.env.DEV) {
-                                    console.log('[KanbanView:AgentChat] 切换思考过程展开:', { msgId: msg.id, current: !!expandedThinking[msg.id] });
-                                  }
-                                  setExpandedThinking((p) => ({ ...p, [msg.id]: !p[msg.id] }));
-                                }}
-                                className="w-full px-2.5 py-1.5 flex items-center justify-between text-[#63636b] hover:bg-[#f1f1f4] transition-colors cursor-pointer"
-                              >
-                                <div className="flex items-center gap-1.5">
-                                  <Sparkles size={11} className={msg.isThinking ? 'text-[#7c3aed] animate-spin' : 'text-[#7c3aed]'} />
-                                  <span className="font-medium text-[11px]">
-                                    {msg.isThinking ? '智能体深度思考中...' : '深度思考过程'}
-                                  </span>
-                                  {msg.isThinking && <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-pulse" />}
-                                </div>
-                                {expandedThinking[msg.id] ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                              </button>
-                              {expandedThinking[msg.id] && (
-                                <div className="p-2.5 border-t border-[#e8e8ed] bg-[#f5f5f8] font-mono text-[10.5px] text-[#63636b] leading-relaxed whitespace-pre-wrap max-h-[200px] overflow-y-auto">
-                                  {msg.thinking}
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {/* 工具调用卡片 Tools */}
-                          {msg.tools && msg.tools.length > 0 && (
-                            <div className="space-y-1.5">
-                              {msg.tools.map((tool) => (
-                                <div key={tool.id} className="rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden text-[11px]">
-                                  <div
-                                    onClick={() => {
-                                      if (import.meta.env.DEV) {
-                                        console.log('[KanbanView:AgentChat] 切换工具输出展开:', { toolId: tool.id, toolName: tool.name });
-                                      }
-                                      setExpandedTools((p) => ({ ...p, [tool.id]: !p[tool.id] }));
-                                    }}
-                                    className="px-2.5 py-1.5 flex items-center justify-between cursor-pointer hover:bg-[#f9f9fb] transition-colors"
-                                  >
-                                    <div className="flex items-center gap-1.5 truncate mr-2">
-                                      <Terminal size={11} className="text-[#4f46e5] shrink-0" />
-                                      <span className="font-mono font-semibold text-[#1c1c21]">{tool.name}</span>
-                                      {tool.args && (
-                                        <span className="font-mono text-[#85858d] truncate max-w-[200px]">
-                                          {typeof tool.args === 'string' ? tool.args : JSON.stringify(tool.args)}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      {tool.status === 'running' ? (
-                                        <span className="text-[#4f46e5] flex items-center gap-1 text-[10px]">
-                                          <Loader2 size={10} className="animate-spin text-[#4f46e5]" />
-                                          执行中
-                                        </span>
-                                      ) : tool.status === 'success' ? (
-                                        <span className="text-[#189a58] flex items-center gap-0.5 text-[10px]">
-                                          <Check size={10.5} />
-                                          {tool.durationMs ? `${(tool.durationMs / 1000).toFixed(1)}s` : '完成'}
-                                        </span>
-                                      ) : (
-                                        <span className="text-[#d64545] flex items-center gap-0.5 text-[10px]">
-                                          <AlertCircle size={10.5} />
-                                          失败
-                                        </span>
-                                      )}
-                                      {expandedTools[tool.id] ? <ChevronDown size={11} className="text-[#85858d]" /> : <ChevronRight size={11} className="text-[#85858d]" />}
-                                    </div>
-                                  </div>
-                                  {expandedTools[tool.id] && (
-                                    <div className="p-2 border-t border-[#ececf0] bg-[#1c1c21] text-[#e3e3e8] font-mono text-[10px] leading-relaxed max-h-[160px] overflow-y-auto">
-                                      {tool.result ? (
-                                        <pre className="whitespace-pre-wrap">{typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2)}</pre>
-                                      ) : (
-                                        <span className="text-[#85858d]">暂无输出内容</span>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Assistant 回复正文 */}
-                          {msg.content && (
-                            <div className="p-3 rounded-[9px] bg-white border border-[#e3e3e8] shadow-sm select-text">
-                              <AgentMarkdown
-                                content={msg.content}
-                                isStreaming={!!sessionState?.isBusy && msgIdx === sessionState.messages.length - 1}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
+                  {chatMessageList}
                   <div ref={chatMessagesEndRef} />
                 </div>
 
@@ -3704,7 +3883,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         )}
 
                         {/* 状态轻量提示 */}
-                        <div className="flex items-center justify-between text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
+                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
                           <span className="flex items-center gap-1">
                             {sessionState?.isBusy ? (
                               <>
@@ -3968,7 +4147,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       </div>
                     ) : includeQaArtifacts ? (
                       /* 原有全量附带测试产物微胶囊 */
-                      <div className="mb-2 flex items-center justify-between bg-[#f0f0ff] border border-[#d8d6fb] rounded-[5px] px-2 py-1">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-1 bg-[#f0f0ff] border border-[#d8d6fb] rounded-[5px] px-2 py-1">
                         <div className="inline-flex items-center gap-1.5 text-[#4f46e5] text-[10.5px] font-medium select-none">
                           <FlaskConical size={11} className="text-[#4f46e5]" />
                           <span>本次将附带全量最新测试产物</span>
@@ -4022,7 +4201,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     />
 
                     {/* 底部工具条：添加图片 + 附带测试产物 + 重测QA + 字数 + 发送按钮 */}
-                    <div className="flex items-center justify-between pt-1.5 border-t border-[#f4f4f6]">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1.5 border-t border-[#f4f4f6]">
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"
@@ -4132,9 +4311,12 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     </div>
                   </div>
                 </div>
+                      </div>
+                      </aside>
+                    </>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
         );
       })()}
     </div>
