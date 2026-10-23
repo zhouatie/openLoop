@@ -745,7 +745,6 @@ export class OpenLoopServer {
           dependencies: Array.isArray(dependencies) ? dependencies : undefined,
           executionMode: executionMode || (isGroup ? 'serial' : undefined),
           concurrencyLimit: typeof concurrencyLimit === 'number' ? concurrencyLimit : (isGroup ? 3 : undefined),
-          autoDecompose: body.autoDecompose !== undefined ? Boolean(body.autoDecompose) : true,
           createdAt: Date.now(),
           updatedAt: Date.now(),
           nodeRuns: {},

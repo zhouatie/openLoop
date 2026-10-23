@@ -296,7 +296,6 @@ export const AppContent: React.FC = () => {
     kind?: 'single' | 'group' | 'subtask';
     executionMode?: 'serial' | 'parallel' | 'dag';
     concurrencyLimit?: number;
-    autoDecompose?: boolean;
     subtasks?: Array<{ id?: string; title: string; workflowId?: string; description?: string; dependencies?: string[]; workspace?: string }>;
   }) => {
     if (import.meta.env?.DEV) {

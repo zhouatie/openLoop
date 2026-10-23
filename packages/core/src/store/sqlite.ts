@@ -33,7 +33,7 @@ const TASK_SUMMARY_SQL = `
   SELECT t.id, t.title, t.description, t.workflow_id, t.status, t.kanban_column, t.current_node_id,
          json_remove(t.context_json, '$.chatMessages', '$.worktree.diffResult') AS context_json,
          t.workspace, t.attachments_json, t.trigger_source, t.kind, t.parent_task_id, t.sub_task_ids_json,
-         t.dependencies_json, t.execution_mode, t.concurrency_limit, t.auto_decompose, t.created_at, t.updated_at,
+         t.dependencies_json, t.execution_mode, t.concurrency_limit, t.created_at, t.updated_at,
          CASE WHEN t.status = 'running' THEN EXISTS (
            SELECT 1
            FROM json_each(json_extract(t.context_json, '$.chatMessages')) AS msg,
@@ -307,9 +307,6 @@ export class SqliteStore {
     } catch {}
     try {
       this.db.exec('ALTER TABLE tasks ADD COLUMN concurrency_limit INTEGER DEFAULT 3');
-    } catch {}
-    try {
-      this.db.exec('ALTER TABLE tasks ADD COLUMN auto_decompose INTEGER DEFAULT 1');
     } catch {}
 
     // 增量表结构平滑迁移：QA 跨端平台 (Web/Android/iOS) 扩展字段
@@ -886,7 +883,6 @@ export class SqliteStore {
       dependencies: tr.dependencies_json ? JSON.parse(tr.dependencies_json) : undefined,
       executionMode: tr.execution_mode || undefined,
       concurrencyLimit: typeof tr.concurrency_limit === 'number' ? tr.concurrency_limit : undefined,
-      autoDecompose: tr.auto_decompose !== null && tr.auto_decompose !== undefined ? Boolean(tr.auto_decompose) : true,
       createdAt: tr.created_at,
       updatedAt: tr.updated_at,
       nodeRuns: runsByTask.get(tr.id) || {},
@@ -954,7 +950,6 @@ export class SqliteStore {
       dependencies: tr.dependencies_json ? JSON.parse(tr.dependencies_json) : undefined,
       executionMode: tr.execution_mode || undefined,
       concurrencyLimit: typeof tr.concurrency_limit === 'number' ? tr.concurrency_limit : undefined,
-      autoDecompose: tr.auto_decompose !== null && tr.auto_decompose !== undefined ? Boolean(tr.auto_decompose) : true,
       createdAt: tr.created_at,
       updatedAt: tr.updated_at,
       nodeRuns,
@@ -978,10 +973,10 @@ export class SqliteStore {
       INSERT INTO tasks (
         id, title, description, workflow_id, status, kanban_column,
         current_node_id, context_json, workspace, attachments_json, trigger_source,
-        kind, parent_task_id, sub_task_ids_json, dependencies_json, execution_mode, concurrency_limit, auto_decompose,
+        kind, parent_task_id, sub_task_ids_json, dependencies_json, execution_mode, concurrency_limit,
         created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         description = excluded.description,
@@ -999,7 +994,6 @@ export class SqliteStore {
         dependencies_json = excluded.dependencies_json,
         execution_mode = excluded.execution_mode,
         concurrency_limit = excluded.concurrency_limit,
-        auto_decompose = excluded.auto_decompose,
         updated_at = excluded.updated_at
     `);
 
@@ -1036,7 +1030,6 @@ export class SqliteStore {
         task.dependencies && task.dependencies.length > 0 ? JSON.stringify(task.dependencies) : null,
         task.executionMode || null,
         typeof task.concurrencyLimit === 'number' ? task.concurrencyLimit : 3,
-        task.autoDecompose !== false ? 1 : 0,
         task.createdAt,
         task.updatedAt
       );

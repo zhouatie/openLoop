@@ -475,7 +475,6 @@ export class AutomationScheduler extends EventEmitter {
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       nodeRuns: {},
-      autoDecompose: directRun ? false : undefined,
       context: {
         automationTaskId: task.id,
         automationTaskName: task.name,
