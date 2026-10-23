@@ -352,7 +352,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
 
   // 任务侧边栏 Tab 与 Agent 会话实时交互状态
-  const [drawerTab, setDrawerTab] = useState<'overview' | 'subtasks' | 'session'>('overview');
+  const [drawerTab, setDrawerTab] = useState<'overview' | 'timeline' | 'subtasks' | 'session'>('overview');
   const [drawerIdCopied, setDrawerIdCopied] = useState(false);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [isAddingSubtask, setIsAddingSubtask] = useState(false);
@@ -2061,6 +2061,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
             const curTask = activeTask || selectedTask;
             const statusInfo = getTaskStatusInfo(curTask);
             const wfDef = wfMap.get(curTask.workflowId);
+            const recordedNodeCount = Object.keys(curTask.nodeRuns || {}).length;
             const hasVisualAcceptance = Boolean(
               curTask.context?.worktree ||
               Object.values(curTask.nodeRuns || {}).some((r) => r.artifacts && r.artifacts.length > 0)
@@ -2216,6 +2217,23 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       <Layers size={12} />
                       <span>任务概览</span>
                     </button>
+                    <button
+                      onClick={() => setDrawerTab('timeline')}
+                      className={`flex-1 h-[26px] rounded-[4px] text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        drawerTab === 'timeline'
+                          ? 'bg-white text-[#1c1c21] shadow-sm font-semibold'
+                          : 'text-[#63636b] hover:text-[#1c1c21]'
+                      }`}
+                      title="查看流水线各节点的执行时序、参数与产物"
+                    >
+                      <GitCommit size={12} />
+                      <span>执行轨迹</span>
+                      {recordedNodeCount > 0 && (
+                        <span className="text-[10px] font-mono px-1.5 py-[0.5px] rounded-full bg-[#ececf0] text-[#63636b]">
+                          {recordedNodeCount}
+                        </span>
+                      )}
+                    </button>
                     {curTask.kind !== 'subtask' && (
                       <button
                         onClick={() => setDrawerTab('subtasks')}
@@ -2247,7 +2265,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       }`}
                     >
                       <Bot size={12} className={sessionState?.isBusy ? 'text-[#4f46e5]' : ''} />
-                      <span>Agent 实时对话</span>
+                      <span>实时对话</span>
                       {(sessionState?.isBusy || curTask.status === 'running') && (
                         <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-pulse" />
                       )}
@@ -2262,490 +2280,482 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                 {/* TAB 1: 任务概览 */}
                 {drawerTab === 'overview' && (
-                  <>
-                    <div className="flex-1 p-5 overflow-y-auto space-y-3.5 text-[12px]">
-                      {/* 模块 1: 核心属性与规格面板 */}
-                      <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-3">
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                          {/* 运行状态 */}
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 text-[10.5px] font-medium text-[#71717a] mb-1">
-                              <Activity size={12} className="text-[#a1a1aa]" />
-                              <span>运行状态</span>
-                            </div>
-                            <div>
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] text-[10.5px] font-medium border ${statusInfo.badgeClass}`}
+                  <div className="flex-1 p-5 overflow-y-auto space-y-3.5 text-[12px]">
+                    {/* 模块 1: 核心属性与规格面板 */}
+                    <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-3">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                        {/* 运行状态 */}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-[10.5px] font-medium text-[#71717a] mb-1">
+                            <Activity size={12} className="text-[#a1a1aa]" />
+                            <span>运行状态</span>
+                          </div>
+                          <div>
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] text-[10.5px] font-medium border ${statusInfo.badgeClass}`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dotClass}`} />
+                              <span>{statusInfo.label}</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* 所属泳道 */}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-[10.5px] font-medium text-[#71717a] mb-1">
+                            <Columns3 size={12} className="text-[#a1a1aa]" />
+                            <span>所属泳道</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-medium text-[#1c1c21] text-[11.5px]">
+                              {COLUMN_NAMES[curTask.kanbanColumn] || curTask.kanbanColumn}
+                            </span>
+                            {curTask.status === 'pending' && curTask.kanbanColumn === 'inbox' && (
+                              <button
+                                disabled={movingTaskId === curTask.id}
+                                onClick={() => handleMoveTaskColumn(curTask.id, 'backlog')}
+                                className="px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] hover:bg-[#eeedfd] text-[#4f46e5] text-[10px] font-medium border border-[#e3e3e8] hover:border-[#c7d2fe] transition-colors cursor-pointer"
+                                title="移入待处理泳道准备执行"
                               >
-                                <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dotClass}`} />
-                                <span>{statusInfo.label}</span>
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* 所属泳道 */}
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 text-[10.5px] font-medium text-[#71717a] mb-1">
-                              <Columns3 size={12} className="text-[#a1a1aa]" />
-                              <span>所属泳道</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-medium text-[#1c1c21] text-[11.5px]">
-                                {COLUMN_NAMES[curTask.kanbanColumn] || curTask.kanbanColumn}
-                              </span>
-                              {curTask.status === 'pending' && curTask.kanbanColumn === 'inbox' && (
-                                <button
-                                  disabled={movingTaskId === curTask.id}
-                                  onClick={() => handleMoveTaskColumn(curTask.id, 'backlog')}
-                                  className="px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] hover:bg-[#eeedfd] text-[#4f46e5] text-[10px] font-medium border border-[#e3e3e8] hover:border-[#c7d2fe] transition-colors cursor-pointer"
-                                  title="移入待处理泳道准备执行"
-                                >
-                                  {movingTaskId === curTask.id ? '移动中' : '移入待处理 →'}
-                                </button>
-                              )}
-                              {curTask.status === 'pending' && curTask.kanbanColumn === 'backlog' && (
-                                <button
-                                  disabled={movingTaskId === curTask.id}
-                                  onClick={() => handleMoveTaskColumn(curTask.id, 'inbox')}
-                                  className="px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] hover:bg-[#eeedfd] text-[#6366f1] text-[10px] font-medium border border-[#e3e3e8] hover:border-[#c7d2fe] transition-colors cursor-pointer"
-                                  title="退回 Inbox 收集箱"
-                                >
-                                  {movingTaskId === curTask.id ? '移动中' : '← 移至 Inbox'}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* 工作流程 */}
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 text-[10.5px] font-medium text-[#71717a] mb-1">
-                              <Workflow size={12} className="text-[#a1a1aa]" />
-                              <span>工作流程</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span
-                                className="font-medium text-[#1c1c21] text-[11.5px] truncate"
-                                title={wfDef?.name || curTask.workflowId}
+                                {movingTaskId === curTask.id ? '移动中' : '移入待处理 →'}
+                              </button>
+                            )}
+                            {curTask.status === 'pending' && curTask.kanbanColumn === 'backlog' && (
+                              <button
+                                disabled={movingTaskId === curTask.id}
+                                onClick={() => handleMoveTaskColumn(curTask.id, 'inbox')}
+                                className="px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] hover:bg-[#eeedfd] text-[#6366f1] text-[10px] font-medium border border-[#e3e3e8] hover:border-[#c7d2fe] transition-colors cursor-pointer"
+                                title="退回 Inbox 收集箱"
                               >
-                                {wfDef?.name || curTask.workflowId}
-                              </span>
-                              <span className="shrink-0 px-1 py-[0.5px] rounded-[3px] bg-[#f4f4f6] border border-[#e3e3e8] text-[9.5px] font-mono text-[#71717a]">
-                                {wfDef?.nodes.length || 0} 节点
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* 工程工作区 */}
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 text-[10.5px] font-medium text-[#71717a] mb-1">
-                              <FolderGit2 size={12} className="text-[#a1a1aa]" />
-                              <span>工程目录</span>
-                            </div>
-                            {curTask.workspace ? (
-                              <div className="flex items-center gap-1 min-w-0">
-                                <span
-                                  className="text-[11.5px] font-medium text-[#1c1c21] truncate cursor-help"
-                                  title={curTask.workspace}
-                                >
-                                  {curTask.workspace.replace(/[/\\]+$/, '').split(/[/\\]/).pop()}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 打开工作区目录:', curTask.workspace);
-                                    api.openPath(curTask.workspace!);
-                                  }}
-                                  className="w-5 h-5 rounded-[4px] hover:bg-[#f4f4f6] text-[#71717a] hover:text-[#4f46e5] flex items-center justify-center shrink-0 transition-colors cursor-pointer"
-                                  title="在系统文件访达中打开"
-                                >
-                                  <FolderOpen size={11} />
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-[#a1a1aa] italic">默认运行时目录</span>
+                                {movingTaskId === curTask.id ? '移动中' : '← 移至 Inbox'}
+                              </button>
                             )}
                           </div>
                         </div>
-                      </div>
 
-                      {/* 模块 2: 任务需求与说明 */}
-                      {(() => {
-                        const isSubtask = curTask.kind === 'subtask' && Boolean(curTask.parentTaskId);
-                        const parentTaskObj = isSubtask
-                          ? tasks.find((t) => t.id === curTask.parentTaskId)
-                          : undefined;
-                        const parentGroupSnapshot = curTask.context?.parentGroupSnapshot;
-                        const parentGroupTitle = parentTaskObj?.title || parentGroupSnapshot?.title;
-                        const parentGroupDescription = parentTaskObj?.description || parentGroupSnapshot?.description;
-                        const parentGroupAttachments: TaskAttachment[] =
-                          parentTaskObj?.attachments || parentGroupSnapshot?.attachments || [];
-
-                        return (
-                          <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-2.5">
-                            {/* 如果是子工序且存在父任务组公共信息，展示全局公共背景与共享参考图 */}
-                            {isSubtask && (parentGroupDescription || parentGroupAttachments.length > 0) && (
-                              <div className="rounded-[6px] border border-[#d8d6fb] bg-[#f8f8ff] p-2.5 space-y-2">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#4f46e5]">
-                                    <Layers size={11.5} />
-                                    <span className="truncate max-w-[280px]">
-                                      任务组公共背景: {parentGroupTitle || '所属任务组'}
-                                    </span>
-                                  </div>
-                                  <span className="text-[9.5px] font-mono text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded shrink-0">
-                                    全工序共享
-                                  </span>
-                                </div>
-
-                                {parentGroupDescription && (
-                                  <div className="text-[11px] text-[#4338ca] leading-relaxed whitespace-pre-wrap select-text max-h-[110px] overflow-y-auto bg-white/75 p-2 rounded-[5px] border border-[#e0defc]">
-                                    {parentGroupDescription}
-                                  </div>
-                                )}
-
-                                {parentGroupAttachments.length > 0 && (
-                                  <div className="space-y-1">
-                                    <span className="text-[10px] text-[#6366f1] font-medium flex items-center gap-1">
-                                      <span>任务组共享参考图 ({parentGroupAttachments.length})</span>
-                                    </span>
-                                    <div className="flex items-center gap-2 overflow-x-auto py-0.5 scrollbar-thin">
-                                      {parentGroupAttachments.map((att) => {
-                                        const displayUrl = api.getAttachmentUrl(att.url);
-                                        return (
-                                          <div
-                                            key={att.id}
-                                            onClick={() => {
-                                              if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 预览任务组公共附件图片:', att.name);
-                                              setActiveDetailImage(att);
-                                            }}
-                                            className="group relative w-[46px] h-[46px] shrink-0 rounded-[5px] border border-[#d8d6fb] bg-white overflow-hidden shadow-2xs hover:border-[#4f46e5] cursor-pointer transition-all"
-                                            title={`${att.name} (任务组公共图片)\n${(att.size / 1024).toFixed(0)} KB\n点击大图预览`}
-                                          >
-                                            <img
-                                              src={displayUrl}
-                                              alt={att.name}
-                                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
-                                            />
-                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                              <ZoomIn size={11} className="text-white" />
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#1c1c21]">
-                                <AlignLeft size={12} className="text-[#71717a]" />
-                                <span>
-                                  {isSubtask ? '本工序专属需求与提示词' : '任务需求与提示词'}
-                                </span>
-                              </div>
-                              {curTask.attachments && curTask.attachments.length > 0 && (
-                                <span className="text-[10px] text-[#71717a] font-mono bg-[#f4f4f6] px-1.5 py-0.5 rounded-[4px] border border-[#e3e3e8]">
-                                  {curTask.attachments.length} 张参考图
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="p-3 rounded-[6px] border border-[#ececf0] bg-[#fafafc] text-[#374151] text-[12px] leading-relaxed whitespace-pre-wrap select-text max-h-[220px] overflow-y-auto">
-                              {curTask.description ? (
-                                curTask.description
-                              ) : (
-                                <span className="text-[#a1a1aa] italic">未设置专属说明（继承任务组公共描述）</span>
-                              )}
-                            </div>
-
-                            {/* 图片附件画廊 */}
-                            {curTask.attachments && curTask.attachments.length > 0 && (
-                              <div className="pt-1 flex items-center gap-2 overflow-x-auto py-1 scrollbar-thin">
-                                {curTask.attachments.map((att) => {
-                                  const displayUrl = api.getAttachmentUrl(att.url);
-                                  return (
-                                    <div
-                                      key={att.id}
-                                      onClick={() => {
-                                        if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 预览附件图片:', att.name);
-                                        setActiveDetailImage(att);
-                                      }}
-                                      className="group relative w-[52px] h-[52px] shrink-0 rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden shadow-sm hover:border-[#4f46e5] cursor-pointer transition-all"
-                                      title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击大图预览`}
-                                    >
-                                      <img
-                                        src={displayUrl}
-                                        alt={att.name}
-                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
-                                      />
-                                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                        <ZoomIn size={12} className="text-white" />
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
+                        {/* 工作流程 */}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-[10.5px] font-medium text-[#71717a] mb-1">
+                            <Workflow size={12} className="text-[#a1a1aa]" />
+                            <span>工作流程</span>
                           </div>
-                        );
-                      })()}
-
-                      {/* 模块 3: 验收用例 (随时可查看与修改) */}
-                      <TaskQaInstructionsCard
-                        task={curTask}
-                        onTaskUpdated={(updated) => onTaskUpdate?.(updated)}
-                      />
-
-                      {/* 模块 4: 流水线节点执行时序 */}
-                      <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#1c1c21]">
-                            <GitCommit size={12} className="text-[#71717a]" />
-                            <span>节点执行轨迹</span>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              className="font-medium text-[#1c1c21] text-[11.5px] truncate"
+                              title={wfDef?.name || curTask.workflowId}
+                            >
+                              {wfDef?.name || curTask.workflowId}
+                            </span>
+                            <span className="shrink-0 px-1 py-[0.5px] rounded-[3px] bg-[#f4f4f6] border border-[#e3e3e8] text-[9.5px] font-mono text-[#71717a]">
+                              {wfDef?.nodes.length || 0} 节点
+                            </span>
                           </div>
-                          <span className="text-[10.5px] font-mono text-[#71717a]">
-                            {Object.keys(curTask.nodeRuns || {}).length} 个节点已记录
-                          </span>
                         </div>
 
-                        <NodeExecutionTimeline
-                          task={curTask}
-                          workflow={wfDef}
-                          allWorkflows={workflows}
-                          onOpenTaskLogs={onOpenTaskLogs}
-                          onPreviewArtifact={(art) => setPreviewArtifact(art)}
-                          onApprove={(taskId, approved, feedback) => handleApprove(taskId, approved, feedback)}
-                          isApproving={approvingId === curTask.id}
-                          onSkipNode={(taskId, nodeId) => handleSkipNode(taskId, nodeId)}
-                          onRetryNode={(taskId, nodeId) => handleRetryNode(taskId, nodeId)}
-                          isSkipping={skippingTaskId === curTask.id}
-                          isRetryingNode={retryingNodeKey?.startsWith(curTask.id)}
-                          onCustomRetry={handleCustomRetry}
-                          isCustomRetrying={isCustomRetrying}
-                          onNodeOverride={handleNodeOverride}
-                        />
+                        {/* 工程工作区 */}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-[10.5px] font-medium text-[#71717a] mb-1">
+                            <FolderGit2 size={12} className="text-[#a1a1aa]" />
+                            <span>工程目录</span>
+                          </div>
+                          {curTask.workspace ? (
+                            <div className="flex items-center gap-1 min-w-0">
+                              <span
+                                className="text-[11.5px] font-medium text-[#1c1c21] truncate cursor-help"
+                                title={curTask.workspace}
+                              >
+                                {curTask.workspace.replace(/[/\\]+$/, '').split(/[/\\]/).pop()}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 打开工作区目录:', curTask.workspace);
+                                  api.openPath(curTask.workspace!);
+                                }}
+                                className="w-5 h-5 rounded-[4px] hover:bg-[#f4f4f6] text-[#71717a] hover:text-[#4f46e5] flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+                                title="在系统文件访达中打开"
+                              >
+                                <FolderOpen size={11} />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-[#a1a1aa] italic">默认运行时目录</span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    {/* 抽屉底部操作区 (ActionBar) */}
-                    <div className="h-[52px] px-4 border-t border-[#e3e3e8] bg-[#fafafc] flex items-center justify-between shrink-0 select-none">
-                      {/* 左侧辅助入口：实时控制台日志 */}
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 打开控制台日志:', curTask.id);
-                            onOpenTaskLogs(curTask.id);
-                            setSelectedTask(null);
-                          }}
-                          className={`h-[28px] px-2.5 rounded-[5px] text-[11.5px] font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
-                            curTask.status === 'running'
-                              ? 'bg-[#eeedfd] text-[#4f46e5] hover:bg-[#e0e0fc]'
-                              : 'text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0]'
-                          }`}
-                          title="查看此任务实时控制台日志与输出"
-                        >
-                          <Terminal size={12} className={curTask.status === 'running' ? 'text-[#4f46e5]' : 'text-[#71717a]'} />
-                          <span>控制台日志</span>
-                          {curTask.status === 'running' && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-pulse" />
+                    {/* 模块 2: 任务需求与说明 */}
+                    {(() => {
+                      const isSubtask = curTask.kind === 'subtask' && Boolean(curTask.parentTaskId);
+                      const parentTaskObj = isSubtask
+                        ? tasks.find((t) => t.id === curTask.parentTaskId)
+                        : undefined;
+                      const parentGroupSnapshot = curTask.context?.parentGroupSnapshot;
+                      const parentGroupTitle = parentTaskObj?.title || parentGroupSnapshot?.title;
+                      const parentGroupDescription = parentTaskObj?.description || parentGroupSnapshot?.description;
+                      const parentGroupAttachments: TaskAttachment[] =
+                        parentTaskObj?.attachments || parentGroupSnapshot?.attachments || [];
+
+                      return (
+                        <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-2.5">
+                          {/* 如果是子工序且存在父任务组公共信息，展示全局公共背景与共享参考图 */}
+                          {isSubtask && (parentGroupDescription || parentGroupAttachments.length > 0) && (
+                            <div className="rounded-[6px] border border-[#d8d6fb] bg-[#f8f8ff] p-2.5 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#4f46e5]">
+                                  <Layers size={11.5} />
+                                  <span className="truncate max-w-[280px]">
+                                    任务组公共背景: {parentGroupTitle || '所属任务组'}
+                                  </span>
+                                </div>
+                                <span className="text-[9.5px] font-mono text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1.5 py-[0.5px] rounded shrink-0">
+                                  全工序共享
+                                </span>
+                              </div>
+
+                              {parentGroupDescription && (
+                                <div className="text-[11px] text-[#4338ca] leading-relaxed whitespace-pre-wrap select-text max-h-[110px] overflow-y-auto bg-white/75 p-2 rounded-[5px] border border-[#e0defc]">
+                                  {parentGroupDescription}
+                                </div>
+                              )}
+
+                              {parentGroupAttachments.length > 0 && (
+                                <div className="space-y-1">
+                                  <span className="text-[10px] text-[#6366f1] font-medium flex items-center gap-1">
+                                    <span>任务组共享参考图 ({parentGroupAttachments.length})</span>
+                                  </span>
+                                  <div className="flex items-center gap-2 overflow-x-auto py-0.5 scrollbar-thin">
+                                    {parentGroupAttachments.map((att) => {
+                                      const displayUrl = api.getAttachmentUrl(att.url);
+                                      return (
+                                        <div
+                                          key={att.id}
+                                          onClick={() => {
+                                            if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 预览任务组公共附件图片:', att.name);
+                                            setActiveDetailImage(att);
+                                          }}
+                                          className="group relative w-[46px] h-[46px] shrink-0 rounded-[5px] border border-[#d8d6fb] bg-white overflow-hidden shadow-2xs hover:border-[#4f46e5] cursor-pointer transition-all"
+                                          title={`${att.name} (任务组公共图片)\n${(att.size / 1024).toFixed(0)} KB\n点击大图预览`}
+                                        >
+                                          <img
+                                            src={displayUrl}
+                                            alt={att.name}
+                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
+                                          />
+                                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                            <ZoomIn size={11} className="text-white" />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           )}
-                        </button>
-                      </div>
 
-                      {/* 右侧核心动作组 */}
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {/* 状态 1: Pending 待处理 */}
-                        {curTask.status === 'pending' && (
-                          <>
-                            {curTask.kanbanColumn === 'inbox' ? (
-                              <button
-                                type="button"
-                                disabled={movingTaskId === curTask.id}
-                                onClick={() => handleMoveTaskColumn(curTask.id, 'backlog')}
-                                className="h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                                title="移入 Backlog 待处理泳道"
-                              >
-                                <ArrowRight size={11.5} />
-                                <span>{movingTaskId === curTask.id ? '移动中...' : '移入待处理'}</span>
-                              </button>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#1c1c21]">
+                              <AlignLeft size={12} className="text-[#71717a]" />
+                              <span>
+                                {isSubtask ? '本工序专属需求与提示词' : '任务需求与提示词'}
+                              </span>
+                            </div>
+                            {curTask.attachments && curTask.attachments.length > 0 && (
+                              <span className="text-[10px] text-[#71717a] font-mono bg-[#f4f4f6] px-1.5 py-0.5 rounded-[4px] border border-[#e3e3e8]">
+                                {curTask.attachments.length} 张参考图
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="p-3 rounded-[6px] border border-[#ececf0] bg-[#fafafc] text-[#374151] text-[12px] leading-relaxed whitespace-pre-wrap select-text max-h-[220px] overflow-y-auto">
+                            {curTask.description ? (
+                              curTask.description
                             ) : (
-                              <button
-                                type="button"
-                                disabled={movingTaskId === curTask.id}
-                                onClick={() => handleMoveTaskColumn(curTask.id, 'inbox')}
-                                className="h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                                title="退回 Inbox 收集箱暂缓"
-                              >
-                                <Inbox size={11.5} />
-                                <span>{movingTaskId === curTask.id ? '移动中...' : '退回收集箱'}</span>
-                              </button>
+                              <span className="text-[#a1a1aa] italic">未设置专属说明（继承任务组公共描述）</span>
                             )}
+                          </div>
 
-                            <button
-                              type="button"
-                              disabled={runningTaskId === curTask.id}
-                              onClick={() => handleRunTask(curTask.id)}
-                              className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[11.5px] font-medium text-white flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                            >
-                              <Play size={11} strokeWidth={2.4} />
-                              <span>{runningTaskId === curTask.id ? '启动中...' : '立即启动'}</span>
-                            </button>
-                          </>
-                        )}
+                          {/* 图片附件画廊 */}
+                          {curTask.attachments && curTask.attachments.length > 0 && (
+                            <div className="pt-1 flex items-center gap-2 overflow-x-auto py-1 scrollbar-thin">
+                              {curTask.attachments.map((att) => {
+                                const displayUrl = api.getAttachmentUrl(att.url);
+                                return (
+                                  <div
+                                    key={att.id}
+                                    onClick={() => {
+                                      if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 预览附件图片:', att.name);
+                                      setActiveDetailImage(att);
+                                    }}
+                                    className="group relative w-[52px] h-[52px] shrink-0 rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden shadow-sm hover:border-[#4f46e5] cursor-pointer transition-all"
+                                    title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击大图预览`}
+                                  >
+                                    <img
+                                      src={displayUrl}
+                                      alt={att.name}
+                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-150"
+                                    />
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                      <ZoomIn size={12} className="text-white" />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
-                        {/* 状态 2: Running 执行中 */}
+                    {/* 模块 3: 验收用例 (随时可查看与修改) */}
+                    <TaskQaInstructionsCard
+                      task={curTask}
+                      onTaskUpdated={(updated) => onTaskUpdate?.(updated)}
+                    />
+                  </div>
+                )}
+
+                {/* TAB 2: 节点执行轨迹 */}
+                {drawerTab === 'timeline' && (
+                  <div className="flex-1 p-5 overflow-y-auto space-y-3.5 text-[12px]">
+                    <NodeExecutionTimeline
+                      task={curTask}
+                      workflow={wfDef}
+                      allWorkflows={workflows}
+                      onOpenTaskLogs={onOpenTaskLogs}
+                      onPreviewArtifact={(art) => setPreviewArtifact(art)}
+                      onApprove={(taskId, approved, feedback) => handleApprove(taskId, approved, feedback)}
+                      isApproving={approvingId === curTask.id}
+                      onSkipNode={(taskId, nodeId) => handleSkipNode(taskId, nodeId)}
+                      onRetryNode={(taskId, nodeId) => handleRetryNode(taskId, nodeId)}
+                      isSkipping={skippingTaskId === curTask.id}
+                      isRetryingNode={retryingNodeKey?.startsWith(curTask.id)}
+                      onCustomRetry={handleCustomRetry}
+                      isCustomRetrying={isCustomRetrying}
+                      onNodeOverride={handleNodeOverride}
+                    />
+                  </div>
+                )}
+
+                {/* 底部操作区：任务概览与执行轨迹共用 */}
+                {(drawerTab === 'overview' || drawerTab === 'timeline') && (
+                  <div className="h-[52px] px-4 border-t border-[#e3e3e8] bg-[#fafafc] flex items-center justify-between shrink-0 select-none">
+                    {/* 左侧辅助入口：实时控制台日志 */}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 打开控制台日志:', curTask.id);
+                          onOpenTaskLogs(curTask.id);
+                          setSelectedTask(null);
+                        }}
+                        className={`h-[28px] px-2.5 rounded-[5px] text-[11.5px] font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
+                          curTask.status === 'running'
+                            ? 'bg-[#eeedfd] text-[#4f46e5] hover:bg-[#e0e0fc]'
+                            : 'text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0]'
+                        }`}
+                        title="查看此任务实时控制台日志与输出"
+                      >
+                        <Terminal size={12} className={curTask.status === 'running' ? 'text-[#4f46e5]' : 'text-[#71717a]'} />
+                        <span>控制台日志</span>
                         {curTask.status === 'running' && (
-                          <button
-                            type="button"
-                            disabled={cancellingTaskId === curTask.id}
-                            onClick={() => handleCancelTask(curTask.id)}
-                            className="h-[28px] px-3 rounded-[6px] border border-[#fecaca] bg-white hover:bg-[#fef2f2] text-[#dc2626] text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                            title="终止正在运行的自动化流水线"
-                          >
-                            <Square size={10.5} className="fill-current" />
-                            <span>{cancellingTaskId === curTask.id ? '正在终止...' : '终止流水线'}</span>
-                          </button>
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-pulse" />
                         )}
+                      </button>
+                    </div>
 
-                        {/* 状态 3: Waiting Approval 待人工验收 */}
-                        {curTask.status === 'waiting_approval' && (
-                          <>
-                            {hasVisualAcceptance && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 打开验收面板:', curTask.id);
-                                  setVisualAcceptanceTask(curTask);
-                                }}
-                                className="h-[28px] px-2.5 rounded-[6px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer"
-                                title="查看截帧回放与验收面板"
-                              >
-                                <Eye size={12} />
-                                <span>截帧回放</span>
-                              </button>
-                            )}
+                    {/* 右侧核心动作组 */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* 状态 1: Pending 待处理 */}
+                      {curTask.status === 'pending' && (
+                        <>
+                          {curTask.kanbanColumn === 'inbox' ? (
                             <button
                               type="button"
-                              disabled={approvingId === curTask.id}
-                              onClick={() => handleApprove(curTask.id, false)}
-                              className="h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#63636b] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                            >
-                              <X size={11.5} />
-                              <span>驳回</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={approvingId === curTask.id}
-                              onClick={() => handleApprove(curTask.id, true)}
-                              className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                            >
-                              <Check size={12} strokeWidth={2.4} />
-                              <span>验收通过</span>
-                            </button>
-                          </>
-                        )}
-
-                        {/* 状态 4: Failed 执行失败 */}
-                        {curTask.status === 'failed' && (
-                          <>
-                            {hasVisualAcceptance && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 查看现场回放:', curTask.id);
-                                  setVisualAcceptanceTask(curTask);
-                                }}
-                                className="h-[28px] px-2.5 rounded-[6px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer"
-                                title="查看报错现场截帧回放"
-                              >
-                                <Eye size={12} />
-                                <span>现场回放</span>
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              disabled={skippingTaskId === curTask.id}
-                              onClick={() => handleSkipNode(curTask.id)}
-                              className="h-[28px] px-2 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                              title="跳过当前报错节点继续后续链路"
-                            >
-                              <SkipForward size={11} />
-                              <span>跳过</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={runningTaskId === curTask.id}
-                              onClick={() => handleRunTask(curTask.id)}
+                              disabled={movingTaskId === curTask.id}
+                              onClick={() => handleMoveTaskColumn(curTask.id, 'backlog')}
                               className="h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                              title="重新从头执行整条流水线"
+                              title="移入 Backlog 待处理泳道"
                             >
-                              <Play size={10.5} />
-                              <span>整单重跑</span>
+                              <ArrowRight size={11.5} />
+                              <span>{movingTaskId === curTask.id ? '移动中...' : '移入待处理'}</span>
                             </button>
+                          ) : (
                             <button
                               type="button"
-                              disabled={retryingNodeKey === `${curTask.id}:`}
-                              onClick={() => handleRetryNode(curTask.id)}
-                              className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                              title="仅重新执行发生报错的节点"
+                              disabled={movingTaskId === curTask.id}
+                              onClick={() => handleMoveTaskColumn(curTask.id, 'inbox')}
+                              className="h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                              title="退回 Inbox 收集箱暂缓"
                             >
-                              <RotateCcw size={11} strokeWidth={2.4} />
-                              <span>重试节点</span>
+                              <Inbox size={11.5} />
+                              <span>{movingTaskId === curTask.id ? '移动中...' : '退回收集箱'}</span>
                             </button>
-                          </>
-                        )}
+                          )}
 
-                        {/* 状态 5: Cancelled 已取消 */}
-                        {curTask.status === 'cancelled' && (
                           <button
                             type="button"
                             disabled={runningTaskId === curTask.id}
                             onClick={() => handleRunTask(curTask.id)}
                             className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[11.5px] font-medium text-white flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
                           >
-                            <RotateCcw size={11} strokeWidth={2.4} />
-                            <span>{runningTaskId === curTask.id ? '重新启动中...' : '重新启动'}</span>
+                            <Play size={11} strokeWidth={2.4} />
+                            <span>{runningTaskId === curTask.id ? '启动中...' : '立即启动'}</span>
                           </button>
-                        )}
+                        </>
+                      )}
 
-                        {/* 状态 6: Completed 已完成 */}
-                        {curTask.status === 'completed' && (
-                          <>
-                            {hasVisualAcceptance && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 查看完成产物与回放:', curTask.id);
-                                  setVisualAcceptanceTask(curTask);
-                                }}
-                                className="h-[28px] px-2.5 rounded-[6px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer"
-                                title="查看交付产物与截帧回放"
-                              >
-                                <Eye size={12} />
-                                <span>交付截帧</span>
-                              </button>
-                            )}
+                      {/* 状态 2: Running 执行中 */}
+                      {curTask.status === 'running' && (
+                        <button
+                          type="button"
+                          disabled={cancellingTaskId === curTask.id}
+                          onClick={() => handleCancelTask(curTask.id)}
+                          className="h-[28px] px-3 rounded-[6px] border border-[#fecaca] bg-white hover:bg-[#fef2f2] text-[#dc2626] text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                          title="终止正在运行的自动化流水线"
+                        >
+                          <Square size={10.5} className="fill-current" />
+                          <span>{cancellingTaskId === curTask.id ? '正在终止...' : '终止流水线'}</span>
+                        </button>
+                      )}
+
+                      {/* 状态 3: Waiting Approval 待人工验收 */}
+                      {curTask.status === 'waiting_approval' && (
+                        <>
+                          {hasVisualAcceptance && (
                             <button
                               type="button"
-                              disabled={runningTaskId === curTask.id}
-                              onClick={() => handleRunTask(curTask.id)}
-                              className="h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                              title="再次重新执行此任务"
+                              onClick={() => {
+                                if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 打开验收面板:', curTask.id);
+                                setVisualAcceptanceTask(curTask);
+                              }}
+                              className="h-[28px] px-2.5 rounded-[6px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer"
+                              title="查看截帧回放与验收面板"
                             >
-                              <RotateCcw size={11} />
-                              <span>再次执行</span>
+                              <Eye size={12} />
+                              <span>截帧回放</span>
                             </button>
-                          </>
-                        )}
-                      </div>
+                          )}
+                          <button
+                            type="button"
+                            disabled={approvingId === curTask.id}
+                            onClick={() => handleApprove(curTask.id, false)}
+                            className="h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#63636b] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                          >
+                            <X size={11.5} />
+                            <span>驳回</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={approvingId === curTask.id}
+                            onClick={() => handleApprove(curTask.id, true)}
+                            className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                          >
+                            <Check size={12} strokeWidth={2.4} />
+                            <span>验收通过</span>
+                          </button>
+                        </>
+                      )}
+
+                      {/* 状态 4: Failed 执行失败 */}
+                      {curTask.status === 'failed' && (
+                        <>
+                          {hasVisualAcceptance && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 查看现场回放:', curTask.id);
+                                setVisualAcceptanceTask(curTask);
+                              }}
+                              className="h-[28px] px-2.5 rounded-[6px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer"
+                              title="查看报错现场截帧回放"
+                            >
+                              <Eye size={12} />
+                              <span>现场回放</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={skippingTaskId === curTask.id}
+                            onClick={() => handleSkipNode(curTask.id)}
+                            className="h-[28px] px-2 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                            title="跳过当前报错节点继续后续链路"
+                          >
+                            <SkipForward size={11} />
+                            <span>跳过</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={runningTaskId === curTask.id}
+                            onClick={() => handleRunTask(curTask.id)}
+                            className="h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                            title="重新从头执行整条流水线"
+                          >
+                            <Play size={10.5} />
+                            <span>整单重跑</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={retryingNodeKey === `${curTask.id}:`}
+                            onClick={() => handleRetryNode(curTask.id)}
+                            className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                            title="仅重新执行发生报错的节点"
+                          >
+                            <RotateCcw size={11} strokeWidth={2.4} />
+                            <span>重试节点</span>
+                          </button>
+                        </>
+                      )}
+
+                      {/* 状态 5: Cancelled 已取消 */}
+                      {curTask.status === 'cancelled' && (
+                        <button
+                          type="button"
+                          disabled={runningTaskId === curTask.id}
+                          onClick={() => handleRunTask(curTask.id)}
+                          className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-[11.5px] font-medium text-white flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                        >
+                          <RotateCcw size={11} strokeWidth={2.4} />
+                          <span>{runningTaskId === curTask.id ? '重新启动中...' : '重新启动'}</span>
+                        </button>
+                      )}
+
+                      {/* 状态 6: Completed 已完成 */}
+                      {curTask.status === 'completed' && (
+                        <>
+                          {hasVisualAcceptance && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 查看完成产物与回放:', curTask.id);
+                                setVisualAcceptanceTask(curTask);
+                              }}
+                              className="h-[28px] px-2.5 rounded-[6px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer"
+                              title="查看交付产物与截帧回放"
+                            >
+                              <Eye size={12} />
+                              <span>交付截帧</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={runningTaskId === curTask.id}
+                            onClick={() => handleRunTask(curTask.id)}
+                            className="h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                            title="再次重新执行此任务"
+                          >
+                            <RotateCcw size={11} />
+                            <span>再次执行</span>
+                          </button>
+                        </>
+                      )}
                     </div>
-                  </>
+                  </div>
                 )}
 
-                {/* TAB 2: 任务组与工序自然生长演进 */}
+                {/* TAB 3: 任务组与工序自然生长演进 */}
                 {drawerTab === 'subtasks' && (
                   <div className="flex-1 p-5 overflow-y-auto space-y-3.5 text-[12px]">
                     {(() => {
@@ -3379,7 +3389,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   </div>
                 )}
 
-            {/* TAB 3: Agent 实时会话与双向交互 */}
+            {/* TAB 4: Agent 实时会话与双向交互 */}
             {drawerTab === 'session' && (
               <div className="flex-1 flex flex-col min-h-0 pt-3">
                 {/* 顶部感知与控制条 */}
