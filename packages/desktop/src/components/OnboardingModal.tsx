@@ -8,13 +8,12 @@ import {
   Terminal,
   Cpu,
   ArrowRight,
-  Sparkles,
   Check,
   HardDrive,
   GitBranch,
-  Layers,
   RotateCcw,
 } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 import { api } from '../services/api';
 
 interface ToolStatus {
@@ -165,9 +164,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
         <div className="px-7 pt-7 pb-5 border-b border-[#f1f1f4] bg-gradient-to-b from-white to-[#fafafc]">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-[8px] bg-[#18181b] text-white flex items-center justify-center shadow-sm">
-                <Sparkles size={16} strokeWidth={2.2} />
-              </div>
+              <BrandLogo size={32} className="shrink-0 shadow-sm" />
               <div>
                 <h2 className="text-[15px] font-semibold text-[#18181b] tracking-tight flex items-center gap-2">
                   <span>openLoop 初始化配置</span>

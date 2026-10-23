@@ -13,6 +13,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { PluginManifest } from '@openloop/core';
+import { BrandLogo } from './BrandLogo';
 import { useShortcuts } from '../context/ShortcutContext';
 import { APP_VERSION } from '../constants/version';
 import { getSortedSidebarPlugins } from '../utils/sidebarOrder';
@@ -85,9 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {isOpen ? (
           <div className="h-[46px] pl-[72px] pr-3 flex items-center shrink-0">
             <div className="flex items-center gap-1.5 min-w-0">
-              <div className="w-[18px] h-[18px] rounded-[5px] bg-[#1c1c21] flex items-center justify-center text-white shadow-sm shrink-0">
-                <Layers size={11} strokeWidth={2.4} />
-              </div>
+              <BrandLogo size={19} className="shrink-0" />
               <span className="flex items-baseline gap-1.5 min-w-0">
                 <span className="font-semibold text-[13px] text-[#1c1c21] tracking-tight truncate">
                   openLoop
