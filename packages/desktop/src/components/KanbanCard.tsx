@@ -235,6 +235,12 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
     return task.subTaskIds.map((id) => taskMap.get(id)).filter(Boolean) as Task[];
   }, [isGroup, task.subTaskIds, allTasks]);
 
+  // 列表按最新添加在前展示，编号仍沿用创建顺序
+  const displaySubtasks = useMemo(
+    () => childSubtasks.map((st, idx) => ({ st, orderNo: idx + 1 })).reverse(),
+    [childSubtasks],
+  );
+
   const groupCompletedCount = childSubtasks.filter((s) => s.status === 'completed').length;
   const groupTotalCount = childSubtasks.length || task.subTaskIds?.length || 0;
   const groupProgressPct = groupTotalCount > 0 ? Math.round((groupCompletedCount / groupTotalCount) * 100) : (task.status === 'completed' ? 100 : 0);
@@ -561,7 +567,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
 
           {isExpanded && (
             <div className="p-1.5 space-y-1 border-t border-[#ececf0] bg-[#fafafc]">
-              {childSubtasks.map((st, idx) => {
+              {displaySubtasks.map(({ st, orderNo }) => {
                 let statusBadge = (
                   <span className="inline-flex items-center gap-0.5 px-1 py-[0.5px] rounded bg-[#f4f4f6] text-[#71717a] text-[9.5px] font-medium border border-[#e3e3e8]">
                     <Clock size={8.5} />
@@ -626,7 +632,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                   >
                     <div className="flex items-center gap-1.5 min-w-0 flex-1">
                       <span className="font-mono text-[9.5px] text-[#85858d] shrink-0">
-                        #{idx + 1}
+                        #{orderNo}
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="text-[11px] text-[#1c1c21] truncate font-medium group-hover/sub:text-[#4f46e5]">

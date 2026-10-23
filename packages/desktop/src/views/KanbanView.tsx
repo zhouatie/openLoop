@@ -2731,6 +2731,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       const groupSubtasks = (curTask.subTaskIds || [])
                         .map((id) => tasks.find((t) => t.id === id))
                         .filter(Boolean) as Task[];
+                      // 列表按最新添加在前展示，编号仍沿用创建顺序
+                      const displayGroupSubtasks = groupSubtasks
+                        .map((st, idx) => ({ st, orderNo: idx + 1 }))
+                        .reverse();
                       const groupPassed = groupSubtasks.filter((s) => s.status === 'completed').length;
                       const groupTotal = groupSubtasks.length;
                       const groupPct = groupTotal > 0 ? Math.round((groupPassed / groupTotal) * 100) : 0;
@@ -3156,7 +3160,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                 </div>
 
                                 <div className="space-y-1.5">
-                                  {groupSubtasks.map((st, idx) => {
+                                  {displayGroupSubtasks.map(({ st, orderNo }) => {
                                     const stStatus = getTaskStatusInfo(st);
                                     const stWf = wfMap.get(st.workflowId);
 
@@ -3167,7 +3171,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                       >
                                         <div className="flex items-center gap-2 min-w-0 flex-1">
                                           <span className="font-mono text-[10px] font-medium text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded shrink-0">
-                                            #{idx + 1}
+                                            #{orderNo}
                                           </span>
                                           <div className="min-w-0 flex-1">
                                             <div className="flex items-center gap-1.5 flex-wrap">
