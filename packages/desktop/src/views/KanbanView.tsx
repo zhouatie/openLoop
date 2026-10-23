@@ -719,45 +719,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
 
-  // 确认 Agent 方案，向会话发送确认指令，启动执行状态
-  const handleConfirmPlanAndExecute = async (prompt = '方案已确认，请开始执行编码实现。') => {
-    if (!selectedTask) return;
-    if (import.meta.env?.DEV) {
-      console.log('[UI:AgentChat] 用户确认方案，发送确认指令以开始执行:', {
-        taskId: selectedTask.id,
-        prompt,
-      });
-    }
-    // 乐观更新：隐藏等待条，将状态切换为执行中 (isBusy: true, awaitingInput: false)
-    setSessionState((prev) =>
-      prev
-        ? {
-            ...prev,
-            awaitingInput: false,
-            isBusy: true,
-            messages: [
-              ...prev.messages,
-              {
-                id: `opt_${Date.now()}`,
-                role: 'user',
-                content: prompt,
-                timestamp: Date.now(),
-              },
-            ],
-          }
-        : prev
-    );
-    try {
-      await api.sendTaskChatMessage(selectedTask.id, prompt);
-      toast.success('方案已确认，Agent 已开始执行');
-    } catch (e: any) {
-      if (import.meta.env?.DEV) {
-        console.error('[UI:AgentChat] 发送确认指令失败:', e);
-      }
-      toast.error(`启动执行失败: ${e?.message || '未知错误'}`);
-    }
-  };
-
   // 确认当前节点已完成，手动放行流水线（兜底跳过）
   const handleConfirmCompleteNode = async () => {
     if (!selectedTask) return;
@@ -3714,7 +3675,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         {showAwaitingBar && (
                           <AgentAwaitingInputBar
                             hasCodeChanges={hasSessionCodeChanges}
-                            onConfirmPlan={handleConfirmPlanAndExecute}
                             onConfirmComplete={handleConfirmCompleteNode}
                           />
                         )}
@@ -3741,7 +3701,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               ) : (
                                 <>
                                   <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
-                                  <span className="text-[#4f46e5] font-medium">等待确认：可点击上方按钮一键确认方案，或输入指令后继续</span>
+                                  <span className="text-[#4f46e5] font-medium">等待你的指令：直接在下方输入指令即可继续推进</span>
                                 </>
                               )
                             ) : (

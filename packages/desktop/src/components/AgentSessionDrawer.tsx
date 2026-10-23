@@ -288,41 +288,6 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
     }
   };
 
-  // 确认 Agent 方案，向 Agent 发送确认指令，启动执行状态
-  const handleConfirmPlan = async (prompt = '方案已确认，请开始执行编码实现。') => {
-    if (!taskId) return;
-    if (import.meta.env?.DEV) {
-      console.log('[AgentSessionDrawer] 用户确认方案，发送确认指令以开始执行:', { taskId, prompt });
-    }
-    // 乐观更新
-    setSessionState((prev) =>
-      prev
-        ? {
-            ...prev,
-            awaitingInput: false,
-            isBusy: true,
-            messages: [
-              ...prev.messages,
-              {
-                id: `opt_${Date.now()}`,
-                role: 'user',
-                content: prompt,
-                timestamp: Date.now(),
-              },
-            ],
-          }
-        : prev
-    );
-    try {
-      await api.sendTaskChatMessage(taskId, prompt);
-      toast('方案已确认，Agent 已开始执行', 'success');
-      await loadSession(true);
-    } catch (err: any) {
-      toast(err?.message || '启动执行失败', 'error');
-      await loadSession(true);
-    }
-  };
-
   // 确认当前节点已完成，手动放行流水线（兜底跳过）
   const handleConfirmComplete = async () => {
     if (!taskId) return;
@@ -805,7 +770,6 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
               {sessionState?.awaitingInput && (
                 <AgentAwaitingInputBar
                   hasCodeChanges={hasCodeChanges}
-                  onConfirmPlan={handleConfirmPlan}
                   onConfirmComplete={handleConfirmComplete}
                 />
               )}
@@ -828,7 +792,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                     ) : (
                       <>
                         <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
-                        <span className="text-[#4f46e5] font-medium truncate">等待确认：可点击上方按钮确认方案，或输入新指令继续</span>
+                        <span className="text-[#4f46e5] font-medium truncate">等待你的指令：直接输入新指令即可继续推进</span>
                       </>
                     )
                   ) : (
