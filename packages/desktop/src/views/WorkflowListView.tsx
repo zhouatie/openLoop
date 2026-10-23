@@ -1204,7 +1204,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           <div className="bg-white border border-[#e3e3e8] rounded-[8px] shadow-sm overflow-hidden flex flex-col">
             {/* 表头 */}
             <div className="h-[34px] bg-[#fafafc] border-b border-[#e3e3e8] px-4 flex items-center text-[11px] font-medium text-[#85858d] select-none">
-              <div className="w-[210px] shrink-0">流水线名称</div>
+              <div className="w-[320px] shrink-0">流水线名称</div>
               <div className="w-[80px] shrink-0">类型</div>
               <div className="w-[140px] shrink-0">标签</div>
               <div className="flex-1 min-w-0 px-3">环节构成</div>
@@ -1233,7 +1233,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     className="group px-4 py-2.5 flex items-center text-[12px] transition-colors cursor-pointer hover:bg-[#fafafc]"
                   >
                     {/* 流水线名称 */}
-                    <div className="w-[210px] shrink-0 flex items-center gap-2 pr-2">
+                    <div className="w-[320px] shrink-0 flex items-center gap-2 pr-2">
                       <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] group-hover:bg-white flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60 transition-colors">
                         <Workflow size={11} />
                       </div>
