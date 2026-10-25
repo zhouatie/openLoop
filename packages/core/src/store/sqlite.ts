@@ -21,6 +21,7 @@ import {
 } from '../types';
 import { DEFAULT_PROMPT_TEMPLATES } from '../constants/prompts';
 import { createLogger } from '../logger';
+import { sanitizeChatMessages } from '../agent/agent-format';
 
 const storeLogger = createLogger('Store:SQLite');
 
@@ -904,7 +905,13 @@ export class SqliteStore {
     if (!raw) return {};
     try {
       const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed : {};
+      if (parsed && typeof parsed === 'object') {
+        if (Array.isArray(parsed.chatMessages)) {
+          parsed.chatMessages = sanitizeChatMessages(parsed.chatMessages);
+        }
+        return parsed;
+      }
+      return {};
     } catch {
       return {};
     }
@@ -930,7 +937,7 @@ export class SqliteStore {
       };
     }
 
-    const parsedContext = tr.context_json ? JSON.parse(tr.context_json) : {};
+    const parsedContext = this.parseContextJson(tr.context_json);
 
     return {
       id: tr.id,

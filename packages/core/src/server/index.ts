@@ -24,6 +24,7 @@ import {
 } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
+import { sanitizeChatMessages } from '../agent/agent-format';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
@@ -1472,7 +1473,13 @@ export class OpenLoopServer {
           return this.sendJson(
             res,
             200,
-            { ...state, awaitingInput: effectiveAwaiting, sessionId, resumeCommand },
+            {
+              ...state,
+              messages: sanitizeChatMessages(state.messages),
+              awaitingInput: effectiveAwaiting,
+              sessionId,
+              resumeCommand,
+            },
             reqMeta
           );
         }
@@ -1486,7 +1493,7 @@ export class OpenLoopServer {
           isBusy: false,
           isPaused: false,
           awaitingInput: isCurrentAgentRunning ? !!task.context?.awaitingInput : false,
-          messages: task.context?.chatMessages || [],
+          messages: sanitizeChatMessages(task.context?.chatMessages || []),
           agentName: task.context?.agentName || 'OpenLoop Agent',
           model: task.context?.model || settings.defaultModel || undefined,
           sessionId,

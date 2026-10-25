@@ -54,7 +54,21 @@ import {
   Link2,
   PanelRight,
 } from 'lucide-react';
-import { Task, KanbanColumn, WorkflowDefinition, NodeRun, TaskSessionState, SessionChatMessage, TaskAttachment, SelectedQaArtifacts } from '@openloop/core';
+import type {
+  Task,
+  KanbanColumn,
+  WorkflowDefinition,
+  NodeRun,
+  TaskSessionState,
+  SessionChatMessage,
+  TaskAttachment,
+  SelectedQaArtifacts,
+} from '@openloop/core';
+import {
+  extractToolResultText,
+  formatToolArgs,
+  sanitizeChatMessages,
+} from '@openloop/core/agent-format';
 import { guessImageMimeType } from '@openloop/core/media-mime';
 import { getAgentProviderMeta } from '@openloop/agent-providers';
 import { api } from '../services/api';
@@ -475,7 +489,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
               messages: state.messages.length,
             });
           }
-          setSessionState(state);
+          setSessionState(state ? { ...state, messages: sanitizeChatMessages(state.messages) } : null);
           // 若任务正在执行中且处于 agent 状态，或已有历史消息，可智能保留或建议查看
         })
         .catch(() => {});
@@ -502,7 +516,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   useEffect(() => {
     const unsub = api.on('agent:chat_update', (data: TaskSessionState) => {
       if (selectedTask && data.taskId === selectedTask.id) {
-        setSessionState(data);
+        setSessionState({ ...data, messages: sanitizeChatMessages(data.messages) });
       }
     });
     return () => unsub();
@@ -1655,12 +1669,15 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       }}
                       className="px-2.5 py-1.5 flex items-center justify-between cursor-pointer hover:bg-[#f9f9fb] transition-colors"
                     >
-                      <div className="flex items-center gap-1.5 truncate mr-2">
+                      <div className="flex items-center gap-1.5 truncate mr-2 flex-1 min-w-0">
                         <Terminal size={11} className="text-[#4f46e5] shrink-0" />
-                        <span className="font-mono font-semibold text-[#1c1c21]">{tool.name}</span>
+                        <span className="font-mono font-semibold text-[#1c1c21] shrink-0">{tool.name}</span>
                         {tool.args && (
-                          <span className="font-mono text-[#85858d] truncate max-w-[200px]">
-                            {typeof tool.args === 'string' ? tool.args : JSON.stringify(tool.args)}
+                          <span
+                            className="font-mono text-[#85858d] truncate flex-1 min-w-0"
+                            title={formatToolArgs(tool.name, tool.args)}
+                          >
+                            {formatToolArgs(tool.name, tool.args)}
                           </span>
                         )}
                       </div>
@@ -1685,9 +1702,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       </div>
                     </div>
                     {expandedTools[tool.id] && (
-                      <div className="p-2 border-t border-[#ececf0] bg-[#1c1c21] text-[#e3e3e8] font-mono text-[10px] leading-relaxed max-h-[160px] overflow-y-auto">
+                      <div className="p-2 border-t border-[#ececf0] bg-[#1c1c21] text-[#e3e3e8] font-mono text-[10px] leading-relaxed max-h-[220px] overflow-y-auto">
                         {tool.result ? (
-                          <pre className="whitespace-pre-wrap">{typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2)}</pre>
+                          <pre className="whitespace-pre-wrap break-all select-text font-mono">
+                            {extractToolResultText(tool.result)}
+                          </pre>
                         ) : (
                           <span className="text-[#85858d]">暂无输出内容</span>
                         )}
@@ -3783,7 +3802,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         wfMap.get(curTask.workflowId)?.nodes.find((n) => n.id === curTask.currentNodeId)?.type === 'agent';
                       const hasSessionCodeChanges = !!sessionState?.messages?.some((msg) =>
                         msg.tools?.some(
-                          (t) => (t.name === 'edit' || t.name === 'write' || t.name === 'patch') && !t.isError
+                          (t) => (t.name === 'edit' || t.name === 'write' || t.name === 'patch') && t.status !== 'error'
                         )
                       );
                       const showAwaitingBar = !!(sessionState?.awaitingInput && isCurTaskAgentRunning);
@@ -3894,7 +3913,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       wfMap.get(curTask.workflowId)?.nodes.find((n) => n.id === curTask.currentNodeId)?.type === 'agent';
                     const hasSessionCodeChanges = !!sessionState?.messages?.some((msg) =>
                       msg.tools?.some(
-                        (t) => (t.name === 'edit' || t.name === 'write' || t.name === 'patch') && !t.isError
+                        (t) => (t.name === 'edit' || t.name === 'write' || t.name === 'patch') && t.status !== 'error'
                       )
                     );
                     const showAwaitingBar = !!(sessionState?.awaitingInput && isCurTaskAgentRunning);
