@@ -444,7 +444,12 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   
   // 需求工序裂变与 AI 协同规划状态
   const [isPlanningAi, setIsPlanningAi] = useState(false);
-  const [aiPlanPreview, setAiPlanPreview] = useState<Array<{ title: string; workflowId: string; dependencies?: string[] }> | null>(null);
+  const [aiPlanPreview, setAiPlanPreview] = useState<Array<{
+    title: string;
+    workflowId: string;
+    workspace?: string;
+    dependencies?: string[];
+  }> | null>(null);
   const [isAddingManualSubtask, setIsAddingManualSubtask] = useState(false);
   const [manualSubtaskTitle, setManualSubtaskTitle] = useState('');
   const [manualSubtaskDesc, setManualSubtaskDesc] = useState('');
@@ -848,6 +853,36 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       toast.error(`会话控制失败: ${e?.message || '未知错误'}`);
     } finally {
       setIsPausingSession(false);
+    }
+  };
+
+  // 向当前 Agent 会话发送快捷规划指令
+  const handleSendSuggestedPrompt = async (text: string) => {
+    if (!selectedTask || isSendingChat) return;
+    setIsSendingChat(true);
+    if (sessionState) {
+      setSessionState({
+        ...sessionState,
+        isBusy: true,
+        awaitingInput: false,
+        messages: [
+          ...sessionState.messages,
+          {
+            id: `opt_${Date.now()}`,
+            role: 'user',
+            content: text,
+            timestamp: Date.now(),
+          },
+        ],
+      });
+    }
+    try {
+      await api.sendTaskChatMessage(selectedTask.id, text, []);
+    } catch (e: any) {
+      if (import.meta.env?.DEV) console.error('[KanbanView] 发送快捷指令失败:', e);
+      toast.error(`发送失败: ${e?.message || '未知错误'}`);
+    } finally {
+      setIsSendingChat(false);
     }
   };
 
@@ -1541,18 +1576,67 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   // 会话消息流单独缓存：输入框逐键输入不触发历史消息与 Markdown 重渲染
   const chatMessageList = useMemo(() => {
+    const curTask = activeTask || selectedTask;
     if (!sessionState?.messages || sessionState.messages.length === 0) {
+      if (curTask?.kind === 'group') {
+        return (
+          <div className="h-full min-h-[260px] flex flex-col items-center justify-center text-center p-6 text-[#85858d]">
+            <div className="w-11 h-11 rounded-[10px] bg-[#eeedfd] border border-[#d8d6fb] flex items-center justify-center mb-2.5 text-[#4f46e5] shadow-xs">
+              <Layers size={20} />
+            </div>
+            <div className="text-[13px] font-semibold text-[#1c1c21] mb-1">
+              任务组架构师 (Task Group Architect)
+            </div>
+            <div className="text-[11px] text-[#71717a] leading-relaxed max-w-[320px] mb-4">
+              我是当前任务组的规划架构师。我不直接修改工程代码，专注于探查工作区目录、与您沟通需求、拆解独立工序并规划执行方案。
+            </div>
+            <div className="flex flex-col gap-1.5 w-full max-w-[320px]">
+              <button
+                type="button"
+                onClick={() =>
+                  handleSendSuggestedPrompt(
+                    '请分析当前需求与工作区目录结构，帮我规划并拆解为可独立闭环执行的子任务。'
+                  )
+                }
+                className="w-full text-left px-2.5 py-1.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#fafafc] hover:border-[#c7d2fe] text-[11px] text-[#4b4b53] hover:text-[#4f46e5] flex items-center justify-between transition-all shadow-2xs cursor-pointer group"
+              >
+                <span>🔍 分析需求与工作区目录并拆解</span>
+                <ArrowRight
+                  size={11}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-[#4f46e5]"
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleSendSuggestedPrompt(
+                    '请帮我梳理当前任务的工序拆解方案并生成执行规划。'
+                  )
+                }
+                className="w-full text-left px-2.5 py-1.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#fafafc] hover:border-[#c7d2fe] text-[11px] text-[#4b4b53] hover:text-[#4f46e5] flex items-center justify-between transition-all shadow-2xs cursor-pointer group"
+              >
+                <span>📋 梳理拆解方案与执行工序</span>
+                <ArrowRight
+                  size={11}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-[#4f46e5]"
+                />
+              </button>
+            </div>
+          </div>
+        );
+      }
+
       return (
-      <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-6 text-[#85858d]">
-        <div className="w-11 h-11 rounded-[10px] bg-[#f4f4f6] border border-[#e3e3e8] flex items-center justify-center mb-2.5">
-          <Bot size={20} className="text-[#85858d]" />
+        <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-6 text-[#85858d]">
+          <div className="w-11 h-11 rounded-[10px] bg-[#f4f4f6] border border-[#e3e3e8] flex items-center justify-center mb-2.5">
+            <Bot size={20} className="text-[#85858d]" />
+          </div>
+          <div className="text-[12.5px] font-medium text-[#1c1c21] mb-1">Agent 实时交互会话</div>
+          <div className="text-[11px] text-[#85858d] leading-relaxed max-w-[280px]">
+            启动任务后，智能体的深度思考、工具调用与代码生成将在此毫秒级流式展现；您亦可在下方随时插话或纠偏。
+          </div>
         </div>
-        <div className="text-[12.5px] font-medium text-[#1c1c21] mb-1">Agent 实时交互会话</div>
-        <div className="text-[11px] text-[#85858d] leading-relaxed max-w-[280px]">
-          启动任务后，智能体的深度思考、工具调用与代码生成将在此毫秒级流式展现；您亦可在下方随时插话或纠偏。
-        </div>
-      </div>
-);
+      );
     }
     return (
       sessionState.messages.map((msg, msgIdx) => {
@@ -1723,6 +1807,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                 <AgentMarkdown
                   content={msg.content}
                   isStreaming={!!sessionState?.isBusy && msgIdx === sessionState.messages.length - 1}
+                  taskId={curTask?.id}
+                  parentWorkspace={curTask?.workspace}
+                  workflows={workflows}
+                  onAppliedPlan={onRefresh}
                 />
               </div>
             )}
@@ -1741,7 +1829,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         );
                     })
     );
-  }, [sessionState, expandedThinking, expandedTools, expandedQaAttachments]);
+  }, [sessionState, expandedThinking, expandedTools, expandedQaAttachments, activeTask, selectedTask, workflows, onRefresh]);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">
@@ -3184,6 +3272,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                           res.plan.subtasks.map((s: any) => ({
                                             title: s.title,
                                             workflowId: s.workflowId || curTask.workflowId,
+                                            workspace: s.workspace || '',
                                             dependencies: s.dependencies || [],
                                           }))
                                         );
@@ -3205,6 +3294,20 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                     <Sparkles size={12} />
                                   )}
                                   <span>{isPlanningAi ? 'AI 正在规划方案...' : '✨ AI 智能规划工序'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAgentPaneOpen(true);
+                                    handleSendSuggestedPrompt(
+                                      '请分析当前需求与工作区目录结构，帮我规划并拆解为可独立闭环执行的子任务。'
+                                    );
+                                  }}
+                                  className="px-3.5 h-[30px] rounded-[6px] bg-[#eeedfd] hover:bg-[#e0e0fc] text-[#4f46e5] border border-[#d8d6fb] text-[11.5px] font-medium flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all"
+                                  title="打开架构师会话面板，通过多轮对话深入沟通并拆解工序"
+                                >
+                                  <Bot size={12} />
+                                  <span>💬 召唤架构 Agent 规划</span>
                                 </button>
                                 <button
                                   type="button"
@@ -3296,6 +3399,23 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                           依赖 #{index}
                                         </span>
                                       )}
+                                    </div>
+
+                                    {/* 目标工作区子路径 */}
+                                    <div className="flex items-center gap-1 text-[10.5px] text-[#71717a] pt-1">
+                                      <FolderGit2 size={10.5} className="text-[#85858d] shrink-0" />
+                                      <span className="shrink-0 text-[#85858d]">目标工作区:</span>
+                                      <input
+                                        type="text"
+                                        placeholder="子工程路径 (相对路径或绝对路径，默认继承父工作区)"
+                                        value={item.workspace || ''}
+                                        onChange={(e) => {
+                                          const next = [...aiPlanPreview];
+                                          next[index].workspace = e.target.value;
+                                          setAiPlanPreview(next);
+                                        }}
+                                        className="flex-1 h-[22px] px-1.5 text-[10px] font-mono bg-[#f4f4f6] text-[#1c1c21] border border-[#e3e3e8] rounded outline-none focus:border-[#4f46e5]"
+                                      />
                                     </div>
                                   </div>
                                 ))}
@@ -3774,8 +3894,16 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-2 h-2 rounded-full bg-[#7c3aed] inline-block shrink-0" />
                     <span className="text-[11.5px] font-semibold text-[#1c1c21] truncate">
-                      {sessionState?.agentName || getAgentProviderMeta(curTask.context?.agentProvider).label}
+                      {curTask.kind === 'group'
+                        ? '任务组架构师'
+                        : sessionState?.agentName || getAgentProviderMeta(curTask.context?.agentProvider).label}
                     </span>
+                    {curTask.kind === 'group' && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eeedfd] text-[#4f46e5] text-[9.5px] font-medium border border-[#d8d6fb] shrink-0">
+                        <Layers size={9.5} />
+                        <span>规划模式 · 只读分析</span>
+                      </span>
+                    )}
                     {(curTask.context?.sessionId || curTask.context?.piSessionId) && (
                       <span
                         className="text-[10px] font-mono text-[#85858d] bg-white px-1.5 py-0.5 rounded border border-[#e3e3e8] truncate max-w-[130px]"

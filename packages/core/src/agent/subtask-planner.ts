@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { Store } from '../store';
 import { Task, WorkflowDefinition, TaskExecutionMode } from '../types';
 import { PiRpcSessionInstance } from './pi-rpc-session';
@@ -8,6 +10,7 @@ const logger = createLogger('SubtaskPlanner');
 export interface SubtaskPlan {
   title: string;
   workflowId?: string;
+  workspace?: string;
   description?: string;
   dependencies?: string[];
 }
@@ -23,7 +26,7 @@ export interface DecompositionResult {
 /** AI 规划工序的超时兜底，避免前端无限等待 */
 const PLAN_TIMEOUT_MS = 180_000;
 
-const PLANNING_RULES = `你是 OpenLoop 的工序规划助手，负责把一条开发需求拆解为多道可独立执行的工序，并为每道工序挑选合适流水线。
+const PLANNING_RULES = `你是 OpenLoop 的工序规划助手，负责把一条开发需求拆解为多道可独立执行的工序，并为每道工序挑选合适流水线与目标工程目录。
 
 只输出一个 json 代码块，结构如下，不要输出任何解释文字：
 \`\`\`json
@@ -34,6 +37,7 @@ const PLANNING_RULES = `你是 OpenLoop 的工序规划助手，负责把一条�
     {
       "title": "工序标题",
       "workflowId": "流水线 ID",
+      "workspace": "相对路径或绝对路径（若有独立子目录请指定，留空则继承父工作区）",
       "description": "这道工序的具体交付内容",
       "dependencies": []
     }
@@ -44,7 +48,8 @@ const PLANNING_RULES = `你是 OpenLoop 的工序规划助手，负责把一条�
 约束：
 1. 工序数量 2~5 道，标题必须贴合当前需求的真实改动，禁止套用通用模板标题；
 2. workflowId 只能取给定流水线列表中的 ID；
-3. dependencies 只允许引用排在它前面的工序，用 "sub_1"、"sub_2" 表示第 1、2 道工序，第一道工序必须为空数组。`;
+3. workspace 为工序对应的工作目录（相对路径或绝对路径）；若无需切换目录则可留空；
+4. dependencies 只允许引用排在它前面的工序，用 "sub_1"、"sub_2" 表示第 1、2 道工序，第一道工序必须为空数组。`;
 
 export class SubtaskPlanner {
   /**
@@ -131,7 +136,7 @@ export class SubtaskPlanner {
 
     return `[任务标题]\n${task.title}\n\n[任务详细说明]\n${
       task.description?.trim() || '（无）'
-    }\n\n[任务当前流水线]\n${task.workflowId}\n\n[可用流水线列表]\n${workflowList}${existing}`;
+    }\n\n[任务当前流水线]\n${task.workflowId}\n\n[任务根工作区]\n${task.workspace || '（未指定）'}\n\n[可用流水线列表]\n${workflowList}${existing}`;
   }
 
   /** 从模型输出中提取第一个 JSON 对象 */
@@ -177,9 +182,12 @@ export class SubtaskPlanner {
             .filter((dep: string | null): dep is string => Boolean(dep))
         : [];
 
+      const ws = typeof item.workspace === 'string' && item.workspace.trim() ? item.workspace.trim() : undefined;
+
       subtasks.push({
         title,
         workflowId: workflowIds.has(item.workflowId) ? item.workflowId : task.workflowId,
+        workspace: ws,
         description: typeof item.description === 'string' ? item.description.trim() : undefined,
         dependencies,
       });

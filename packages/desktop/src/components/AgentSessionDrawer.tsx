@@ -20,7 +20,7 @@ import {
   MessageSquare,
   ZoomIn,
 } from 'lucide-react';
-import type { TaskSessionState, SessionChatMessage, QaRunRecord, SelectedQaArtifacts, TaskAttachment } from '@openloop/core';
+import type { TaskSessionState, SessionChatMessage, QaRunRecord, SelectedQaArtifacts, TaskAttachment, WorkflowDefinition } from '@openloop/core';
 import { extractToolResultText, formatToolArgs, sanitizeChatMessages } from '@openloop/core/agent-format';
 import { guessImageMimeType } from '@openloop/core/media-mime';
 import { getAgentProviderMeta, getDefaultResumeCommand } from '@openloop/agent-providers';
@@ -62,6 +62,11 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [expandedQaAttachments, setExpandedQaAttachments] = useState<Record<string, boolean>>({});
   const [defaultModel, setDefaultModel] = useState<string>('');
+  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
+
+  useEffect(() => {
+    api.getWorkflows().then(setWorkflows).catch(() => {});
+  }, []);
 
   // QA 自动化测试产物选择与查看状态
   const [qaRun, setQaRun] = useState<QaRunRecord | null>(null);
@@ -737,6 +742,9 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                           !!sessionState?.isBusy &&
                           msgIdx === sessionState.messages.length - 1
                         }
+                        taskId={taskId || undefined}
+                        parentWorkspace={workspace}
+                        workflows={workflows}
                       />
                     </div>
                   )}

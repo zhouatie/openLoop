@@ -3,6 +3,8 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import Prism from 'prismjs';
 import { Check, Copy, ExternalLink, Terminal } from 'lucide-react';
+import { SubtaskPlanCard } from './SubtaskPlanCard';
+import { WorkflowDefinition } from '@openloop/core';
 
 // 按需加载常用高亮语言
 import 'prismjs/components/prism-typescript';
@@ -131,6 +133,10 @@ export interface AgentMarkdownProps {
   content: string;
   className?: string;
   isStreaming?: boolean;
+  taskId?: string;
+  parentWorkspace?: string;
+  workflows?: WorkflowDefinition[];
+  onAppliedPlan?: () => void;
 }
 
 /**
@@ -140,6 +146,10 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   content,
   className = '',
   isStreaming = false,
+  taskId,
+  parentWorkspace,
+  workflows = [],
+  onAppliedPlan,
 }: AgentMarkdownProps) {
   // 自定义组件映射
   const components = useMemo(
@@ -149,6 +159,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({
       },
       code({ className: codeClass, children, ...props }: any) {
         const match = /language-(\w+)/.exec(codeClass || '');
+        const lang = match ? match[1].toLowerCase() : '';
         const codeStr = String(children).replace(/\n$/, '');
         const isInline = !match && !String(children).includes('\n');
 
@@ -161,6 +172,30 @@ export const AgentMarkdown = memo(function AgentMarkdown({
               {children}
             </code>
           );
+        }
+
+        // 检测是否为工序拆解方案 JSON (如由任务组架构师产出的 subtask_plan)
+        if (
+          (lang === 'json' || lang === 'subtask_plan' || lang === 'subtasks' || !lang) &&
+          codeStr.includes('"subtasks"')
+        ) {
+          try {
+            const parsed = JSON.parse(codeStr);
+            if (parsed && Array.isArray(parsed.subtasks) && parsed.subtasks.length > 0 && parsed.subtasks[0]?.title) {
+              return (
+                <SubtaskPlanCard
+                  plan={parsed}
+                  rawJson={codeStr}
+                  taskId={taskId}
+                  parentWorkspace={parentWorkspace}
+                  workflows={workflows}
+                  onApplied={onAppliedPlan}
+                />
+              );
+            }
+          } catch (_) {
+            // 解析失败时优雅降级到默认代码块展示
+          }
         }
 
         return (
@@ -283,7 +318,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({
         return <em className="italic text-[#4b4b53]">{children}</em>;
       },
     }),
-    []
+    [taskId, parentWorkspace, workflows, onAppliedPlan]
   );
 
   return (

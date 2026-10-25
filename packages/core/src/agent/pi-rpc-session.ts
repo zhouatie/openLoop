@@ -28,6 +28,8 @@ export interface PiRpcSessionOptions {
   model?: string;
   thinking?: string;
   tools?: string;
+  /** 排除的工具列表，逗号分隔，例如 'edit,write' */
+  excludeTools?: string;
   /** 关闭全部工具，仅进行纯文本推理（一次性规划场景） */
   disableTools?: boolean;
   cwd?: string;
@@ -105,6 +107,9 @@ export class PiRpcSessionInstance extends EventEmitter {
     }
     if (options.tools && options.tools.trim()) {
       args.push('--tools', options.tools.trim());
+    }
+    if (options.excludeTools && options.excludeTools.trim()) {
+      args.push('--exclude-tools', options.excludeTools.trim());
     }
     if (options.disableTools) {
       args.push('--no-tools');

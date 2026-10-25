@@ -1018,7 +1018,15 @@ export class OpenLoopServer {
         const body = await this.parseJsonBody(req);
         const { title, workflowId, description, dependencies, attachments, workspace } = body;
         const subId = `task_sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        const childWorkspace = typeof workspace === 'string' && workspace.trim() ? workspace.trim() : parent.workspace;
+        
+        // 解析子任务物理工作区：若传入相对路径，自动基于父任务工作区解析为绝对路径
+        let childWorkspace = parent.workspace;
+        if (typeof workspace === 'string' && workspace.trim()) {
+          const trimmed = workspace.trim();
+          childWorkspace = path.isAbsolute(trimmed)
+            ? trimmed
+            : (parent.workspace ? path.resolve(parent.workspace, trimmed) : trimmed);
+        }
 
         const childTask: Task = {
           id: subId,
@@ -1095,8 +1103,14 @@ export class OpenLoopServer {
             .map((d: string) => tempIdToRealId.get(d) || d)
             .filter((d: string) => currentSubTaskIds.includes(d));
 
-          const childWorkspace =
-            typeof raw.workspace === 'string' && raw.workspace.trim() ? raw.workspace.trim() : parent.workspace;
+          // 解析子任务物理工作区：若传入相对路径，自动基于父任务工作区解析为绝对路径
+          let childWorkspace = parent.workspace;
+          if (typeof raw.workspace === 'string' && raw.workspace.trim()) {
+            const trimmed = raw.workspace.trim();
+            childWorkspace = path.isAbsolute(trimmed)
+              ? trimmed
+              : (parent.workspace ? path.resolve(parent.workspace, trimmed) : trimmed);
+          }
 
           const childTask: Task = {
             id: realId,
@@ -1648,11 +1662,77 @@ export class OpenLoopServer {
         const workflow = this.store.getWorkflow(task.workflowId);
         const currentNode = workflow?.nodes.find((n) => n.id === task.currentNodeId);
         const isCurrentAgentNode = task.status === 'running' && currentNode?.type === 'agent';
+        const isTaskGroup = task.kind === 'group' || (Array.isArray(task.subTaskIds) && task.subTaskIds.length > 0);
+
+        let effectiveAgentName = task.context?.agentName || (isTaskGroup ? '任务组架构师' : 'OpenLoop Agent');
+        let excludeTools: string | undefined = undefined;
 
         // 仅当当前任务真正由 Agent 节点驱动流水线时，才注入完成协议提示词，提示 Agent 在验证通过后输出完成标记
         let promptToSend = enrichedMessage;
         if (isCurrentAgentNode) {
           promptToSend += `\n\n【完成协议（重要）】\n- 需求修改并验证通过后，在最后一条回复末尾单独一行输出 ${PIPELINE_DONE_MARKER}，流水线据此流转到下一个节点。\n- 只要还需要用户确认方案、补充信息或回答问题，就直接提问并不要输出该标记，流水线会停留在本节点等待用户回复。`;
+        } else if (isTaskGroup) {
+          effectiveAgentName = '任务组架构师';
+          excludeTools = 'edit,write';
+
+          const existingSubtasks = (task.subTaskIds || [])
+            .map((id) => this.store.getTask(id))
+            .filter(Boolean) as Task[];
+          const existingSubSummary =
+            existingSubtasks.length > 0
+              ? existingSubtasks
+                  .map(
+                    (s, i) =>
+                      `${i + 1}. ${s.title} (workspace: ${s.workspace || '默认'}, workflow: ${s.workflowId})`
+                  )
+                  .join('\n')
+              : '（当前尚未拆分子工序）';
+
+          const architectHeader = `【系统指令：任务组架构与规划 Agent】
+你当前处于【任务组 (Task Group)】顶层架构规划上下文，身份为「任务组架构师」。
+
+【核心原则】
+1. 【严禁修改或编写业务代码】你不是具体编码的 Agent，禁止直接写文件或修改文件（系统已禁用写代码工具）。你的职责是需求梳理、方案设计与工序拆解。
+2. 【只读分析】允许且鼓励使用只读工具（read、grep、find，或查看目录与状态的 bash 命令如 ls、cat、git status）来探查工作区目录结构、工程配置与业务需求。
+3. 【任务拆解】与用户沟通交流，深入理解需求。根据实际工程结构（如单体项目分阶段、多工程项目跨目录等），将其拆解为独立闭环的子任务，并明确为每个子任务指定：
+   - title: 子工序标题
+   - workspace: 目标工作区路径（若在特定子目录或独立工程，指定相对路径或绝对路径；若与父任务一致可留空）
+   - workflowId: 绑定的流水线 ID（由用户指定或与用户商定）
+   - description: 针对该子工序的具体详细交付说明
+   - dependencies: 前序依赖（如 ["sub_1"] 或 []）
+4. 【工序方案结构化输出】当你与用户沟通确认好拆解方案后，除了用自然语言解释你的方案外，请在回复末尾附带标准的 JSON 代码块（系统前端会自动捕获并渲染为「一键采纳方案卡片」，方便用户一键挂载子工序）：
+\`\`\`json
+{
+  "type": "subtask_plan",
+  "executionMode": "serial",
+  "concurrencyLimit": 1,
+  "subtasks": [
+    {
+      "title": "子工序标题",
+      "workspace": "相对路径或绝对路径（留空则继承父工作区）",
+      "workflowId": "流水线 ID",
+      "description": "该工序的具体交付与验收内容...",
+      "dependencies": []
+    }
+  ]
+}
+\`\`\`
+
+【任务组上下文】
+- 标题: ${task.title}
+- 需求描述: ${task.description?.trim() || '（无）'}
+- 工作区根目录: ${task.workspace || '（未指定）'}
+
+【已有子工序】
+${existingSubSummary}
+----------------------------------------\n\n`;
+
+          const hasInjectedHeader = task.context?.chatMessages?.some((m: any) =>
+            typeof m.content === 'string' && m.content.includes('【系统指令：任务组架构与规划 Agent】')
+          );
+          if (!hasInjectedHeader) {
+            promptToSend = `${architectHeader}${promptToSend}`;
+          }
         }
 
         const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
@@ -1710,7 +1790,8 @@ export class OpenLoopServer {
           taskTitle: task.title,
           taskDescription: task.description,
           sessionId,
-          agentName: 'OpenLoop Agent',
+          agentName: effectiveAgentName,
+          excludeTools,
           model: settings.defaultModel,
           thinking: settings.reasoningLevel || 'high',
           cwd,
