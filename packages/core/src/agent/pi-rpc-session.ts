@@ -408,6 +408,8 @@ export class PiRpcSessionInstance extends EventEmitter {
 
       case 'message_end': {
         const msg = record.message;
+        if (!msg || msg.role !== 'assistant') break;
+
         const rawContent = msg?.content;
         const contentText = typeof rawContent === 'string'
           ? rawContent
@@ -435,6 +437,7 @@ export class PiRpcSessionInstance extends EventEmitter {
             this.emitLog('stderr', `[Agent 报错] 模型接口异常: ${errorText}`);
           }
           this.notifyUpdate();
+          this.currentAssistantMessage = null;
         } else if (msg?.errorMessage || msg?.stopReason === 'error') {
           const errorText = msg?.errorMessage || '模型调用失败';
           this.lastError = errorText;
@@ -448,9 +451,12 @@ export class PiRpcSessionInstance extends EventEmitter {
         if (msg?.errorMessage || msg?.stopReason === 'error') {
           const errorText = msg.errorMessage || '模型调用失败';
           this.lastError = errorText;
-          if (this.currentAssistantMessage) {
-            this.currentAssistantMessage.errorMessage = errorText;
-            this.currentAssistantMessage.stopReason = msg.stopReason || 'error';
+          const targetMsg =
+            this.currentAssistantMessage ||
+            this.messages.slice().reverse().find((m) => m.role === 'assistant');
+          if (targetMsg) {
+            targetMsg.errorMessage = errorText;
+            targetMsg.stopReason = msg.stopReason || 'error';
           }
         }
         break;
@@ -460,9 +466,12 @@ export class PiRpcSessionInstance extends EventEmitter {
         const errorText = record.message || record.error || 'RPC 内部错误';
         this.lastError = errorText;
         this.emitLog('stderr', `[Pi RPC 错误] ${errorText}`);
-        if (this.currentAssistantMessage) {
-          this.currentAssistantMessage.errorMessage = errorText;
-          this.currentAssistantMessage.stopReason = 'error';
+        const targetMsg =
+          this.currentAssistantMessage ||
+          this.messages.slice().reverse().find((m) => m.role === 'assistant');
+        if (targetMsg) {
+          targetMsg.errorMessage = errorText;
+          targetMsg.stopReason = 'error';
         }
         this.notifyUpdate();
         break;

@@ -13,6 +13,7 @@ export default defineConfig({
       // 纯函数常量同理别名到 core 源码，避免把 core 的 CJS 产物引入渲染层
       '@openloop/core/media-mime': path.resolve(__dirname, '../core/src/constants/media-mime.ts'),
       '@openloop/core/task-summary': path.resolve(__dirname, '../core/src/store/task-summary.ts'),
+      '@openloop/core/agent-format': path.resolve(__dirname, '../core/src/agent/agent-format.ts'),
     },
   },
   server: {
