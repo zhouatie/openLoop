@@ -14,6 +14,7 @@ export * from './engine/workflow-recommender';
 export * from './agent/pi-rpc-session';
 export * from './agent/agent-format';
 export * from './agent/workflow-copilot';
+export * from './agent/pi-web-manager';
 export * from './server';
 export * from './logger';
 export * from './qa/midscene-runner';

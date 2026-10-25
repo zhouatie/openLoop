@@ -14,6 +14,7 @@ import {
   PanelLeft,
   Zap,
   History,
+  Bot,
 } from 'lucide-react';
 import { Kbd } from './Kbd';
 import { useShortcuts } from '../context/ShortcutContext';
@@ -119,6 +120,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         shortcutKeys: ['super', '4'],
         action: () => {
           onNavigate('qa-automation');
+          onClose();
+        },
+      },
+      {
+        id: 'nav-agent-studio',
+        category: '导航',
+        title: '智能体开发 (Pi Web)',
+        description: '深度交互开发工作台，支持会话分支、模型微调与代码预览',
+        icon: <Bot size={16} strokeWidth={1.8} className="text-[#8b5cf6]" />,
+        shortcutKeys: ['super', '5'],
+        action: () => {
+          onNavigate('agent-studio');
           onClose();
         },
       },

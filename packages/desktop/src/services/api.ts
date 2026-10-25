@@ -22,6 +22,7 @@ import {
   StorageStats,
   StorageCleanOptions,
   StorageCleanResult,
+  PiWebStatus,
 } from '@openloop/core';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
@@ -1229,6 +1230,40 @@ export class DesktopApiService {
     return requestJson<StorageCleanResult>(`${BASE_URL}/api/storage/clean`, {
       method: 'POST',
       body: JSON.stringify(options),
+    });
+  }
+
+  // ================= Pi Web Agent Studio API =================
+
+  async getPiWebStatus(): Promise<PiWebStatus> {
+    return requestJson<PiWebStatus>(`${BASE_URL}/api/pi-web/status`);
+  }
+
+  async startPiWeb(port?: number): Promise<PiWebStatus> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:PiWeb] 请求启动 Pi Web 服务, port:', port);
+    }
+    return requestJson<PiWebStatus>(`${BASE_URL}/api/pi-web/start`, {
+      method: 'POST',
+      body: JSON.stringify({ port }),
+    });
+  }
+
+  async stopPiWeb(): Promise<PiWebStatus> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:PiWeb] 请求停止 Pi Web 服务');
+    }
+    return requestJson<PiWebStatus>(`${BASE_URL}/api/pi-web/stop`, {
+      method: 'POST',
+    });
+  }
+
+  async restartPiWeb(): Promise<PiWebStatus> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:PiWeb] 请求重启 Pi Web 服务');
+    }
+    return requestJson<PiWebStatus>(`${BASE_URL}/api/pi-web/restart`, {
+      method: 'POST',
     });
   }
 }

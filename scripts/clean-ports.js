@@ -1,8 +1,8 @@
 const { execSync } = require('child_process');
 
-// 默认只清理开发环境端口（19889 和 5173），严格保护稳定版端口 19888
+// 默认只清理开发环境端口（19889、5173 及 Pi Web 开发端口 30142），严格保护稳定版端口 19888
 const isAll = process.argv.includes('--all') || process.argv.includes('--prod');
-const ports = isAll ? [19888, 19889, 5173] : [19889, 5173];
+const ports = isAll ? [19888, 19889, 5173, 30141, 30142] : [19889, 5173, 30142];
 
 for (const port of ports) {
   try {

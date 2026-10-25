@@ -15,6 +15,7 @@ import { WorkflowListView } from './views/WorkflowListView';
 import { WorkflowEditorView } from './views/WorkflowEditorView';
 import { AutomationListView } from './views/AutomationListView';
 import { QaAutomationView } from './views/QaAutomationView';
+import { AgentStudioView } from './views/AgentStudioView';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
 import { PluginSandboxContainer } from './components/PluginSandboxContainer';
@@ -96,6 +97,9 @@ export const AppContent: React.FC = () => {
     },
     onNavigateQa: () => {
       setActivePluginId('qa-automation');
+    },
+    onNavigateAgentStudio: () => {
+      setActivePluginId('agent-studio');
     },
     onNavigateSettings: () => {
       setActivePluginId('settings-agent');
@@ -445,6 +449,16 @@ export const AppContent: React.FC = () => {
             <QaAutomationView />
           )}
 
+          {/* Pi Web 智能体开发工作台 (Keep-Alive 保活机制，切屏会话不中断) */}
+          <AgentStudioView
+            isVisible={activePluginId === 'agent-studio'}
+            currentWorkspace={
+              selectedWorkspaceFilter !== 'all' && selectedWorkspaceFilter !== 'none'
+                ? selectedWorkspaceFilter
+                : undefined
+            }
+          />
+
           {isSettings && (
             <SettingsView
               activeSubTab={activePluginId === 'plugin-manager' ? 'settings-plugins' : activePluginId}
@@ -467,6 +481,7 @@ export const AppContent: React.FC = () => {
             activePluginId !== 'workflow-editor' &&
             activePluginId !== 'automations' &&
             activePluginId !== 'qa-automation' &&
+            activePluginId !== 'agent-studio' &&
             activePluginId !== 'plugin-manager' &&
             !isSettings &&
             (currentPlugin?.entry ? (

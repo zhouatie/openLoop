@@ -6,6 +6,7 @@ export interface ShortcutActions {
   onNavigateWorkflows: () => void;
   onNavigateAutomations?: () => void;
   onNavigateQa?: () => void;
+  onNavigateAgentStudio?: () => void;
   onNavigateSettings: () => void;
   onOpenCreateTask: () => void;
   onQuickRunWorkflow?: () => void;
@@ -105,6 +106,17 @@ export const useGlobalShortcuts = (actions: ShortcutActions) => {
           console.log('[Shortcut] 触发快捷键: Super + 4 -> QA 自动化', { superKey: activeSuper });
         }
         actionsRef.current.onNavigateQa();
+        return;
+      }
+
+      // 5. Super + 5: 导航至智能体开发 (Pi Web)
+      if ((key === '5' || code === 'Digit5' || code === 'Numpad5') && actionsRef.current.onNavigateAgentStudio) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (import.meta.env?.DEV) {
+          console.log('[Shortcut] 触发快捷键: Super + 5 -> 智能体开发', { superKey: activeSuper });
+        }
+        actionsRef.current.onNavigateAgentStudio();
         return;
       }
 

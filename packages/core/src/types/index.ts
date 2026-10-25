@@ -693,6 +693,17 @@ export interface StorageCleanResult {
   durationMs: number;
 }
 
+export interface PiWebStatus {
+  running: boolean;
+  status: 'stopped' | 'starting' | 'running' | 'error';
+  port: number;
+  url: string;
+  pid?: number;
+  error?: string;
+  installed?: boolean;
+}
+
+
 
 
 

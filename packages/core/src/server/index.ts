@@ -26,6 +26,7 @@ import { createLogger } from '../logger';
 import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
 import { sanitizeChatMessages } from '../agent/agent-format';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
+import { PiWebManager } from '../agent/pi-web-manager';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
 import { IosDeviceManager } from '../qa/ios-device-manager';
@@ -230,6 +231,10 @@ export class OpenLoopServer {
   public async stop(): Promise<void> {
     this.scheduler.stop();
     this.unsubscribeDeviceLeases?.();
+
+    try {
+      await PiWebManager.getInstance().stop();
+    } catch {}
 
     for (const ws of this.clients) {
       ws.close();
@@ -450,6 +455,28 @@ export class OpenLoopServer {
           uptime: process.uptime(),
           version: '0.1.0',
         }, reqMeta);
+      }
+
+      // Pi Web 管理 API
+      if (pathname === '/api/pi-web/status' && method === 'GET') {
+        const status = await PiWebManager.getInstance().getStatus();
+        return this.sendJson(res, 200, status, reqMeta);
+      }
+
+      if (pathname === '/api/pi-web/start' && method === 'POST') {
+        const body = await this.parseJsonBody(req).catch(() => ({}));
+        const status = await PiWebManager.getInstance().start(body?.port);
+        return this.sendJson(res, 200, status, reqMeta);
+      }
+
+      if (pathname === '/api/pi-web/stop' && method === 'POST') {
+        const status = await PiWebManager.getInstance().stop();
+        return this.sendJson(res, 200, status, reqMeta);
+      }
+
+      if (pathname === '/api/pi-web/restart' && method === 'POST') {
+        const status = await PiWebManager.getInstance().restart();
+        return this.sendJson(res, 200, status, reqMeta);
       }
 
       // Workflows

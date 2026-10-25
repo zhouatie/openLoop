@@ -113,7 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <Puzzle size={15} strokeWidth={1.8} />
               );
 
-            // 对前四项核心视图分配全局快捷键提示
+            // 对前五项核心视图分配全局快捷键提示
             const shortcutHint =
               plugin.id === 'kanban'
                 ? formatCombo('1')
@@ -123,6 +123,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 ? formatCombo('3')
                 : plugin.id === 'qa-automation'
                 ? formatCombo('4')
+                : plugin.id === 'agent-studio'
+                ? formatCombo('5')
                 : undefined;
 
             const titleText = plugin.sidebarItem?.title || plugin.name;
