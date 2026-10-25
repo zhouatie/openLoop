@@ -575,6 +575,9 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const [workflowTaskTemplate, setWorkflowTaskTemplate] = useState<WorkflowTaskTemplate | undefined>(
     activeWorkflow?.taskTemplate
   );
+  const [workflowVariables, setWorkflowVariables] = useState<Record<string, any>>(
+    activeWorkflow?.variables ? { ...activeWorkflow.variables } : {}
+  );
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -810,6 +813,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       setWorkflowRequireWorkspace(Boolean(activeWorkflow.requireWorkspace));
       setWorkflowDefaultWorkspace(activeWorkflow.defaultWorkspace || '');
       setWorkflowTaskTemplate(activeWorkflow.taskTemplate ? { ...activeWorkflow.taskTemplate } : undefined);
+      setWorkflowVariables(activeWorkflow.variables ? { ...activeWorkflow.variables } : {});
       setTitleDraft(activeWorkflow.name || '');
     }
   }, [
@@ -820,6 +824,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
     activeWorkflow?.requireWorkspace,
     activeWorkflow?.defaultWorkspace,
     activeWorkflow?.taskTemplate,
+    activeWorkflow?.variables,
   ]);
 
   // 拉取 Copilot 会话历史状态
@@ -2034,6 +2039,10 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
       name: finalName,
       description: finalDesc,
       tags: finalTags,
+      variables: {
+        ...(activeWorkflow.variables || {}),
+        ...workflowVariables,
+      },
       taskTemplate: finalTaskTemplate,
       requireWorkspace: workflowRequireWorkspace,
       defaultWorkspace: workflowDefaultWorkspace.trim() || undefined,
@@ -4277,6 +4286,40 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                         />
                       </div>
                     </div>
+
+                    {/* 运行参数与变量 (Variables) */}
+                    {(workflowVariables.appPackage !== undefined ||
+                      activeWorkflow.variables?.appPackage !== undefined ||
+                      (activeWorkflow.variables && Object.keys(activeWorkflow.variables).length > 0)) && (
+                      <div className="pt-2 border-t border-[#ececf0] space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11.5px] font-medium text-[#1c1c21]">
+                            运行参数与变量 (Variables)
+                          </label>
+                          <span className="text-[10px] text-[#85858d]">模板级生效</span>
+                        </div>
+                        <div className="space-y-2">
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-[10.5px] text-[#85858d] font-medium">目标 App 包名 (Bundle ID)</label>
+                              <span className="font-mono text-[9.5px] text-[#85858d]">appPackage</span>
+                            </div>
+                            <input
+                              type="text"
+                              value={workflowVariables.appPackage ?? activeWorkflow.variables?.appPackage ?? ''}
+                              onChange={(e) =>
+                                setWorkflowVariables((prev) => ({ ...prev, appPackage: e.target.value }))
+                              }
+                              placeholder="com.netease.cloudmusicother"
+                              className="w-full h-[28px] font-mono text-[11px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5] transition-all"
+                            />
+                            <p className="text-[9.5px] text-[#85858d] mt-0.5">
+                              例如: com.netease.cloudmusicother / com.netease.cloudmusicinhouse / com.netease.cloudmusic
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* 任务说明与提示词模板配置 */}
                     <div className="pt-2 border-t border-[#ececf0] space-y-2.5">

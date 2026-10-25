@@ -423,6 +423,75 @@ export class SqliteStore {
       // 忽略
     }
 
+    // 平滑升级 wf_rn_ios_chitu_qa 流水线：支持目标 App 参数配置
+    try {
+      const row = this.db.prepare("SELECT nodes_json, variables_json FROM workflows WHERE id = 'wf_rn_ios_chitu_qa'").get() as { nodes_json: string; variables_json: string } | undefined;
+      if (row) {
+        let changed = false;
+        let nodes: any[] = [];
+        try { nodes = JSON.parse(row.nodes_json); } catch {}
+        let variables: Record<string, any> = {};
+        try { variables = JSON.parse(row.variables_json || '{}'); } catch {}
+
+        if (!variables.appPackage) {
+          variables.appPackage = 'com.netease.cloudmusicother';
+          changed = true;
+        }
+
+        for (const n of nodes) {
+          if (n.id === 'node_ios_deeplink') {
+            const ep = Array.isArray(n.config?.editableParams) ? n.config.editableParams : [];
+            if (!ep.some((p: any) => p.key === 'appPackage')) {
+              n.config = {
+                ...n.config,
+                editableParams: [
+                  {
+                    key: 'appPackage',
+                    label: '目标 App 包名 (Bundle ID)',
+                    placeholder: 'com.netease.cloudmusicother',
+                    hint: 'iOS Bundle ID (如 com.netease.cloudmusicother / com.netease.cloudmusicinhouse / com.netease.cloudmusic)',
+                  },
+                  ...ep,
+                ],
+              };
+              changed = true;
+            }
+          } else if (n.id === 'node_rn_midscene_test') {
+            if (n.config?.appPackage === 'com.netease.cloudmusicother' || !n.config?.appPackage) {
+              n.config = {
+                ...n.config,
+                appPackage: '{{appPackage}}',
+              };
+              changed = true;
+            }
+            const ep = Array.isArray(n.config?.editableParams) ? n.config.editableParams : [];
+            if (!ep.some((p: any) => p.key === 'appPackage')) {
+              n.config = {
+                ...n.config,
+                editableParams: [
+                  {
+                    key: 'appPackage',
+                    label: '目标 App 包名 (Bundle ID)',
+                    placeholder: 'com.netease.cloudmusicother',
+                    hint: 'iOS Bundle ID (如 com.netease.cloudmusicother / com.netease.cloudmusicinhouse / com.netease.cloudmusic)',
+                  },
+                  ...ep,
+                ],
+              };
+              changed = true;
+            }
+          }
+        }
+
+        if (changed) {
+          this.db.prepare("UPDATE workflows SET nodes_json = ?, variables_json = ?, updated_at = ? WHERE id = 'wf_rn_ios_chitu_qa'")
+            .run(JSON.stringify(nodes), JSON.stringify(variables), Date.now());
+        }
+      }
+    } catch {
+      // 忽略
+    }
+
     // 注意：孤立任务恢复不在此处执行。Store 会被 CLI、脚本等多个进程实例化，
     // 若在构造时清理，任何并发进程都会误杀正在执行的任务。
     // 该动作改由 OpenLoopServer.start() 在服务启动时执行一次。

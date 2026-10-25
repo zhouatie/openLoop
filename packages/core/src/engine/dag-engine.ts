@@ -252,6 +252,16 @@ export class DagEngine extends EventEmitter {
 
     const executor = this.registry.get(node.type);
     const abortController = this.abortControllers.get(task.id);
+    // 聚合任务上下文中跨节点覆盖的参数（保证上游节点微调配置如 appPackage 可传递给下游节点）
+    const sharedOverrideParams: Record<string, any> = {};
+    if (task.context?.nodeOverrides && typeof task.context.nodeOverrides === 'object') {
+      for (const ov of Object.values(task.context.nodeOverrides) as any[]) {
+        if (ov?.params && typeof ov.params === 'object') {
+          Object.assign(sharedOverrideParams, ov.params);
+        }
+      }
+    }
+
     const ctx: ExecutionContext = {
       task,
       node: effectiveNode,
@@ -273,6 +283,7 @@ export class DagEngine extends EventEmitter {
           workspace: task.workspace || '',
         },
         ...workflow.variables,
+        ...sharedOverrideParams,
         ...task.context,
         ...overrideParams,
         inputs: task.context,
