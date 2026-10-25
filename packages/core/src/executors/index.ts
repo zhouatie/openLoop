@@ -1228,14 +1228,26 @@ export class MidsceneExecutor implements NodeExecutor {
       }
 
       const suiteId = node.config.suiteId || `suite_task_${task.id}`;
+      const rawAppPackage =
+        node.config.appPackage ||
+        variables.appPackage ||
+        (platform !== 'web' ? testUrl : undefined);
+      const resolvedAppPackage =
+        platform === 'web'
+          ? undefined
+          : (rawAppPackage ? interpolateString(rawAppPackage, { task, ...variables }) : undefined);
+      const resolvedWdaEndpoint = node.config.wdaEndpoint
+        ? interpolateString(node.config.wdaEndpoint, { task, ...variables })
+        : (variables.wdaEndpoint || undefined);
+
       const suite: QaSuite = {
         id: suiteId,
         name: `任务验收: ${task.title.slice(0, 30)}`,
         platform,
         targetUrl: testUrl,
-        appPackage: platform === 'web' ? undefined : node.config.appPackage || testUrl,
+        appPackage: resolvedAppPackage,
         deviceSerial: node.config.deviceSerial,
-        wdaEndpoint: node.config.wdaEndpoint,
+        wdaEndpoint: resolvedWdaEndpoint,
         steps,
         createdAt: Date.now(),
         updatedAt: Date.now(),

@@ -381,8 +381,15 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
     []
   );
 
-  // 参数的模板原值：任务上下文 > 流水线变量，用于展示当前生效值与还原
+  // 参数的模板原值：上游微调值 > 任务上下文 > 流水线变量，用于展示当前生效值与还原
   const resolveTemplateParamValue = (key: string): string => {
+    if (task.context?.nodeOverrides && typeof task.context.nodeOverrides === 'object') {
+      for (const ov of Object.values(task.context.nodeOverrides) as any[]) {
+        if (ov?.params?.[key] !== undefined && ov?.params?.[key] !== '') {
+          return String(ov.params[key]);
+        }
+      }
+    }
     const raw = task.context?.[key] ?? workflow?.variables?.[key] ?? '';
     return raw === undefined || raw === null ? '' : String(raw);
   };
