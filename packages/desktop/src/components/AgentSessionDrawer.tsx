@@ -33,6 +33,7 @@ import { ChatScrollToLatestButton } from './ChatScrollToLatestButton';
 import { AgentChatChangedFiles } from './AgentChatChangedFiles';
 import { QaArtifactSelectorModal } from './qa/QaArtifactSelectorModal';
 import { ImageLightboxModal } from './ImageLightboxModal';
+import { AgentAutocompletePopover, AgentAutocompletePopoverHandle } from './AgentAutocompletePopover';
 
 export interface AgentSessionDrawerProps {
   isOpen: boolean;
@@ -77,6 +78,7 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
   const [activeLightboxImages, setActiveLightboxImages] = useState<{ name: string; url: string }[]>([]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const autocompleteRef = useRef<AgentAutocompletePopoverHandle>(null);
 
   // 检测会话中是否有代码改动工具调用（edit, write, patch）
   const hasCodeChanges = useMemo(() => {
@@ -956,13 +958,31 @@ export const AgentSessionDrawer: React.FC<AgentSessionDrawerProps> = ({
                 </div>
               )}
 
-              <div className="bg-[#f9f9fb] border border-[#e3e3e8] focus-within:border-[#7c3aed] focus-within:ring-2 focus-within:ring-[#7c3aed]/15 rounded-[8px] p-2 transition-all flex flex-col gap-1.5">
+              <div className="relative bg-[#f9f9fb] border border-[#e3e3e8] focus-within:border-[#7c3aed] focus-within:ring-2 focus-within:ring-[#7c3aed]/15 rounded-[8px] p-2 transition-all flex flex-col gap-1.5">
+                <AgentAutocompletePopover
+                  ref={autocompleteRef}
+                  taskId={taskId}
+                  textareaRef={textareaRef}
+                  value={chatInput}
+                  onChange={setChatInput}
+                  onClearSession={() => {
+                    if (sessionState) {
+                      setSessionState({ ...sessionState, messages: [] });
+                    }
+                  }}
+                  onPauseSession={handleTogglePause}
+                  onResumeSession={handleTogglePause}
+                />
+
                 <textarea
                   ref={textareaRef}
                   rows={2}
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => {
+                    if (autocompleteRef.current?.handleKeyDown(e)) {
+                      return;
+                    }
                     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                       e.preventDefault();
                       handleSendChat();

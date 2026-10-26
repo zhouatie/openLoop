@@ -880,6 +880,55 @@ export class DesktopApiService {
     });
   }
 
+  async clearTaskSession(taskId: string): Promise<{ success: boolean }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 请求清空任务 [${taskId}] 的 Agent 会话消息`);
+    }
+    return requestJson<{ success: boolean }>(`${BASE_URL}/api/tasks/${taskId}/session/clear`, {
+      method: 'POST',
+    });
+  }
+
+  async getTaskWorkspaceFiles(
+    taskId: string,
+    query?: string,
+    limit?: number
+  ): Promise<{ files: string[]; workspace: string; total: number; matched: number }> {
+    const params = new URLSearchParams();
+    if (query) params.set('query', query);
+    if (limit) params.set('limit', String(limit));
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return requestJson<{ files: string[]; workspace: string; total: number; matched: number }>(
+      `${BASE_URL}/api/tasks/${taskId}/files${qs}`
+    );
+  }
+
+  async getAgentCommandsAndSkills(
+    taskId?: string
+  ): Promise<{
+    commands: Array<{
+      name: string;
+      label: string;
+      description: string;
+      type: 'command';
+      template?: string;
+      action?: 'clear' | 'pause' | 'resume';
+    }>;
+    skills: Array<{
+      name: string;
+      label: string;
+      description: string;
+      type: 'skill';
+      path: string;
+      template: string;
+    }>;
+  }> {
+    const url = taskId
+      ? `${BASE_URL}/api/tasks/${taskId}/agent/commands-and-skills`
+      : `${BASE_URL}/api/agent/commands-and-skills`;
+    return requestJson<{ commands: any[]; skills: any[] }>(url);
+  }
+
   // System Dialog & File Manager
   /**
    * 调起系统原生文件管理器（访达/资源管理器）进行目录选择

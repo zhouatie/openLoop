@@ -84,6 +84,7 @@ import { AgentMarkdown } from '../components/AgentMarkdown';
 import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
 import { AgentAwaitingInputBar } from '../components/AgentAwaitingInputBar';
 import { AgentChatChangedFiles } from '../components/AgentChatChangedFiles';
+import { AgentAutocompletePopover, AgentAutocompletePopoverHandle } from '../components/AgentAutocompletePopover';
 import { VisualAcceptanceModal } from '../components/qa/VisualAcceptanceModal';
 import { QaArtifactSelectorModal } from '../components/qa/QaArtifactSelectorModal';
 import { TaskQaInstructionsCard } from '../components/qa/TaskQaInstructionsCard';
@@ -466,6 +467,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const chatTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const chatAutocompleteRef = useRef<AgentAutocompletePopoverHandle>(null);
 
   const {
     containerRef: chatScrollContainerRef,
@@ -4260,6 +4262,21 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       </div>
                     ) : null}
 
+                    <AgentAutocompletePopover
+                      ref={chatAutocompleteRef}
+                      taskId={curTask.id}
+                      textareaRef={chatTextareaRef}
+                      value={chatInput}
+                      onChange={setChatInput}
+                      onClearSession={() => {
+                        if (sessionState) {
+                          setSessionState({ ...sessionState, messages: [] });
+                        }
+                      }}
+                      onPauseSession={handleTogglePauseSession}
+                      onResumeSession={handleTogglePauseSession}
+                    />
+
                     <textarea
                       ref={chatTextareaRef}
                       value={chatInput}
@@ -4270,6 +4287,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       }}
                       onPaste={handleChatPaste}
                       onKeyDown={(e) => {
+                        if (chatAutocompleteRef.current?.handleKeyDown(e)) {
+                          return;
+                        }
                         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                           e.preventDefault();
                           handleSendChat();
