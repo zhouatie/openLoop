@@ -16,7 +16,10 @@ import {
   Loader2,
   AlertCircle,
   RefreshCw,
+  AlignJustify,
+  Columns2,
 } from 'lucide-react';
+import { diffWordsWithSpace } from 'diff';
 import { TaskWorktreeDiffResult, FileDiffItem } from '@openloop/core';
 
 interface CodeDiffViewerModalProps {
@@ -29,30 +32,222 @@ interface CodeDiffViewerModalProps {
   onClose: () => void;
 }
 
-interface ParsedDiffLine {
-  type: 'chunk-header' | 'add' | 'delete' | 'context' | 'meta';
+export interface DiffPart {
+  text: string;
+  type: 'same' | 'delete' | 'add';
+}
+
+export interface UnifiedDiffLine {
+  type: 'chunk-header' | 'add' | 'delete' | 'context';
   oldLineNumber?: number;
   newLineNumber?: number;
   content: string;
+  parts?: DiffPart[];
 }
 
-function parseFileDiff(diffText: string): ParsedDiffLine[] {
-  if (!diffText) return [];
+export interface SplitDiffSide {
+  lineNumber?: number;
+  type: 'delete' | 'add' | 'context';
+  content: string;
+  parts?: DiffPart[];
+}
+
+export interface SplitDiffRow {
+  type: 'chunk-header' | 'diff';
+  chunkContent?: string;
+  left?: SplitDiffSide;
+  right?: SplitDiffSide;
+}
+
+export interface ParsedFileDiffResult {
+  unified: UnifiedDiffLine[];
+  split: SplitDiffRow[];
+}
+
+/**
+ * 针对两行文本进行词级（Word-level / Intra-line）差异比对
+ */
+function computeLineDiff(oldText: string, newText: string): { oldParts: DiffPart[]; newParts: DiffPart[] } {
+  if (oldText === newText) {
+    return {
+      oldParts: [{ text: oldText, type: 'same' }],
+      newParts: [{ text: newText, type: 'same' }],
+    };
+  }
+
+  const changes = diffWordsWithSpace(oldText, newText);
+  const oldParts: DiffPart[] = [];
+  const newParts: DiffPart[] = [];
+
+  for (const c of changes) {
+    if (c.removed) {
+      oldParts.push({ text: c.value, type: 'delete' });
+    } else if (c.added) {
+      newParts.push({ text: c.value, type: 'add' });
+    } else {
+      oldParts.push({ text: c.value, type: 'same' });
+      newParts.push({ text: c.value, type: 'same' });
+    }
+  }
+
+  return { oldParts, newParts };
+}
+
+/**
+ * 计算两行文本公共前后缀相似度，用于多行变动时的智能对齐配对
+ */
+function calcLineSimilarity(s1: string, s2: string): number {
+  if (s1 === s2) return 1;
+  const minLen = Math.min(s1.length, s2.length);
+  if (minLen === 0) return 0;
+  let prefix = 0;
+  while (prefix < minLen && s1[prefix] === s2[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < minLen - prefix && s1[s1.length - 1 - suffix] === s2[s2.length - 1 - suffix]) suffix++;
+  return ((prefix + suffix) * 2) / (s1.length + s2.length);
+}
+
+/**
+ * 将连续的删除行与新增行块进行智能配对
+ */
+function pairChangeBlocks(
+  delBlock: Array<{ oldLineNumber: number; content: string }>,
+  addBlock: Array<{ newLineNumber: number; content: string }>
+) {
+  if (delBlock.length === addBlock.length) {
+    return delBlock.map((del, idx) => ({ del: del as typeof del | undefined, add: addBlock[idx] as typeof addBlock[0] | undefined }));
+  }
+
+  const pairs: Array<{ del?: typeof delBlock[0]; add?: typeof addBlock[0] }> = [];
+  const usedAdd = new Set<number>();
+
+  for (const del of delBlock) {
+    let bestIdx = -1;
+    let bestScore = 0.25;
+    for (let j = 0; j < addBlock.length; j++) {
+      if (usedAdd.has(j)) continue;
+      const score = calcLineSimilarity(del.content, addBlock[j].content);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = j;
+      }
+    }
+    if (bestIdx !== -1) {
+      usedAdd.add(bestIdx);
+      pairs.push({ del, add: addBlock[bestIdx] });
+    } else {
+      pairs.push({ del, add: undefined });
+    }
+  }
+
+  for (let j = 0; j < addBlock.length; j++) {
+    if (!usedAdd.has(j)) {
+      pairs.push({ del: undefined, add: addBlock[j] });
+    }
+  }
+
+  return pairs;
+}
+
+function parseFileDiff(diffText: string): ParsedFileDiffResult {
+  if (!diffText) return { unified: [], split: [] };
   const rawLines = diffText.split('\n');
-  const result: ParsedDiffLine[] = [];
+  const unified: UnifiedDiffLine[] = [];
+  const split: SplitDiffRow[] = [];
+
   let oldLine = 0;
   let newLine = 0;
 
+  let delBlock: Array<{ oldLineNumber: number; content: string }> = [];
+  let addBlock: Array<{ newLineNumber: number; content: string }> = [];
+
+  const flushBlock = () => {
+    if (delBlock.length === 0 && addBlock.length === 0) return;
+
+    const pairs = pairChangeBlocks(delBlock, addBlock);
+    for (const pair of pairs) {
+      const { del, add } = pair;
+      if (del && add) {
+        const { oldParts, newParts } = computeLineDiff(del.content, add.content);
+        unified.push({
+          type: 'delete',
+          oldLineNumber: del.oldLineNumber,
+          content: del.content,
+          parts: oldParts,
+        });
+        unified.push({
+          type: 'add',
+          newLineNumber: add.newLineNumber,
+          content: add.content,
+          parts: newParts,
+        });
+        split.push({
+          type: 'diff',
+          left: {
+            lineNumber: del.oldLineNumber,
+            type: 'delete',
+            content: del.content,
+            parts: oldParts,
+          },
+          right: {
+            lineNumber: add.newLineNumber,
+            type: 'add',
+            content: add.content,
+            parts: newParts,
+          },
+        });
+      } else if (del) {
+        unified.push({
+          type: 'delete',
+          oldLineNumber: del.oldLineNumber,
+          content: del.content,
+        });
+        split.push({
+          type: 'diff',
+          left: {
+            lineNumber: del.oldLineNumber,
+            type: 'delete',
+            content: del.content,
+          },
+          right: undefined,
+        });
+      } else if (add) {
+        unified.push({
+          type: 'add',
+          newLineNumber: add.newLineNumber,
+          content: add.content,
+        });
+        split.push({
+          type: 'diff',
+          left: undefined,
+          right: {
+            lineNumber: add.newLineNumber,
+            type: 'add',
+            content: add.content,
+          },
+        });
+      }
+    }
+
+    delBlock = [];
+    addBlock = [];
+  };
+
   for (const line of rawLines) {
     if (line.startsWith('@@')) {
+      flushBlock();
       const match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
       if (match) {
         oldLine = parseInt(match[1], 10);
         newLine = parseInt(match[2], 10);
       }
-      result.push({
+      unified.push({
         type: 'chunk-header',
         content: line,
+      });
+      split.push({
+        type: 'chunk-header',
+        chunkContent: line,
       });
     } else if (
       line.startsWith('---') ||
@@ -67,33 +262,36 @@ function parseFileDiff(diffText: string): ParsedDiffLine[] {
     ) {
       // 元数据行，略过展示以保持视觉极简专注
       continue;
-    } else if (line.startsWith('+')) {
-      result.push({
-        type: 'add',
-        newLineNumber: newLine,
-        content: line.slice(1),
-      });
-      newLine++;
     } else if (line.startsWith('-')) {
-      result.push({
-        type: 'delete',
-        oldLineNumber: oldLine,
-        content: line.slice(1),
-      });
+      if (addBlock.length > 0) {
+        flushBlock();
+      }
+      delBlock.push({ oldLineNumber: oldLine, content: line.slice(1) });
       oldLine++;
+    } else if (line.startsWith('+')) {
+      addBlock.push({ newLineNumber: newLine, content: line.slice(1) });
+      newLine++;
     } else if (line.startsWith(' ') || line === '') {
-      result.push({
+      flushBlock();
+      const content = line.startsWith(' ') ? line.slice(1) : line;
+      unified.push({
         type: 'context',
         oldLineNumber: oldLine,
         newLineNumber: newLine,
-        content: line.startsWith(' ') ? line.slice(1) : line,
+        content,
+      });
+      split.push({
+        type: 'diff',
+        left: { lineNumber: oldLine, type: 'context', content },
+        right: { lineNumber: newLine, type: 'context', content },
       });
       oldLine++;
       newLine++;
     }
   }
 
-  return result;
+  flushBlock();
+  return { unified, split };
 }
 
 function splitPath(filePath: string): { dir: string; name: string } {
@@ -103,6 +301,72 @@ function splitPath(filePath: string): { dir: string; name: string } {
   }
   const name = parts.pop() || '';
   return { dir: parts.join('/') + '/', name };
+}
+
+/**
+ * 渲染行内细粒度差异（标出具体变动单词/字符）
+ */
+function renderDiffContent(
+  parts?: DiffPart[],
+  fallbackContent?: string,
+  lineType?: 'delete' | 'add' | 'context'
+) {
+  if (parts && parts.length > 0) {
+    return (
+      <>
+        {parts.map((p, idx) => {
+          if (p.type === 'delete') {
+            return (
+              <mark
+                key={idx}
+                className="bg-[#fecaca] text-[#7f1d1d] font-semibold rounded-[2px] px-0.5 border border-[#f87171]/40 shadow-3xs"
+              >
+                {p.text}
+              </mark>
+            );
+          }
+          if (p.type === 'add') {
+            return (
+              <mark
+                key={idx}
+                className="bg-[#a7f3d0] text-[#064e3b] font-semibold rounded-[2px] px-0.5 border border-[#34d399]/40 shadow-3xs"
+              >
+                {p.text}
+              </mark>
+            );
+          }
+          return (
+            <span
+              key={idx}
+              className={
+                lineType === 'delete'
+                  ? 'text-[#991b1b] opacity-90'
+                  : lineType === 'add'
+                  ? 'text-[#065f46] opacity-90'
+                  : 'text-[#27272a]'
+              }
+            >
+              {p.text}
+            </span>
+          );
+        })}
+      </>
+    );
+  }
+
+  return (
+    <span
+      className={
+        lineType === 'delete'
+          ? 'text-[#991b1b]'
+          : lineType === 'add'
+          ? 'text-[#065f46]'
+          : 'text-[#27272a]'
+      }
+    >
+      {fallbackContent || ' '}
+    </span>
+  );
 }
 
 export const CodeDiffViewerModal: React.FC<CodeDiffViewerModalProps> = ({
@@ -123,6 +387,23 @@ export const CodeDiffViewerModal: React.FC<CodeDiffViewerModalProps> = ({
   });
   const [filterQuery, setFilterQuery] = useState('');
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
+
+  // 视图模式：统一逐行 (unified) vs 分栏左右并排 (split)，支持持久化
+  const [viewMode, setViewMode] = useState<'unified' | 'split'>(() => {
+    try {
+      return (localStorage.getItem('openloop_diff_view_mode') as 'unified' | 'split') || 'unified';
+    } catch {
+      return 'unified';
+    }
+  });
+
+  const handleSetViewMode = (mode: 'unified' | 'split') => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem('openloop_diff_view_mode', mode);
+    } catch {}
+    if (import.meta.env?.DEV) console.log(`[DiffReviewModal] 切换 Diff 视图模式: ${mode}`);
+  };
 
   // 监听 ESC 键关闭
   useEffect(() => {
@@ -154,6 +435,17 @@ export const CodeDiffViewerModal: React.FC<CodeDiffViewerModalProps> = ({
     const target = files.find((f) => f.file === selectedFile);
     return target ? [target] : filteredFiles;
   }, [selectedFile, filteredFiles, files]);
+
+  // 缓存解析后的 Diff 数据，避免重复计算
+  const parsedDiffMap = useMemo(() => {
+    const map = new Map<string, ParsedFileDiffResult>();
+    for (const f of displayFiles) {
+      if (f.diff && !f.isBinary) {
+        map.set(f.file, parseFileDiff(f.diff));
+      }
+    }
+    return map;
+  }, [displayFiles]);
 
   const handleCopyPath = (filePath: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -200,6 +492,38 @@ export const CodeDiffViewerModal: React.FC<CodeDiffViewerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
+            {/* 视图模式切换控件 */}
+            <div className="flex items-center p-0.5 rounded-[6px] bg-[#f4f4f6] border border-[#e3e3e8]">
+              <button
+                type="button"
+                onClick={() => handleSetViewMode('unified')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[4px] text-[11px] font-medium transition-all cursor-pointer ${
+                  viewMode === 'unified'
+                    ? 'bg-white text-[#1c1c21] shadow-3xs font-semibold'
+                    : 'text-[#71717a] hover:text-[#1c1c21]'
+                }`}
+                title="统一视图：逐行展示，高亮具体变动词"
+              >
+                <AlignJustify size={11} strokeWidth={2.2} />
+                <span>统一视图</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetViewMode('split')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[4px] text-[11px] font-medium transition-all cursor-pointer ${
+                  viewMode === 'split'
+                    ? 'bg-white text-[#1c1c21] shadow-3xs font-semibold'
+                    : 'text-[#71717a] hover:text-[#1c1c21]'
+                }`}
+                title="分栏视图：左右并排对照，高亮具体变动词"
+              >
+                <Columns2 size={11} strokeWidth={2.2} />
+                <span>分栏并排</span>
+              </button>
+            </div>
+
+            <div className="h-4 w-[1px] bg-[#e3e3e8]" />
+
             {/* 总体统计徽章 */}
             <div className="flex items-center gap-1.5 font-mono text-[11px]">
               <span className="text-[#71717a] text-[10.5px] font-sans font-medium">
@@ -360,7 +684,7 @@ export const CodeDiffViewerModal: React.FC<CodeDiffViewerModalProps> = ({
               </div>
             ) : (
               displayFiles.map((fileItem) => {
-                const parsedLines = parseFileDiff(fileItem.diff);
+                const parsedData = parsedDiffMap.get(fileItem.file) || { unified: [], split: [] };
                 const { dir, name } = splitPath(fileItem.file);
 
                 return (
@@ -431,15 +755,130 @@ export const CodeDiffViewerModal: React.FC<CodeDiffViewerModalProps> = ({
                           当前后台 Core 服务尚未加载实时 Diff 路由接口（HTTP 404）。请按指引在当前任务目录运行或重启 Core 服务。
                         </p>
                       </div>
-                    ) : parsedLines.length === 0 ? (
+                    ) : parsedData.unified.length === 0 ? (
                       <div className="py-8 text-center text-[11.5px] text-[#85858d] bg-[#fafafc]">
                         空文件或仅文件权限模式发生变更。
                       </div>
+                    ) : viewMode === 'split' ? (
+                      /* 分栏左右并排视图 (Side-by-Side Split Diff) */
+                      <div className="overflow-x-auto text-[11.5px] font-mono leading-[20px]">
+                        <table className="w-full border-collapse table-fixed min-w-[780px]">
+                          <colgroup>
+                            <col className="w-[44px]" />
+                            <col className="w-[18px]" />
+                            <col className="w-[calc(50%-62px)]" />
+                            <col className="w-[44px]" />
+                            <col className="w-[18px]" />
+                            <col className="w-[calc(50%-62px)]" />
+                          </colgroup>
+                          <thead>
+                            <tr className="bg-[#fafafc] border-b border-[#e3e3e8] text-[10.5px] text-[#71717a] font-sans font-medium select-none">
+                              <th colSpan={3} className="px-3 py-1 text-left border-r border-[#e3e3e8]">
+                                原始版本 (变更前)
+                              </th>
+                              <th colSpan={3} className="px-3 py-1 text-left">
+                                最新版本 (变更后)
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {parsedData.split.map((row, idx) => {
+                              if (row.type === 'chunk-header') {
+                                return (
+                                  <tr
+                                    key={idx}
+                                    className="bg-[#f4f4f6]/80 text-[#71717a] select-none border-y border-[#e3e3e8]/60"
+                                  >
+                                    <td
+                                      colSpan={6}
+                                      className="px-3 py-1 font-mono text-[10.5px] italic text-[#63636b] break-all"
+                                    >
+                                      {row.chunkContent}
+                                    </td>
+                                  </tr>
+                                );
+                              }
+
+                              const left = row.left;
+                              const right = row.right;
+                              const isLeftDel = left?.type === 'delete';
+                              const isRightAdd = right?.type === 'add';
+
+                              return (
+                                <tr key={idx} className="group border-b border-[#f1f1f4]/40">
+                                  {/* 左侧旧行号 */}
+                                  <td
+                                    className={`w-[44px] px-1.5 py-0 align-top text-right select-none text-[10.5px] text-[#a1a1aa] bg-[#fafafc]/50 border-r border-[#f1f1f4] ${
+                                      isLeftDel ? 'bg-[#fef2f2]/40' : ''
+                                    }`}
+                                  >
+                                    {left?.lineNumber ?? ''}
+                                  </td>
+                                  {/* 左侧符号 */}
+                                  <td
+                                    className={`w-[18px] px-0.5 py-0 align-top text-center select-none font-bold text-[11px] ${
+                                      isLeftDel
+                                        ? 'text-[#dc2626] bg-[#fef2f2]/60'
+                                        : 'text-[#a1a1aa] bg-[#fafafc]/30'
+                                    }`}
+                                  >
+                                    {isLeftDel ? '-' : ' '}
+                                  </td>
+                                  {/* 左侧代码内容 */}
+                                  <td
+                                    className={`px-2 py-0 align-top whitespace-pre-wrap break-all border-r border-[#e3e3e8] ${
+                                      isLeftDel
+                                        ? 'bg-[#fef2f2]/60 hover:bg-[#fef2f2]'
+                                        : left
+                                        ? 'hover:bg-[#fafafc]'
+                                        : 'bg-[#fafafc]/50 select-none text-transparent'
+                                    }`}
+                                  >
+                                    {left ? renderDiffContent(left.parts, left.content, left.type) : ' '}
+                                  </td>
+
+                                  {/* 右侧新行号 */}
+                                  <td
+                                    className={`w-[44px] px-1.5 py-0 align-top text-right select-none text-[10.5px] text-[#a1a1aa] bg-[#fafafc]/50 border-r border-[#f1f1f4] ${
+                                      isRightAdd ? 'bg-[#ecfdf5]/40' : ''
+                                    }`}
+                                  >
+                                    {right?.lineNumber ?? ''}
+                                  </td>
+                                  {/* 右侧符号 */}
+                                  <td
+                                    className={`w-[18px] px-0.5 py-0 align-top text-center select-none font-bold text-[11px] ${
+                                      isRightAdd
+                                        ? 'text-[#059669] bg-[#ecfdf5]/60'
+                                        : 'text-[#a1a1aa] bg-[#fafafc]/30'
+                                    }`}
+                                  >
+                                    {isRightAdd ? '+' : ' '}
+                                  </td>
+                                  {/* 右侧代码内容 */}
+                                  <td
+                                    className={`px-2 py-0 align-top whitespace-pre-wrap break-all ${
+                                      isRightAdd
+                                        ? 'bg-[#ecfdf5]/60 hover:bg-[#ecfdf5]'
+                                        : right
+                                        ? 'hover:bg-[#fafafc]'
+                                        : 'bg-[#fafafc]/50 select-none text-transparent'
+                                    }`}
+                                  >
+                                    {right ? renderDiffContent(right.parts, right.content, right.type) : ' '}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     ) : (
+                      /* 统一逐行视图 (Unified Diff) */
                       <div className="overflow-x-auto text-[11.5px] font-mono leading-[20px]">
                         <table className="w-full border-collapse">
                           <tbody>
-                            {parsedLines.map((line, idx) => {
+                            {parsedData.unified.map((line, idx) => {
                               if (line.type === 'chunk-header') {
                                 return (
                                   <tr
@@ -487,12 +926,8 @@ export const CodeDiffViewerModal: React.FC<CodeDiffViewerModalProps> = ({
                                     {isAdd ? '+' : isDel ? '-' : ' '}
                                   </td>
                                   {/* 代码内容列 */}
-                                  <td
-                                    className={`px-2 py-0 whitespace-pre overflow-x-visible break-all ${
-                                      isAdd ? 'text-[#065f46]' : isDel ? 'text-[#991b1b]' : 'text-[#27272a]'
-                                    }`}
-                                  >
-                                    {line.content || ' '}
+                                  <td className="px-2 py-0 whitespace-pre overflow-x-visible break-all">
+                                    {renderDiffContent(line.parts, line.content, line.type)}
                                   </td>
                                 </tr>
                               );

@@ -14,6 +14,7 @@
     "@openloop/core": "workspace:*",
     "@xyflow/react": "^12.4.2",
     "clsx": "^2.1.1",
+    "diff": "^9.0.0",
     "lucide-react": "^1.16.0",
     "prismjs": "^1.30.0",
     "react": "^18.3.1",
@@ -23,6 +24,7 @@
     "tailwind-merge": "^3.0.1"
   },
   "devDependencies": {
+    "@types/diff": "^8.0.0",
     "@types/node": "^22.13.0",
     "@types/prismjs": "^1.26.6",
     "@types/react": "^18.3.18",
