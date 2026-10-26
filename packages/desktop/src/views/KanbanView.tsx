@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import {
   Check,
   Copy,
@@ -281,6 +281,21 @@ interface PendingChatAttachment {
   errorMessage?: string;
 }
 
+/** 会话消息首屏渲染窗口：长会话只渲染最新若干条，避免一次挂载上百条 Markdown 阻塞首帧 */
+const CHAT_WINDOW_SIZE = 30;
+
+/** 会话状态 SWR 缓存：再次打开同一任务时立即呈现对话，避免整包重拉与空白等待 */
+const sessionStateCache = new Map<string, TaskSessionState>();
+const SESSION_CACHE_MAX = 3;
+
+const cacheSessionState = (taskId: string, state: TaskSessionState) => {
+  sessionStateCache.delete(taskId);
+  sessionStateCache.set(taskId, state);
+  while (sessionStateCache.size > SESSION_CACHE_MAX) {
+    sessionStateCache.delete(sessionStateCache.keys().next().value as string);
+  }
+};
+
 export const KanbanView: React.FC<KanbanViewProps> = ({
   tasks,
   workflows,
@@ -461,6 +476,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   const [manualSubtaskWorkspace, setManualSubtaskWorkspace] = useState('');
 
   const [sessionState, setSessionState] = useState<TaskSessionState | null>(null);
+  const [chatWindowSize, setChatWindowSize] = useState(CHAT_WINDOW_SIZE);
+  const chatScrollAnchorRef = useRef<number | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [isSendingChat, setIsSendingChat] = useState(false);
   const [isPausingSession, setIsPausingSession] = useState(false);
@@ -483,11 +500,31 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     resetKey: selectedTask?.id,
   });
 
+  // 展开更早消息后按距底距离回正滚动位置，避免长历史插入导致视觉跳动
+  useLayoutEffect(() => {
+    const scroller = chatScrollContainerRef.current;
+    if (!scroller || chatScrollAnchorRef.current === null) return;
+    scroller.scrollTop = scroller.scrollHeight - chatScrollAnchorRef.current;
+    chatScrollAnchorRef.current = null;
+  }, [chatWindowSize]);
+
   // 打开任务抽屉时同步获取最新 Session 状态
   useEffect(() => {
     setExpandedThinking({});
     setExpandedTools({});
+    setChatWindowSize(CHAT_WINDOW_SIZE);
     if (selectedTask) {
+      // 命中缓存先即时上屏，再静默拉取最新状态校准
+      const cached = sessionStateCache.get(selectedTask.id);
+      if (cached) {
+        if (import.meta.env?.DEV) {
+          console.log('[KanbanView:Drawer] 命中会话缓存，秒开历史对话:', {
+            taskId: selectedTask.id,
+            messages: cached.messages.length,
+          });
+        }
+        setSessionState(cached);
+      }
       api.getTaskSession(selectedTask.id)
         .then((state) => {
           if (import.meta.env?.DEV) {
@@ -497,7 +534,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
               messages: state.messages.length,
             });
           }
-          setSessionState(state ? { ...state, messages: sanitizeChatMessages(state.messages) } : null);
+          const next = state ? { ...state, messages: sanitizeChatMessages(state.messages) } : null;
+          if (next) cacheSessionState(selectedTask.id, next);
+          setSessionState(next);
           // 若任务正在执行中且处于 agent 状态，或已有历史消息，可智能保留或建议查看
         })
         .catch(() => {});
@@ -524,7 +563,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   useEffect(() => {
     const unsub = api.on('agent:chat_update', (data: TaskSessionState) => {
       if (selectedTask && data.taskId === selectedTask.id) {
-        setSessionState({ ...data, messages: sanitizeChatMessages(data.messages) });
+        const next = { ...data, messages: sanitizeChatMessages(data.messages) };
+        cacheSessionState(data.taskId, next);
+        setSessionState(next);
       }
     });
     return () => unsub();
@@ -1580,7 +1621,15 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   // 会话消息流单独缓存：输入框逐键输入不触发历史消息与 Markdown 重渲染
   const chatMessageList = useMemo(() => {
     const curTask = activeTask || selectedTask;
-    if (!sessionState?.messages || sessionState.messages.length === 0) {
+    if (!sessionState) {
+      return (
+        <div className="h-full min-h-[220px] flex items-center justify-center gap-1.5 text-[11.5px] text-[#85858d]">
+          <Loader2 size={12} className="animate-spin text-[#4f46e5]" />
+          <span>正在载入会话记录...</span>
+        </div>
+      );
+    }
+    if (sessionState.messages.length === 0) {
       if (curTask?.kind === 'group') {
         return (
           <div className="h-full min-h-[260px] flex flex-col items-center justify-center text-center p-6 text-[#85858d]">
@@ -1641,8 +1690,29 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         </div>
       );
     }
+    // 长会话只渲染最新窗口，余下由顶部入口按需展开，保证首帧与流式刷新都轻量
+    const hiddenCount = Math.max(0, sessionState.messages.length - chatWindowSize);
     return (
-      sessionState.messages.map((msg, msgIdx) => {
+      <>
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              if (import.meta.env.DEV) {
+                console.log('[KanbanView:AgentChat] 展开更早的会话消息:', { hiddenCount });
+              }
+              const scroller = chatScrollContainerRef.current;
+              // 记录距底距离，展开后保持视觉不跳动
+              if (scroller) chatScrollAnchorRef.current = scroller.scrollHeight - scroller.scrollTop;
+              setChatWindowSize((size) => size + CHAT_WINDOW_SIZE * 2);
+            }}
+            className="w-full py-1.5 text-[11px] text-[#85858d] hover:text-[#4f46e5] transition-colors cursor-pointer"
+          >
+            展开更早的 {hiddenCount} 条会话消息
+          </button>
+        )}
+        {sessionState.messages.slice(hiddenCount).map((msg, localIdx) => {
+        const msgIdx = hiddenCount + localIdx;
         if (msg.role === 'user') {
           // 检测是否包含 UI 自动化测试产物附加块
           const qaMarkerMatch = msg.content?.match(/\[(?:系统自动附加|用户主动附带|附带)：?(?:最新 UI 自动化测试产物|UI 自动化测试验收产物.*?)\]/);
@@ -1830,9 +1900,20 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
             )}
           </div>
         );
-                    })
+                    })}
+      </>
     );
-  }, [sessionState, expandedThinking, expandedTools, expandedQaAttachments, activeTask, selectedTask, workflows, onRefresh]);
+  }, [
+    sessionState,
+    chatWindowSize,
+    expandedThinking,
+    expandedTools,
+    expandedQaAttachments,
+    activeTask,
+    selectedTask,
+    workflows,
+    onRefresh,
+  ]);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">
@@ -4270,7 +4351,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       onChange={setChatInput}
                       onClearSession={() => {
                         if (sessionState) {
-                          setSessionState({ ...sessionState, messages: [] });
+                          const next = { ...sessionState, messages: [] };
+                          cacheSessionState(curTask.id, next);
+                          setSessionState(next);
                         }
                       }}
                       onPauseSession={handleTogglePauseSession}
