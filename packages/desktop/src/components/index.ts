@@ -25,6 +25,7 @@ export * from './AgentChatChangedFiles';
 export * from './diff/CodeDiffViewerModal';
 export * from './qa/QaArtifactSelectorModal';
 export * from './SubtaskPlanCard';
+export * from './AgentAutocompletePopover';
 
 
 

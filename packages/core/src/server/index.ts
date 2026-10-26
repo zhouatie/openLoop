@@ -82,6 +82,8 @@ export class OpenLoopServer {
   private clients: Set<WebSocket> = new Set();
   private staticDir?: string;
   private unsubscribeDeviceLeases?: () => void;
+  private workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>();
+  private skillsCache: { data: { commands: any[]; skills: any[] }; timestamp: number } | null = null;
 
   constructor(options: ServerOptions = {}) {
     this.port = options.port || 19888;
@@ -294,6 +296,210 @@ export class OpenLoopServer {
         }
       });
     });
+  }
+
+  private async getWorkspaceFiles(targetDir: string): Promise<string[]> {
+    const now = Date.now();
+    const cached = this.workspaceFilesCache.get(targetDir);
+    if (cached && now - cached.timestamp < 15000) {
+      return cached.files;
+    }
+
+    try {
+      const gitFiles = await new Promise<string[]>((resolve, reject) => {
+        exec(
+          'git ls-files --cached --others --exclude-standard',
+          { cwd: targetDir, maxBuffer: 10 * 1024 * 1024, timeout: 3000 },
+          (error, stdout) => {
+            if (error) return reject(error);
+            const list = stdout
+              .split('\n')
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+            resolve(list);
+          }
+        );
+      });
+
+      if (Array.isArray(gitFiles) && gitFiles.length > 0) {
+        this.workspaceFilesCache.set(targetDir, { files: gitFiles, timestamp: now });
+        return gitFiles;
+      }
+    } catch {
+      // 降级为快速目录遍历
+    }
+
+    const files: string[] = [];
+    const maxFiles = 2500;
+    const ignoredDirs = new Set([
+      '.git',
+      'node_modules',
+      'dist',
+      'build',
+      'out',
+      '.worktrees',
+      '.next',
+      '.turbo',
+      'coverage',
+      '.svn',
+      '.hg',
+      'target',
+      'vendor',
+      '.pi',
+      '.agents',
+    ]);
+
+    const scan = (currentDir: string, relPrefix = '') => {
+      if (files.length >= maxFiles) return;
+      try {
+        const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (files.length >= maxFiles) break;
+          const name = entry.name;
+          if (entry.isDirectory()) {
+            if (ignoredDirs.has(name) || name.startsWith('.')) continue;
+            scan(path.join(currentDir, name), relPrefix ? `${relPrefix}/${name}` : name);
+          } else if (entry.isFile()) {
+            files.push(relPrefix ? `${relPrefix}/${name}` : name);
+          }
+        }
+      } catch {}
+    };
+
+    scan(targetDir);
+    this.workspaceFilesCache.set(targetDir, { files, timestamp: now });
+    return files;
+  }
+
+  private async getAgentCommandsAndSkills(targetDir?: string): Promise<{ commands: any[]; skills: any[] }> {
+    const now = Date.now();
+    if (this.skillsCache && now - this.skillsCache.timestamp < 30000) {
+      return this.skillsCache.data;
+    }
+
+    const commands = [
+      {
+        name: '/clear',
+        label: '清空会话',
+        description: '清空当前任务的 Agent 对话与历史记录',
+        type: 'command',
+        action: 'clear',
+      },
+      {
+        name: '/plan',
+        label: '工序规划',
+        description: '梳理任务目标并生成可行的分步执行计划',
+        type: 'command',
+        template: '/plan 请分析当前任务需求，制定极简可行的分步执行计划',
+      },
+      {
+        name: '/review',
+        label: '代码审查',
+        description: '审查当前工作区已修改的代码改动 (Git Diff)',
+        type: 'command',
+        template: '/review 请全面审查当前工作区已修改的代码，重点关注正确性、边界情况与潜在缺陷',
+      },
+      {
+        name: '/test',
+        label: '运行测试',
+        description: '执行自动化测试脚本并分析验收结果',
+        type: 'command',
+        template: '/test 请运行工程相关测试与验证脚本并汇报结果',
+      },
+      {
+        name: '/fix',
+        label: '报错修复',
+        description: '针对上一轮错误日志或测试失败原因自动排查并修复',
+        type: 'command',
+        template: '/fix 请分析上一步的错误信息与堆栈并完成代码修复',
+      },
+      {
+        name: '/pause',
+        label: '暂停会话',
+        description: '暂停当前正在运行的 Agent 推理与执行',
+        type: 'command',
+        action: 'pause',
+      },
+      {
+        name: '/resume',
+        label: '恢复运行',
+        description: '恢复当前已暂停的 Agent 会话继续运行',
+        type: 'command',
+        action: 'resume',
+      },
+      {
+        name: '/compact',
+        label: '提炼记忆',
+        description: '压缩长对话并提炼核心上下文决策与关键信息',
+        type: 'command',
+        template: '/compact 请提炼当前会话的核心上下文和决策记忆',
+      },
+      {
+        name: '/help',
+        label: '帮助指南',
+        description: '查看常用命令与 Skill 扩展使用指导',
+        type: 'command',
+        template: '/help 请列出当前可用的指令建议与使用指导',
+      },
+    ];
+
+    const searchDirs: string[] = [
+      path.join(os.homedir(), '.agents', 'skills'),
+      path.join(os.homedir(), '.pi', 'agent', 'skills'),
+    ];
+    if (targetDir) {
+      searchDirs.unshift(
+        path.join(targetDir, '.agents', 'skills'),
+        path.join(targetDir, '.pi', 'skills'),
+        path.join(targetDir, 'skills')
+      );
+    }
+
+    const skillsMap = new Map<string, { name: string; label: string; description: string; type: 'skill'; path: string; template: string }>();
+
+    for (const dir of searchDirs) {
+      if (!fs.existsSync(dir)) continue;
+      try {
+        const subEntries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of subEntries) {
+          if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+          const skillName = entry.name;
+          if (skillsMap.has(skillName)) continue;
+
+          const skillPath = path.join(dir, skillName);
+          const skillFile = path.join(skillPath, 'SKILL.md');
+          if (fs.existsSync(skillFile)) {
+            let description = `加载并使用 ${skillName} 扩展技能`;
+            try {
+              const content = fs.readFileSync(skillFile, 'utf-8');
+              const descMatch = content.match(/description:\s*(?:>|\|)?\s*([^\n\r]+(?:\n\s+[^\n\r]+)*)/i);
+              if (descMatch && descMatch[1]) {
+                description = descMatch[1].replace(/\n\s+/g, ' ').trim().slice(0, 100);
+              } else {
+                const lines = content.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !l.startsWith('---'));
+                if (lines.length > 0) {
+                  description = lines[0].slice(0, 100);
+                }
+              }
+            } catch {}
+
+            skillsMap.set(skillName, {
+              name: `/${skillName}`,
+              label: `Skill: ${skillName}`,
+              description,
+              type: 'skill',
+              path: skillFile,
+              template: `/${skillName} `,
+            });
+          }
+        }
+      } catch {}
+    }
+
+    const skills = Array.from(skillsMap.values());
+    const result = { commands, skills };
+    this.skillsCache = { data: result, timestamp: now };
+    return result;
   }
 
   private sendJson(
@@ -1889,6 +2095,94 @@ ${existingSubSummary}
           return this.sendJson(res, 200, { success: resumed }, reqMeta);
         }
         return this.sendJson(res, 400, { error: 'No active session to resume' }, reqMeta);
+      }
+
+      // Task session clear: /api/tasks/:id/session/clear
+      const taskSessionClearMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/clear$/);
+      if (taskSessionClearMatch && method === 'POST') {
+        const taskId = taskSessionClearMatch[1];
+        const task = this.store.getTask(taskId);
+        if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
+
+        if (task.context) {
+          task.context.chatMessages = [];
+        }
+        this.store.saveTask(task);
+
+        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        if (rpcSession) {
+          rpcSession.messages = [];
+        }
+
+        this.broadcastTaskUpdate(task);
+        serverLogger.info(`[Tasks:ClearSession] 已清空任务 [${taskId}] 的全部会话消息`);
+        return this.sendJson(res, 200, { success: true }, reqMeta);
+      }
+
+      // Task files search: /api/tasks/:id/files
+      const taskFilesMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/files$/);
+      if (taskFilesMatch && method === 'GET') {
+        const taskId = taskFilesMatch[1];
+        const task = this.store.getTask(taskId);
+        if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
+
+        const repoRoot = findRepoRoot(process.cwd());
+        const targetDir = task.context?.worktree?.worktreeDir || task.workspace || repoRoot || process.cwd();
+
+        const query = (parsedUrl.searchParams.get('query') || '').trim().toLowerCase();
+        const limitParam = parsedUrl.searchParams.get('limit');
+        const limit = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 50, 1), 2000) : 50;
+
+        try {
+          const allFiles = await this.getWorkspaceFiles(targetDir);
+          let filtered = allFiles;
+          if (query) {
+            filtered = allFiles
+              .filter((f) => f.toLowerCase().includes(query))
+              .sort((a, b) => {
+                const aLower = a.toLowerCase();
+                const bLower = b.toLowerCase();
+                const aName = aLower.split('/').pop() || '';
+                const bName = bLower.split('/').pop() || '';
+
+                const aStarts = aName.startsWith(query) ? 2 : aName.includes(query) ? 1 : 0;
+                const bStarts = bName.startsWith(query) ? 2 : bName.includes(query) ? 1 : 0;
+                if (aStarts !== bStarts) return bStarts - aStarts;
+                return a.length - b.length;
+              });
+          }
+          const resultFiles = filtered.slice(0, limit);
+          return this.sendJson(res, 200, {
+            files: resultFiles,
+            workspace: targetDir,
+            total: allFiles.length,
+            matched: filtered.length,
+          }, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[Tasks:Files] 读取工作区文件失败: ${err.message}`, err, { taskId });
+          return this.sendJson(res, 500, { error: err.message }, reqMeta);
+        }
+      }
+
+      // Task agent commands & skills: /api/tasks/:id/agent/commands-and-skills 或 /api/agent/commands-and-skills
+      const taskCommandsSkillsMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/agent\/commands-and-skills$/);
+      if ((taskCommandsSkillsMatch || pathname === '/api/agent/commands-and-skills') && method === 'GET') {
+        let targetDir: string | undefined;
+        if (taskCommandsSkillsMatch) {
+          const taskId = taskCommandsSkillsMatch[1];
+          const task = this.store.getTask(taskId);
+          if (task) {
+            const repoRoot = findRepoRoot(process.cwd());
+            targetDir = task.context?.worktree?.worktreeDir || task.workspace || repoRoot;
+          }
+        }
+        try {
+          const data = await this.getAgentCommandsAndSkills(targetDir);
+          return this.sendJson(res, 200, data, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[Agent:CommandsAndSkills] 获取命令与技能失败: ${err.message}`, err);
+          return this.sendJson(res, 500, { error: err.message }, reqMeta);
+        }
       }
 
       // Task resume (QA approval): /api/tasks/:id/resume
