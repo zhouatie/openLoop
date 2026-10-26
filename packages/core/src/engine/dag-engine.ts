@@ -10,6 +10,9 @@ import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manage
 
 const dagLogger = createLogger('Engine:DAG');
 
+/** 会话消息落库最小间隔：流式增量会把整列 context 写库，逐帧落库会阻塞事件循环 */
+const CHAT_PERSIST_INTERVAL_MS = 1000;
+
 /**
  * 安全表达式求值函数
  * 支持评估例如: output === 'A', output.status === 'pass', exitCode === 0, score > 80 等表达式
@@ -262,6 +265,9 @@ export class DagEngine extends EventEmitter {
       }
     }
 
+    let lastChatPersistAt = 0;
+    let pendingChatPatch: Record<string, any> | null = null;
+
     const ctx: ExecutionContext = {
       task,
       node: effectiveNode,
@@ -305,8 +311,18 @@ export class DagEngine extends EventEmitter {
         const patch: Record<string, any> = { chatMessages: state.messages, awaitingInput: nextAwaiting };
         if (state.model) patch.model = state.model;
         Object.assign(task.context, patch);
-        this.store.updateTaskContext(task.id, patch);
-        if (prevAwaiting !== nextAwaiting) {
+
+        // 流式期间每个 token 都会回调一次：限频落库，节点收尾时兜底写入最终消息
+        const awaitingChanged = prevAwaiting !== nextAwaiting;
+        const now = Date.now();
+        if (awaitingChanged || now - lastChatPersistAt >= CHAT_PERSIST_INTERVAL_MS) {
+          lastChatPersistAt = now;
+          this.store.updateTaskContext(task.id, patch);
+          pendingChatPatch = null;
+        } else {
+          pendingChatPatch = patch;
+        }
+        if (awaitingChanged) {
           this.emit('task:update', task);
         }
         this.emit('agent:chat_update', state);
@@ -327,6 +343,12 @@ export class DagEngine extends EventEmitter {
         exitCode: 1,
         error: err.message,
       };
+    }
+
+    // 节点收尾兜底：取消 / 失败等提前返回路径也不会丢失限频窗口内的最后一段会话
+    if (pendingChatPatch) {
+      this.store.updateTaskContext(task.id, pendingChatPatch);
+      pendingChatPatch = null;
     }
 
     // 运行期间节点已被用户手动跳过（或任务已被终止）：丢弃本次执行结果，避免重复驱动下游
