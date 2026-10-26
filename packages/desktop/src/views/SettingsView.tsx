@@ -160,22 +160,32 @@ const SIDEBAR_ICON_MAP: Record<string, React.ReactNode> = {
 
 const ModelInput: React.FC<{
   value: string;
+  options?: string[];
   onSave: (val: string) => void;
-}> = ({ value, onSave }) => {
+}> = ({ value, options = [], onSave }) => {
   const [localVal, setLocalVal] = useState(value);
+  const [openOptions, setOpenOptions] = useState(false);
   const debounceTimerRef = useRef<any>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setLocalVal(value);
   }, [value]);
 
+  // 点击输入区外部时收起最近记录列表
+  useEffect(() => {
+    if (!openOptions) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (!wrapperRef.current?.contains(e.target as Node)) setOpenOptions(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [openOptions]);
+
   const commitSave = (nextVal: string) => {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     const trimmed = nextVal.trim();
     if (trimmed !== value) {
-      if (import.meta.env?.DEV) {
-        console.log('[Settings:Model] 保存模型配置:', trimmed);
-      }
       onSave(trimmed);
     }
   };
@@ -194,31 +204,71 @@ const ModelInput: React.FC<{
     commitSave('');
   };
 
+  const handlePick = (val: string) => {
+    setLocalVal(val);
+    setOpenOptions(false);
+    commitSave(val);
+  };
+
   return (
-    <div className="relative shrink-0 flex items-center">
-      <input
-        type="text"
-        value={localVal}
-        onChange={handleChange}
-        onBlur={() => commitSave(localVal)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.currentTarget.blur();
-          }
-        }}
-        spellCheck={false}
-        placeholder="例如 sonnet / gpt-5-codex"
-        className="w-56 h-[26px] pl-2 pr-6 rounded-[6px] border border-[#e3e3e8] bg-white text-[11.5px] font-mono text-[#1c1c21] placeholder-[#a1a1aa] outline-none shadow-2xs transition-all hover:border-[#d0d0d7] focus:border-[#4f46e5] focus:ring-2 focus:ring-[#4f46e5]/10"
-      />
-      {localVal && (
+    <div ref={wrapperRef} className="relative shrink-0 flex items-center gap-1">
+      <div className="relative">
+        <input
+          type="text"
+          value={localVal}
+          onChange={handleChange}
+          onBlur={() => commitSave(localVal)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.currentTarget.blur();
+            }
+          }}
+          spellCheck={false}
+          placeholder="例如 sonnet / gpt-5-codex"
+          className="w-56 h-[26px] pl-2 pr-6 rounded-[6px] border border-[#e3e3e8] bg-white text-[11.5px] font-mono text-[#1c1c21] placeholder-[#a1a1aa] outline-none shadow-2xs transition-all hover:border-[#d0d0d7] focus:border-[#4f46e5] focus:ring-2 focus:ring-[#4f46e5]/10"
+        />
+        {localVal && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full text-[#a1a1aa] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-all cursor-pointer"
+            title="清空并继承引擎默认模型"
+          >
+            <X size={10} strokeWidth={2.4} />
+          </button>
+        )}
+      </div>
+
+      {options.length > 0 && (
         <button
           type="button"
-          onClick={handleClear}
-          className="absolute right-1.5 w-4 h-4 rounded-full text-[#a1a1aa] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-all cursor-pointer"
-          title="清空并继承引擎默认模型"
+          onClick={() => setOpenOptions((prev) => !prev)}
+          className={`w-[26px] h-[26px] rounded-[6px] border border-[#e3e3e8] bg-white text-[#85858d] hover:text-[#1c1c21] hover:border-[#d0d0d7] flex items-center justify-center transition-all cursor-pointer ${openOptions ? 'border-[#4f46e5] text-[#4f46e5]' : ''}`}
+          title="选择最近使用过的模型"
         >
-          <X size={10} strokeWidth={2.4} />
+          <ChevronDown size={11} strokeWidth={2.2} />
         </button>
+      )}
+
+      {openOptions && options.length > 0 && (
+        <div className="absolute right-0 top-[30px] z-20 w-[232px] rounded-[6px] border border-[#e3e3e8] bg-white shadow-[0_8px_20px_rgba(0,0,0,0.08)] py-1">
+          <div className="px-2 py-1 text-[10px] text-[#a1a1aa] select-none">最近使用</div>
+          {options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handlePick(opt);
+              }}
+              className="w-full h-[26px] px-2 flex items-center justify-between gap-2 text-left rounded-[4px] text-[11px] font-mono text-[#4b4b53] hover:bg-[#f4f4f6] hover:text-[#1c1c21] transition-colors cursor-pointer"
+              title={opt}
+            >
+              <span className="truncate">{opt}</span>
+              {opt === localVal && <Check size={10} strokeWidth={2.4} className="text-[#4f46e5] shrink-0" />}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -258,6 +308,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // 表单状态
   const [agentProvider, setAgentProvider] = useState<AgentProviderType>('pi');
   const [model, setModel] = useState('');
+  // 最近三次使用过的模型（供快速 select 选择）
+  const [recentModels, setRecentModels] = useState<string[]>([]);
   const [thinking, setThinking] = useState<ThinkingLevel>('high');
   const [defaultCwd, setDefaultCwd] = useState('');
   const [autoSnapshot, setAutoSnapshot] = useState(true);
@@ -422,6 +474,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (settings) {
         if (settings.agentProvider) setAgentProvider(getAgentProviderMeta(settings.agentProvider).id);
         if (settings.defaultModel) setModel(settings.defaultModel);
+        if (Array.isArray(settings.recentModels)) setRecentModels(settings.recentModels.filter(Boolean));
         if (settings.reasoningLevel) setThinking(settings.reasoningLevel);
         setDefaultCwd(settings.defaultCwd || '');
         if (settings.autoSnapshot !== undefined) setAutoSnapshot(settings.autoSnapshot);
@@ -547,6 +600,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }
       toast.error(`保存失败: ${err?.message || '未知错误'}`);
     }
+  };
+
+  const handleSaveModel = (val: string) => {
+    const trimmed = val.trim();
+    const nextRecent = trimmed
+      ? [trimmed, ...recentModels.filter((m) => m !== trimmed)].slice(0, 3)
+      : recentModels;
+    if (import.meta.env?.DEV) {
+      console.log('[Settings:Model] 保存模型配置:', trimmed, '最近记录:', nextRecent);
+    }
+    setModel(trimmed);
+    setRecentModels(nextRecent);
+    handleSave({ defaultModel: trimmed, recentModels: nextRecent });
   };
 
   const handleBrowseCwd = async () => {
@@ -975,17 +1041,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium text-[#1c1c21]">模型</div>
                   <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                    所有引擎共用同一个模型配置，留空则继承引擎自身默认模型
+                    所有引擎共用同一个模型配置，留空则继承引擎自身默认模型，保留最近三次记录
                   </div>
                 </div>
 
                 <div className="self-center">
                   <ModelInput
                     value={model}
-                    onSave={(val) => {
-                      setModel(val);
-                      handleSave({ defaultModel: val });
-                    }}
+                    options={recentModels}
+                    onSave={handleSaveModel}
                   />
                 </div>
               </div>
