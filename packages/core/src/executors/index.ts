@@ -749,191 +749,62 @@ export class QaPlannerExecutor implements NodeExecutor {
     const { task, node, emitLog, settings = {} } = ctx;
     emitLog('system', `>>> 开始执行节点 [${node.name || 'QA 黑盒用例设计'}] (qa-planner)`);
 
-    // 优先复用人工预设验收用例：若已配置则直接复用并跳过 AI 规划。
+    // 优先复用人工预设验收用例：若未配置或保持为空，则跳过 AI 规划并直接由人工自测验收。
     // 内存中的 task 是流水线启动时的快照，必须回读库中最新值，否则会漏掉运行期间用户保存的用例。
     const latestInstructions = ctx.store?.getTask(task.id)?.context?.qaInstructions;
-    const presetSteps = Array.isArray(latestInstructions) ? latestInstructions.map((s) => String(s)) : [];
-    if (presetSteps.length > 0) {
-      if (!task.context) task.context = {};
-      task.context.qaInstructions = presetSteps;
-      const steps = presetSteps;
-      task.context.qaPlan = {
-        role: '人工预设用例 (任务配置)',
-        createdAt: Date.now(),
-        steps,
-      };
-      if (ctx.store) {
-        ctx.store.saveTask(task);
-      }
+    const presetSteps = Array.isArray(latestInstructions)
+      ? latestInstructions.map((s) => String(s).trim()).filter(Boolean)
+      : [];
+
+    if (presetSteps.length === 0) {
       executorLogger.info(
-        `[QA 黑盒用例设计] 命中人工预设用例 (${steps.length} 步)，跳过 AI 规划`,
-        { steps },
+        `[QA 黑盒用例设计] 任务未配置验收用例，跳过 AI 用例设计，直接保留现场由人工自测`,
+        undefined,
         { taskId: task.id, nodeId: node.id }
       );
       emitLog(
         'system',
-        `[QA 黑盒用例设计] ✔ 检测到任务已预设验收用例 (${steps.length} 步)，跳过 AI 规划直接采用:\n${steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
+        `[QA 黑盒用例设计] ⏭ 任务未配置验收用例，跳过 AI 用例设计，直接保留现场由人工自测`
       );
       return {
-        status: 'success',
+        status: 'skipped',
         exitCode: 0,
         output: {
-          qaInstructions: steps,
-          stepsCount: steps.length,
-          preset: true,
+          skipped: true,
+          reason: 'empty_qa_instructions',
         },
       };
     }
 
-    const title = task.title || '功能需求';
-    const description = task.description || '';
-
-    emitLog('system', `[QA 黑盒用例设计] 正在以资深质量工程师视角，根据需求规划端到端验收用例...`);
-
-    const rolePromptTemplate = getEffectivePrompt('qaPlanner', settings.prompts);
-    const rolePrompt = renderPromptTemplate(rolePromptTemplate, {
-      task: {
-        title,
-        description: description || '无',
-      },
-    });
-
-    // 确定工作目录
-    const repoRoot = findRepoRoot(
-      node.config?.cwd ||
-      (task.context?.worktree ? task.context.worktree.worktreeDir : undefined)
-    );
-    const cwd = task.context?.worktree?.worktreeDir || task.workspace || repoRoot;
-
-    // 创建专属 QA 规划会话
-    const qaSessionId = `qa_plan_${task.id}`;
-
-    return new Promise<ExecutionResult>((resolve) => {
-      let settled = false;
-      const finish = (res: ExecutionResult) => {
-        if (settled) return;
-        settled = true;
-        resolve(res);
-      };
-
-      try {
-        const session = PiRpcSessionManager.getInstance().createSession({
-          taskId: `${task.id}_qa`,
-          taskTitle: `[QA 用例设计] ${title}`,
-          sessionId: qaSessionId,
-          agentName: '资深 QA 工程师',
-          model: settings.defaultModel,
-          thinking: 'off', // QA 规划用例无需长思考，极速产出
-          cwd,
-          initialPrompt: rolePrompt,
-          onLog: (type, text) => {
-            if (type === 'stdout' || type === 'system') {
-              emitLog('stdout', text);
-            }
-          },
-          onFinished: (error) => {
-            if (error) {
-              emitLog('stderr', `[QA 用例设计 异常] ${error}，启用平台通用默认冒烟用例`);
-              this.applyFallbackInstructions(task, emitLog);
-              finish({
-                status: 'success',
-                exitCode: 0,
-                output: { fallback: true, qaInstructions: task.context?.qaInstructions },
-              });
-              return;
-            }
-
-            try {
-              const state = session.getState();
-              const lastMsg = [...state.messages].reverse().find((m) => m.role === 'assistant');
-              const content = lastMsg?.content || '';
-
-              const match = content.match(/```qa-plan\s*([\s\S]*?)\s*```/i);
-              let steps: string[] = [];
-              if (match && match[1]) {
-                steps = match[1]
-                  .split('\n')
-                  .map((l) => l.replace(/^[-*•\d.]+\s*/, '').trim())
-                  .filter((l) => Boolean(l) && !l.startsWith('//') && !l.startsWith('#'));
-              }
-
-              // 清洗步骤：剔除空行和过度复杂的模拟项，最多保留 4 步
-              steps = steps
-                .filter((s) => !s.includes('模拟') && !s.includes('等待后台推送'))
-                .slice(0, 4);
-
-              // 兜底保障
-              if (steps.length === 0) {
-                this.applyFallbackInstructions(task, emitLog);
-              } else {
-                if (!task.context) task.context = {};
-                task.context.qaInstructions = steps;
-                task.context.qaPlan = {
-                  role: '资深 QA 工程师 (黑盒测试)',
-                  createdAt: Date.now(),
-                  steps,
-                };
-                emitLog(
-                  'system',
-                  `[QA 黑盒用例设计] ✔ 资深 QA 专家成功设计 ${steps.length} 步核心端到端验收用例:\n${steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
-                );
-              }
-
-              if (ctx.store) {
-                ctx.store.saveTask(task);
-              }
-
-              finish({
-                status: 'success',
-                exitCode: 0,
-                output: {
-                  qaInstructions: task.context?.qaInstructions,
-                  stepsCount: task.context?.qaInstructions?.length || 0,
-                },
-              });
-            } catch (err: any) {
-              this.applyFallbackInstructions(task, emitLog);
-              finish({
-                status: 'success',
-                exitCode: 0,
-                output: { fallback: true, error: err.message },
-              });
-            }
-          },
-        });
-
-        if (ctx.abortSignal) {
-          ctx.abortSignal.addEventListener('abort', () => {
-            session.terminate();
-            finish({ status: 'failed', exitCode: 1, error: 'QA 规划已手动取消' });
-          });
-        }
-      } catch (e: any) {
-        emitLog('stderr', `[QA 用例设计 启动失败] ${e.message}，使用兜底通用用例`);
-        this.applyFallbackInstructions(task, emitLog);
-        finish({
-          status: 'success',
-          exitCode: 0,
-          output: { fallback: true, qaInstructions: task.context?.qaInstructions },
-        });
-      }
-    });
-  }
-
-  private applyFallbackInstructions(task: any, emitLog: (stream: any, text: string) => void) {
-    const fallbackSteps = [
-      '等待页面加载并处于就绪状态',
-      '检查关键主视觉元素正常渲染',
-      '校验页面无报错与异常提示',
-    ];
     if (!task.context) task.context = {};
-    task.context.qaInstructions = fallbackSteps;
+    task.context.qaInstructions = presetSteps;
+    const steps = presetSteps;
     task.context.qaPlan = {
-      role: '资深 QA 工程师 (通用兜底)',
+      role: '人工预设用例 (任务配置)',
       createdAt: Date.now(),
-      steps: fallbackSteps,
+      steps,
     };
-    emitLog('system', `[QA 黑盒用例设计] 载入通用黑盒冒烟用例 (${fallbackSteps.length} 步)`);
+    if (ctx.store) {
+      ctx.store.saveTask(task);
+    }
+    executorLogger.info(
+      `[QA 黑盒用例设计] 命中人工预设用例 (${steps.length} 步)，采用预设用例`,
+      { steps },
+      { taskId: task.id, nodeId: node.id }
+    );
+    emitLog(
+      'system',
+      `[QA 黑盒用例设计] ✔ 检测到任务已配置验收用例 (${steps.length} 步)，直接采用:\n${steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
+    );
+    return {
+      status: 'success',
+      exitCode: 0,
+      output: {
+        qaInstructions: steps,
+        stepsCount: steps.length,
+        preset: true,
+      },
+    };
   }
 }
 
@@ -1150,29 +1021,38 @@ export class MidsceneExecutor implements NodeExecutor {
     try {
       const dataDir = ctx.store?.getDataDir?.() || path.join(os.homedir(), '.openloop');
 
-      // 1. 优先读取任务定制验收用例（用户在任务创建时输入，或 Agent 编码完成后智能规划输出）
+      // 1. 优先读取任务定制验收用例（用户在任务创建时输入，或在任务执行期间编辑录入）
       // 回读库中最新值，确保使用用户在运行期间刚保存的用例
       const latestInstructions = ctx.store?.getTask(task.id)?.context?.qaInstructions;
-      let instructions: string[] = [];
-      if (Array.isArray(latestInstructions) && latestInstructions.length > 0) {
-        instructions = latestInstructions.map((s) => String(s));
-        emitLog('system', `[Midscene UI 测试] 载入定制验收用例 (${instructions.length} 步)`);
-      } else if (node.config.instructions && node.config.instructions.length > 0) {
-        instructions = [...node.config.instructions];
-      } else {
-        // 平台通用默认健康探针，彻底解耦特定业务菜单，适用于任意 Web 或移动端应用
-        if (platform === 'web') {
-          instructions = [
-            '等待页面完全加载，检查首屏主视觉元素',
-            '校验当前页面正常渲染，无报错与异常提示',
-          ];
-        } else {
-          instructions = [
-            '等待应用界面完全加载并处于就绪状态',
-            '校验移动端界面正常渲染，无异常崩溃提示',
-          ];
-        }
+      const cleanCustomInstructions = Array.isArray(latestInstructions)
+        ? latestInstructions.map((s) => String(s).trim()).filter(Boolean)
+        : [];
+
+      // 核心机制：当任务未输入用例或保持用例为空时，跳过 AI 自动化验证，保留现场服务供人工自测
+      if (cleanCustomInstructions.length === 0) {
+        executorLogger.info(
+          `[Midscene UI 测试] 任务未配置验收用例，跳过 AI 自动化验证，保留现场服务供人工自测`,
+          undefined,
+          { taskId: task.id, nodeId: node.id }
+        );
+        emitLog(
+          'system',
+          `[Midscene UI 测试] ⏭ 任务未配置验收用例，跳过 AI 自动化验证与视觉截帧。测试现场服务已就绪，流程直达人工验收门禁供自测。`
+        );
+        return {
+          status: 'skipped',
+          exitCode: 0,
+          output: {
+            skipped: true,
+            reason: 'empty_qa_instructions',
+            platform,
+            targetUrl: testUrl,
+          },
+        };
       }
+
+      const instructions = cleanCustomInstructions;
+      emitLog('system', `[Midscene UI 测试] 载入定制验收用例 (${instructions.length} 步)`);
 
       const steps: QaStep[] = [];
       let stepCounter = 1;

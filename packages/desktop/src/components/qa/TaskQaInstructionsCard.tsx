@@ -197,7 +197,7 @@ export const TaskQaInstructionsCard: React.FC<TaskQaInstructionsCardProps> = ({
         ) : (
           <div className="py-2.5 px-3 rounded-[6px] bg-[#fafafc] border border-dashed border-[#e3e3e8] text-center">
             <p className="text-[10.5px] text-[#85858d] leading-relaxed">
-              暂无用例；留空时运行期将由 AI 按任务标题与说明自动规划
+              暂无用例；留空将跳过 AI 自动化验证，直接保留现场由人工自测
             </p>
           </div>
         )

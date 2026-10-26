@@ -35,6 +35,7 @@ import {
   Undo2,
   GitCommitHorizontal,
   Smartphone,
+  UserCheck,
 } from 'lucide-react';
 import { Task, QaRunRecord, StepTimelineRecord, WorktreeContextInfo, TaskWorktreeDiffResult, WorkflowDefinition } from '@openloop/core';
 import { api } from '../../services/api';
@@ -630,8 +631,8 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
   useEffect(() => {
     if (isCaseDirty) return;
     let initialList: string[] = [];
-    if (Array.isArray(currentTask.context?.qaInstructions) && currentTask.context.qaInstructions.length > 0) {
-      initialList = [...currentTask.context.qaInstructions];
+    if (Array.isArray(currentTask.context?.qaInstructions)) {
+      initialList = currentTask.context.qaInstructions.map((s) => String(s).trim()).filter(Boolean);
     } else if (Array.isArray(currentTask.context?.qaPlan?.steps) && currentTask.context.qaPlan.steps.length > 0) {
       initialList = [...currentTask.context.qaPlan.steps];
     } else if (run?.timeline && run.timeline.length > 0) {
@@ -639,11 +640,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
     } else if (steps.length > 0) {
       initialList = steps.map((s) => s.prompt).filter(Boolean);
     } else {
-      initialList = [
-        '等待页面完全加载，检查首屏主视觉元素',
-        '定位核心交互按钮并触发点击',
-        '校验页面无报错与异常提示',
-      ];
+      initialList = [];
     }
     setInstructions(initialList);
     setRawInstructionsText(initialList.join('\n'));
@@ -683,8 +680,8 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
 
   const handleResetInstructions = () => {
     let originalList: string[] = [];
-    if (Array.isArray(currentTask.context?.qaInstructions) && currentTask.context.qaInstructions.length > 0) {
-      originalList = [...currentTask.context.qaInstructions];
+    if (Array.isArray(currentTask.context?.qaInstructions)) {
+      originalList = currentTask.context.qaInstructions.map((s) => String(s).trim()).filter(Boolean);
     } else if (Array.isArray(currentTask.context?.qaPlan?.steps) && currentTask.context.qaPlan.steps.length > 0) {
       originalList = [...currentTask.context.qaPlan.steps];
     } else if (run?.timeline && run.timeline.length > 0) {
@@ -859,6 +856,11 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
     await handleRerunTest(cleanList);
   };
 
+  const isManualQaMode =
+    !run &&
+    (!Array.isArray(currentTask.context?.qaInstructions) ||
+      currentTask.context.qaInstructions.filter((s: any) => String(s).trim().length > 0).length === 0);
+
   const isPassed = run ? run.status === 'passed' : true;
   const passedCount = run ? run.passedSteps : steps.length;
   const totalCount = run ? run.totalSteps : steps.length;
@@ -939,7 +941,12 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
               )}
 
               {/* 状态微徽章 */}
-              {isPassed ? (
+              {isManualQaMode ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eff6ff] text-[#2563eb] text-[10px] font-medium border border-[#bfdbfe]/60 shrink-0 whitespace-nowrap">
+                  <UserCheck size={10} strokeWidth={2.2} className="shrink-0" />
+                  <span className="whitespace-nowrap">MANUAL QA</span>
+                </span>
+              ) : isPassed ? (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60 shrink-0 whitespace-nowrap">
                   <CheckCircle2 size={10} strokeWidth={2.2} className="shrink-0" />
                   <span className="whitespace-nowrap">PASSED</span>
@@ -1297,6 +1304,31 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                   </div>
                 )}
               </div>
+            ) : isManualQaMode ? (
+              <div className="flex flex-col items-center justify-center text-center p-8 max-w-md bg-white rounded-[10px] border border-[#d8d8de] shadow-sm animate-in fade-in duration-150">
+                <div className="w-12 h-12 rounded-full bg-[#eff6ff] text-[#2563eb] flex items-center justify-center mb-3.5 border border-[#bfdbfe]">
+                  <Globe size={24} />
+                </div>
+                <h3 className="text-[14px] font-semibold text-[#1c1c21] mb-1.5">
+                  已跳过 AI 自动化验证 · 现场服务已就绪
+                </h3>
+                <p className="text-[11.5px] text-[#71717a] leading-relaxed mb-5">
+                  未配置自动化测试用例，系统已为您拉起完整的开发靶机服务。请在靶机或真机上进行人工功能验收，并在右侧核对代码改动。
+                </p>
+                {worktree && (
+                  <button
+                    type="button"
+                    onClick={handleStartOrOpenSandbox}
+                    className="h-[32px] px-4 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium flex items-center gap-2 shadow-xs transition-all active:scale-95 cursor-pointer mb-2"
+                  >
+                    <ExternalLink size={13} />
+                    <span>打开沙箱靶机自测 {worktree.webPort ? `(:${worktree.webPort})` : ''}</span>
+                  </button>
+                )}
+                <span className="text-[10px] text-[#a1a1aa] mt-2">
+                  自测无误后，在右下角点击【验收通过并合并】即可自动合入代码
+                </span>
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center text-[#85858d] gap-2">
                 <Camera size={32} className="opacity-40" />
@@ -1623,6 +1655,16 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-2">
+                      {instructions.length === 0 && (
+                        <div className="py-4 px-3 rounded-[6px] bg-[#fafafc] border border-dashed border-[#e3e3e8] text-center mb-2">
+                          <p className="text-[11px] text-[#85858d]">
+                            当前未配置验收用例（人工自测模式）
+                          </p>
+                          <p className="text-[10px] text-[#a1a1aa] mt-1">
+                            若需运行 AI 视觉自动化测试，可点击下方按钮添加用例步骤
+                          </p>
+                        </div>
+                      )}
                       {instructions.map((inst, idx) => {
                         const isAssert =
                           inst.includes('检查') ||

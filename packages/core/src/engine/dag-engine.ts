@@ -427,9 +427,9 @@ export class DagEngine extends EventEmitter {
       return;
     }
 
-    // 节点执行成功，调度下游节点
+    // 节点执行成功/跳过，调度下游节点
     dagLogger.info(
-      `节点 [${node.name}] 执行完成并标记为 success (耗时: ${duration}ms, 产物数: ${result.artifacts?.length || 0})`,
+      `节点 [${node.name}] 执行完成并标记为 ${result.status} (耗时: ${duration}ms, 产物数: ${result.artifacts?.length || 0})`,
       undefined,
       { taskId: task.id, nodeId: node.id }
     );

@@ -35,6 +35,7 @@ import {
   Plus,
   X,
   Workflow,
+  UserCheck,
 } from 'lucide-react';
 import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
@@ -1044,87 +1045,104 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
       })()}
 
       {/* 待人工验收门禁卡片 */}
-      {task.status === 'waiting_approval' && (
-        <div className="my-2 p-2 rounded-[7px] bg-[#f9f9fb] border border-[#e3e3e8] space-y-1.5">
-          <div className="text-[11px] font-medium text-[#1c1c21] flex items-center justify-between">
-            <span className="flex items-center gap-1.5 truncate">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#1c1c21] animate-pulse shrink-0" />
-              <span className="truncate">
-                {currentNodeMeta?.name || currentNode?.name || 'QA 验收门禁'} · 待确认
+      {task.status === 'waiting_approval' && (() => {
+        const isManualQaMode =
+          (!task.context?.qaInstructions || task.context.qaInstructions.length === 0) &&
+          !nodeRuns.some((r) => r.artifacts && r.artifacts.length > 0);
+
+        return (
+          <div className="my-2 p-2 rounded-[7px] bg-[#f9f9fb] border border-[#e3e3e8] space-y-1.5">
+            <div className="text-[11px] font-medium text-[#1c1c21] flex items-center justify-between">
+              <span className="flex items-center gap-1.5 truncate">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#1c1c21] animate-pulse shrink-0" />
+                <span className="truncate">
+                  {isManualQaMode
+                    ? '现场就绪 · 人工自测'
+                    : `${currentNodeMeta?.name || currentNode?.name || 'QA 验收门禁'} · 待确认`}
+                </span>
               </span>
-            </span>
-            {task.context?.worktree && (
+              {task.context?.worktree && (
+                <button
+                  type="button"
+                  onClick={handleOpenOrStartSandbox}
+                  className={`text-[9.5px] font-mono px-1.5 py-[1.5px] rounded border flex items-center gap-1 transition-all cursor-pointer ${
+                    sandboxStatus === 'running'
+                      ? 'bg-[#eff6ff] hover:bg-[#dbeafe] text-[#2563eb] border-[#bfdbfe]'
+                      : sandboxStatus === 'starting'
+                      ? 'bg-[#fffbeb] text-[#b45309] border-[#fde68a]'
+                      : 'bg-[#f4f4f6] hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] border-[#e3e3e8]'
+                  }`}
+                  title={
+                    sandboxStatus === 'running'
+                      ? '沙箱靶机在线运行中，点击在新标签页打开'
+                      : sandboxStatus === 'starting'
+                      ? '正在拉起沙箱靶机服务...'
+                      : '沙箱靶机离线，点击一键唤醒'
+                  }
+                >
+                  {sandboxStatus === 'starting' ? (
+                    <Loader2 size={9} className="animate-spin text-[#b45309]" />
+                  ) : sandboxStatus === 'running' ? (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#059669] shrink-0" />
+                  ) : (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#a1a1aa] shrink-0" />
+                  )}
+                  <span>靶机 :{task.context.worktree.webPort}</span>
+                  {sandboxStatus === 'running' ? (
+                    <ExternalLink size={8} className="opacity-70" />
+                  ) : sandboxStatus === 'stopped' ? (
+                    <Play size={7} className="fill-current opacity-70" />
+                  ) : null}
+                </button>
+              )}
+            </div>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onVisualAcceptance(task);
+              }}
+              className="w-full h-[24px] rounded-[5px] bg-[#4f46e5]/10 hover:bg-[#4f46e5]/20 text-[#4338ca] text-[11px] font-medium flex items-center justify-center gap-1.5 border border-[#c7d2fe] transition-all cursor-pointer"
+            >
+              {isManualQaMode ? (
+                <>
+                  <UserCheck size={11} />
+                  <span>人工自测核验与代码 Diff</span>
+                </>
+              ) : (
+                <>
+                  <Play size={10} className="fill-current" />
+                  <span>查看截帧回放与验收</span>
+                </>
+              )}
+            </button>
+
+            <div className="flex items-center gap-1.5">
               <button
-                type="button"
-                onClick={handleOpenOrStartSandbox}
-                className={`text-[9.5px] font-mono px-1.5 py-[1.5px] rounded border flex items-center gap-1 transition-all cursor-pointer ${
-                  sandboxStatus === 'running'
-                    ? 'bg-[#eff6ff] hover:bg-[#dbeafe] text-[#2563eb] border-[#bfdbfe]'
-                    : sandboxStatus === 'starting'
-                    ? 'bg-[#fffbeb] text-[#b45309] border-[#fde68a]'
-                    : 'bg-[#f4f4f6] hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] border-[#e3e3e8]'
-                }`}
-                title={
-                  sandboxStatus === 'running'
-                    ? '沙箱靶机在线运行中，点击在新标签页打开'
-                    : sandboxStatus === 'starting'
-                    ? '正在拉起沙箱靶机服务...'
-                    : '沙箱靶机离线，点击一键唤醒'
-                }
+                disabled={isApproving}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onApprove(task.id, true);
+                }}
+                className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-50 shadow-sm"
               >
-                {sandboxStatus === 'starting' ? (
-                  <Loader2 size={9} className="animate-spin text-[#b45309]" />
-                ) : sandboxStatus === 'running' ? (
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#059669] shrink-0" />
-                ) : (
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#a1a1aa] shrink-0" />
-                )}
-                <span>靶机 :{task.context.worktree.webPort}</span>
-                {sandboxStatus === 'running' ? (
-                  <ExternalLink size={8} className="opacity-70" />
-                ) : sandboxStatus === 'stopped' ? (
-                  <Play size={7} className="fill-current opacity-70" />
-                ) : null}
+                <Check size={11} strokeWidth={2.4} />
+                验收通过
               </button>
-            )}
+              <button
+                disabled={isApproving}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onApprove(task.id, false);
+                }}
+                className="h-[24px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[11px] font-medium transition-all"
+              >
+                驳回
+              </button>
+            </div>
           </div>
-
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onVisualAcceptance(task);
-            }}
-            className="w-full h-[24px] rounded-[5px] bg-[#4f46e5]/10 hover:bg-[#4f46e5]/20 text-[#4338ca] text-[11px] font-medium flex items-center justify-center gap-1.5 border border-[#c7d2fe] transition-all cursor-pointer"
-          >
-            <Play size={10} className="fill-current" />
-            <span>查看截帧回放与验收</span>
-          </button>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              disabled={isApproving}
-              onClick={(e) => {
-                e.stopPropagation();
-                onApprove(task.id, true);
-              }}
-              className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-50 shadow-sm"
-            >
-              <Check size={11} strokeWidth={2.4} />
-              验收通过
-            </button>
-            <button
-              disabled={isApproving}
-              onClick={(e) => {
-                e.stopPropagation();
-                onApprove(task.id, false);
-              }}
-              className="h-[24px] px-2.5 rounded-[5px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[11px] font-medium transition-all"
-            >
-              驳回
-            </button>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 冲突自愈提示 */}
       {task.context?.worktree?.conflictResolution && (

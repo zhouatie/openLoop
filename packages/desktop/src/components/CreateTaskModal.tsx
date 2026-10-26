@@ -1325,7 +1325,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   {criteriaList.length === 0 ? (
                     <div className="py-2.5 px-3 rounded-[5px] bg-[#fafafc] border border-dashed border-[#e3e3e8] text-center mb-2">
                       <p className="text-[10.5px] text-[#85858d]">
-                        暂无用例；留空运行期将由 AI 自动推断规划，或点击下方添加
+                        暂无用例；留空将跳过 AI 自动化验证，保留现场服务由人工自测
                       </p>
                     </div>
                   ) : (
