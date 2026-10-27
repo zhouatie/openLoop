@@ -341,11 +341,20 @@
 }
 
 /* 运行中的会话：标题前置旋转小环 */
+.statusSlot {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 20px;
+  margin-right: 4px;
+}
+
 .liveSpinner {
   flex: none;
   width: 10px;
   height: 10px;
-  margin-right: 2px;
   border-radius: 50%;
   border: 1.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 22%, transparent);
   border-top-color: var(--dsw-alias-state-business-primary);
@@ -487,7 +496,9 @@
 }
 
 .menuItem {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   height: 30px;
   padding: 0 8px;
@@ -500,6 +511,21 @@
   line-height: 30px;
   text-align: left;
   cursor: pointer;
+}
+
+/* 分组标签与分隔线：对齐 DSH ViewOptionsMenu 的三段式结构 */
+.menuLabel {
+  padding: 6px 8px 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11.5px;
+  line-height: 16px;
+  user-select: none;
+}
+
+.menuDivider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--dsw-alias-border-l3);
 }
 
 .menuItem:hover {
@@ -731,6 +757,11 @@
 /* 当前项标记 */
 .menuItemActive {
   color: var(--dsw-alias-state-business-primary);
+}
+
+/* 图标随选中状态一起变主色 */
+.menuItemActive svg {
+  color: inherit;
 }
 
 .menuCount {

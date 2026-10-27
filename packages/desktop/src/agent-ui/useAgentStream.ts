@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { SessionChatMessage, TaskAttachment, TaskSessionState } from '@openloop/core/types';
 import { applyAgentEvent } from '@openloop/core/agent-events';
 import { api } from '../services/api';
+
+/** pi 一轮结束到下一轮开始之间有几十毫秒的 isBusy:false 间隙，界面要跨过它，否则按钮与运行指示会闪 */
+const BUSY_IDLE_GRACE_MS = 700;
 
 /** 会话侧的写操作由调用方按场景注入（任务会话 / 全局会话走不同接口） */
 export interface AgentTransport {
@@ -147,6 +150,18 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
     await transport?.stop?.();
   }, [transport]);
 
+  // busy 稳定化：置位立刻生效，熄灭延迟 BUSY_IDLE_GRACE_MS，跨过一轮之间的间隙
+  const rawBusy = Boolean(stateRef.current?.isBusy);
+  const [steadyBusy, setSteadyBusy] = useState(rawBusy);
+  useEffect(() => {
+    if (rawBusy) {
+      setSteadyBusy(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setSteadyBusy(false), BUSY_IDLE_GRACE_MS);
+    return () => window.clearTimeout(timer);
+  }, [rawBusy]);
+
   const state = stateRef.current;
   const messages = useMemo(
     () => mergeMessages(historyRef.current, state?.messages),
@@ -156,7 +171,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   return {
     state,
     messages,
-    isBusy: Boolean(state?.isBusy),
+    isBusy: steadyBusy,
     awaitingInput: Boolean(state?.awaitingInput),
     active: state ? state.active : true,
     lastError: state?.lastError,

@@ -8,7 +8,13 @@ import {
   IconPin,
   IconProjectAdd,
   IconSearch,
+  IconSliders,
   IconSort,
+  IconClock,
+  IconFlatList,
+  IconArchiveCheck,
+  IconArchiveOff,
+  IconQueue,
   IconTriangleRight,
 } from './icons';
 import styles from './SessionList.module.css';
@@ -85,15 +91,21 @@ export interface SessionListProps {
 const SESSION_VISIBLE_COUNT = 5;
 const HOME_PATTERN = /^\/Users\/[^/]+/;
 
-type SortMode = 'recent' | 'oldest' | 'name';
+/** 视图选项：对齐 DSH WorkspaceBrowser 的 ViewOptionsMenu（分组方式 / 排序方式 / 筛选会话） */
+type GroupBy = 'workspace' | 'flat';
+type OrderBy = 'manual' | 'updated';
+type ArchivedFilter = 'hide' | 'show' | 'only';
 
-const SORT_LABEL: Record<SortMode, string> = {
-  recent: '最近活跃优先',
-  oldest: '最早活跃优先',
-  name: '按名称排序',
+const ORDER_BY_LABEL: Record<OrderBy, string> = { manual: '手动排序', updated: '最近更新' };
+const ARCHIVED_LABEL: Record<ArchivedFilter, string> = {
+  hide: '隐藏已归档',
+  show: '全部对话（显示已归档）',
+  only: '仅显示已归档',
 };
-
-const SORT_ORDER: SortMode[] = ['recent', 'oldest', 'name'];
+/** 标题搜索命中上限，超出时提示缩小范围（对齐 DSH search.hasMore） */
+const SEARCH_TITLE_LIMIT = 20;
+/** 单列表模式每页渲染的会话数 */
+const FLAT_PAGE_SIZE = 120;
 
 interface HoverCardState {
   title: string;
@@ -176,7 +188,13 @@ export const SessionList = memo(function SessionList({
 }: SessionListProps) {
   const searching = query.trim().length > 0;
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
-  const [sortMode, setSortMode] = useState<SortMode>('recent');
+  const [groupBy, setGroupBy] = useState<GroupBy>('workspace');
+  const [orderBy, setOrderBy] = useState<OrderBy>('updated');
+  const [archivedFilter, setArchivedFilter] = useState<ArchivedFilter>('hide');
+  /** 视图选项菜单的定位 */
+  const [viewMenu, setViewMenu] = useState<{ top: number; left: number } | null>(null);
+  /** 单列表一次渲染的会话数（逐步加载，避免一次性铺 2000+ 行） */
+  const [flatLimit, setFlatLimit] = useState(FLAT_PAGE_SIZE);
   const [searchOpen, setSearchOpen] = useState(false);
   const [contentHits, setContentHits] = useState<SessionContentHit[]>([]);
   const [contentLoading, setContentLoading] = useState(false);
@@ -201,43 +219,50 @@ export const SessionList = memo(function SessionList({
     setExpandedGroups((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
   };
 
-  /** 组排序：最近 / 最早 / 名称；手动排序（order）由上层决定初始顺序 */
+  /** 组排序：手动 = 沿用上层给出的顺序（工作区拖拽排序 / order 元数据），最近更新 = 按组内最新会话 */
   const orderedGroups = useMemo(() => {
     const list = [...groups];
-    if (sortMode === 'name') {
-      list.sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
-      return list;
-    }
-    if (sortMode === 'oldest') {
-      const timeOf = (group: SessionGroupItem) =>
-        Math.min(...group.sessions.map((item) => Date.parse(item.modifiedAt) || 0), Number.MAX_SAFE_INTEGER);
-      list.sort((a, b) => timeOf(a) - timeOf(b));
-      return list;
-    }
+    if (orderBy === 'manual') return list;
     const timeOf = (group: SessionGroupItem) =>
-      Math.max(...group.sessions.map((item) => Date.parse(item.modifiedAt) || 0), 0);
+      Math.max(0, ...group.sessions.map((item) => Date.parse(item.modifiedAt) || 0));
     list.sort((a, b) => timeOf(b) - timeOf(a));
     return list;
-  }, [groups, sortMode]);
+  }, [groups, orderBy]);
 
-  const filteredGroups = useMemo(
-    () => (projectFilter ? orderedGroups.filter((group) => group.key === projectFilter) : orderedGroups),
-    [orderedGroups, projectFilter]
-  );
-
-  /** 组内会话排序：置顶优先，其次按当前排序模式 */
+  /** 会话排序：置顶优先，其次按当前排序方式（手动 = 沿用上层顺序） */
   const sortSessions = useCallback(
     (list: SessionListItem[]) => {
-      const sorted = [...list].sort((a, b) => {
-        if (sortMode === 'name') return (a.title || '').localeCompare(b.title || '', 'zh-CN');
-        const left = Date.parse(a.modifiedAt) || 0;
-        const right = Date.parse(b.modifiedAt) || 0;
-        return sortMode === 'oldest' ? left - right : right - left;
-      });
+      const sorted =
+        orderBy === 'updated'
+          ? [...list].sort(
+              (a, b) => (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0)
+            )
+          : [...list];
       const pinned = sorted.filter((item) => item.pinned);
       return pinned.length > 0 ? [...pinned, ...sorted.filter((item) => !item.pinned)] : sorted;
     },
-    [sortMode]
+    [orderBy]
+  );
+
+  /** 归档过滤：默认隐藏已归档（对齐 DSH viewOptions） */
+  const matchesArchive = useCallback(
+    (item: SessionListItem) =>
+      archivedFilter === 'show' ? true : archivedFilter === 'only' ? Boolean(item.archived) : !item.archived,
+    [archivedFilter]
+  );
+
+  const filteredGroups = useMemo(() => {
+    const scoped = projectFilter ? orderedGroups.filter((group) => group.key === projectFilter) : orderedGroups;
+    return scoped
+      .map((group) => ({ ...group, sessions: group.sessions.filter(matchesArchive) }))
+      // 真正没有会话的空工作区保留（新建后立刻可见）；只因归档过滤变空的组才收起
+      .filter((group, index) => group.sessions.length > 0 || scoped[index].sessions.length === 0);
+  }, [orderedGroups, projectFilter, matchesArchive]);
+
+  /** 单列表模式：把全部工作区的会话摊平成一条列表 */
+  const flatSessions = useMemo(
+    () => sortSessions(filteredGroups.flatMap((group) => group.sessions)),
+    [filteredGroups, sortSessions]
   );
 
   // 正文全文搜索：输入停顿 260ms 再请求
@@ -403,9 +428,19 @@ export const SessionList = memo(function SessionList({
     setRename(null);
   };
 
-  const cycleSort = () => {
-    setSortMode((prev) => SORT_ORDER[(SORT_ORDER.indexOf(prev) + 1) % SORT_ORDER.length]);
+  /** 打开视图选项菜单（对齐 DSH 的 sliders 图标入口） */
+  const openViewMenu = (event: React.MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+    if (viewMenu) {
+      setViewMenu(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    setViewMenu({ top: rect.bottom + 4, left: Math.max(12, rect.right - 216) });
   };
+
+  const viewOptionsActive =
+    groupBy !== 'workspace' || orderBy !== 'updated' || archivedFilter !== 'hide';
 
   const contentHitRows = contentRows.length;
   const flatHits = useMemo(
@@ -437,6 +472,105 @@ export const SessionList = memo(function SessionList({
       onSelectSession(hit.id);
       setSearchOpen(false);
     }
+  };
+
+  /** 会话行：工作区树与单列表共用同一份交互（选中、悬停卡、置顶、菜单、行内重命名） */
+  const renderSessionRow = (session: SessionListItem) => {
+    const renamingSession = rename?.kind === 'session' && rename.key === session.id;
+    return (
+                  <div
+                    key={session.id}
+                    className={`${styles.sessionRow} ${
+                      session.id === activeId ? styles.sessionSelected : ''
+                    } ${session.archived ? styles.sessionArchived : ''}`}
+                    onClick={() => {
+                      if (renamingSession) return;
+                      onSelectSession(session.id);
+                    }}
+                    role="treeitem"
+                    aria-selected={session.id === activeId}
+                    tabIndex={0}
+                    onMouseEnter={(event) =>
+                      showCard(
+                        event.currentTarget,
+                        session.title || '未命名会话',
+                        session.cwd,
+                        createdLabel(session.createdAt)
+                      )
+                    }
+                    onMouseLeave={() => setCard(null)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !renamingSession) onSelectSession(session.id);
+                    }}
+                  >
+                    {/* 状态槽固定 16px（对齐 DSH）：运行指示在槽内显隐，标题位置不随之左右跳 */}
+                    <span className={styles.statusSlot}>
+                      {session.running && <span className={styles.liveSpinner} aria-label="进行中" />}
+                    </span>
+                    {renamingSession ? (
+                      <input
+                        ref={renameInputRef}
+                        className={styles.renameInput}
+                        value={rename.value}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => setRename({ ...rename, value: event.target.value })}
+                        onBlur={commitRename}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            commitRename();
+                          }
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setRename(null);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <span className={styles.sessionTitle}>{session.title || '未命名会话'}</span>
+                    )}
+                    {session.pinned && (
+                      <span className={styles.pinMark} aria-label="已置顶">
+                        <IconPin size={13} />
+                      </span>
+                    )}
+                    <span className={styles.time}>{relativeTime(session.modifiedAt)}</span>
+                    <span className={styles.rowActions}>
+                      {onPinSession && (
+                        <button
+                          type="button"
+                          className={`${styles.rowIcon} ${session.pinned ? styles.rowIconActive : ''}`}
+                          aria-label={session.pinned ? '取消置顶' : '置顶会话'}
+                          title={session.pinned ? '取消置顶' : '置顶会话'}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onPinSession(session.id, !session.pinned);
+                          }}
+                        >
+                          <IconPin size={14} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={styles.rowIcon}
+                        aria-label="会话操作"
+                        onClick={(event) =>
+                          openMenu(event, {
+                            kind: 'session',
+                            cwd: session.cwd,
+                            sessionId: session.id,
+                            archived: session.archived,
+                            pinned: session.pinned,
+                          })
+                        }
+                      >
+                        <IconMore size={16} />
+                      </button>
+                    </span>
+                  </div>
+
+    );
   };
 
   // 折叠成图标轨道
@@ -566,11 +700,15 @@ export const SessionList = memo(function SessionList({
               </button>
               <button
                 type="button"
-                className={`${styles.iconButton} ${sortMode !== 'recent' ? styles.iconButtonActive : ''}`}
-                onClick={cycleSort}
-                title={`排序：${SORT_LABEL[sortMode]}（点击切换）`}
+                className={`${styles.iconButton} ${viewOptionsActive ? styles.iconButtonActive : ''}`}
+                onClick={openViewMenu}
+                title="视图选项"
+                aria-label="视图选项"
+                aria-haspopup="menu"
+                aria-expanded={Boolean(viewMenu)}
+                data-agent-transient
               >
-                <IconSort size={16} />
+                <IconSliders size={16} />
               </button>
               <button
                 type="button"
@@ -589,10 +727,10 @@ export const SessionList = memo(function SessionList({
         <div className={styles.searchPanel} data-agent-transient>
           <div className={styles.searchPanelHead}>
             {flatHits.length > 0
-              ? `${flatHits.length} 个匹配会话${contentLoading ? ' · 正在检索正文…' : ''}`
+              ? `${flatHits.length} 个匹配会话${contentLoading ? ' · 正在搜索会话历史…' : ''}`
               : contentLoading
-                ? '正在检索正文…'
-                : '没有匹配的会话'}
+                ? '正在搜索会话历史…'
+                : '无匹配会话'}
           </div>
           <div className={styles.searchPanelList}>
             {titleHits.map((hit, index) => (
@@ -623,19 +761,47 @@ export const SessionList = memo(function SessionList({
               </button>
             ))}
           </div>
-          {contentHitRows === 0 && titleHits.length === 0 && !contentLoading && (
-            <div className={styles.searchPanelFoot}>正文检索覆盖最近会话的最新内容</div>
+          {titleHits.length >= SEARCH_TITLE_LIMIT && (
+            <div className={styles.searchPanelFoot}>
+              仅显示前 {SEARCH_TITLE_LIMIT} 条结果，请缩小搜索范围。
+            </div>
           )}
         </div>
       )}
 
       <div className={styles.list}>
         {loading && groups.length === 0 && <div className={styles.placeholder}>正在扫描会话…</div>}
-        {!loading && filteredGroups.length === 0 && (
+        {!loading && groups.length === 0 && (
           <div className={styles.placeholder}>还没有工作区。点右上角图标选择一个目录。</div>
         )}
+        {!loading && groups.length > 0 && filteredGroups.length === 0 && (
+          <div className={styles.placeholder}>
+            {archivedFilter === 'only' ? '暂无已归档会话' : '暂无会话'}
+          </div>
+        )}
 
-        {filteredGroups.map((group) => {
+        {groupBy === 'flat' && (
+          <>
+            {flatSessions.length === 0 ? (
+              <div className={styles.placeholder}>
+                {archivedFilter === 'only' ? '暂无已归档会话' : '暂无会话'}
+              </div>
+            ) : (
+              flatSessions.slice(0, flatLimit).map((session) => renderSessionRow(session))
+            )}
+            {flatSessions.length > flatLimit && (
+              <button
+                type="button"
+                className={styles.overflowButton}
+                onClick={() => setFlatLimit((prev) => prev + FLAT_PAGE_SIZE)}
+              >
+                显示其余 {flatSessions.length - flatLimit} 个会话
+              </button>
+            )}
+          </>
+        )}
+
+        {groupBy === 'workspace' && filteredGroups.map((group) => {
           const isCollapsed = !searching && collapsed.includes(group.key);
           const isExpanded = searching || expandedGroups.includes(group.key);
           const sortedSessions = sortSessions(group.sessions);
@@ -754,99 +920,7 @@ export const SessionList = memo(function SessionList({
                     </button>
                   )}
 
-                  {visibleSessions.map((session) => {
-                    const renamingSession = rename?.kind === 'session' && rename.key === session.id;
-                    return (
-                      <div
-                        key={session.id}
-                        className={`${styles.sessionRow} ${
-                          session.id === activeId ? styles.sessionSelected : ''
-                        } ${session.archived ? styles.sessionArchived : ''}`}
-                        onClick={() => {
-                          if (renamingSession) return;
-                          onSelectSession(session.id);
-                        }}
-                        role="treeitem"
-                        aria-selected={session.id === activeId}
-                        tabIndex={0}
-                        onMouseEnter={(event) =>
-                          showCard(
-                            event.currentTarget,
-                            session.title || '未命名会话',
-                            session.cwd,
-                            createdLabel(session.createdAt)
-                          )
-                        }
-                        onMouseLeave={() => setCard(null)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' && !renamingSession) onSelectSession(session.id);
-                        }}
-                      >
-                        {session.running && <span className={styles.liveSpinner} aria-label="进行中" />}
-                        {renamingSession ? (
-                          <input
-                            ref={renameInputRef}
-                            className={styles.renameInput}
-                            value={rename.value}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={(event) => setRename({ ...rename, value: event.target.value })}
-                            onBlur={commitRename}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                commitRename();
-                              }
-                              if (event.key === 'Escape') {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                setRename(null);
-                              }
-                            }}
-                          />
-                        ) : (
-                          <span className={styles.sessionTitle}>{session.title || '未命名会话'}</span>
-                        )}
-                        {session.pinned && (
-                          <span className={styles.pinMark} aria-label="已置顶">
-                            <IconPin size={13} />
-                          </span>
-                        )}
-                        <span className={styles.time}>{relativeTime(session.modifiedAt)}</span>
-                        <span className={styles.rowActions}>
-                          {onPinSession && (
-                            <button
-                              type="button"
-                              className={`${styles.rowIcon} ${session.pinned ? styles.rowIconActive : ''}`}
-                              aria-label={session.pinned ? '取消置顶' : '置顶会话'}
-                              title={session.pinned ? '取消置顶' : '置顶会话'}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onPinSession(session.id, !session.pinned);
-                              }}
-                            >
-                              <IconPin size={14} />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className={styles.rowIcon}
-                            aria-label="会话操作"
-                            onClick={(event) =>
-                              openMenu(event, {
-                                kind: 'session',
-                                cwd: session.cwd,
-                                sessionId: session.id,
-                                archived: session.archived,
-                                pinned: session.pinned,
-                              })
-                            }
-                          >
-                            <IconMore size={16} />
-                          </button>
-                        </span>
-                      </div>
-                    );
-                  })}
+                  {visibleSessions.map((session) => renderSessionRow(session))}
 
                   {(hiddenCount > 0 || (isExpanded && sortedSessions.length > SESSION_VISIBLE_COUNT)) && (
                     <button
@@ -1025,6 +1099,93 @@ export const SessionList = memo(function SessionList({
               复制会话 ID
             </button>
           )}
+        </div>
+      )}
+
+      {viewMenu && (
+        <div
+          className={styles.menu}
+          style={{ top: viewMenu.top, left: viewMenu.left, width: 216 }}
+          role="menu"
+          data-agent-transient
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className={styles.menuLabel}>分组方式</div>
+          <button
+            type="button"
+            className={`${styles.menuItem} ${groupBy === 'workspace' ? styles.menuItemActive : ''}`}
+            onClick={() => {
+              setGroupBy('workspace');
+              setViewMenu(null);
+            }}
+          >
+            <IconFolderClose size={14} />
+            按工作区
+          </button>
+          <button
+            type="button"
+            className={`${styles.menuItem} ${groupBy === 'flat' ? styles.menuItemActive : ''}`}
+            onClick={() => {
+              setGroupBy('flat');
+              setViewMenu(null);
+            }}
+          >
+            <IconFlatList size={14} />
+            单列表
+          </button>
+
+          <div className={styles.menuDivider} role="separator" />
+          <div className={styles.menuLabel}>排序方式</div>
+          {(['manual', 'updated'] as OrderBy[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={`${styles.menuItem} ${orderBy === mode ? styles.menuItemActive : ''}`}
+              onClick={() => {
+                setOrderBy(mode);
+                setViewMenu(null);
+              }}
+            >
+              {mode === 'manual' ? <IconSort size={14} /> : <IconClock size={14} />}
+              {ORDER_BY_LABEL[mode]}
+            </button>
+          ))}
+
+          <div className={styles.menuDivider} role="separator" />
+          <div className={styles.menuLabel}>筛选会话</div>
+          <button
+            type="button"
+            className={`${styles.menuItem} ${archivedFilter === 'hide' ? styles.menuItemActive : ''}`}
+            onClick={() => {
+              setArchivedFilter('hide');
+              setViewMenu(null);
+            }}
+          >
+            <IconArchiveOff size={14} />
+            {ARCHIVED_LABEL.hide}
+          </button>
+          <button
+            type="button"
+            className={`${styles.menuItem} ${archivedFilter === 'show' ? styles.menuItemActive : ''}`}
+            onClick={() => {
+              setArchivedFilter('show');
+              setViewMenu(null);
+            }}
+          >
+            <IconQueue size={14} />
+            {ARCHIVED_LABEL.show}
+          </button>
+          <button
+            type="button"
+            className={`${styles.menuItem} ${archivedFilter === 'only' ? styles.menuItemActive : ''}`}
+            onClick={() => {
+              setArchivedFilter('only');
+              setViewMenu(null);
+            }}
+          >
+            <IconArchiveCheck size={14} />
+            {ARCHIVED_LABEL.only}
+          </button>
         </div>
       )}
     </aside>

@@ -325,3 +325,55 @@ export const IconCode = createIcon('IconCode', 14, () => (
   </>
 ));
 
+/** 视图选项（DSH sliders-two-outline） */
+export const IconSliders = createIcon('IconSliders', 16, () => (
+  <>
+    <path d="M2.3 5h5.85M12.05 5h1.65" stroke="currentColor" />
+    <circle cx="9.95" cy="5" r="1.45" stroke="currentColor" />
+    <path d="M2.3 11h1.65M7.85 11h5.85" stroke="currentColor" />
+    <circle cx="5.75" cy="11" r="1.45" stroke="currentColor" />
+  </>
+));
+
+/** 单列表分组（DSH flat-list-outline） */
+export const IconFlatList = createIcon('IconFlatList', 16, () => (
+  <>
+    <path d="M6 3.5h7.5M6 8h7.5M6 12.5h7.5" stroke="currentColor" />
+    <path d="M2.6 3.5h.01M2.6 8h.01M2.6 12.5h.01" stroke="currentColor" />
+  </>
+));
+
+/** 归档检查（DSH archive-check-outline） */
+export const IconArchiveCheck = createIcon('IconArchiveCheck', 16, () => (
+  <>
+    <rect x="1.9" y="2.1" width="12.2" height="3.4" rx="1.1" stroke="currentColor" />
+    <path d="M2.95 5.7v4.8a2.9 2.9 0 0 0 2.9 2.9h4.3a2.9 2.9 0 0 0 2.9-2.9V5.7" stroke="currentColor" />
+    <path d="m6 9.35 1.4 1.4 2.6-2.6" stroke="currentColor" />
+  </>
+));
+
+/** 空归档（DSH archive-off-outline 的无遮罩简化版，避免重复 mask id） */
+export const IconArchiveOff = createIcon('IconArchiveOff', 16, () => (
+  <>
+    <rect x="1.9" y="2.1" width="12.2" height="3.4" rx="1.1" stroke="currentColor" />
+    <path d="M2.95 5.7v4.8a2.9 2.9 0 0 0 2.9 2.9h4.3a2.9 2.9 0 0 0 2.9-2.9V5.7" stroke="currentColor" />
+    <path d="m2.6 1.7 10.8 11.9" stroke="currentColor" />
+  </>
+));
+
+/** 全部对话（DSH queue-outline） */
+export const IconQueue = createIcon('IconQueue', 16, () => (
+  <>
+    <path d="M5 6.75H11" stroke="currentColor" />
+    <path d="M5 9H8" stroke="currentColor" />
+    <path d="M2.37 11.25a6.6 6.6 0 1 1 12.11-1.41 6.6 6.6 0 0 1-8.83 4.22c-.48-.19-.88-.57-1.38-.66-.6-.12-1.32.16-2.23.93" stroke="currentColor" />
+  </>
+));
+
+/** 最近更新（DSH clock-outline） */
+export const IconClock = createIcon('IconClock', 16, () => (
+  <>
+    <path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14Z" stroke="currentColor" />
+    <path d="M8 4.31V8.46L11 10.08" stroke="currentColor" />
+  </>
+));

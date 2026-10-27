@@ -453,6 +453,8 @@ const COLLAPSED_KEY = 'openloop.agent.collapsedProjects';
 const PROJECTS_KEY = 'openloop.agent.projects';
 
 const TEMP_PROJECT_KEY = '__temp__';
+/** 运行指示的熄灭延时：躲开 pi 一轮之间 turn_end → 下一轮 busy 的短暂间隙 */
+const RUNNING_IDLE_GRACE_MS = 700;
 
 /** 临时目录、仓库子包与会话工作树都归入所属项目，避免侧栏被内部路径刷屏 */
 function normalizeProjectCwd(cwd: string): string {
@@ -521,6 +523,10 @@ export function GlobalAgentPanel({
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [liveIds, setLiveIds] = useState<string[]>([]);
   const [busyIds, setBusyIds] = useState<string[]>([]);
+  /** 最近一次已知的运行集合（poll / refresh / 实时事件共同维护） */
+  const busyRef = useRef<Set<string>>(new Set());
+  /** 熄灭延时计时器：pi 一轮里会有 turn_end → 下一轮 busy 的间隙，立刻熄灭会让运行指示闪一下 */
+  const runningClearTimers = useRef<Map<string, number>>(new Map());
   const [extraProjects, setExtraProjects] = useState<string[]>(() => readJsonArray(PROJECTS_KEY));
   const [collapsed, setCollapsed] = useState<string[]>(() => readJsonArray(COLLAPSED_KEY));
   const [loading, setLoading] = useState(true);
@@ -597,6 +603,48 @@ export function GlobalAgentPanel({
     void refreshProjectMeta();
   }, [refreshProjectMeta]);
 
+  /** 统一置运行指示：busy 立刻点亮；空闲延迟 RUNNING_IDLE_GRACE_MS 再熄灭，避免一轮之间闪烁 */
+  const applyRunning = useCallback((busyList: string[]) => {
+    const busy = new Set(busyList);
+    setSessions((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        const pending = runningClearTimers.current.get(item.id);
+        if (busy.has(item.id)) {
+          if (pending) {
+            window.clearTimeout(pending);
+            runningClearTimers.current.delete(item.id);
+          }
+          if (item.running) return item;
+          changed = true;
+          return { ...item, running: true };
+        }
+        if (!item.running || pending) return item;
+        runningClearTimers.current.set(
+          item.id,
+          window.setTimeout(() => {
+            runningClearTimers.current.delete(item.id);
+            if (busyRef.current.has(item.id)) return;
+            setSessions((cur) =>
+              cur.map((row) => (row.id === item.id && row.running ? { ...row, running: false } : row))
+            );
+          }, RUNNING_IDLE_GRACE_MS)
+        );
+        return item;
+      });
+      return changed ? next : prev;
+    });
+  }, []);
+
+  // 卸载时清掉未触发的熄灭计时器
+  useEffect(() => {
+    const timers = runningClearTimers.current;
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      timers.clear();
+    };
+  }, []);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -608,21 +656,32 @@ export function GlobalAgentPanel({
       const busyList = live.busy || [];
       setLiveIds(liveList);
       setBusyIds(busyList);
-      setSessions(
-        (list.sessions || []).map((item) => ({
-          id: item.id,
-          title: item.title || sessionTitleOf(item.firstUserMessage, item.modifiedAt),
-          cwd: item.cwd || '',
-          modifiedAt: item.modifiedAt,
-          messageCount: item.messageCount,
-          live: liveList.includes(item.id),
-          running: busyList.includes(item.id),
-          createdAt: item.createdAt,
-          path: item.path,
-          archived: item.archived === true,
-          pinned: item.pinned === true,
-        }))
-      );
+      busyRef.current = new Set(busyList);
+      const fromDisk: SessionListItem[] = (list.sessions || []).map((item) => ({
+        id: item.id,
+        title: item.title || sessionTitleOf(item.firstUserMessage, item.modifiedAt),
+        cwd: item.cwd || '',
+        modifiedAt: item.modifiedAt,
+        messageCount: item.messageCount,
+        live: liveList.includes(item.id),
+        running: false,
+        createdAt: item.createdAt,
+        path: item.path,
+        archived: item.archived === true,
+        pinned: item.pinned === true,
+      }));
+      // 刚落盘还没被列表扫到的会话（进程仍活着或在跑）要保留，否则该行会先消失再出现
+      setSessions((prev) => {
+        const prevById = new Map(prev.map((item) => [item.id, item]));
+        // 保留已有的运行态，避免刷新时先熄再亮
+        const disk = fromDisk.map((item) =>
+          prevById.get(item.id)?.running ? { ...item, running: true } : item
+        );
+        const known = new Set(disk.map((item) => item.id));
+        const keep = prev.filter((item) => !known.has(item.id) && (item.running || item.live));
+        return keep.length > 0 ? [...keep, ...disk] : disk;
+      });
+      applyRunning(busyList);
     } catch (err) {
       if (import.meta.env?.DEV) console.warn('[AgentPanel] 加载会话列表失败:', err);
       setSessions([]);
@@ -631,9 +690,13 @@ export function GlobalAgentPanel({
     }
   }, []);
 
+  // 面板打开时重新拉一次磁盘会话列表；隐藏期间外部新建的会话就靠这一下才出现
   useEffect(() => {
+    if (!active) return;
     void refresh();
-  }, [refresh]);
+    const timer = window.setInterval(() => void refresh(), 15000);
+    return () => window.clearInterval(timer);
+  }, [active, refresh]);
 
   useEffect(() => {
     localStorage.setItem(COLLAPSED_KEY, JSON.stringify(collapsed));
@@ -738,6 +801,8 @@ export function GlobalAgentPanel({
         attachments.clear();
         // 新会话的文件还没落盘，先登记占位行，等实时状态把它带进列表
         pendingRows.current[activeId] = { title: message.slice(0, 40) || '新会话', cwd };
+        busyRef.current.add(activeId);
+        applyRunning([...busyRef.current]);
         void applyLiveState();
       } catch (err) {
         if (import.meta.env?.DEV) console.warn('[AgentPanel] 发送全局会话消息失败:', err);
@@ -748,7 +813,7 @@ export function GlobalAgentPanel({
         window.setTimeout(() => void refresh(), 1500);
       }
     },
-    [activeId, streamKey, sendMessage, refresh, attachments]
+    [activeId, streamKey, sendMessage, refresh, attachments, applyRunning, cwd]
   );
 
   const keyword = query.trim().toLowerCase();
@@ -839,6 +904,7 @@ export function GlobalAgentPanel({
     const busyList = live.busy || [];
     setLiveIds(liveList);
     setBusyIds(busyList);
+    busyRef.current = new Set(busyList);
     setSessions((prev) => {
       const known = new Set(prev.map((item) => item.id));
       const nowIso = new Date().toISOString();
@@ -856,15 +922,15 @@ export function GlobalAgentPanel({
         }));
       let changed = placeholders.length > 0;
       const next = prev.map((item) => {
-        const running = busyList.includes(item.id);
         const liveFlag = liveList.includes(item.id);
-        if (Boolean(item.running) === running && Boolean(item.live) === liveFlag) return item;
+        if (Boolean(item.live) === liveFlag) return item;
         changed = true;
-        return { ...item, running, live: liveFlag };
+        return { ...item, live: liveFlag };
       });
       return changed ? [...placeholders, ...next] : prev;
     });
-  }, []);
+    applyRunning(busyList);
+  }, [applyRunning]);
 
   useEffect(() => {
     if (!active) return;
@@ -922,38 +988,32 @@ export function GlobalAgentPanel({
             ? true
             : undefined;
       if (typeof busy !== 'boolean') return;
+      if (busy) busyRef.current.add(sessionId);
+      else busyRef.current.delete(sessionId);
       setSessions((prev) => {
-        const hit = prev.some((item) => item.id === sessionId);
-        if (!hit) {
-          // 文件还没落盘：先用占位行让运行指示立刻出现
-          const info = pendingRows.current[sessionId];
-          if (!busy || !info) return prev;
-          const nowIso = new Date().toISOString();
-          return [
-            {
-              id: sessionId,
-              title: info.title,
-              cwd: info.cwd,
-              modifiedAt: nowIso,
-              messageCount: 1,
-              running: true,
-              live: true,
-              createdAt: nowIso,
-            },
-            ...prev,
-          ];
-        }
-        let changed = false;
-        const next = prev.map((item) => {
-          if (item.id !== sessionId || Boolean(item.running) === busy) return item;
-          changed = true;
-          return { ...item, running: busy };
-        });
-        return changed ? next : prev;
+        if (prev.some((item) => item.id === sessionId)) return prev;
+        // 文件还没落盘：先用占位行让运行指示立刻出现
+        const info = pendingRows.current[sessionId];
+        if (!busy || !info) return prev;
+        const nowIso = new Date().toISOString();
+        return [
+          {
+            id: sessionId,
+            title: info.title,
+            cwd: info.cwd,
+            modifiedAt: nowIso,
+            messageCount: 1,
+            running: true,
+            live: true,
+            createdAt: nowIso,
+          },
+          ...prev,
+        ];
       });
+      applyRunning([...busyRef.current]);
     });
     return () => off?.();
-  }, [active]);
+  }, [active, applyRunning]);
 
   const deleteSession = useCallback(
     async (id: string) => {
