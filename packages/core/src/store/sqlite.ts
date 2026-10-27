@@ -43,7 +43,7 @@ const TASK_SUMMARY_SQL = `
              AND COALESCE(json_extract(tool.value, '$.status'), 'success') <> 'error'
          ) ELSE 0 END AS has_code_changes
   FROM tasks AS t
-  ORDER BY t.created_at DESC
+  ORDER BY t.updated_at DESC
 `;
 
 
@@ -244,6 +244,7 @@ export class SqliteStore {
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_kanban ON tasks(kanban_column);
       CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_node_runs_task ON task_node_runs(task_id);
       CREATE INDEX IF NOT EXISTS idx_logs_task_time ON logs(task_id, timestamp ASC);
       CREATE INDEX IF NOT EXISTS idx_logs_node ON logs(task_id, node_id);
