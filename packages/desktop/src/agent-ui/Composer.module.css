@@ -7,8 +7,8 @@
   align-items: center;
   flex: none;
   box-sizing: border-box;
-  /* 底部留白：DSH 原版在卡片下方还有用量条区域，这里去掉内容但保留同样高度 */
-  padding: 0 16px 28px;
+  /* 底部留白：只留 DSH 输入条下方的那点空隙，不做额外的空白带 */
+  padding: 0 16px 10px;
 }
 
 .card {

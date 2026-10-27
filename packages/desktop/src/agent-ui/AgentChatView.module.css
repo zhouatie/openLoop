@@ -10,7 +10,8 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 20px 16px 8px;
+  /* 底部 14px：与输入卡的间距，避免最后一行紧贴卡片边缘 */
+  padding: 20px 16px 14px;
   scrollbar-gutter: stable;
 }
 

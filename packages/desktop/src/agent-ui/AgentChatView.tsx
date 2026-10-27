@@ -62,7 +62,7 @@ const RunningStatus = React.memo(function RunningStatus({ startedAt }: { started
       <span className={styles.runningContent}>
         <span className={styles.runningDot} aria-hidden />
         <TextShimmer active className={styles.runningText}>
-          {seconds > 0 ? `深度求索中，用时 ${seconds} 秒 ···` : '深度求索中 ···'}
+          {`用时 ${Math.max(1, seconds)} 秒 ···`}
         </TextShimmer>
       </span>
     </div>
@@ -166,6 +166,7 @@ export const AgentChatView = React.memo(function AgentChatView({
   onFork,
 }: AgentChatViewProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const stickRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
@@ -231,6 +232,20 @@ export const AgentChatView = React.memo(function AgentChatView({
     node.scrollTop = node.scrollHeight;
   }, []);
 
+  // 内容高度变化（工具输出、图片、代码高亮等不改变正文字数的异步布局）同样保持贴底，
+  // 否则只在 messages.length/lastLength 变化时贴底会让最新内容被输入卡切掉一截。
+  useEffect(() => {
+    const node = scrollerRef.current;
+    const content = contentRef.current;
+    if (!node || !content || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (!stickRef.current) return;
+      node.scrollTop = node.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
+
   const jumpToTurn = useCallback((turn: number) => {
     const node = scrollerRef.current;
     if (!node) return;
@@ -268,7 +283,7 @@ export const AgentChatView = React.memo(function AgentChatView({
             </div>
           </div>
         ) : (
-          <div className={styles.content} style={contentStyle}>
+          <div ref={contentRef} className={styles.content} style={contentStyle}>
             {blocks.map((block, blockIndex) => {
               const previousDay = blockIndex > 0 ? blocks[blockIndex - 1].day : '';
               const separator =
