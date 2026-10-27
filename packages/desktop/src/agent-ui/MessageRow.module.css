@@ -207,3 +207,38 @@
   color: var(--dsw-alias-label-caption);
   font-variant-numeric: tabular-nums;
 }
+
+/* 过程折叠内的紧凑行：去掉顶部留白 */
+.compact {
+  margin: 0;
+}
+
+.compact .content {
+  font-size: 13px;
+}
+
+/* 消息操作：静默到悬停才出现 */
+.assistantRow:hover .action {
+  opacity: 1;
+}
+
+.action {
+  margin-left: auto;
+  padding: 0 6px;
+  height: 20px;
+  border: none;
+  border-radius: var(--dsw-radius-xs);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 20px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms var(--ds-ease-in-out), color 120ms var(--ds-ease-in-out);
+}
+
+.action:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}

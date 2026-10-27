@@ -331,3 +331,204 @@
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* 行悬浮操作：DSH 悬停时露出裸图标按钮 */
+.rowActions {
+  flex: none;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: 2px;
+}
+
+.projectRow:hover .rowActions,
+.sessionRow:hover .rowActions,
+.projectRow:focus-visible .rowActions,
+.sessionRow:focus-visible .rowActions {
+  display: inline-flex;
+}
+
+.sessionRow:hover .time {
+  display: none;
+}
+
+.rowIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--dsw-radius-xs);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: color 120ms var(--ds-ease-in-out), background 120ms var(--ds-ease-in-out);
+}
+
+.rowIcon:hover {
+  color: var(--dsw-alias-label-primary);
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent);
+}
+
+.rowIcon:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+/* 悬浮信息卡：深色底，固定贴住侧栏右侧 */
+.hoverCard {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(300px, 40vw);
+  box-sizing: border-box;
+  padding: 12px;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-tooltip-bg);
+  box-shadow: var(--dsw-elevation-panel);
+  pointer-events: none;
+}
+
+.hoverTitle {
+  font-size: 14px;
+  line-height: 20px;
+  color: #ffffff;
+  overflow-wrap: break-word;
+}
+
+.hoverPath {
+  font-size: 12px;
+  line-height: 16px;
+  color: #cfd3d6;
+  word-break: break-all;
+}
+
+.hoverTime {
+  font-size: 12px;
+  line-height: 16px;
+  color: #cfd3d6;
+}
+
+/* 行内更多操作菜单 */
+.menu {
+  position: fixed;
+  z-index: 61;
+  min-width: 148px;
+  padding: 4px;
+  border-radius: var(--dsw-radius-md);
+  border: 1px solid var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-base);
+  box-shadow: var(--dsw-elevation-prominent);
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 30px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.menuItem:disabled {
+  color: var(--dsw-alias-label-caption);
+  cursor: default;
+  background: transparent;
+}
+
+/* 归档会话：整体降级 */
+.sessionArchived .sessionTitle {
+  color: var(--dsw-alias-label-caption);
+}
+
+/* 搜索弹层：结果列表浮在会话列右侧 */
+.searchPanel {
+  position: fixed;
+  z-index: 55;
+  top: 96px;
+  left: calc(var(--agent-sidebar-width, 280px) + 224px);
+  width: 320px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+  box-shadow: var(--dsw-elevation-prominent);
+}
+
+.searchPanelHead {
+  padding: 4px 8px 8px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.searchPanelList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: auto;
+}
+
+.searchHit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.searchHit:hover,
+.searchHitActive {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.searchHitTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.searchHitMeta {
+  flex: none;
+  max-width: 100px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.searchHitTime {
+  flex: none;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}

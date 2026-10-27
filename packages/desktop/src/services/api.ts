@@ -893,6 +893,12 @@ export class DesktopApiService {
       messageCount: number;
       firstUserMessage: string;
       lastModel?: string;
+      /** openLoop 侧元数据：标题覆盖 / 归档 / 所属工作区标题 */
+      title?: string;
+      archived?: boolean;
+      projectTitle?: string;
+      projectHidden?: boolean;
+      projectOrder?: number;
     }>;
   }> {
     const search = new URLSearchParams();
@@ -934,7 +940,13 @@ export class DesktopApiService {
   async sendAgentSessionMessage(
     sessionId: string,
     message: string,
-    options?: { cwd?: string; model?: string; thinking?: string; attachments?: TaskAttachment[] }
+    options?: {
+      cwd?: string;
+      model?: string;
+      thinking?: string;
+      attachments?: TaskAttachment[];
+      permission?: 'full' | 'readonly' | 'noshell';
+    }
   ): Promise<TaskSessionState> {
     if (import.meta.env?.DEV) {
       console.log(`[UI:API] 发送全局 Agent 会话消息 (${sessionId}):`, message.slice(0, 40));
@@ -962,6 +974,135 @@ export class DesktopApiService {
     return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/stop`, {
       method: 'POST',
     });
+  }
+
+  // ---- 会话元数据：重命名 / 归档 / 删除 ----
+
+  async setAgentSessionMeta(
+    sessionId: string,
+    patch: { title?: string; archived?: boolean }
+  ): Promise<{ sessionId: string; meta: any }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/meta`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+  }
+
+  async deleteAgentSession(
+    sessionId: string,
+    purge = false
+  ): Promise<{ success: boolean; purged: boolean; target?: string }> {
+    const qs = purge ? '?purge=1' : '';
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}${qs}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async setAgentProjectMeta(
+    cwd: string,
+    patch: { title?: string; hidden?: boolean; order?: number }
+  ): Promise<{ cwd: string; meta: any }> {
+    return requestJson(`${BASE_URL}/api/agent/projects`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd, ...patch }),
+    });
+  }
+
+  async getAgentProjects(): Promise<{ projects: Record<string, any> }> {
+    return requestJson(`${BASE_URL}/api/agent/projects`);
+  }
+
+  async respondAgentUiRequest(
+    sessionId: string,
+    payload: { id: string; value?: string; confirmed?: boolean; cancelled?: boolean }
+  ): Promise<{ success: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/ui-response`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getAgentSessionModels(sessionId: string): Promise<{ models: Array<{ id: string; provider: string }> }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/models`);
+  }
+
+  // ---- 模型 / 权限 / 重发 ----
+
+  async setAgentSessionModel(
+    sessionId: string,
+    model?: string,
+    thinking?: string
+  ): Promise<{ applied: boolean; queued: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, thinking }),
+    });
+  }
+
+  async setAgentSessionPermission(
+    sessionId: string,
+    preset: 'full' | 'readonly' | 'noshell'
+  ): Promise<{ applied: boolean; restarted: boolean; settings: any }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/permission`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset }),
+    });
+  }
+
+  async regenerateAgentSession(sessionId: string): Promise<TaskSessionState> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/regenerate`, {
+      method: 'POST',
+    });
+  }
+
+  // ---- 文件浏览 / 预览 ----
+
+  async listAgentFs(path: string): Promise<{
+    path: string;
+    parent: string | null;
+    entries: Array<{ name: string; path: string; isDir: boolean; size: number; mtime: number }>;
+  }> {
+    return requestJson(`${BASE_URL}/api/agent/fs/list?path=${encodeURIComponent(path)}`);
+  }
+
+  async readAgentFsFile(path: string): Promise<{
+    path: string;
+    content: string;
+    size: number;
+    truncated: boolean;
+  }> {
+    return requestJson(`${BASE_URL}/api/agent/fs/read?path=${encodeURIComponent(path)}`);
+  }
+
+  agentFsRawUrl(path: string): string {
+    return `${BASE_URL}/api/agent/fs/raw?path=${encodeURIComponent(path)}`;
+  }
+
+  // ---- 终端 ----
+
+  async openTerminal(cwd?: string): Promise<{ id: string; cwd: string; replay: string }> {
+    return requestJson(`${BASE_URL}/api/agent/terminal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd }),
+    });
+  }
+
+  async writeTerminal(id: string, data: string): Promise<{ success: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/terminal/${encodeURIComponent(id)}/input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data }),
+    });
+  }
+
+  async closeTerminal(id: string): Promise<{ success: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/terminal/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   async clearTaskSession(taskId: string): Promise<{ success: boolean }> {

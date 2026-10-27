@@ -3,7 +3,14 @@ import type { SessionChatMessage } from '@openloop/core/types';
 import { api } from '../services/api';
 import type { TaskAttachment } from '@openloop/core/types';
 import { AgentChatView } from './AgentChatView';
-import { Composer, ComposerAttachmentItem } from './Composer';
+import {
+  Composer,
+  ComposerAttachmentItem,
+  ComposerCommand,
+  ComposerPermission,
+} from './Composer';
+import { WorkspaceDock, type DockTab } from './WorkspaceDock';
+import { ApprovalCard, type AgentUiRequest } from './ApprovalCard';
 import { IconChevronDown, IconFolderOpen } from './icons';
 import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
@@ -49,6 +56,18 @@ export interface AgentPanelShellProps {
   hero?: React.ReactNode;
   /** 整页形态不渲染顶栏，与 DSH 一致 */
   headerless?: boolean;
+  /** 斜杠指令与 @ 文件候选 */
+  commands?: ComposerCommand[];
+  onRequestFiles?: (query: string) => Promise<string[]>;
+  /** 工具权限与模型切换 */
+  permission?: ComposerPermission;
+  onPermissionSelect?: (preset: ComposerPermission) => void;
+  models?: Array<{ id: string; label: string }>;
+  onModelSelect?: (model: string) => void;
+  /** 右侧工作区面板（文件 / 终端 / 预览） */
+  dock?: React.ReactNode;
+  /** 重新生成最后一轮回答 */
+  onRegenerate?: () => void;
 }
 
 /** 三种挂载共用的会话外壳：顶栏 + 消息列 + 输入卡 */
@@ -77,6 +96,14 @@ export function AgentPanelShell({
   onRemoveAttachment,
   hero,
   headerless,
+  commands,
+  onRequestFiles,
+  permission,
+  onPermissionSelect,
+  models,
+  onModelSelect,
+  dock,
+  onRegenerate,
 }: AgentPanelShellProps) {
   const [draft, setDraft] = useState('');
 
@@ -103,6 +130,12 @@ export function AgentPanelShell({
       onAddFiles={onAddFiles}
       onRemoveAttachment={onRemoveAttachment}
       actions={composerActions}
+      commands={commands}
+      onRequestFiles={onRequestFiles}
+      permission={permission}
+      onPermissionSelect={onPermissionSelect}
+      models={models}
+      onModelSelect={onModelSelect}
     />
   );
 
@@ -127,28 +160,34 @@ export function AgentPanelShell({
       </header>
       )}
 
-      <div className={styles.body}>{children}</div>
+      <div className={styles.mainRow}>
+        <div className={styles.mainCol}>
+          <div className={styles.body}>{children}</div>
 
-      {isBlank ? (
-        <div className={styles.heroArea}>
-          <div className={styles.heroStack}>
-            {hero}
-            {composer}
-          </div>
+          {isBlank ? (
+            <div className={styles.heroArea}>
+              <div className={styles.heroStack}>
+                {hero}
+                {composer}
+              </div>
+            </div>
+          ) : (
+            <>
+              <AgentChatView
+                messages={messages}
+                isBusy={isBusy}
+                emptyTitle={emptyTitle}
+                emptyHint={emptyHint}
+                contentWidth={contentWidth}
+                onRegenerate={onRegenerate}
+              />
+              {banner}
+              {composer}
+            </>
+          )}
         </div>
-      ) : (
-        <>
-          <AgentChatView
-            messages={messages}
-            isBusy={isBusy}
-            emptyTitle={emptyTitle}
-            emptyHint={emptyHint}
-            contentWidth={contentWidth}
-          />
-          {banner}
-          {composer}
-        </>
-      )}
+        {dock}
+      </div>
     </div>
   );
 }
@@ -164,6 +203,8 @@ export interface TaskAgentPanelProps {
   headerExtra?: React.ReactNode;
   banner?: React.ReactNode;
   composerActions?: React.ReactNode;
+  /** 任务工作区，用于文件 / 终端 / 预览面板 */
+  cwd?: string;
 }
 
 /** 任务绑定会话：数据来自任务会话接口，事件按 task.id 路由 */
@@ -177,8 +218,11 @@ export function TaskAgentPanel({
   headerExtra,
   banner,
   composerActions,
+  cwd,
 }: TaskAgentPanelProps) {
   const [sending, setSending] = useState(false);
+  const [dockTab, setDockTab] = useState<DockTab | null>(null);
+  const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   const attachments = useAttachments();
 
   const load = useCallback(() => api.getTaskSession(taskId).catch(() => null), [taskId]);
@@ -228,9 +272,31 @@ export function TaskAgentPanel({
       onSend={handleSend}
       onStop={() => void stop()}
       onClose={onClose}
-      headerExtra={headerExtra}
+      headerExtra={
+        <>
+          {headerExtra}
+          <button
+            type="button"
+            className={styles.cwdButton}
+            onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
+            title="工作区面板：文件 / 终端 / 预览"
+          >
+            {dockTab ? '收起面板' : '工作区'}
+          </button>
+        </>
+      }
       banner={banner}
       composerActions={composerActions}
+      dock={
+        dockTab ? (
+          <WorkspaceDock
+            cwd={cwd}
+            activeTab={dockTab}
+            onTabChange={setDockTab}
+            onClose={() => setDockTab(null)}
+          />
+        ) : undefined
+      }
       attachments={attachments.items}
       onAddFiles={attachments.add}
       onRemoveAttachment={attachments.remove}
@@ -252,6 +318,8 @@ interface ProjectGroup {
   cwd: string;
   sessions: SessionListItem[];
   lastModified: number;
+  createdAt?: string;
+  order?: number;
 }
 
 const COLLAPSED_KEY = 'openloop.agent.collapsedProjects';
@@ -332,7 +400,58 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
   const [history, setHistory] = useState<SessionChatMessage[] | undefined>(undefined);
   const [cwd, setCwd] = useState<string>('');
   const [sending, setSending] = useState(false);
+  const [commands, setCommands] = useState<ComposerCommand[]>([]);
+  const [models, setModels] = useState<Array<{ id: string; label: string }>>([]);
+  const [permission, setPermission] = useState<ComposerPermission>('full');
+  const [projectMeta, setProjectMeta] = useState<
+    Record<string, { title?: string; hidden?: boolean; order?: number }>
+  >({});
+  const [dockTab, setDockTab] = useState<DockTab | null>(null);
+  const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   const attachments = useAttachments();
+
+  // 斜杠指令（提供方为 /api/agent/commands-and-skills）
+  useEffect(() => {
+    api
+      .getAgentCommandsAndSkills?.()
+      .then((data: any) => {
+        const list = Array.isArray(data?.commands) ? data.commands : [];
+        setCommands(
+          list.map((item: any) => ({
+            name: String(item.name || '').replace(/^\//, ''),
+            description: item.description || item.label,
+          }))
+        );
+      })
+      .catch(() => setCommands([]));
+  }, []);
+
+  // 扩展 UI 请求（审批 / 选择）：只接管当前会话的请求
+  useEffect(() => {
+    const off = api.on('agent:ui_request', (payload: any) => {
+      if (!payload || payload.sessionId !== activeId) return;
+      setUiRequest(payload as AgentUiRequest);
+    });
+    return () => off?.();
+  }, [activeId]);
+
+  const respondUi = useCallback(
+    async (payload: { value?: string; confirmed?: boolean; cancelled?: boolean }) => {
+      if (!uiRequest || !activeId) return;
+      setUiRequest(null);
+      await api.respondAgentUiRequest(activeId, { id: uiRequest.id, ...payload }).catch(() => null);
+    },
+    [uiRequest, activeId]
+  );
+
+  const refreshProjectMeta = useCallback(async () => {
+    const data = await api.getAgentProjects().catch(() => ({ projects: {} }));
+    setProjectMeta(data.projects || {});
+  }, []);
+
+  useEffect(() => {
+    void refreshProjectMeta();
+  }, [refreshProjectMeta]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -346,11 +465,14 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
       setSessions(
         (list.sessions || []).map((item) => ({
           id: item.id,
-          title: sessionTitleOf(item.firstUserMessage, item.modifiedAt),
+          title: item.title || sessionTitleOf(item.firstUserMessage, item.modifiedAt),
           cwd: item.cwd || '',
           modifiedAt: item.modifiedAt,
           messageCount: item.messageCount,
           live: liveList.includes(item.id),
+          createdAt: item.createdAt,
+          path: item.path,
+          archived: item.archived === true,
         }))
       );
     } catch (err) {
@@ -407,13 +529,14 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
               api.sendAgentSessionMessage(activeId, message, {
                 cwd: cwd || undefined,
                 attachments: files,
+                permission,
               }),
             pause: () => api.pauseAgentSession(activeId),
             resume: () => api.resumeAgentSession(activeId),
             stop: () => api.stopAgentSession(activeId),
           }
         : undefined,
-    [activeId, cwd]
+    [activeId, cwd, permission]
   );
 
   const { messages, isBusy, awaitingInput, sendMessage, stop, state } = useAgentStream({
@@ -486,12 +609,14 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
       const key = projectCwd || TEMP_PROJECT_KEY;
       const existing = map.get(key);
       if (existing) return existing;
+      const meta = projectMeta[key] || {};
       const group: ProjectGroup = {
         key,
-        label: projectLabel(projectCwd),
+        label: meta.title || projectLabel(projectCwd),
         cwd: projectCwd,
         sessions: [],
         lastModified: 0,
+        order: typeof meta.order === 'number' ? meta.order : undefined,
       };
       map.set(key, group);
       return group;
@@ -503,17 +628,145 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
       group.sessions.push(session);
       const time = Date.parse(session.modifiedAt) || 0;
       if (time > group.lastModified) group.lastModified = time;
+      const created = Date.parse(session.createdAt || '');
+      if (Number.isFinite(created) && (!group.createdAt || created < Date.parse(group.createdAt))) {
+        group.createdAt = session.createdAt;
+      }
     }
 
     return [...map.values()]
+      .filter((group) => !projectMeta[group.key]?.hidden)
       .map((group) => ({
         ...group,
         sessions: group.sessions.sort(
           (a, b) => (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0)
         ),
       }))
-      .sort((a, b) => b.lastModified - a.lastModified);
-  }, [filteredSessions, extraProjects]);
+      .sort((a, b) => {
+        if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+        if (a.order !== undefined) return -1;
+        if (b.order !== undefined) return 1;
+        return b.lastModified - a.lastModified;
+      });
+  }, [filteredSessions, extraProjects, projectMeta]);
+
+  // 会话与工作区元数据操作
+  const renameSession = useCallback(
+    async (id: string) => {
+      const current = sessions.find((item) => item.id === id);
+      const next = window.prompt('重命名会话', current?.title || '');
+      if (next === null) return;
+      await api.setAgentSessionMeta(id, { title: next.trim() }).catch(() => null);
+      await refresh();
+    },
+    [sessions, refresh]
+  );
+
+  const archiveSession = useCallback(
+    async (id: string, archived: boolean) => {
+      await api.setAgentSessionMeta(id, { archived }).catch(() => null);
+      await refresh();
+    },
+    [refresh]
+  );
+
+  const deleteSession = useCallback(
+    async (id: string) => {
+      if (!window.confirm('删除该会话？文件会移入 openLoop 回收目录。')) return;
+      await api.deleteAgentSession(id, true).catch(() => null);
+      if (id === activeId) {
+        const next = newSessionId();
+        setActiveId(next);
+        setStreamKey(`agent_${next}`);
+        setHistory([]);
+      }
+      await refresh();
+    },
+    [activeId, refresh]
+  );
+
+  const renameProject = useCallback(
+    async (cwdKey: string) => {
+      const next = window.prompt('重命名工作区', projectMeta[cwdKey]?.title || projectLabel(cwdKey));
+      if (next === null) return;
+      await api.setAgentProjectMeta(cwdKey, { title: next.trim() }).catch(() => null);
+      await refreshProjectMeta();
+    },
+    [projectMeta, refreshProjectMeta]
+  );
+
+  const hideProject = useCallback(
+    async (cwdKey: string) => {
+      await api.setAgentProjectMeta(cwdKey, { hidden: true }).catch(() => null);
+      await refreshProjectMeta();
+    },
+    [refreshProjectMeta]
+  );
+
+  const reorderProjects = useCallback(
+    async (keys: string[]) => {
+      await Promise.all(
+        keys.map((key, index) => api.setAgentProjectMeta(key, { order: index }).catch(() => null))
+      );
+      await refreshProjectMeta();
+    },
+    [refreshProjectMeta]
+  );
+
+  // 模型候选：会话在线时可列举，离线时用当前模型占位
+  useEffect(() => {
+    if (!activeId || !liveIds.includes(activeId)) return;
+    api
+      .getAgentSessionModels(activeId)
+      .then((data) => {
+        setModels(
+          (data.models || []).map((item) => ({
+            id: `${item.provider}/${item.id}`,
+            label: `${item.provider}/${item.id}`,
+          }))
+        );
+      })
+      .catch(() => setModels([]));
+  }, [activeId, liveIds]);
+
+  const handleModelSelect = useCallback(
+    async (modelId: string) => {
+      if (!activeId) return;
+      await api.setAgentSessionModel(activeId, modelId).catch(() => null);
+    },
+    [activeId]
+  );
+
+  const handlePermissionSelect = useCallback(
+    async (preset: ComposerPermission) => {
+      setPermission(preset);
+      if (!activeId) return;
+      await api.setAgentSessionPermission(activeId, preset).catch(() => null);
+    },
+    [activeId]
+  );
+
+  // @ 文件候选：按输入前缀列目录
+  const requestFiles = useCallback(
+    async (query: string): Promise<string[]> => {
+      const base = cwd || sessions.find((item) => item.id === activeId)?.cwd || '';
+      if (!base) return [];
+      const slash = query.lastIndexOf('/');
+      const dirPart = slash >= 0 ? query.slice(0, slash + 1) : '';
+      const namePart = slash >= 0 ? query.slice(slash + 1) : query;
+      const dir = dirPart ? `${base.replace(/\/$/, '')}/${dirPart}` : base;
+      try {
+        const listing = await api.listAgentFs(dir);
+        return listing.entries
+          .filter((entry) => !namePart || entry.name.toLowerCase().includes(namePart.toLowerCase()))
+          .slice(0, 20)
+          .map((entry) => `${dirPart}${entry.name}${entry.isDir ? '/' : ''}`);
+      } catch (_) {
+        return [];
+      }
+    },
+    [cwd, sessions, activeId]
+  );
 
   const activeSession = sessions.find((item) => item.id === activeId);
   const isLive = activeId ? liveIds.includes(activeId) : false;
@@ -553,6 +806,15 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
           onNewInGroup={startNewSession}
           onAddProject={() => void handleAddProject()}
           onRefresh={() => void refresh()}
+          onRevealPath={(path) => {
+            (window as any).electronAPI?.openPath?.(path);
+          }}
+          onRenameSession={(id) => void renameSession(id)}
+          onArchiveSession={(id, archived) => void archiveSession(id, archived)}
+          onDeleteSession={(id) => void deleteSession(id)}
+          onRenameProject={(key) => void renameProject(key)}
+          onHideProject={(key) => void hideProject(key)}
+          onReorderProjects={(keys) => void reorderProjects(keys)}
         />
       )}
 
@@ -564,6 +826,12 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
           isBusy={isBusy}
           awaitingInput={awaitingInput}
           model={state?.model}
+          commands={commands}
+          onRequestFiles={requestFiles}
+          permission={permission}
+          onPermissionSelect={handlePermissionSelect}
+          models={models}
+          onModelSelect={models.length > 0 ? handleModelSelect : undefined}
           contentWidth={920}
           sending={sending}
           onSend={handleSend}
@@ -576,14 +844,54 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
           onAddFiles={activeId ? attachments.add : undefined}
           onRemoveAttachment={attachments.remove}
           headerExtra={
-            <button
-              type="button"
-              className={styles.cwdButton}
-              onClick={() => void handleAddProject()}
-              title="切换工作目录"
-            >
-              {shortenPath(activeCwd)}
-            </button>
+            <>
+              <button
+                type="button"
+                className={styles.cwdButton}
+                onClick={() => void handleAddProject()}
+                title="切换工作目录"
+              >
+                {shortenPath(activeCwd)}
+              </button>
+              <button
+                type="button"
+                className={styles.cwdButton}
+                onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
+                title="工作区面板：文件 / 终端 / 预览"
+              >
+                {dockTab ? '收起面板' : '工作区'}
+              </button>
+            </>
+          }
+          onRegenerate={
+            activeId
+              ? () => {
+                  void api.regenerateAgentSession(activeId).catch(() => null);
+                }
+              : undefined
+          }
+          dock={
+            dockTab ? (
+              <WorkspaceDock
+                cwd={activeCwd}
+                activeTab={dockTab}
+                onTabChange={setDockTab}
+                onClose={() => setDockTab(null)}
+              />
+            ) : undefined
+          }
+          banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : undefined}
+          composerActions={
+            mode === 'page' ? (
+              <button
+                type="button"
+                className={styles.dockToggle}
+                onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
+                title="工作区面板：文件 / 终端 / 预览"
+              >
+                {dockTab ? '收起工作区' : '工作区'}
+              </button>
+            ) : undefined
           }
           emptyTitle={activeId ? '开始一段新的会话' : '选择左侧会话，或新建一段'}
           emptyHint="会话直接跑在本机 pi 上，拥有读写文件与执行命令的能力。"

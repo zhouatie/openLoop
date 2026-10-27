@@ -117,6 +117,14 @@ export const IconPlus = createIcon('IconPlus', 16, () => (
   </>
 ));
 
+export const IconMore = createIcon('IconMore', 16, () => (
+  <>
+    <circle cx="3" cy="8" r="1" fill="currentColor" stroke="none" />
+    <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+    <circle cx="13" cy="8" r="1" fill="currentColor" stroke="none" />
+  </>
+));
+
 export const IconClose = createIcon('IconClose', 16, () => (
   <>
     <path d="M2.5 2.5L13.5 13.5" stroke="currentColor" />

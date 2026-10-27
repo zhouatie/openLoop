@@ -1,0 +1,201 @@
+/* 工作区面板：右侧 320px 栏，文件 / 终端 / 预览 */
+.dock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: clamp(280px, 30%, 420px);
+  min-width: 0;
+  border-left: 1px solid var(--dsw-alias-border-l3);
+  background: var(--dsw-specific-sidebar-fill);
+}
+
+.tabs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 38px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l3);
+}
+
+.tab {
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 26px;
+  cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out),
+    color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.tab:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.tabActive {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.close:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.dockBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 文件树 */
+.tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 6px 12px;
+}
+
+.treeRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding-right: 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 26px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.treeRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.treeRowActive {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.treeIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.treeIconGhost {
+  flex: none;
+  width: 14px;
+}
+
+.treeName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.treeSize {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.treeLoading,
+.treeEmpty {
+  font-size: 12px;
+  line-height: 24px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.dockEmpty {
+  padding: 24px 16px;
+  font-size: 12.5px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 终端 */
+.terminalHost {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 6px 6px 10px;
+  overflow: hidden;
+}
+
+.terminalHost :global(.xterm) {
+  height: 100%;
+}
+
+/* 预览 */
+.preview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px 24px;
+  font-size: 13px;
+}
+
+.previewCode {
+  margin: 0;
+  font-family: var(--ds-font-family-code);
+  font-size: 12.5px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--dsw-alias-label-primary);
+}
+
+.previewNote {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.imageWrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow: auto;
+}
+
+.image {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--dsw-radius-md);
+  box-shadow: var(--dsw-elevation-soft);
+}

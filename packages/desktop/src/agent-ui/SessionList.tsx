@@ -1,6 +1,7 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import {
   IconFolderClose,
+  IconMore,
   IconFolderOpen,
   IconNewChat,
   IconProjectAdd,
@@ -17,6 +18,9 @@ export interface SessionListItem {
   modifiedAt: string;
   messageCount: number;
   live?: boolean;
+  createdAt?: string;
+  path?: string;
+  archived?: boolean;
 }
 
 export interface SessionGroupItem {
@@ -25,6 +29,7 @@ export interface SessionGroupItem {
   label: string;
   cwd: string;
   sessions: SessionListItem[];
+  createdAt?: string;
 }
 
 export interface SessionListProps {
@@ -39,9 +44,53 @@ export interface SessionListProps {
   onNewInGroup: (cwd: string) => void;
   onAddProject: () => void;
   onRefresh: () => void;
+  /** 在系统文件管理器中打开目录 */
+  onRevealPath?: (path: string) => void;
+  /** 会话元数据操作 */
+  onRenameSession?: (id: string) => void;
+  onArchiveSession?: (id: string, archived: boolean) => void;
+  onDeleteSession?: (id: string) => void;
+  /** 工作区元数据操作 */
+  onRenameProject?: (key: string) => void;
+  onHideProject?: (key: string) => void;
+  /** 工作区拖拽排序：返回新的键顺序 */
+  onReorderProjects?: (keys: string[]) => void;
 }
 
 const SESSION_VISIBLE_COUNT = 5;
+const HOME_PATTERN = /^\/Users\/[^/]+/;
+
+interface HoverCardState {
+  title: string;
+  path: string;
+  time: string;
+  top: number;
+  left: number;
+}
+
+interface MenuState {
+  kind: 'project' | 'session';
+  cwd: string;
+  sessionId?: string;
+  archived?: boolean;
+  top: number;
+  left: number;
+}
+
+function homeShortened(path: string): string {
+  return path ? path.replace(HOME_PATTERN, '~') : '';
+}
+
+function createdLabel(iso?: string): string {
+  if (!iso) return '';
+  const time = Date.parse(iso);
+  if (!Number.isFinite(time)) return '';
+  const date = new Date(time);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `创建于 ${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日 ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+}
 
 function relativeTime(iso: string): string {
   const time = Date.parse(iso);
@@ -68,6 +117,13 @@ export const SessionList = memo(function SessionList({
   onNewInGroup,
   onAddProject,
   onRefresh,
+  onRevealPath,
+  onRenameSession,
+  onArchiveSession,
+  onDeleteSession,
+  onRenameProject,
+  onHideProject,
+  onReorderProjects,
 }: SessionListProps) {
   const searching = query.trim().length > 0;
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -79,6 +135,71 @@ export const SessionList = memo(function SessionList({
   };
 
   const orderedGroups = sortDesc ? groups : [...groups].reverse();
+
+  const searchHits = useMemo(() => {
+    if (!searching) return [];
+    const keyword = query.trim().toLowerCase();
+    const hits: Array<{ id: string; title: string; project: string; modifiedAt: string; archived?: boolean }> = [];
+    for (const group of groups) {
+      for (const session of group.sessions) {
+        const title = session.title || '未命名会话';
+        if (!title.toLowerCase().includes(keyword) && !group.label.toLowerCase().includes(keyword)) continue;
+        hits.push({
+          id: session.id,
+          title,
+          project: group.label,
+          modifiedAt: session.modifiedAt,
+          archived: session.archived,
+        });
+      }
+    }
+    return hits.sort((a, b) => (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0)).slice(0, 30);
+  }, [searching, groups, query]);
+
+  const [card, setCard] = useState<HoverCardState | null>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenu(null);
+    };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [menu]);
+
+  /** 悬浮卡：贴住行右侧，跟随行的垂直位置 */
+  const showCard = (element: HTMLElement, title: string, path: string, time: string) => {
+    const rect = element.getBoundingClientRect();
+    setCard({
+      title,
+      path: homeShortened(path),
+      time,
+      top: Math.min(Math.max(12, rect.top - 4), window.innerHeight - 150),
+      left: rect.right + 10,
+    });
+  };
+
+  const openMenu = (event: React.MouseEvent<HTMLElement>, next: Omit<MenuState, 'top' | 'left'>) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenu({ ...next, top: rect.bottom + 4, left: Math.max(12, rect.left - 120) });
+  };
+
+  const reveal = (target: string) => {
+    onRevealPath?.(target);
+    setMenu(null);
+  };
+
+  const copyText = (text: string) => {
+    void navigator.clipboard?.writeText(text);
+    setMenu(null);
+  };
 
   return (
     <aside className={styles.root}>
@@ -153,6 +274,28 @@ export const SessionList = memo(function SessionList({
         )}
       </div>
 
+      {searching && (
+        <div className={styles.searchPanel}>
+          <div className={styles.searchPanelHead}>
+            {searchHits.length > 0 ? `${searchHits.length} 个匹配会话` : '没有匹配的会话'}
+          </div>
+          <div className={styles.searchPanelList}>
+            {searchHits.map((hit) => (
+              <button
+                key={hit.id}
+                type="button"
+                className={`${styles.searchHit} ${hit.id === activeId ? styles.searchHitActive : ''}`}
+                onClick={() => onSelectSession(hit.id)}
+              >
+                <span className={styles.searchHitTitle}>{hit.title}</span>
+                <span className={styles.searchHitMeta}>{hit.project}</span>
+                <span className={styles.searchHitTime}>{relativeTime(hit.modifiedAt)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className={styles.list}>
         {loading && groups.length === 0 && <div className={styles.placeholder}>正在扫描会话…</div>}
         {!loading && groups.length === 0 && (
@@ -171,8 +314,31 @@ export const SessionList = memo(function SessionList({
             <div key={group.key} className={styles.group}>
               <div
                 className={styles.projectRow}
+                draggable={Boolean(onReorderProjects)}
+                onDragStart={(event) => {
+                  event.dataTransfer.setData('text/openloop-project', group.key);
+                  event.dataTransfer.effectAllowed = 'move';
+                }}
+                onDragOver={(event) => {
+                  if (!onReorderProjects) return;
+                  if (!event.dataTransfer.types.includes('text/openloop-project')) return;
+                  event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  const source = event.dataTransfer.getData('text/openloop-project');
+                  if (!onReorderProjects || !source || source === group.key) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const keys = orderedGroups.map((item) => item.key).filter((key) => key !== source);
+                  const targetIndex = keys.indexOf(group.key);
+                  keys.splice(targetIndex < 0 ? keys.length : targetIndex, 0, source);
+                  onReorderProjects(keys);
+                }}
                 onClick={() => onToggleGroup(group.key)}
-                title={group.cwd || '临时目录'}
+                onMouseEnter={(event) =>
+                  showCard(event.currentTarget, group.label, group.cwd, createdLabel(group.createdAt))
+                }
+                onMouseLeave={() => setCard(null)}
                 role="treeitem"
                 aria-expanded={!isCollapsed}
                 tabIndex={0}
@@ -192,6 +358,27 @@ export const SessionList = memo(function SessionList({
                   </span>
                 </span>
                 <span className={styles.projectTitle}>{group.label}</span>
+                <span className={styles.rowActions}>
+                  <button
+                    type="button"
+                    className={styles.rowIcon}
+                    aria-label="更多操作"
+                    onClick={(event) => openMenu(event, { kind: 'project', cwd: group.cwd })}
+                  >
+                    <IconMore size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.rowIcon}
+                    aria-label="在此工作区新建会话"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onNewInGroup(group.cwd);
+                    }}
+                  >
+                    <IconNewChat size={16} />
+                  </button>
+                </span>
               </div>
 
               {!isCollapsed && (
@@ -211,12 +398,20 @@ export const SessionList = memo(function SessionList({
                       key={session.id}
                       className={`${styles.sessionRow} ${
                         session.id === activeId ? styles.sessionSelected : ''
-                      }`}
+                      } ${session.archived ? styles.sessionArchived : ''}`}
                       onClick={() => onSelectSession(session.id)}
                       role="treeitem"
                       aria-selected={session.id === activeId}
                       tabIndex={0}
-                      title={session.title}
+                      onMouseEnter={(event) =>
+                        showCard(
+                          event.currentTarget,
+                          session.title || '未命名会话',
+                          session.cwd,
+                          createdLabel(session.createdAt)
+                        )
+                      }
+                      onMouseLeave={() => setCard(null)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') onSelectSession(session.id);
                       }}
@@ -224,6 +419,23 @@ export const SessionList = memo(function SessionList({
                       <span className={styles.sessionTitle}>{session.title || '未命名会话'}</span>
                       {session.live && <span className={styles.liveDot} aria-label="进行中" />}
                       <span className={styles.time}>{relativeTime(session.modifiedAt)}</span>
+                      <span className={styles.rowActions}>
+                        <button
+                          type="button"
+                          className={styles.rowIcon}
+                          aria-label="会话操作"
+                          onClick={(event) =>
+                            openMenu(event, {
+                              kind: 'session',
+                              cwd: session.cwd,
+                              sessionId: session.id,
+                              archived: session.archived,
+                            })
+                          }
+                        >
+                          <IconMore size={16} />
+                        </button>
+                      </span>
                     </div>
                   ))}
 
@@ -242,6 +454,112 @@ export const SessionList = memo(function SessionList({
           );
         })}
       </div>
+
+      {card && (
+        <div className={styles.hoverCard} style={{ top: card.top, left: card.left }} role="presentation">
+          <div className={styles.hoverTitle}>{card.title}</div>
+          {card.path && <div className={styles.hoverPath}>{card.path}</div>}
+          {card.time && <div className={styles.hoverTime}>{card.time}</div>}
+        </div>
+      )}
+
+      {menu && (
+        <div
+          className={styles.menu}
+          style={{ top: menu.top, left: menu.left }}
+          role="menu"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {menu.kind === 'project' && (
+            <>
+              <button type="button" className={styles.menuItem} onClick={() => onNewInGroup(menu.cwd)}>
+                新建会话
+              </button>
+              {onRenameProject && (
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    onRenameProject(menu.cwd);
+                    setMenu(null);
+                  }}
+                >
+                  重命名工作区
+                </button>
+              )}
+              {onHideProject && (
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    onHideProject(menu.cwd);
+                    setMenu(null);
+                  }}
+                >
+                  隐藏工作区
+                </button>
+              )}
+            </>
+          )}
+          {menu.kind === 'session' && (
+            <>
+              {onRenameSession && (
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    onRenameSession(menu.sessionId || '');
+                    setMenu(null);
+                  }}
+                >
+                  重命名会话
+                </button>
+              )}
+              {onArchiveSession && (
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    onArchiveSession(menu.sessionId || '', !menu.archived);
+                    setMenu(null);
+                  }}
+                >
+                  {menu.archived ? '取消归档' : '归档会话'}
+                </button>
+              )}
+              {onDeleteSession && (
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    onDeleteSession(menu.sessionId || '');
+                    setMenu(null);
+                  }}
+                >
+                  删除会话
+                </button>
+              )}
+            </>
+          )}
+          <button
+            type="button"
+            className={styles.menuItem}
+            onClick={() => reveal(menu.cwd || '.')}
+            disabled={!menu.cwd}
+          >
+            在访达中打开
+          </button>
+          {menu.kind === 'project' ? (
+            <button type="button" className={styles.menuItem} onClick={() => copyText(menu.cwd)}>
+              复制路径
+            </button>
+          ) : (
+            <button type="button" className={styles.menuItem} onClick={() => copyText(menu.sessionId || '')}>
+              复制会话 ID
+            </button>
+          )}
+        </div>
+      )}
     </aside>
   );
 });

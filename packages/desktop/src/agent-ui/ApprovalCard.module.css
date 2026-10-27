@@ -1,0 +1,85 @@
+/* 审批卡：贴在输入卡上方的确认条 */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 16px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-elevation-soft);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--dsw-radius-xs);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-label) 14%, transparent);
+  color: var(--dsw-alias-state-warn-label);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  overflow-wrap: anywhere;
+}
+
+.message {
+  font-size: 12.5px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 26px;
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--dsw-alias-button-floating-hover);
+}
+
+.dismiss {
+  height: 28px;
+  margin-left: auto;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dismiss:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}

@@ -3888,6 +3888,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           taskTitle={curTask.kind === 'group' ? '任务组架构师' : curTask.title}
                           mode="inline"
                           model={sessionState?.model}
+                          cwd={curTask.workspace}
                           sendExtra={buildChatSendExtra}
                           headerExtra={
                             <>

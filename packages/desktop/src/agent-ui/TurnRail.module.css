@@ -1,0 +1,125 @@
+/* 轮次定位轨：绝对定位于会话区右侧，垂直居中 */
+.slot {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+}
+
+.frame {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 28px;
+  max-height: min(420px, 60%);
+  transform: translateY(-50%);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.scroller {
+  position: relative;
+  max-height: inherit;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.marks {
+  position: relative;
+}
+
+.mark {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.mark::before {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 20px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--dsw-alias-border-l4);
+  content: '';
+  transform: translateY(-50%) scaleX(0.6);
+  transform-origin: right center;
+  transition: transform 140ms var(--ds-ease-in-out), background-color 140ms var(--ds-ease-in-out);
+}
+
+.markPreview::before {
+  transform: translateY(-50%) scaleX(0.9);
+  background: var(--dsw-alias-label-tertiary);
+}
+
+.markActive::before {
+  transform: translateY(-50%) scaleX(1);
+  background: var(--dsw-alias-label-primary);
+}
+
+.mark:focus-visible {
+  outline: none;
+}
+
+.mark:focus-visible::before {
+  transform: translateY(-50%) scaleX(1);
+  background: var(--dsw-alias-state-business-primary);
+}
+
+/* 预览卡：DSH 悬停卡样式，深色底、标题 14/20、摘要 12/16 */
+.preview {
+  position: absolute;
+  right: calc(100% + 10px);
+  width: min(300px, 46vw);
+  max-height: 100px;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-tooltip-bg);
+  box-shadow: var(--dsw-elevation-panel);
+  pointer-events: none;
+  transition: top 140ms var(--ds-ease-in-out);
+}
+
+.previewPrompt {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  color: #ffffff;
+}
+
+.previewResponse {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: #cfd3d6;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mark::before,
+  .preview {
+    transition: none;
+  }
+}

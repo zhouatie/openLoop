@@ -69,3 +69,44 @@
 .jump:hover {
   background: var(--dsw-alias-interactive-bg-hover-solid);
 }
+
+/* 轮容器：同轮内容共享间距 */
+.turn {
+  display: flex;
+  flex-direction: column;
+}
+
+.turnFooter {
+  margin: 2px 0 14px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.waiting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.waitingDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-business-primary);
+  animation: waiting-pulse 1.2s var(--ds-ease-in-out) infinite;
+}
+
+@keyframes waiting-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}

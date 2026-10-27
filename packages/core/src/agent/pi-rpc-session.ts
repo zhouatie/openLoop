@@ -284,7 +284,36 @@ export class PiRpcSessionInstance extends EventEmitter {
     }
   }
 
+  /** 扩展 UI 请求：approval 卡片等交互，由上层接管渲染与回应 */
+  public respondExtensionUi(id: string, response: { value?: string; confirmed?: boolean; cancelled?: boolean }) {
+    const payload: any = { type: 'extension_ui_response', id, ...response };
+    try {
+      this.child?.stdin?.write(`${JSON.stringify(payload)}\n`);
+    } catch (err) {
+      this.emitLog('system', `[Pi RPC] 扩展 UI 回应失败: ${String(err)}`);
+    }
+  }
+
   private handleRpcRecord(record: any) {
+    // 0. 扩展 UI 请求（确认 / 选择 / 输入）
+    if (record.type === 'extension_ui_request') {
+      const method = String(record.method || '');
+      if (method === 'select' || method === 'confirm' || method === 'input' || method === 'editor') {
+        this.emit('uiRequest', {
+          id: record.id,
+          method,
+          title: record.title || '',
+          message: record.message || '',
+          options: Array.isArray(record.options) ? record.options : undefined,
+          placeholder: record.placeholder,
+          timeout: typeof record.timeout === 'number' ? record.timeout : undefined,
+        });
+      } else {
+        this.emitLog('system', `[Pi RPC] 扩展 UI: ${method} ${record.title || ''}`.trim());
+      }
+      return;
+    }
+
     // 1. 命令响应匹配
     if (record.type === 'response') {
       if (record.id && this.pendingCommands.has(record.id)) {
@@ -866,6 +895,12 @@ export class PiRpcSessionInstance extends EventEmitter {
     } finally {
       this.switching = false;
     }
+  }
+
+  /** 供上层列举可用模型（模型选择器） */
+  public async listModels(): Promise<Array<{ id: string; provider: string }>> {
+    if (!this.active) return [];
+    return this.getAvailableModels().catch(() => []);
   }
 
   private async getAvailableModels(): Promise<Array<{ id: string; provider: string }>> {

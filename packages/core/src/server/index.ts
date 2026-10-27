@@ -26,7 +26,10 @@ import { createLogger } from '../logger';
 import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
 import { sanitizeChatMessages } from '../agent/agent-format';
 import { piSessionIndex } from '../agent/session-index';
-import { agentSessionHost } from '../agent/agent-session-host';
+import { agentSessionHost, type AgentPermissionPreset } from '../agent/agent-session-host';
+import { agentSessionMeta, moveSessionFileToTrash } from '../agent/session-meta';
+import { listDirectory, readTextFile, statFile } from '../agent/fs-browser';
+import { terminalHost } from '../agent/terminal-host';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
@@ -135,6 +138,19 @@ export class OpenLoopServer {
     });
     agentSessionHost.on('update', (state) => {
       this.broadcast({ type: 'agent:chat_update', data: state });
+    });
+
+    // 扩展 UI 请求（审批 / 选择卡片）
+    agentSessionHost.onUiRequest((request) => {
+      this.broadcast({ type: 'agent:ui_request', data: request });
+    });
+
+    // 终端输出推流
+    terminalHost.on('data', ({ id, data }) => {
+      this.broadcast({ type: 'agent:terminal', data: { id, data } });
+    });
+    terminalHost.on('exit', ({ id, code }) => {
+      this.broadcast({ type: 'agent:terminal', data: { id, exited: true, code } });
     });
 
     // 流程编排智能体 Copilot 状态推流广播
@@ -247,6 +263,7 @@ export class OpenLoopServer {
   public async stop(): Promise<void> {
     this.scheduler.stop();
     this.unsubscribeDeviceLeases?.();
+    terminalHost.closeAll();
 
     for (const ws of this.clients) {
       ws.close();
@@ -677,7 +694,23 @@ export class OpenLoopServer {
       if (pathname === '/api/agent/sessions' && method === 'GET') {
         const cwd = parsedUrl.searchParams.get('cwd') || undefined;
         const limit = Number(parsedUrl.searchParams.get('limit') || 0);
-        const sessions = await piSessionIndex.list({ cwd, limit });
+        const raw = await piSessionIndex.list({ cwd, limit });
+        const projectMeta = agentSessionMeta.listProjects();
+        const sessions = raw
+          .map((session) => {
+            const meta = agentSessionMeta.getSession(session.id);
+            const project = projectMeta[session.cwd] || {};
+            return {
+              ...session,
+              title: meta.title,
+              archived: meta.archived === true,
+              deleted: meta.deleted === true,
+              projectTitle: project.title,
+              projectHidden: project.hidden === true,
+              projectOrder: project.order,
+            };
+          })
+          .filter((session) => !session.deleted);
         return this.sendJson(
           res,
           200,
@@ -703,6 +736,126 @@ export class OpenLoopServer {
         return this.sendJson(res, 200, { sessions: agentSessionHost.listLive() }, reqMeta);
       }
 
+      // 会话元数据：重命名 / 归档
+      const agentMetaMatch = pathname.match(/^\/api\/agent\/sessions\/([^/]+)\/meta$/);
+      if (agentMetaMatch && (method === 'PUT' || method === 'POST')) {
+        const sessionKey = decodeURIComponent(agentMetaMatch[1]);
+        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+        const meta = agentSessionMeta.setSession(sessionKey, {
+          title: typeof body?.title === 'string' ? body.title : undefined,
+          archived: typeof body?.archived === 'boolean' ? body.archived : undefined,
+        });
+        return this.sendJson(res, 200, { sessionId: sessionKey, meta }, reqMeta);
+      }
+
+      // 删除会话：默认软删除（列表隐藏），purge=1 时把文件移入回收目录
+      const agentDeleteMatch = pathname.match(/^\/api\/agent\/sessions\/([^/]+)$/);
+      if (agentDeleteMatch && method === 'DELETE') {
+        const sessionKey = decodeURIComponent(agentDeleteMatch[1]);
+        const purge = parsedUrl.searchParams.get('purge') === '1';
+        if (!purge) {
+          agentSessionMeta.setSession(sessionKey, { deleted: true });
+          return this.sendJson(res, 200, { success: true, purged: false }, reqMeta);
+        }
+        const summary = await piSessionIndex.find(sessionKey);
+        if (!summary) {
+          return this.sendJson(res, 404, { error: 'Session Not Found' }, reqMeta);
+        }
+        agentSessionHost.stop(sessionKey);
+        const moved = moveSessionFileToTrash(summary.path);
+        if (!moved.ok) {
+          return this.sendJson(res, 500, { error: moved.error || '删除失败' }, reqMeta);
+        }
+        piSessionIndex.invalidate(summary.path);
+        agentSessionMeta.setSession(sessionKey, { deleted: true });
+        serverLogger.info(`[Agent:Session] 删除会话 ${sessionKey} → ${moved.target}`);
+        return this.sendJson(res, 200, { success: true, purged: true, target: moved.target }, reqMeta);
+      }
+
+      // 工作区元数据：重命名 / 隐藏 / 排序
+      if (pathname === '/api/agent/projects') {
+        if (method === 'GET') {
+          return this.sendJson(res, 200, { projects: agentSessionMeta.listProjects() }, reqMeta);
+        }
+        if (method === 'PUT' || method === 'POST') {
+          const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+          const target = typeof body?.cwd === 'string' ? body.cwd : '';
+          if (!target) return this.sendJson(res, 400, { error: '缺少 cwd' }, reqMeta);
+          const meta = agentSessionMeta.setProject(target, {
+            title: typeof body?.title === 'string' ? body.title : undefined,
+            hidden: typeof body?.hidden === 'boolean' ? body.hidden : undefined,
+            order: typeof body?.order === 'number' ? body.order : undefined,
+          });
+          return this.sendJson(res, 200, { cwd: target, meta }, reqMeta);
+        }
+      }
+
+      // 文件浏览与文本预览：工作区面板的「文件」「文档预览」
+      if (pathname === '/api/agent/fs/list' && method === 'GET') {
+        const target = parsedUrl.searchParams.get('path') || '';
+        try {
+          return this.sendJson(res, 200, listDirectory(target), reqMeta);
+        } catch (err: any) {
+          return this.sendJson(res, 400, { error: err?.message || '无法读取目录' }, reqMeta);
+        }
+      }
+
+      if (pathname === '/api/agent/fs/read' && method === 'GET') {
+        const target = parsedUrl.searchParams.get('path') || '';
+        try {
+          return this.sendJson(res, 200, readTextFile(target), reqMeta);
+        } catch (err: any) {
+          return this.sendJson(res, 400, { error: err?.message || '无法读取文件' }, reqMeta);
+        }
+      }
+
+      if (pathname === '/api/agent/fs/raw' && method === 'GET') {
+        const target = parsedUrl.searchParams.get('path') || '';
+        try {
+          const info = statFile(target);
+          res.writeHead(200, {
+            'Content-Type': info.mime,
+            'Content-Length': String(info.size),
+            'Cache-Control': 'no-store',
+          });
+          fs.createReadStream(info.path).pipe(res);
+          return;
+        } catch (err: any) {
+          return this.sendJson(res, 404, { error: err?.message || '文件不存在' }, reqMeta);
+        }
+      }
+
+      // 终端：一个终端一个 shell 子进程，输出经 WS 推送
+      if (pathname === '/api/agent/terminal' && method === 'POST') {
+        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+        const session = terminalHost.open(typeof body?.cwd === 'string' ? body.cwd : undefined);
+        return this.sendJson(res, 200, { ...session, replay: terminalHost.replay(session.id) }, reqMeta);
+      }
+
+      if (pathname === '/api/agent/terminal' && method === 'GET') {
+        return this.sendJson(res, 200, { terminals: terminalHost.list() }, reqMeta);
+      }
+
+      const terminalInputMatch = pathname.match(/^\/api\/agent\/terminal\/([^/]+)\/input$/);
+      if (terminalInputMatch && method === 'POST') {
+        const terminalId = decodeURIComponent(terminalInputMatch[1]);
+        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+        const data = typeof body?.data === 'string' ? body.data : '';
+        return this.sendJson(res, 200, { success: terminalHost.write(terminalId, data) }, reqMeta);
+      }
+
+      const terminalMatch = pathname.match(/^\/api\/agent\/terminal\/([^/]+)$/);
+      if (terminalMatch) {
+        const terminalId = decodeURIComponent(terminalMatch[1]);
+        if (method === 'DELETE') {
+          return this.sendJson(res, 200, { success: terminalHost.close(terminalId) }, reqMeta);
+        }
+        if (method === 'GET') {
+          const replay = terminalHost.replay(terminalId);
+          return this.sendJson(res, 200, { id: terminalId, replay }, reqMeta);
+        }
+      }
+
       // 读取某个全局会话的实时状态（进程未启动时返回 null，界面改用历史消息）
       const agentLiveMatch = pathname.match(/^\/api\/agent\/sessions\/(.+)\/live$/);
       if (agentLiveMatch && method === 'GET') {
@@ -710,8 +863,33 @@ export class OpenLoopServer {
         return this.sendJson(res, 200, { state: agentSessionHost.getState(sessionKey) || null }, reqMeta);
       }
 
+      // 回应扩展 UI 请求：approval 卡片的选择结果
+      const agentUiResponseMatch = pathname.match(/^\/api\/agent\/sessions\/(.+)\/ui-response$/);
+      if (agentUiResponseMatch && method === 'POST') {
+        const sessionKey = decodeURIComponent(agentUiResponseMatch[1]);
+        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+        const requestId = typeof body?.id === 'string' ? body.id : '';
+        if (!requestId) return this.sendJson(res, 400, { error: '缺少 id' }, reqMeta);
+        const success = agentSessionHost.respondUiRequest(sessionKey, requestId, {
+          value: typeof body?.value === 'string' ? body.value : undefined,
+          confirmed: typeof body?.confirmed === 'boolean' ? body.confirmed : undefined,
+          cancelled: body?.cancelled === true ? true : undefined,
+        });
+        return this.sendJson(res, 200, { success }, reqMeta);
+      }
+
+      // 会话可用模型（模型选择器）
+      const agentModelsMatch = pathname.match(/^\/api\/agent\/sessions\/(.+)\/models$/);
+      if (agentModelsMatch && method === 'GET') {
+        const sessionKey = decodeURIComponent(agentModelsMatch[1]);
+        const models = await agentSessionHost.listModels(sessionKey).catch(() => []);
+        return this.sendJson(res, 200, { models }, reqMeta);
+      }
+
       // 全局 Agent 会话控制：打开 / 发消息 / 暂停 / 继续 / 停止
-      const agentActionMatch = pathname.match(/^\/api\/agent\/sessions\/(.+)\/(chat|open|pause|resume|stop)$/);
+      const agentActionMatch = pathname.match(
+        /^\/api\/agent\/sessions\/(.+)\/(chat|open|pause|resume|stop|model|permission|regenerate)$/
+      );
       if (agentActionMatch) {
         const sessionKey = decodeURIComponent(agentActionMatch[1]);
         const action = agentActionMatch[2];
@@ -740,8 +918,32 @@ export class OpenLoopServer {
               model: body?.model,
               attachments: Array.isArray(body?.attachments) ? body.attachments : undefined,
               thinking: body?.thinking,
+              permission: body?.permission,
             });
             return this.sendJson(res, 200, state, reqMeta);
+          }
+          if (action === 'model') {
+            const result = await agentSessionHost.setModel(
+              sessionKey,
+              typeof body?.model === 'string' ? body.model : undefined,
+              typeof body?.thinking === 'string' ? body.thinking : undefined
+            );
+            return this.sendJson(res, 200, result, reqMeta);
+          }
+          if (action === 'permission') {
+            const preset = (typeof body?.preset === 'string' ? body.preset : 'full') as AgentPermissionPreset;
+            const result = await agentSessionHost.setPermission(sessionKey, preset);
+            return this.sendJson(res, 200, { ...result, settings: agentSessionHost.getSettings(sessionKey) }, reqMeta);
+          }
+          if (action === 'regenerate') {
+            const state = agentSessionHost.getState(sessionKey);
+            const lastUser = [...(state?.messages || [])].reverse().find((item) => item.role === 'user');
+            if (!lastUser) {
+              return this.sendJson(res, 400, { error: '没有可重发的用户消息' }, reqMeta);
+            }
+            await agentSessionHost.pause(sessionKey).catch(() => false);
+            const next = await agentSessionHost.chat(sessionKey, lastUser.content, {});
+            return this.sendJson(res, 200, next, reqMeta);
           }
           if (action === 'pause') {
             return this.sendJson(res, 200, { success: await agentSessionHost.pause(sessionKey) }, reqMeta);

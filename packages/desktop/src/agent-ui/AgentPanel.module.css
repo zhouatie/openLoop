@@ -195,3 +195,36 @@
   flex: none;
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* 主列 + 右侧工作区面板 */
+.mainRow {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.mainCol {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 输入卡内的面板开关（整页形态没有顶栏） */
+.dockToggle {
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 28px;
+  cursor: pointer;
+}
+
+.dockToggle:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}

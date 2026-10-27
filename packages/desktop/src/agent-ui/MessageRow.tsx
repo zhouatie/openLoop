@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import type { SessionChatMessage } from '@openloop/core/types';
 import { AgentMarkdown } from './Markdown';
 import { ToolCard } from './ToolCard';
@@ -32,7 +32,15 @@ const ThinkingBlock = memo(function ThinkingBlock({
   );
 });
 
-export const MessageRow = memo(function MessageRow({ message }: { message: SessionChatMessage }) {
+export interface MessageRowProps {
+  message: SessionChatMessage;
+  /** 过程折叠内的紧凑形态：隐藏模型与时间行 */
+  compact?: boolean;
+  /** 重新生成该轮回答（后端支持时由挂载方注入） */
+  onRegenerate?: () => void;
+}
+
+export const MessageRow = memo(function MessageRow({ message, compact, onRegenerate }: MessageRowProps) {
   if (message.role === 'system') {
     return (
       <div className={styles.systemRow}>
@@ -66,12 +74,20 @@ export const MessageRow = memo(function MessageRow({ message }: { message: Sessi
   const hasError = Boolean(message.errorMessage);
 
   return (
-    <div className={styles.assistantRow}>
-      <div className={styles.assistantMeta}>
-        <span className={styles.author}>{message.model || 'Agent'}</span>
-        <span className={styles.time}>{formatTime(message.timestamp)}</span>
-        {message.isStreaming && <span className={styles.streamingDot} aria-label="正在输出" />}
-      </div>
+    <div className={`${styles.assistantRow} ${compact ? styles.compact : ''}`}>
+      {!compact && (
+        <div className={styles.assistantMeta}>
+          <span className={styles.author}>{message.model || 'Agent'}</span>
+          <span className={styles.time}>{formatTime(message.timestamp)}</span>
+          {message.isStreaming && <span className={styles.streamingDot} aria-label="正在输出" />}
+          {message.content.trim().length > 0 && <CopyAction text={message.content} />}
+          {onRegenerate && !message.isStreaming && (
+            <button type="button" className={styles.action} onClick={onRegenerate} title="重新生成">
+              重新生成
+            </button>
+          )}
+        </div>
+      )}
 
       {(message.thinking || message.isThinking) && (
         <ThinkingBlock thinking={message.thinking || ''} active={message.isThinking} />
@@ -94,17 +110,28 @@ export const MessageRow = memo(function MessageRow({ message }: { message: Sessi
 
       {hasError && <div className={styles.error}>{message.errorMessage}</div>}
 
-      {message.usage && (message.usage.totalTokens || message.usage.cost) && (
-        <div className={styles.usage}>
-          {message.usage.totalTokens ? `${formatTokens(message.usage.totalTokens)} tokens` : ''}
-          {message.usage.cost ? ` · $${message.usage.cost.toFixed(4)}` : ''}
-        </div>
-      )}
     </div>
   );
 });
 
-function formatTokens(tokens: number): string {
+/** 消息操作：复制 Markdown 原文 */
+function CopyAction({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(() => {
+    void navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    });
+  }, [text]);
+
+  return (
+    <button type="button" className={styles.action} onClick={handleCopy} title="复制内容">
+      {copied ? '已复制' : '复制'}
+    </button>
+  );
+}
+
+export function formatTokens(tokens: number): string {
   if (tokens < 1000) return String(tokens);
   return `${(tokens / 1000).toFixed(1)}k`;
 }
