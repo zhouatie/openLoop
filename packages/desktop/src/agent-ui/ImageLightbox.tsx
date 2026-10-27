@@ -7,7 +7,7 @@ export interface LightboxImage {
   name?: string;
 }
 
-const LIGHTBOX_LABELS = { dialog: '图片预览', close: '关闭' };
+export const LIGHTBOX_LABELS = { dialog: '图片预览', close: '关闭' };
 
 /** 对话里的图片缩略图：点击由 DSH ImageLightbox 原语放大（body portal、焦点还原） */
 export const ImageThumb = memo(function ImageThumb({
@@ -20,23 +20,34 @@ export const ImageThumb = memo(function ImageThumb({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [ratio, setRatio] = useState(0);
   const close = useCallback(() => setOpen(false), []);
 
   if (!image.url) {
     return <span className={`${styles.missing} ${className || ''}`}>图片未内联</span>;
   }
 
+  const box = thumbBox(size, ratio);
+
   return (
     <>
       <button
         type="button"
         className={`${styles.thumb} ${className || ''}`}
-        style={{ width: size, height: size }}
+        style={{ width: box.width, height: box.height }}
         onClick={() => setOpen(true)}
         title={image.name || '查看大图'}
         aria-label={`预览 ${image.name || '图片'}`}
       >
-        <img src={image.url} alt={image.name || '图片'} loading="lazy" />
+        <img
+          src={image.url}
+          alt={image.name || '图片'}
+          loading="lazy"
+          onLoad={(event) => {
+            const { naturalWidth, naturalHeight } = event.currentTarget;
+            if (naturalWidth > 0 && naturalHeight > 0) setRatio(naturalWidth / naturalHeight);
+          }}
+        />
       </button>
       {open && (
         <DshImageLightbox src={image.url} alt={image.name || '图片'} labels={LIGHTBOX_LABELS} onClose={close} />
@@ -44,3 +55,12 @@ export const ImageThumb = memo(function ImageThumb({
     </>
   );
 });
+
+/** 缩略图尺寸：长边固定，短边按原图比例收缩（极宽/极高截图也不会被裁成方块） */
+function thumbBox(longEdge: number, ratio: number): { width: number; height: number } {
+  if (!ratio) return { width: longEdge, height: longEdge };
+  const clamped = Math.min(4, Math.max(0.25, ratio));
+  return clamped >= 1
+    ? { width: longEdge, height: Math.round(longEdge / clamped) }
+    : { width: Math.round(longEdge * clamped), height: longEdge };
+}
