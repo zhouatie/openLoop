@@ -160,6 +160,10 @@ export class OpenLoopServer {
     agentSessionHost.onUiRequest((request) => {
       this.broadcast({ type: 'agent:ui_request', data: request });
     });
+    // 任务会话（流水线 agent 节点）的审批卡走同一条推流通道
+    PiRpcSessionManager.getInstance().on('uiRequest', (request) => {
+      this.broadcast({ type: 'agent:ui_request', data: request });
+    });
 
     // 终端输出推流
     terminalHost.on('data', ({ id, data }) => {
@@ -2464,6 +2468,37 @@ ${existingSubSummary}
           return this.sendJson(res, 200, { success: resumed }, reqMeta);
         }
         return this.sendJson(res, 400, { error: 'No active session to resume' }, reqMeta);
+      }
+
+      // Task session ui-response: /api/tasks/:id/session/ui-response
+      const taskUiResponseMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/ui-response$/);
+      if (taskUiResponseMatch && method === 'POST') {
+        const taskId = taskUiResponseMatch[1];
+        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+        const requestId = typeof body?.id === 'string' ? body.id : '';
+        const session = PiRpcSessionManager.getInstance().getSession(taskId);
+        if (!requestId || !session) {
+          return this.sendJson(res, 400, { error: '缺少 id 或会话未启动' }, reqMeta);
+        }
+        session.respondExtensionUi(requestId, {
+          value: typeof body?.value === 'string' ? body.value : undefined,
+          confirmed: typeof body?.confirmed === 'boolean' ? body.confirmed : undefined,
+          cancelled: body?.cancelled === true ? true : undefined,
+        });
+        return this.sendJson(res, 200, { success: true }, reqMeta);
+      }
+
+      // Task session regenerate: /api/tasks/:id/session/regenerate
+      const taskRegenerateMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/regenerate$/);
+      if (taskRegenerateMatch && method === 'POST') {
+        const taskId = taskRegenerateMatch[1];
+        const session = PiRpcSessionManager.getInstance().getSession(taskId);
+        if (!session) return this.sendJson(res, 400, { error: 'No active session to regenerate' }, reqMeta);
+        const lastUser = [...session.messages].reverse().find((item) => item.role === 'user');
+        if (!lastUser) return this.sendJson(res, 400, { error: '没有可重发的用户消息' }, reqMeta);
+        await session.pause().catch(() => false);
+        await session.sendPrompt(lastUser.content, lastUser.attachments);
+        return this.sendJson(res, 200, session.getState(), reqMeta);
       }
 
       // Task session clear: /api/tasks/:id/session/clear

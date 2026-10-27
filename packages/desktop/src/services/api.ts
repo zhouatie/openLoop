@@ -885,6 +885,23 @@ export class DesktopApiService {
     });
   }
 
+  async respondTaskUiRequest(
+    taskId: string,
+    payload: { id: string; value?: string; confirmed?: boolean; cancelled?: boolean }
+  ): Promise<{ success: boolean }> {
+    return requestJson<{ success: boolean }>(`${BASE_URL}/api/tasks/${taskId}/session/ui-response`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async regenerateTaskSession(taskId: string): Promise<TaskSessionState> {
+    return requestJson<TaskSessionState>(`${BASE_URL}/api/tasks/${taskId}/session/regenerate`, {
+      method: 'POST',
+    });
+  }
+
   // 全局 Agent 会话（不绑定任务）：pi 会话浏览 + 直接对话
   async getAgentSessions(params?: { cwd?: string; limit?: number }): Promise<{
     root: string;

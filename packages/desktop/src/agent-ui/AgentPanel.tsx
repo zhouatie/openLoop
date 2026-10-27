@@ -44,6 +44,48 @@ function shortenPath(cwd: string): string {
   return parts.length <= 3 ? cwd : `…/${parts.slice(-3).join('/')}`;
 }
 
+/** /api/agent/commands-and-skills → Composer 的斜杠候选 */
+function toComposerCommands(data: any): ComposerCommand[] {
+  const list = Array.isArray(data?.commands) ? data.commands : [];
+  const skills = Array.isArray(data?.skills) ? data.skills : [];
+  return [
+    ...list.map((item: any) => ({
+      name: String(item.name || '').replace(/^\//, ''),
+      description: item.description || item.label,
+      kind: item.action ? ('command' as const) : ('template' as const),
+    })),
+    ...skills.map((item: any) => ({
+      name: String(item.name || '').replace(/^\//, ''),
+      description: item.description || item.label,
+      kind: 'skill' as const,
+    })),
+  ];
+}
+
+/** @ 菜单候选：按目录前缀列出工作区里的文件与文件夹 */
+async function workspaceMentionItems(base: string, query: string): Promise<ComposerMentionItem[]> {
+  const slash = query.lastIndexOf('/');
+  const dirPart = slash >= 0 ? query.slice(0, slash + 1) : '';
+  const namePart = slash >= 0 ? query.slice(slash + 1) : query;
+  const dir = dirPart ? `${base.replace(/\/$/, '')}/${dirPart}` : base;
+  const items: ComposerMentionItem[] = [];
+  try {
+    const listing = await api.listAgentFs(dir);
+    for (const entry of listing.entries) {
+      if (namePart && !entry.name.toLowerCase().includes(namePart.toLowerCase())) continue;
+      items.push({
+        key: `${dirPart}${entry.name}${entry.isDir ? '/' : ''}`,
+        label: `${entry.name}${entry.isDir ? '/' : ''}`,
+        kind: entry.isDir ? 'dir' : 'file',
+      });
+      if (items.length >= 12) break;
+    }
+  } catch (_) {
+    /* 目录不可读时只返回空候选 */
+  }
+  return items;
+}
+
 export interface AgentPanelShellProps {
   title: string;
   subtitle?: string;
@@ -338,6 +380,7 @@ export function TaskAgentPanel({
   const [sending, setSending] = useState(false);
   const [dockTab, setDockTab] = useState<DockTab | null>(null);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
+  const [commands, setCommands] = useState<ComposerCommand[]>([]);
   const attachments = useAttachments();
 
   // 面板内快捷键：工作台开合与页签
@@ -348,6 +391,42 @@ export function TaskAgentPanel({
   });
 
   const load = useCallback(() => api.getTaskSession(taskId).catch(() => null), [taskId]);
+
+  // 斜杠指令：候选按任务工作区解析，与全局会话同一份来源
+  useEffect(() => {
+    api
+      .getAgentCommandsAndSkills?.(taskId)
+      .then((data: any) => setCommands(toComposerCommands(data)))
+      .catch(() => setCommands([]));
+  }, [taskId]);
+
+  // 扩展 UI 请求（审批卡）：任务会话的事件带 taskId，只接管本任务
+  useEffect(() => {
+    const off = api.on('agent:ui_request', (payload: any) => {
+      if (!payload || payload.taskId !== taskId) return;
+      setUiRequest(payload as AgentUiRequest);
+    });
+    return () => off?.();
+  }, [taskId]);
+
+  const respondUi = useCallback(
+    async (payload: { value?: string; confirmed?: boolean; cancelled?: boolean }) => {
+      if (!uiRequest) return;
+      if (import.meta.env?.DEV) {
+        console.log('[AgentPanel] 回应任务会话审批请求:', { taskId, id: uiRequest.id, ...payload });
+      }
+      setUiRequest(null);
+      await api.respondTaskUiRequest(taskId, { id: uiRequest.id, ...payload }).catch(() => null);
+    },
+    [uiRequest, taskId]
+  );
+
+  // @ 候选：任务工作区文件
+  const requestMentions = useCallback(
+    (query: string): Promise<ComposerMentionItem[]> =>
+      cwd ? workspaceMentionItems(cwd, query) : Promise.resolve([]),
+    [cwd]
+  );
 
   const transport = useMemo(
     () => ({
@@ -392,6 +471,8 @@ export function TaskAgentPanel({
       model={state?.model || model}
       contentWidth={920}
       sending={sending}
+      commands={commands}
+      onRequestMentions={requestMentions}
       onSend={handleSend}
       onStop={() => void stop()}
       onClose={onClose}
@@ -409,7 +490,7 @@ export function TaskAgentPanel({
           </button>
         </>
       }
-      banner={banner}
+      banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : banner}
       composerActions={composerActions}
       dock={
         dockTab ? (
@@ -426,6 +507,10 @@ export function TaskAgentPanel({
       onRemoveAttachment={attachments.remove}
       emptyTitle={taskTitle ? `开始推进：${taskTitle}` : '开始一段新的会话'}
       emptyHint="描述目标即可，Agent 会在任务工作区里读写代码、执行命令。"
+      onRegenerate={() => {
+        if (import.meta.env?.DEV) console.log('[AgentPanel] 重新生成任务会话最后一轮:', taskId);
+        void api.regenerateTaskSession(taskId).catch(() => null);
+      }}
     />
   );
 }
@@ -565,22 +650,7 @@ export function GlobalAgentPanel({
   useEffect(() => {
     api
       .getAgentCommandsAndSkills?.()
-      .then((data: any) => {
-        const list = Array.isArray(data?.commands) ? data.commands : [];
-        const skills = Array.isArray(data?.skills) ? data.skills : [];
-        setCommands([
-          ...list.map((item: any) => ({
-            name: String(item.name || '').replace(/^\//, ''),
-            description: item.description || item.label,
-            kind: item.action ? ('command' as const) : ('template' as const),
-          })),
-          ...skills.map((item: any) => ({
-            name: String(item.name || '').replace(/^\//, ''),
-            description: item.description || item.label,
-            kind: 'skill' as const,
-          })),
-        ]);
-      })
+      .then((data: any) => setCommands(toComposerCommands(data)))
       .catch(() => setCommands([]));
   }, []);
 
@@ -1137,28 +1207,7 @@ export function GlobalAgentPanel({
   const requestMentions = useCallback(
     async (query: string): Promise<ComposerMentionItem[]> => {
       const base = cwd || sessions.find((item) => item.id === activeId)?.cwd || '';
-      const items: ComposerMentionItem[] = [];
-
-      if (base) {
-        const slash = query.lastIndexOf('/');
-        const dirPart = slash >= 0 ? query.slice(0, slash + 1) : '';
-        const namePart = slash >= 0 ? query.slice(slash + 1) : query;
-        const dir = dirPart ? `${base.replace(/\/$/, '')}/${dirPart}` : base;
-        try {
-          const listing = await api.listAgentFs(dir);
-          for (const entry of listing.entries) {
-            if (namePart && !entry.name.toLowerCase().includes(namePart.toLowerCase())) continue;
-            items.push({
-              key: `${dirPart}${entry.name}${entry.isDir ? '/' : ''}`,
-              label: `${entry.name}${entry.isDir ? '/' : ''}`,
-              kind: entry.isDir ? 'dir' : 'file',
-            });
-            if (items.length >= 12) break;
-          }
-        } catch (_) {
-          /* 目录不可读就只列会话 */
-        }
-      }
+      const items: ComposerMentionItem[] = base ? await workspaceMentionItems(base, query) : [];
 
       const keyword = query.toLowerCase();
       const matched = sessions
