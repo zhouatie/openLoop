@@ -8,19 +8,23 @@ import {
   Search,
   Plus,
   Minus,
-  Maximize2,
   Layers,
-  FileText,
-  CornerDownRight,
-  GitCommitHorizontal,
   Loader2,
   AlertCircle,
   RefreshCw,
   AlignJustify,
   Columns2,
 } from 'lucide-react';
-import { diffWordsWithSpace } from 'diff';
-import { TaskWorktreeDiffResult, FileDiffItem } from '@openloop/core';
+import { TaskWorktreeDiffResult } from '@openloop/core';
+import { parseFileDiff, type DiffPart, type ParsedFileDiffResult } from './diffParser';
+
+export type {
+  DiffPart,
+  UnifiedDiffLine,
+  SplitDiffSide,
+  SplitDiffRow,
+  ParsedFileDiffResult,
+} from './diffParser';
 
 interface CodeDiffViewerModalProps {
   diffResult?: TaskWorktreeDiffResult | null;
@@ -30,268 +34,6 @@ interface CodeDiffViewerModalProps {
   error?: string | null;
   onRetry?: () => void;
   onClose: () => void;
-}
-
-export interface DiffPart {
-  text: string;
-  type: 'same' | 'delete' | 'add';
-}
-
-export interface UnifiedDiffLine {
-  type: 'chunk-header' | 'add' | 'delete' | 'context';
-  oldLineNumber?: number;
-  newLineNumber?: number;
-  content: string;
-  parts?: DiffPart[];
-}
-
-export interface SplitDiffSide {
-  lineNumber?: number;
-  type: 'delete' | 'add' | 'context';
-  content: string;
-  parts?: DiffPart[];
-}
-
-export interface SplitDiffRow {
-  type: 'chunk-header' | 'diff';
-  chunkContent?: string;
-  left?: SplitDiffSide;
-  right?: SplitDiffSide;
-}
-
-export interface ParsedFileDiffResult {
-  unified: UnifiedDiffLine[];
-  split: SplitDiffRow[];
-}
-
-/**
- * 针对两行文本进行词级（Word-level / Intra-line）差异比对
- */
-function computeLineDiff(oldText: string, newText: string): { oldParts: DiffPart[]; newParts: DiffPart[] } {
-  if (oldText === newText) {
-    return {
-      oldParts: [{ text: oldText, type: 'same' }],
-      newParts: [{ text: newText, type: 'same' }],
-    };
-  }
-
-  const changes = diffWordsWithSpace(oldText, newText);
-  const oldParts: DiffPart[] = [];
-  const newParts: DiffPart[] = [];
-
-  for (const c of changes) {
-    if (c.removed) {
-      oldParts.push({ text: c.value, type: 'delete' });
-    } else if (c.added) {
-      newParts.push({ text: c.value, type: 'add' });
-    } else {
-      oldParts.push({ text: c.value, type: 'same' });
-      newParts.push({ text: c.value, type: 'same' });
-    }
-  }
-
-  return { oldParts, newParts };
-}
-
-/**
- * 计算两行文本公共前后缀相似度，用于多行变动时的智能对齐配对
- */
-function calcLineSimilarity(s1: string, s2: string): number {
-  if (s1 === s2) return 1;
-  const minLen = Math.min(s1.length, s2.length);
-  if (minLen === 0) return 0;
-  let prefix = 0;
-  while (prefix < minLen && s1[prefix] === s2[prefix]) prefix++;
-  let suffix = 0;
-  while (suffix < minLen - prefix && s1[s1.length - 1 - suffix] === s2[s2.length - 1 - suffix]) suffix++;
-  return ((prefix + suffix) * 2) / (s1.length + s2.length);
-}
-
-/**
- * 将连续的删除行与新增行块进行智能配对
- */
-function pairChangeBlocks(
-  delBlock: Array<{ oldLineNumber: number; content: string }>,
-  addBlock: Array<{ newLineNumber: number; content: string }>
-) {
-  if (delBlock.length === addBlock.length) {
-    return delBlock.map((del, idx) => ({ del: del as typeof del | undefined, add: addBlock[idx] as typeof addBlock[0] | undefined }));
-  }
-
-  const pairs: Array<{ del?: typeof delBlock[0]; add?: typeof addBlock[0] }> = [];
-  const usedAdd = new Set<number>();
-
-  for (const del of delBlock) {
-    let bestIdx = -1;
-    let bestScore = 0.25;
-    for (let j = 0; j < addBlock.length; j++) {
-      if (usedAdd.has(j)) continue;
-      const score = calcLineSimilarity(del.content, addBlock[j].content);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIdx = j;
-      }
-    }
-    if (bestIdx !== -1) {
-      usedAdd.add(bestIdx);
-      pairs.push({ del, add: addBlock[bestIdx] });
-    } else {
-      pairs.push({ del, add: undefined });
-    }
-  }
-
-  for (let j = 0; j < addBlock.length; j++) {
-    if (!usedAdd.has(j)) {
-      pairs.push({ del: undefined, add: addBlock[j] });
-    }
-  }
-
-  return pairs;
-}
-
-function parseFileDiff(diffText: string): ParsedFileDiffResult {
-  if (!diffText) return { unified: [], split: [] };
-  const rawLines = diffText.split('\n');
-  const unified: UnifiedDiffLine[] = [];
-  const split: SplitDiffRow[] = [];
-
-  let oldLine = 0;
-  let newLine = 0;
-
-  let delBlock: Array<{ oldLineNumber: number; content: string }> = [];
-  let addBlock: Array<{ newLineNumber: number; content: string }> = [];
-
-  const flushBlock = () => {
-    if (delBlock.length === 0 && addBlock.length === 0) return;
-
-    const pairs = pairChangeBlocks(delBlock, addBlock);
-    for (const pair of pairs) {
-      const { del, add } = pair;
-      if (del && add) {
-        const { oldParts, newParts } = computeLineDiff(del.content, add.content);
-        unified.push({
-          type: 'delete',
-          oldLineNumber: del.oldLineNumber,
-          content: del.content,
-          parts: oldParts,
-        });
-        unified.push({
-          type: 'add',
-          newLineNumber: add.newLineNumber,
-          content: add.content,
-          parts: newParts,
-        });
-        split.push({
-          type: 'diff',
-          left: {
-            lineNumber: del.oldLineNumber,
-            type: 'delete',
-            content: del.content,
-            parts: oldParts,
-          },
-          right: {
-            lineNumber: add.newLineNumber,
-            type: 'add',
-            content: add.content,
-            parts: newParts,
-          },
-        });
-      } else if (del) {
-        unified.push({
-          type: 'delete',
-          oldLineNumber: del.oldLineNumber,
-          content: del.content,
-        });
-        split.push({
-          type: 'diff',
-          left: {
-            lineNumber: del.oldLineNumber,
-            type: 'delete',
-            content: del.content,
-          },
-          right: undefined,
-        });
-      } else if (add) {
-        unified.push({
-          type: 'add',
-          newLineNumber: add.newLineNumber,
-          content: add.content,
-        });
-        split.push({
-          type: 'diff',
-          left: undefined,
-          right: {
-            lineNumber: add.newLineNumber,
-            type: 'add',
-            content: add.content,
-          },
-        });
-      }
-    }
-
-    delBlock = [];
-    addBlock = [];
-  };
-
-  for (const line of rawLines) {
-    if (line.startsWith('@@')) {
-      flushBlock();
-      const match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (match) {
-        oldLine = parseInt(match[1], 10);
-        newLine = parseInt(match[2], 10);
-      }
-      unified.push({
-        type: 'chunk-header',
-        content: line,
-      });
-      split.push({
-        type: 'chunk-header',
-        chunkContent: line,
-      });
-    } else if (
-      line.startsWith('---') ||
-      line.startsWith('+++') ||
-      line.startsWith('diff --git') ||
-      line.startsWith('index ') ||
-      line.startsWith('new file mode') ||
-      line.startsWith('deleted file mode') ||
-      line.startsWith('similarity index') ||
-      line.startsWith('rename from') ||
-      line.startsWith('rename to')
-    ) {
-      // 元数据行，略过展示以保持视觉极简专注
-      continue;
-    } else if (line.startsWith('-')) {
-      if (addBlock.length > 0) {
-        flushBlock();
-      }
-      delBlock.push({ oldLineNumber: oldLine, content: line.slice(1) });
-      oldLine++;
-    } else if (line.startsWith('+')) {
-      addBlock.push({ newLineNumber: newLine, content: line.slice(1) });
-      newLine++;
-    } else if (line.startsWith(' ') || line === '') {
-      flushBlock();
-      const content = line.startsWith(' ') ? line.slice(1) : line;
-      unified.push({
-        type: 'context',
-        oldLineNumber: oldLine,
-        newLineNumber: newLine,
-        content,
-      });
-      split.push({
-        type: 'diff',
-        left: { lineNumber: oldLine, type: 'context', content },
-        right: { lineNumber: newLine, type: 'context', content },
-      });
-      oldLine++;
-      newLine++;
-    }
-  }
-
-  flushBlock();
-  return { unified, split };
 }
 
 function splitPath(filePath: string): { dir: string; name: string } {
