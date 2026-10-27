@@ -230,6 +230,85 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* 工作区芯片 + 选择列表：点芯片开列表，选中项打勾，最下方是添加工作区 */
+.wsPicker {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.wsMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  max-width: 380px;
+  /* 项目可能很多：列表自己滑，添加工作区常驻底部 */
+  max-height: 340px;
+  padding: 4px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+  box-shadow: var(--dsw-elevation-prominent);
+}
+
+.wsMenuList {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+.wsMenuItem {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 32px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wsMenuItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.wsMenuIcon {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.wsMenuLabel {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wsMenuCheck {
+  flex: none;
+  color: var(--dsw-alias-label-primary);
+}
+
+.wsMenuDivider {
+  flex: none;
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--dsw-alias-border-l3);
+}
+
 /* 主列 + 右侧工作区面板 */
 .mainRow {
   flex: 1;
