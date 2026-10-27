@@ -1158,7 +1158,7 @@ export class PiRpcSessionInstance extends EventEmitter {
 /**
  * 全局 Pi RPC 会话管理器
  */
-export class PiRpcSessionManager {
+export class PiRpcSessionManager extends EventEmitter {
   private static instance: PiRpcSessionManager;
   private sessions = new Map<string, PiRpcSessionInstance>();
 
@@ -1182,6 +1182,10 @@ export class PiRpcSessionManager {
 
     session.on('update', () => {
       // 保持活跃会话引用
+    });
+    // 扩展 UI 请求（审批卡）转给上层：带上任务路由键，界面据此过滤
+    session.on('uiRequest', (request) => {
+      this.emit('uiRequest', { ...request, taskId: options.taskId, sessionId: session.sessionId });
     });
 
     return session;
