@@ -1087,13 +1087,6 @@ export class DagEngine extends EventEmitter {
       const node: WorkflowNode = workflow.nodes[i];
       const nid = node.id;
 
-      if (i < startIndex) {
-        // 在起始节点之前：如果用户未重新勾选它，且此前已成功，则保持成果不重跑
-        if (!selectedSet.has(nid) && task.nodeRuns[nid]?.status === 'success') {
-          continue;
-        }
-      }
-
       if (selectedSet.has(nid)) {
         // 用户选中的待重跑节点：重置为 pending
         if (task.nodeRuns[nid]) {
@@ -1110,16 +1103,19 @@ export class DagEngine extends EventEmitter {
           };
         }
       } else {
-        // 用户取消勾选的节点（在起始节点之后或未勾选）：标记为 skipped
-        if (i >= startIndex) {
-          task.nodeRuns[nid] = {
-            nodeId: nid,
-            status: 'skipped',
-            startedAt: now,
-            finishedAt: now,
-          };
-          this.log(task.id, nid, 'system', `[定制重试] 节点 [${node.name}] 被用户取消勾选，自动跳过`);
+        // 未勾选的节点：
+        // 若此前已成功或此前已跳过，保留既有状态
+        if (task.nodeRuns[nid]?.status === 'success' || task.nodeRuns[nid]?.status === 'skipped') {
+          continue;
         }
+        // 起始节点之前或之后未勾选且未成功的节点，统一标记为 skipped，避免阻塞流水线终态判定
+        task.nodeRuns[nid] = {
+          nodeId: nid,
+          status: 'skipped',
+          startedAt: now,
+          finishedAt: now,
+        };
+        this.log(task.id, nid, 'system', `[定制重试] 节点 [${node.name}] 未被勾选重跑，自动跳过`);
       }
     }
 
