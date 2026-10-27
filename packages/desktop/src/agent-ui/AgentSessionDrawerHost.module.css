@@ -1,0 +1,56 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.18);
+  animation: drawer-fade var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: 620px;
+  max-width: 92vw;
+  height: 100%;
+  background: var(--dsw-alias-bg-base);
+  border-left: 1px solid var(--dsw-alias-border-l3);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.1);
+  animation: drawer-slide var(--ds-transition-duration-normal) var(--ds-ease-in-out);
+}
+
+@keyframes drawer-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes drawer-slide {
+  from {
+    transform: translateX(16px);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .panel {
+    width: 100%;
+    max-width: 100%;
+    border-left: none;
+  }
+}

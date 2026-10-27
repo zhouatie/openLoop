@@ -87,7 +87,7 @@ import { AgentMarkdown } from '../components/AgentMarkdown';
 import { toast } from '../components/Toast';
 import { DebugWorkflowModal } from '../components/DebugWorkflowModal';
 import { WorkspacePicker } from '../components/WorkspacePicker';
-import { AgentSessionDrawer } from '../components/AgentSessionDrawer';
+import { AgentSessionDrawerHost } from '../agent-ui';
 import { ChatScrollToLatestButton } from '../components/ChatScrollToLatestButton';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
 import { TagInput } from '../components/TagInput';
@@ -4572,15 +4572,12 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
         onStartDebug={handleStartDebug}
       />
 
-      {/* Agent 实时交互会话抽屉 */}
-      <AgentSessionDrawer
+      {/* Agent 实时交互会话抽屉（新面板） */}
+      <AgentSessionDrawerHost
         isOpen={isAgentSessionOpen}
         onClose={() => setIsAgentSessionOpen(false)}
         taskId={inspectingSessionTaskId}
         taskTitle={debugTask?.title}
-        nodeId={inspectingSessionNodeId}
-        nodeName={inspectingSessionNodeName}
-        workspace={debugTask?.workspace}
       />
 
       {/* 动作配方选择器弹窗 (Recipe Picker Modal) */}

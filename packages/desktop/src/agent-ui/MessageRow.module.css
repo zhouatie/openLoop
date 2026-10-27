@@ -1,0 +1,209 @@
+/* 会话行：用户气泡右对齐，助手整行铺开，系统事件居中细线 */
+.systemRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.systemLine {
+  flex: 1;
+  height: 1px;
+  background: var(--dsw-alias-border-l3);
+}
+
+.systemText {
+  flex: none;
+  max-width: 70%;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-caption);
+  text-align: center;
+}
+
+.userRow {
+  display: flex;
+  justify-content: flex-end;
+  margin: 20px 0 8px;
+}
+
+/* 用户气泡：DSH UserMessageBubble —— radius-xl、10/16 内距、22px 行高 */
+.userBubble {
+  max-width: 100%;
+  padding: 10px 16px;
+  border-radius: var(--dsw-radius-xl);
+  background: var(--dsw-specific-bubble);
+}
+
+.userText {
+  font-size: var(--dsh-content-font-size, 14px);
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.attachment {
+  padding: 1px 6px;
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l3);
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.assistantRow {
+  margin: 4px 0 18px;
+}
+
+.assistantMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.author {
+  font-weight: 500;
+  color: var(--dsw-alias-label-tertiary);
+  max-width: 60%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.time {
+  font-variant-numeric: tabular-nums;
+}
+
+.streamingDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-business-primary);
+  animation: streamPulse 1s ease-in-out infinite;
+}
+
+@keyframes streamPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.content {
+  position: relative;
+}
+
+.caret {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--dsw-alias-state-business-primary);
+  animation: caretBlink 1s steps(2) infinite;
+}
+
+@keyframes caretBlink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.thinking {
+  margin-bottom: 10px;
+}
+
+.thinkingToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.thinkingToggle:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.thinkingDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-caption);
+}
+
+.thinkingPulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-business-primary);
+  animation: streamPulse 1s ease-in-out infinite;
+}
+
+.thinkingCount {
+  color: var(--dsw-alias-label-caption);
+}
+
+.thinkingChevron {
+  color: var(--dsw-alias-label-caption);
+}
+
+.thinkingBody {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--dsw-alias-border-l3);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.error {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-sm);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, transparent);
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12.5px;
+}
+
+.usage {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+  font-variant-numeric: tabular-nums;
+}

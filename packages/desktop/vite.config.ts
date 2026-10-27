@@ -14,6 +14,9 @@ export default defineConfig({
       '@openloop/core/media-mime': path.resolve(__dirname, '../core/src/constants/media-mime.ts'),
       '@openloop/core/task-summary': path.resolve(__dirname, '../core/src/store/task-summary.ts'),
       '@openloop/core/agent-format': path.resolve(__dirname, '../core/src/agent/agent-format.ts'),
+      // Agent 增量事件归约器：纯函数 + 纯类型，渲染层与服务端共用同一份语义
+      '@openloop/core/agent-events': path.resolve(__dirname, '../core/src/agent/agent-events.ts'),
+      '@openloop/core/types': path.resolve(__dirname, '../core/src/types/index.ts'),
     },
   },
   server: {

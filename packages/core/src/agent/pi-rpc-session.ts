@@ -14,11 +14,42 @@ import {
 } from '../types';
 import { createLogger } from '../logger';
 import { compactToolResult } from './agent-format';
+import {
+  AgentStatusEvent,
+  AgentStreamEvent,
+  classifyToolKind,
+  compactToolForEvent,
+  compactUsage,
+} from './agent-events';
 
 const logger = createLogger('PiRpcSession');
 
 /** Agent 显式声明完成的标记：只有输出该标记，流水线才允许流转到下一个节点 */
 export const PIPELINE_DONE_MARKER = '[OPENLOOP_DONE]';
+
+/**
+ * 全量快照限频间隔
+ * 流式期间增量事件逐包推送，快照只负责对账，不需要跟每个 token 同步。
+ */
+const PI_SNAPSHOT_INTERVAL_MS = 120;
+
+/** 工具入参摘要：只保留可展示的原始字段，供工具卡直接渲染 */
+function summarizeToolInput(args: any): Record<string, any> | undefined {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined;
+  const summary: Record<string, any> = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(args)) {
+    if (count >= 20) break;
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'string') {
+      summary[key] = value.length > 500 ? `${value.slice(0, 500)}…` : value;
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      summary[key] = value;
+    }
+    count += 1;
+  }
+  return Object.keys(summary).length > 0 ? summary : undefined;
+}
 
 export interface PiRpcSessionOptions {
   taskId: string;
@@ -39,8 +70,15 @@ export interface PiRpcSessionOptions {
   initialAttachments?: TaskAttachment[];
   /** 流水线节点场景：Agent 未输出完成标记时停留在本节点等待用户回复，不自动流转下游 */
   awaitCompletionMarker?: boolean;
+  /**
+   * 是否在进程启动后自动发送 initialPrompt
+   * 历史会话浏览、纯面板打开场景传 false，等用户手动发消息再启动轮次
+   */
+  autoStart?: boolean;
   onLog?: (stream: 'stdout' | 'stderr' | 'system', message: string) => void;
   onUpdate?: (state: TaskSessionState) => void;
+  /** 增量事件回调：流式期间只推变化部分，全量快照由 onUpdate 限频兜底 */
+  onEvent?: (event: AgentStreamEvent) => void;
   onFinished?: (error?: string) => void;
 }
 
@@ -70,12 +108,20 @@ export class PiRpcSessionInstance extends EventEmitter {
   private stdoutBuffer = '';
   private onLog?: (stream: 'stdout' | 'stderr' | 'system', message: string) => void;
   private onUpdateCallback?: (state: TaskSessionState) => void;
+  private onEventCallback?: (event: AgentStreamEvent) => void;
   private onFinishedCallback?: (error?: string) => void;
   private currentAssistantMessage: SessionChatMessage | null = null;
   private initialPromptSent = false;
   private executionCompleted = false;
   private awaitCompletionMarker: boolean;
   private doneMarkerSeen = false;
+  /** 当前轮次序号（从 1 开始） */
+  private turnSeq = 0;
+  /** 全量快照限频：首个事件立即发，之后最多每 120ms 一包 */
+  private snapshotTimer?: NodeJS.Timeout;
+  private snapshotPending = false;
+  /** 增量事件计数，仅供开发环境采样日志 */
+  private eventSeq = 0;
 
   constructor(options: PiRpcSessionOptions) {
     super();
@@ -87,6 +133,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.thinking = options.thinking;
     this.onLog = options.onLog;
     this.onUpdateCallback = options.onUpdate;
+    this.onEventCallback = options.onEvent;
     this.onFinishedCallback = options.onFinished;
     this.awaitCompletionMarker = options.awaitCompletionMarker === true;
 
@@ -165,7 +212,8 @@ export class PiRpcSessionInstance extends EventEmitter {
       logger.error(`Pi RPC 进程启动失败: ${err.message}`, undefined, { taskId: this.taskId });
       this.emitLog('stderr', `[Pi RPC 异常] ${err.message}`);
       this.active = false;
-      this.notifyUpdate();
+      this.emitStatus({ active: false });
+      this.notifyUpdate(true);
       if (this.onFinishedCallback && !this.executionCompleted) {
         this.executionCompleted = true;
         this.onFinishedCallback(err.message);
@@ -176,7 +224,8 @@ export class PiRpcSessionInstance extends EventEmitter {
       logger.info(`Pi RPC 进程退出，退出码: ${code}`, undefined, { taskId: this.taskId });
       this.active = false;
       this.isBusy = false;
-      this.notifyUpdate();
+      this.emitStatus({ active: false, isBusy: false });
+      this.notifyUpdate(true);
       if (this.onFinishedCallback && !this.executionCompleted) {
         this.executionCompleted = true;
         this.onFinishedCallback(code === 0 ? undefined : `Process exited with code ${code}`);
@@ -184,6 +233,9 @@ export class PiRpcSessionInstance extends EventEmitter {
     });
 
     // 进程建立后，发送初始 Prompt
+    if (options.autoStart === false) {
+      return;
+    }
     setTimeout(() => {
       if (this.active && !this.initialPromptSent) {
         this.initialPromptSent = true;
@@ -251,12 +303,15 @@ export class PiRpcSessionInstance extends EventEmitter {
     switch (record.type) {
       case 'agent_start':
         this.isBusy = true;
-        this.notifyUpdate();
+        this.emitStatus({ isBusy: true, active: this.active });
+        this.notifyUpdate(true);
         break;
 
       case 'turn_start':
         this.isBusy = true;
-        this.notifyUpdate();
+        this.turnSeq += 1;
+        this.emitStatus({ isBusy: true });
+        this.notifyUpdate(true);
         break;
 
       case 'message_start': {
@@ -281,13 +336,17 @@ export class PiRpcSessionInstance extends EventEmitter {
                 userText.includes('【用户随附参考图片】')));
 
           if (!isAlreadyTracked && (!lastMsg || lastMsg.role !== 'user')) {
-            this.messages.push({
+            const userMessage: SessionChatMessage = {
               id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
               role: 'user',
               content: userText,
               timestamp: Date.now(),
-            });
-            this.notifyUpdate();
+              turn: this.turnSeq || undefined,
+              source: 'live',
+            };
+            this.messages.push(userMessage);
+            this.emitMessage(userMessage);
+            this.notifyUpdate(true);
           }
         } else if (msg.role === 'assistant') {
           const newAssistantMsg: SessionChatMessage = {
@@ -298,10 +357,14 @@ export class PiRpcSessionInstance extends EventEmitter {
             isThinking: false,
             tools: [],
             timestamp: Date.now(),
+            turn: this.turnSeq || undefined,
+            model: msg.model || this.model,
+            source: 'live',
           };
           this.currentAssistantMessage = newAssistantMsg;
           this.messages.push(newAssistantMsg);
-          this.notifyUpdate();
+          this.emitMessage(newAssistantMsg);
+          this.notifyUpdate(true);
         }
         break;
       }
@@ -312,36 +375,48 @@ export class PiRpcSessionInstance extends EventEmitter {
 
         if (ev.type === 'thinking_start') {
           this.currentAssistantMessage.isThinking = true;
+          this.emitMessagePatch(this.currentAssistantMessage.id, { isThinking: true });
           this.notifyUpdate();
         } else if (ev.type === 'thinking_delta') {
           this.currentAssistantMessage.isThinking = true;
           this.currentAssistantMessage.thinking = (this.currentAssistantMessage.thinking || '') + (ev.delta || '');
-          this.notifyUpdate();
+          this.emitDelta('thinking', ev.delta || '', { isThinking: true });
         } else if (ev.type === 'thinking_end') {
           this.currentAssistantMessage.isThinking = false;
           if (ev.content) {
             this.currentAssistantMessage.thinking = ev.content;
           }
+          this.emitMessagePatch(this.currentAssistantMessage.id, {
+            isThinking: false,
+            thinking: this.currentAssistantMessage.thinking,
+          });
           this.notifyUpdate();
         } else if (ev.type === 'text_start') {
           this.currentAssistantMessage.isStreaming = true;
+          this.emitMessagePatch(this.currentAssistantMessage.id, { isStreaming: true });
           this.notifyUpdate();
         } else if (ev.type === 'text_delta') {
           this.currentAssistantMessage.isStreaming = true;
           this.currentAssistantMessage.content = (this.currentAssistantMessage.content || '') + (ev.delta || '');
-          this.notifyUpdate();
+          this.emitDelta('content', ev.delta || '', { isStreaming: true });
         } else if (ev.type === 'text_end') {
           if (ev.content) {
             this.currentAssistantMessage.content = ev.content;
           }
+          this.emitMessagePatch(this.currentAssistantMessage.id, {
+            content: this.currentAssistantMessage.content,
+          });
           this.notifyUpdate();
         } else if (ev.type === 'toolcall_start') {
           if (!this.currentAssistantMessage.tools) this.currentAssistantMessage.tools = [];
-          this.currentAssistantMessage.tools.push({
+          const tool: ToolExecutionRecord = {
             id: ev.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             name: ev.toolName,
             status: 'running',
-          });
+            kind: classifyToolKind(ev.toolName),
+          };
+          this.currentAssistantMessage.tools.push(tool);
+          this.emitTool(this.currentAssistantMessage.id, tool);
           this.notifyUpdate();
         } else if (ev.type === 'error') {
           const errText = ev.error?.message || ev.error || ev.reason || '流式输出异常';
@@ -351,28 +426,23 @@ export class PiRpcSessionInstance extends EventEmitter {
           if (this.currentAssistantMessage) {
             this.currentAssistantMessage.errorMessage = errMsg;
             this.currentAssistantMessage.stopReason = 'error';
+            this.emitMessagePatch(this.currentAssistantMessage.id, {
+              errorMessage: errMsg,
+              stopReason: 'error',
+            });
           }
-          this.notifyUpdate();
+          this.notifyUpdate(true);
         }
         break;
       }
 
       case 'tool_execution_start': {
-        let targetTool: any;
-        if (this.currentAssistantMessage?.tools) {
-          targetTool = this.currentAssistantMessage.tools.find((t) => t.id === record.toolCallId);
-        }
-        if (!targetTool) {
-          for (let i = this.messages.length - 1; i >= 0; i--) {
-            const found = this.messages[i].tools?.find((t) => t.id === record.toolCallId);
-            if (found) {
-              targetTool = found;
-              break;
-            }
-          }
-        }
-        if (targetTool) {
-          targetTool.args = record.args;
+        const owner = this.findToolOwner(record.toolCallId);
+        if (owner) {
+          owner.tool.args = record.args;
+          owner.tool.input = summarizeToolInput(record.args);
+          if (!owner.tool.kind) owner.tool.kind = classifyToolKind(owner.tool.name);
+          this.emitTool(owner.messageId, owner.tool);
           this.notifyUpdate();
         }
         const toolLabel = record.toolName ? `[${record.toolName}]` : '';
@@ -382,26 +452,15 @@ export class PiRpcSessionInstance extends EventEmitter {
       }
 
       case 'tool_execution_end': {
-        let targetTool: any;
-        if (this.currentAssistantMessage?.tools) {
-          targetTool = this.currentAssistantMessage.tools.find((t) => t.id === record.toolCallId);
-        }
-        if (!targetTool) {
-          for (let i = this.messages.length - 1; i >= 0; i--) {
-            const found = this.messages[i].tools?.find((t) => t.id === record.toolCallId);
-            if (found) {
-              targetTool = found;
-              break;
-            }
-          }
-        }
+        const owner = this.findToolOwner(record.toolCallId);
         let toolName = '';
-        if (targetTool) {
-          targetTool.result = compactToolResult(record.result);
-          targetTool.status = record.isError ? 'error' : 'success';
-          targetTool.durationMs = record.durationMs;
-          toolName = targetTool.name;
-          this.notifyUpdate();
+        if (owner) {
+          owner.tool.result = compactToolResult(record.result);
+          owner.tool.status = record.isError ? 'error' : 'success';
+          owner.tool.durationMs = record.durationMs;
+          toolName = owner.tool.name;
+          this.emitTool(owner.messageId, owner.tool);
+          this.notifyUpdate(true);
         }
         const statusText = record.isError ? '失败' : '完成';
         const costText = record.durationMs !== undefined ? ` (耗时: ${record.durationMs}ms)` : '';
@@ -442,7 +501,13 @@ export class PiRpcSessionInstance extends EventEmitter {
             this.currentAssistantMessage.stopReason = msg?.stopReason || 'error';
             this.emitLog('stderr', `[Agent 报错] 模型接口异常: ${errorText}`);
           }
-          this.notifyUpdate();
+          // 用量与模型归属：供输入框上方统计胶囊与工具卡展示
+          const usage = compactUsage(msg?.usage);
+          if (usage) this.currentAssistantMessage.usage = usage;
+          if (msg?.model) this.currentAssistantMessage.model = msg.model;
+          if (msg?.stopReason) this.currentAssistantMessage.stopReason = msg.stopReason;
+          this.emitMessage(this.currentAssistantMessage);
+          this.notifyUpdate(true);
           this.currentAssistantMessage = null;
         } else if (msg?.errorMessage || msg?.stopReason === 'error') {
           const errorText = msg?.errorMessage || '模型调用失败';
@@ -463,8 +528,11 @@ export class PiRpcSessionInstance extends EventEmitter {
           if (targetMsg) {
             targetMsg.errorMessage = errorText;
             targetMsg.stopReason = msg.stopReason || 'error';
+            this.emitMessagePatch(targetMsg.id, { errorMessage: errorText, stopReason: msg.stopReason || 'error' });
           }
         }
+        this.emitStatus({ isBusy: false });
+        this.notifyUpdate(true);
         break;
       }
 
@@ -478,8 +546,10 @@ export class PiRpcSessionInstance extends EventEmitter {
         if (targetMsg) {
           targetMsg.errorMessage = errorText;
           targetMsg.stopReason = 'error';
+          this.emitMessagePatch(targetMsg.id, { errorMessage: errorText, stopReason: 'error' });
         }
-        this.notifyUpdate();
+        this.emitStatus({ lastError: errorText });
+        this.notifyUpdate(true);
         break;
       }
 
@@ -490,9 +560,11 @@ export class PiRpcSessionInstance extends EventEmitter {
           if (this.currentAssistantMessage.content?.includes(PIPELINE_DONE_MARKER)) this.doneMarkerSeen = true;
           this.currentAssistantMessage.isStreaming = false;
           this.currentAssistantMessage.isThinking = false;
+          this.emitMessagePatch(this.currentAssistantMessage.id, { isStreaming: false, isThinking: false });
           this.currentAssistantMessage = null;
         }
-        this.notifyUpdate();
+        this.emitStatus({ isBusy: false, active: this.active });
+        this.notifyUpdate(true);
 
         // 本轮空闲后应用排队中的模型 / 思考强度变更
         this.flushPendingSettings().catch((err) => {
@@ -560,14 +632,19 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.lastError = undefined;
 
     // 前置压入用户消息展示
-    this.messages.push({
+    const userMessage: SessionChatMessage = {
       id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       role: 'user',
       content: message,
       attachments: attachments && attachments.length > 0 ? attachments : undefined,
       timestamp: Date.now(),
-    });
-    this.notifyUpdate();
+      turn: this.turnSeq + 1 || undefined,
+      source: 'live',
+    };
+    this.messages.push(userMessage);
+    this.emitMessage(userMessage);
+    this.emitStatus({ isBusy: true, isPaused: false, awaitingInput: false });
+    this.notifyUpdate(true);
 
     let actualMessage = message;
     if (attachments && attachments.length > 0) {
@@ -599,14 +676,19 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.awaitingInput = false;
     this.lastError = undefined;
     // 立即压入用户消息
-    this.messages.push({
+    const userMessage: SessionChatMessage = {
       id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       role: 'user',
       content: message,
       attachments: attachments && attachments.length > 0 ? attachments : undefined,
       timestamp: Date.now(),
-    });
-    this.notifyUpdate();
+      turn: this.turnSeq || undefined,
+      source: 'live',
+    };
+    this.messages.push(userMessage);
+    this.emitMessage(userMessage);
+    this.emitStatus({ awaitingInput: false });
+    this.notifyUpdate(true);
 
     let actualMessage = message;
     if (attachments && attachments.length > 0) {
@@ -650,7 +732,8 @@ export class PiRpcSessionInstance extends EventEmitter {
     try {
       await this.sendCommand({ type: 'abort' });
       this.isBusy = false;
-      this.notifyUpdate();
+      this.emitStatus({ isPaused: true, isBusy: false });
+      this.notifyUpdate(true);
       return true;
     } catch (e: any) {
       logger.error(`暂停会话失败: ${e.message}`, undefined, { taskId: this.taskId });
@@ -861,12 +944,102 @@ export class PiRpcSessionInstance extends EventEmitter {
     };
   }
 
-  private notifyUpdate() {
+  /**
+   * 推送增量事件（单包小、按需推送）
+   */
+  private emitEvent(event: AgentStreamEvent) {
+    this.eventSeq += 1;
+    if (process.env.NODE_ENV !== 'production' && this.eventSeq % 200 === 0) {
+      logger.debug(`[Pi RPC] 已推送 ${this.eventSeq} 个增量事件 (${event.kind})`, undefined, {
+        taskId: this.taskId,
+      });
+    }
+    if (this.onEventCallback) {
+      this.onEventCallback(event);
+    }
+    this.emit('stream', event);
+  }
+
+  /** 定位工具调用所属的消息，返回可变引用与消息 ID */
+  private findToolOwner(toolCallId: string): { messageId: string; tool: ToolExecutionRecord } | null {
+    if (toolCallId && this.currentAssistantMessage?.tools) {
+      const tool = this.currentAssistantMessage.tools.find((t) => t.id === toolCallId);
+      if (tool) return { messageId: this.currentAssistantMessage.id, tool };
+    }
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const message = this.messages[i];
+      const tool = message.tools?.find((t) => t.id === toolCallId);
+      if (tool) return { messageId: message.id, tool };
+    }
+    return null;
+  }
+
+  /** 流式文本增量：只在消息已存在时推送，避免半截消息污染状态 */
+  private emitDelta(field: 'content' | 'thinking', delta: string, flags?: { isStreaming?: boolean; isThinking?: boolean }) {
+    if (!delta) return;
+    const message = this.currentAssistantMessage;
+    if (!message) return;
+    this.emitEvent({
+      kind: 'message_delta',
+      taskId: this.taskId,
+      messageId: message.id,
+      field,
+      delta,
+      isStreaming: flags?.isStreaming,
+      isThinking: flags?.isThinking,
+    });
+  }
+
+  /** 推送完整消息（新增或既有消息的整条覆盖） */
+  private emitMessage(message: SessionChatMessage) {
+    this.emitEvent({ kind: 'message', taskId: this.taskId, message });
+  }
+
+  /** 推送消息局部变更（状态翻转、错误信息等） */
+  private emitMessagePatch(messageId: string, patch: Partial<SessionChatMessage>) {
+    this.emitEvent({ kind: 'message_patch', taskId: this.taskId, messageId, patch });
+  }
+
+  /** 推送工具调用状态 */
+  private emitTool(messageId: string, tool: ToolExecutionRecord) {
+    this.emitEvent({ kind: 'tool', taskId: this.taskId, messageId, tool: compactToolForEvent(tool) });
+  }
+
+  /** 推送会话级状态位（忙碌、等待回复、模型等） */
+  private emitStatus(patch: AgentStatusEvent['patch']) {
+    this.emitEvent({ kind: 'status', taskId: this.taskId, patch });
+  }
+
+  /**
+   * 全量快照：限频推送，首包立即发出，之后最多 120ms 一包
+   * @param immediate 强制立即推送（消息边界、错误、结束、进程退出等）
+   */
+  private notifyUpdate(immediate = false) {
+    if (this.snapshotTimer) {
+      if (!immediate) {
+        this.snapshotPending = true;
+        return;
+      }
+      clearTimeout(this.snapshotTimer);
+      this.snapshotTimer = undefined;
+      this.snapshotPending = false;
+    }
+
     const state = this.getState();
     if (this.onUpdateCallback) {
       this.onUpdateCallback(state);
     }
     this.emit('update', state);
+    this.emitEvent({ kind: 'snapshot', taskId: this.taskId, state });
+
+    if (immediate) return;
+    this.snapshotTimer = setTimeout(() => {
+      this.snapshotTimer = undefined;
+      if (!this.snapshotPending) return;
+      this.snapshotPending = false;
+      this.notifyUpdate();
+    }, PI_SNAPSHOT_INTERVAL_MS);
+    this.snapshotTimer.unref?.();
   }
 
   /**
@@ -890,7 +1063,8 @@ export class PiRpcSessionInstance extends EventEmitter {
       } catch (_) {}
       this.child = null;
     }
-    this.notifyUpdate();
+    this.emitStatus({ active: false, isBusy: false });
+    this.notifyUpdate(true);
   }
 }
 

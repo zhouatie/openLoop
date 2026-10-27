@@ -25,8 +25,9 @@ import {
 import { createLogger } from '../logger';
 import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
 import { sanitizeChatMessages } from '../agent/agent-format';
+import { piSessionIndex } from '../agent/session-index';
+import { agentSessionHost } from '../agent/agent-session-host';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
-import { PiWebManager } from '../agent/pi-web-manager';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
 import { IosDeviceManager } from '../qa/ios-device-manager';
@@ -121,6 +122,19 @@ export class OpenLoopServer {
 
     this.engine.on('agent:chat_update', (data) => {
       this.broadcast({ type: 'agent:chat_update', data });
+    });
+
+    // Agent 会话增量事件：流式期间只推变化部分，快照仍走 agent:chat_update
+    this.engine.on('agent:stream', (event) => {
+      this.broadcast({ type: 'agent:stream', data: event });
+    });
+
+    // 不绑定任务的全局 Agent 会话（侧边栏「智能体开发」）：事件同样并入同一条推流通道
+    agentSessionHost.onStream((event) => {
+      this.broadcast({ type: 'agent:stream', data: event });
+    });
+    agentSessionHost.on('update', (state) => {
+      this.broadcast({ type: 'agent:chat_update', data: state });
     });
 
     // 流程编排智能体 Copilot 状态推流广播
@@ -233,10 +247,6 @@ export class OpenLoopServer {
   public async stop(): Promise<void> {
     this.scheduler.stop();
     this.unsubscribeDeviceLeases?.();
-
-    try {
-      await PiWebManager.getInstance().stop();
-    } catch {}
 
     for (const ws of this.clients) {
       ws.close();
@@ -663,26 +673,87 @@ export class OpenLoopServer {
         }, reqMeta);
       }
 
-      // Pi Web 管理 API
-      if (pathname === '/api/pi-web/status' && method === 'GET') {
-        const status = await PiWebManager.getInstance().getStatus();
-        return this.sendJson(res, 200, status, reqMeta);
+      // Agent 会话浏览：pi 把会话存成 JSONL 文件，没有列举接口，这里按目录索引
+      if (pathname === '/api/agent/sessions' && method === 'GET') {
+        const cwd = parsedUrl.searchParams.get('cwd') || undefined;
+        const limit = Number(parsedUrl.searchParams.get('limit') || 0);
+        const sessions = await piSessionIndex.list({ cwd, limit });
+        return this.sendJson(
+          res,
+          200,
+          { root: piSessionIndex.getRootDir(), total: sessions.length, sessions },
+          reqMeta
+        );
       }
 
-      if (pathname === '/api/pi-web/start' && method === 'POST') {
-        const body = await this.parseJsonBody(req).catch(() => ({}));
-        const status = await PiWebManager.getInstance().start(body?.port);
-        return this.sendJson(res, 200, status, reqMeta);
+      // 读取单个历史会话的消息序列（活动分支）
+      const agentSessionMatch = pathname.match(/^\/api\/agent\/sessions\/([^/]+)$/);
+      if (agentSessionMatch && method === 'GET') {
+        const sessionKey = decodeURIComponent(agentSessionMatch[1]);
+        const limit = Number(parsedUrl.searchParams.get('limit') || 0);
+        const detail = await piSessionIndex.read(sessionKey, { limit });
+        if (!detail) {
+          return this.sendJson(res, 404, { error: 'Session Not Found' }, reqMeta);
+        }
+        return this.sendJson(res, 200, detail, reqMeta);
       }
 
-      if (pathname === '/api/pi-web/stop' && method === 'POST') {
-        const status = await PiWebManager.getInstance().stop();
-        return this.sendJson(res, 200, status, reqMeta);
+      // 当前活跃的全局 Agent 会话（用于界面判断哪些会话可实时连接）
+      if (pathname === '/api/agent/live' && method === 'GET') {
+        return this.sendJson(res, 200, { sessions: agentSessionHost.listLive() }, reqMeta);
       }
 
-      if (pathname === '/api/pi-web/restart' && method === 'POST') {
-        const status = await PiWebManager.getInstance().restart();
-        return this.sendJson(res, 200, status, reqMeta);
+      // 读取某个全局会话的实时状态（进程未启动时返回 null，界面改用历史消息）
+      const agentLiveMatch = pathname.match(/^\/api\/agent\/sessions\/(.+)\/live$/);
+      if (agentLiveMatch && method === 'GET') {
+        const sessionKey = decodeURIComponent(agentLiveMatch[1]);
+        return this.sendJson(res, 200, { state: agentSessionHost.getState(sessionKey) || null }, reqMeta);
+      }
+
+      // 全局 Agent 会话控制：打开 / 发消息 / 暂停 / 继续 / 停止
+      const agentActionMatch = pathname.match(/^\/api\/agent\/sessions\/(.+)\/(chat|open|pause|resume|stop)$/);
+      if (agentActionMatch) {
+        const sessionKey = decodeURIComponent(agentActionMatch[1]);
+        const action = agentActionMatch[2];
+        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+
+        if (method !== 'POST') {
+          return this.sendJson(res, 405, { error: 'Method Not Allowed' }, reqMeta);
+        }
+
+        try {
+          if (action === 'open') {
+            const result = await agentSessionHost.open(sessionKey, {
+              cwd: body?.cwd,
+              model: body?.model,
+              thinking: body?.thinking,
+            });
+            return this.sendJson(res, 200, result, reqMeta);
+          }
+          if (action === 'chat') {
+            const message = typeof body?.message === 'string' ? body.message.trim() : '';
+            if (!message) {
+              return this.sendJson(res, 400, { error: '缺少 message' }, reqMeta);
+            }
+            const state = await agentSessionHost.chat(sessionKey, message, {
+              cwd: body?.cwd,
+              model: body?.model,
+              attachments: Array.isArray(body?.attachments) ? body.attachments : undefined,
+              thinking: body?.thinking,
+            });
+            return this.sendJson(res, 200, state, reqMeta);
+          }
+          if (action === 'pause') {
+            return this.sendJson(res, 200, { success: await agentSessionHost.pause(sessionKey) }, reqMeta);
+          }
+          if (action === 'resume') {
+            return this.sendJson(res, 200, { success: await agentSessionHost.resume(sessionKey) }, reqMeta);
+          }
+          return this.sendJson(res, 200, { success: agentSessionHost.stop(sessionKey) }, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[Agent:Session] ${action} 失败: ${err?.message || err}`);
+          return this.sendJson(res, 500, { error: err?.message || 'Agent 会话操作失败' }, reqMeta);
+        }
       }
 
       // Workflows

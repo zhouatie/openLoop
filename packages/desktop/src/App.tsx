@@ -15,7 +15,7 @@ import { WorkflowListView } from './views/WorkflowListView';
 import { WorkflowEditorView } from './views/WorkflowEditorView';
 import { AutomationListView } from './views/AutomationListView';
 import { QaAutomationView } from './views/QaAutomationView';
-import { AgentStudioView } from './views/AgentStudioView';
+import { GlobalAgentPanel } from './agent-ui';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
 import { PluginSandboxContainer } from './components/PluginSandboxContainer';
@@ -449,15 +449,10 @@ export const AppContent: React.FC = () => {
             <QaAutomationView />
           )}
 
-          {/* Pi Web 智能体开发工作台 (Keep-Alive 保活机制，切屏会话不中断) */}
-          <AgentStudioView
-            isVisible={activePluginId === 'agent-studio'}
-            currentWorkspace={
-              selectedWorkspaceFilter !== 'all' && selectedWorkspaceFilter !== 'none'
-                ? selectedWorkspaceFilter
-                : undefined
-            }
-          />
+          {/* 智能体开发工作台：pi 会话整页形态，切换侧边栏时保留会话壳（面板内部自持状态） */}
+          <div className={`absolute inset-0 ${activePluginId === 'agent-studio' ? '' : 'hidden'}`}>
+            <GlobalAgentPanel mode="page" />
+          </div>
 
           {isSettings && (
             <SettingsView

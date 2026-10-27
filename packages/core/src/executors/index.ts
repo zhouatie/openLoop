@@ -5,6 +5,7 @@ import os from 'os';
 import { WorkflowNode, WorkflowDefinition, Task, LogEntry, NodeRun, TaskSessionState, QaSuite, QaStep, TaskAttachment } from '../types';
 import { createLogger } from '../logger';
 import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
+import type { AgentStreamEvent } from '../agent/agent-events';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 import {
   getAgentProviderMeta,
@@ -79,6 +80,8 @@ export interface ExecutionContext {
   registerChildProcess?: (child: ChildProcess) => void;
   abortSignal?: AbortSignal;
   onSessionUpdate?: (state: TaskSessionState) => void;
+  /** 会话增量事件：流式推送用，避免每 token 都走全量快照 */
+  onSessionEvent?: (event: AgentStreamEvent) => void;
   store?: any;
 }
 
@@ -612,6 +615,11 @@ export class AgentExecutor implements NodeExecutor {
           onUpdate: (state) => {
             if (ctx.onSessionUpdate) {
               ctx.onSessionUpdate(state);
+            }
+          },
+          onEvent: (event) => {
+            if (ctx.onSessionEvent) {
+              ctx.onSessionEvent(event);
             }
           },
           onFinished: (error) => {

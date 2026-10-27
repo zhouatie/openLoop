@@ -1,0 +1,99 @@
+import { useCallback, useState } from 'react';
+import type { TaskAttachment } from '@openloop/core/types';
+import { api } from '../services/api';
+import type { ComposerAttachmentItem } from './Composer';
+
+export interface PendingAttachment extends ComposerAttachmentItem {
+  attachment?: TaskAttachment;
+}
+
+export interface UseAttachmentsResult {
+  items: PendingAttachment[];
+  ready: TaskAttachment[];
+  add: (files: File[]) => void;
+  remove: (id: string) => void;
+  clear: () => void;
+  isUploading: boolean;
+}
+
+let seq = 0;
+
+/**
+ * 附件管线：只负责「选文件 → 上传 → 得到可用附件」。
+ * 由挂载方决定是否启用、发送时是否带上，面板本身不感知上传策略。
+ */
+export function useAttachments(): UseAttachmentsResult {
+  const [items, setItems] = useState<PendingAttachment[]>([]);
+
+  const add = useCallback((files: File[]) => {
+    const uploadable = files.filter((file) => file.size > 0);
+    if (uploadable.length === 0) return;
+
+    const drafts: PendingAttachment[] = uploadable.map((file) => ({
+      id: `att_${Date.now()}_${++seq}`,
+      name: file.name || '图片',
+      previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+      status: 'uploading',
+    }));
+
+    setItems((prev) => [...prev, ...drafts]);
+
+    for (let i = 0; i < drafts.length; i += 1) {
+      const draft = drafts[i];
+      const file = uploadable[i];
+      void api
+        .uploadAttachment(file)
+        .then((attachment) => {
+          if (import.meta.env?.DEV) {
+            console.log('[AgentUI:Attachments] 附件已上传:', attachment.name, attachment.path);
+          }
+          setItems((prev) =>
+            prev.map((item) =>
+              item.id === draft.id ? { ...item, status: 'ready', attachment } : item
+            )
+          );
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : '上传失败';
+          if (import.meta.env?.DEV) {
+            console.warn('[AgentUI:Attachments] 附件上传失败:', draft.name, message);
+          }
+          setItems((prev) =>
+            prev.map((item) =>
+              item.id === draft.id ? { ...item, status: 'error', errorMessage: message } : item
+            )
+          );
+        });
+    }
+  }, []);
+
+  const remove = useCallback((id: string) => {
+    setItems((prev) => {
+      const target = prev.find((item) => item.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((item) => item.id !== id);
+    });
+  }, []);
+
+  const clear = useCallback(() => {
+    setItems((prev) => {
+      for (const item of prev) {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      }
+      return [];
+    });
+  }, []);
+
+  const ready = items
+    .filter((item) => item.status === 'ready' && item.attachment)
+    .map((item) => item.attachment as TaskAttachment);
+
+  return {
+    items,
+    ready,
+    add,
+    remove,
+    clear,
+    isUploading: items.some((item) => item.status === 'uploading'),
+  };
+}

@@ -327,6 +327,12 @@ export class DagEngine extends EventEmitter {
         }
         this.emit('agent:chat_update', state);
       },
+      onSessionEvent: (event) => {
+        if (abortController?.signal.aborted) return;
+        // 快照已经走 agent:chat_update 通道，这里只转发增量，避免同一份状态发两次
+        if (event.kind === 'snapshot') return;
+        this.emit('agent:stream', event);
+      },
       store: this.store,
     };
 

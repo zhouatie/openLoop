@@ -1,0 +1,249 @@
+/* 输入卡：几何取自 DSH ui-conversation InputBar（28px 圆角、底部控件行、34px 圆形发送） */
+.root {
+  --agent-composer-max-width: min(100%, 952px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+  box-sizing: border-box;
+  padding: 0 16px 8px;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: var(--agent-composer-max-width);
+  box-sizing: border-box;
+  padding-top: 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-panel);
+  background: var(--dsw-specific-input-major);
+  box-shadow: var(--dsw-elevation-soft);
+  font-family: var(--dsw-font-family);
+  font-size: 14px;
+  line-height: 24px;
+  transition: box-shadow var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.card:focus-within {
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l4);
+}
+
+.cardDragging {
+  --dsw-elevation-stroke-color: var(--dsw-alias-state-business-primary);
+}
+
+/* ---- 正文 ---- */
+.input {
+  box-sizing: border-box;
+  min-height: 36px;
+  max-height: 200px;
+  padding: 4px 14px 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  caret-color: var(--dsw-alias-state-business-primary);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  overflow-y: auto;
+}
+
+.input::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.input:disabled {
+  cursor: default;
+}
+
+/* ---- 底部控件行 ---- */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 8px 6px;
+  min-width: 0;
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.trailing {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.add {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--dsw-specific-selector);
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+@media (hover: hover) {
+  .add:hover {
+    background: var(--dsw-alias-interactive-bg-hover-solid);
+  }
+}
+
+.chip {
+  max-width: 220px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: var(--dsw-radius-sm);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hint {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.shortcutHint {
+  font-size: 11px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+.primary {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--dsw-alias-button-info-fill);
+  color: #fff;
+  cursor: pointer;
+  transform: translateY(-2px);
+  transition: background-color 100ms ease;
+}
+
+@media (hover: hover) {
+  .primary:hover:not(:disabled) {
+    background: var(--dsw-alias-button-info-hover);
+  }
+}
+
+.primary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.fileInput {
+  display: none;
+}
+
+/* ---- 附件 ---- */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 14px 0;
+}
+
+.attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 28px;
+  padding: 0 6px 0 4px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-base);
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.attachmentError {
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.attachmentThumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.attachmentIcon {
+  width: 20px;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.attachmentName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.attachmentSpinner {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--dsw-alias-border-l4);
+  border-top-color: var(--dsw-alias-state-business-primary);
+  border-radius: 50%;
+  animation: composer-spin 0.7s linear infinite;
+}
+
+@keyframes composer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.attachmentRemove {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.attachmentRemove:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}

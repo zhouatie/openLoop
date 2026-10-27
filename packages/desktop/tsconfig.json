@@ -20,7 +20,10 @@
       "@/*": ["src/*"],
       "@openloop/agent-providers": ["../core/src/constants/agent-providers.ts"],
       "@openloop/core/media-mime": ["../core/src/constants/media-mime.ts"],
-      "@openloop/core/task-summary": ["../core/src/store/task-summary.ts"]
+      "@openloop/core/task-summary": ["../core/src/store/task-summary.ts"],
+      "@openloop/core/agent-format": ["../core/src/agent/agent-format.ts"],
+      "@openloop/core/agent-events": ["../core/src/agent/agent-events.ts"],
+      "@openloop/core/types": ["../core/src/types/index.ts"]
     }
   },
   "include": ["src"]

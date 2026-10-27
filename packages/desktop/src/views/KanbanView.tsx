@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Check,
   Copy,
@@ -71,6 +71,7 @@ import {
 } from '@openloop/core/agent-format';
 import { guessImageMimeType } from '@openloop/core/media-mime';
 import { getAgentProviderMeta } from '@openloop/agent-providers';
+import { TaskAgentPanel } from '../agent-ui';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -782,6 +783,25 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       );
     }
   };
+
+  // 右栏新面板：测试产物计数与随消息发送的额外参数
+  const selectedQaTotalCount = useMemo(
+    () =>
+      (selectedQaArtifacts?.steps?.length || 0) + (selectedQaArtifacts?.screenshots?.length || 0),
+    [selectedQaArtifacts]
+  );
+
+  const buildChatSendExtra = useCallback(() => {
+    const hasSelected =
+      !!selectedQaArtifacts &&
+      ((Array.isArray(selectedQaArtifacts.steps) && selectedQaArtifacts.steps.length > 0) ||
+        (Array.isArray(selectedQaArtifacts.screenshots) &&
+          selectedQaArtifacts.screenshots.length > 0));
+    return {
+      includeQaArtifacts,
+      selectedQaArtifacts: hasSelected ? selectedQaArtifacts || undefined : undefined,
+    };
+  }, [includeQaArtifacts, selectedQaArtifacts]);
 
   // 发送消息（支持运行中无缝插话 Steer 与空闲时发起交互）
   const handleSendChat = async () => {
@@ -3858,643 +3878,56 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                     )}
                   </main>
 
-                  {/* 右栏：Agent 协作流全程同屏，翻档与对话互不打断 */}
+                  {/* 右栏：Agent 协作流，任务详情内常驻同屏 */}
                   {isAgentPaneOpen && (
                     <>
                       <div className="w-px shrink-0 bg-[#ececf0]" />
-                      <aside className="w-[clamp(340px,42%,600px)] shrink-0 flex flex-col min-h-0 bg-white px-3 pb-3">
-                        <div className="flex-1 flex flex-col min-h-0 pt-2">
-                {/* 顶部感知与控制条 */}
-                <div className="mb-2 px-3 py-2 rounded-[8px] bg-[#f9f9fb] border border-[#ececf0] flex flex-wrap items-center justify-between gap-1.5 gap-y-1">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-2 h-2 rounded-full bg-[#7c3aed] inline-block shrink-0" />
-                    <span className="text-[11.5px] font-semibold text-[#1c1c21] truncate">
-                      {curTask.kind === 'group'
-                        ? '任务组架构师'
-                        : sessionState?.agentName || getAgentProviderMeta(curTask.context?.agentProvider).label}
-                    </span>
-                    {curTask.kind === 'group' && (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eeedfd] text-[#4f46e5] text-[9.5px] font-medium border border-[#d8d6fb] shrink-0">
-                        <Layers size={9.5} />
-                        <span>规划模式 · 只读分析</span>
-                      </span>
-                    )}
-                    {(curTask.context?.sessionId || curTask.context?.piSessionId) && (
-                      <span
-                        className="text-[10px] font-mono text-[#85858d] bg-white px-1.5 py-0.5 rounded border border-[#e3e3e8] truncate max-w-[130px]"
-                        title={curTask.context?.sessionId || curTask.context?.piSessionId}
-                      >
-                        {curTask.context?.sessionId || curTask.context?.piSessionId}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {/* 代码改动文件查看与审查 */}
-                    <AgentChatChangedFiles
-                      taskId={curTask.id}
-                      taskTitle={curTask.title}
-                      isBusy={sessionState?.isBusy}
-                      sessionMessagesCount={sessionState?.messages?.length || 0}
-                    />
-
-                    {/* 会话状态微徽章 */}
-                    {(() => {
-                      const isCurTaskAgentRunning =
-                        curTask.status === 'running' &&
-                        wfMap.get(curTask.workflowId)?.nodes.find((n) => n.id === curTask.currentNodeId)?.type === 'agent';
-                      const hasSessionCodeChanges = !!sessionState?.messages?.some((msg) =>
-                        msg.tools?.some(
-                          (t) => (t.name === 'edit' || t.name === 'write' || t.name === 'patch') && t.status !== 'error'
-                        )
-                      );
-                      const showAwaitingBar = !!(sessionState?.awaitingInput && isCurTaskAgentRunning);
-
-                      if (sessionState?.isBusy) {
-                        return (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eff6ff] text-[#2563eb] text-[10px] font-medium border border-[#bfdbfe]/60">
-                            <Loader2 size={10} className="animate-spin" />
-                            <span>执行中</span>
-                          </span>
-                        );
-                      }
-                      if (sessionState?.isPaused) {
-                        return (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fffbeb] text-[#d97706] text-[10px] font-medium border border-[#fde68a]">
-                            <Pause size={10} />
-                            <span>已暂停</span>
-                          </span>
-                        );
-                      }
-                      if (showAwaitingBar) {
-                        return (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eef2ff] text-[#4338ca] text-[10px] font-medium border border-[#c7d2fe]">
-                            <MessageSquare size={10} />
-                            <span>{hasSessionCodeChanges ? '待确认放行' : '等待回复'}</span>
-                          </span>
-                        );
-                      }
-                      if (sessionState?.lastError) {
-                        return (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10px] font-medium border border-[#fecaca]/60">
-                            <AlertCircle size={10} />
-                            <span>调用异常</span>
-                          </span>
-                        );
-                      }
-                      return (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#ecfdf5] text-[#059669] text-[10px] font-medium border border-[#a7f3d0]/60">
-                          <Check size={10} />
-                          <span>就绪 / 空闲</span>
-                        </span>
-                      );
-                    })()}
-
-                    {/* 运行中：显示暂停按钮 */}
-                    {sessionState?.isBusy && (
-                      <button
-                        disabled={isPausingSession}
-                        onClick={handleTogglePauseSession}
-                        className="h-[22px] px-2 rounded-[4px] border border-[#e3e3e8] bg-white hover:bg-[#fee2e2] text-[#4b4b53] hover:text-[#d64545] text-[10.5px] font-medium flex items-center gap-1 transition-all shadow-sm"
-                        title="暂停智能体当前思考与执行"
-                      >
-                        <Pause size={10} />
-                        <span>{isPausingSession ? '暂停中' : '暂停'}</span>
-                      </button>
-                    )}
-
-                    {/* 已暂停：显示继续恢复按钮 */}
-                    {sessionState?.isPaused && (
-                      <button
-                        disabled={isPausingSession}
-                        onClick={handleTogglePauseSession}
-                        className="h-[22px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10.5px] font-medium flex items-center gap-1 transition-all shadow-sm"
-                        title="恢复智能体会话继续推进"
-                      >
-                        <Play size={10} strokeWidth={2.4} />
-                        <span>{isPausingSession ? '恢复中' : '继续'}</span>
-                      </button>
-                    )}
-
-                    {/* 在系统终端拉起接管 */}
-                    <button
-                      onClick={() => handleResumeTerminal(curTask.id)}
-                      className="h-[22px] px-1.5 rounded-[4px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[#85858d] hover:text-[#1c1c21] text-[10.5px] flex items-center gap-1 transition-all"
-                      title="在 macOS 终端中接管此会话"
-                    >
-                      <ExternalLink size={10.5} />
-                      <span>终端</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 消息滚动流与浮动查看最新指示器 */}
-                <div className="relative flex-1 min-h-0 flex flex-col">
-                  <div
-                    ref={chatScrollContainerRef}
-                    onScroll={handleChatScroll}
-                    onWheel={handleChatWheel}
-                    className="flex-1 overflow-y-auto pr-1 space-y-3 min-h-0 text-[12px]"
-                  >
-                  {chatMessageList}
-                  <div ref={chatMessagesEndRef} />
-                </div>
-
-                {/* 离开底部后的浮动「查看最新」胶囊按钮 */}
-                <ChatScrollToLatestButton
-                  visible={!isChatAtBottom}
-                  hasNewOutput={hasNewChatOutput}
-                  onClick={() => scrollChatToBottom(true)}
-                />
-              </div>
-
-                {/* 贴底悬浮输入框区 */}
-                <div className="pt-2.5 border-t border-[#ececf0] bg-white shrink-0">
-                  {(() => {
-                    const isCurTaskAgentRunning =
-                      curTask.status === 'running' &&
-                      wfMap.get(curTask.workflowId)?.nodes.find((n) => n.id === curTask.currentNodeId)?.type === 'agent';
-                    const hasSessionCodeChanges = !!sessionState?.messages?.some((msg) =>
-                      msg.tools?.some(
-                        (t) => (t.name === 'edit' || t.name === 'write' || t.name === 'patch') && t.status !== 'error'
-                      )
-                    );
-                    const showAwaitingBar = !!(sessionState?.awaitingInput && isCurTaskAgentRunning);
-
-                    return (
-                      <>
-                        {showAwaitingBar && hasSessionCodeChanges && (
-                          <AgentAwaitingInputBar
-                            hasCodeChanges={hasSessionCodeChanges}
-                            onConfirmComplete={handleConfirmCompleteNode}
-                          />
-                        )}
-
-                        {/* 状态轻量提示 */}
-                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[10.5px] text-[#85858d] mb-1.5 px-0.5">
-                          <span className="flex items-center gap-1">
-                            {sessionState?.isBusy ? (
-                              <>
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-ping" />
-                                <span className="text-[#7c3aed] font-medium">运行中：发送将无缝插话 (Steer)</span>
-                              </>
-                            ) : sessionState?.isPaused ? (
-                              <>
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#b45309]" />
-                                <span className="text-[#b45309] font-medium">已暂停：发送新指令将继续推进</span>
-                              </>
-                            ) : showAwaitingBar ? (
-                              hasSessionCodeChanges ? (
-                                <>
-                                  <span className="w-1.5 h-1.5 rounded-full bg-[#059669]" />
-                                  <span className="text-[#059669] font-medium">代码已修改：可点击上方按钮放行流转，或输入修改意见</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5]" />
-                                  <span className="text-[#4f46e5] font-medium">等待你的指令：直接在下方输入指令即可继续推进</span>
-                                </>
-                              )
-                            ) : (
-                              <span>可向当前智能体会话追问或补充指令</span>
-                            )}
-                          </span>
-                          <span className="font-mono text-[#a5a5b0] text-[10px]">⌘ + Enter 发送</span>
-                        </div>
-                      </>
-                    );
-                  })()}
-
-                  {/* 隐藏的图片选择器 */}
-                  <input
-                    type="file"
-                    ref={chatFileInputRef}
-                    onChange={(e) => {
-                      if (e.target.files) {
-                        uploadChatFiles(Array.from(e.target.files));
-                        e.target.value = '';
-                      }
-                    }}
-                    accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
-                    multiple
-                    className="hidden"
-                  />
-
-                  {/* 极简精致输入卡片 */}
-                  <div
-                    onDragOver={handleChatDragOver}
-                    onDragLeave={handleChatDragLeave}
-                    onDrop={handleChatDrop}
-                    className={`relative rounded-[8px] border transition-all ${
-                      isChatDragging
-                        ? 'border-[#4f46e5] ring-2 ring-[#4f46e5]/20 bg-[#f5f4ff]'
-                        : 'border-[#e3e3e8] focus-within:border-[#1c1c21]/40 focus-within:shadow-[0_2px_8px_rgba(0,0,0,0.06)] bg-white'
-                    } p-2`}
-                  >
-                    {/* 拖拽释放遮罩 */}
-                    {isChatDragging && (
-                      <div className="absolute inset-0 z-20 rounded-[7px] bg-[#4f46e5]/10 border-2 border-dashed border-[#4f46e5] flex items-center justify-center pointer-events-none backdrop-blur-[0.5px]">
-                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#4f46e5]">
-                          <ImageIcon size={14} />
-                          <span>松开鼠标添加图片到 Agent 对话</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 待发送图片缩略图条带 */}
-                    {(chatAttachments.length > 0 || pendingChatUploads.length > 0) && (
-                      <div className="mb-2 pb-1.5 border-b border-[#f0f0f4] flex items-center gap-1.5 overflow-x-auto scrollbar-thin">
-                        {chatAttachments.map((att) => {
-                          const displayUrl = api.getAttachmentUrl(att.url);
-                          return (
-                            <div
-                              key={att.id}
-                              className="group relative w-[46px] h-[46px] shrink-0 rounded-[6px] border border-[#e3e3e8] bg-white overflow-hidden shadow-xs hover:border-[#4f46e5] transition-all cursor-pointer select-none"
-                              onClick={() => {
-                                setActiveDetailImageList(chatAttachments);
-                                setActiveDetailImage(att);
-                              }}
-                              title={`${att.name}\n${(att.size / 1024).toFixed(0)} KB\n点击放大查看`}
-                            >
-                              <img src={displayUrl} alt={att.name} className="w-full h-full object-cover" />
-                              <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1 transition-opacity">
-                                <div className="p-0.5 rounded bg-white/20 text-white" title="放大">
-                                  <ZoomIn size={10} />
-                                </div>
+                      <aside className="w-[clamp(360px,42%,640px)] shrink-0 flex flex-col min-h-0 overflow-hidden">
+                        <TaskAgentPanel
+                          taskId={curTask.id}
+                          taskTitle={curTask.kind === 'group' ? '任务组架构师' : curTask.title}
+                          mode="inline"
+                          model={sessionState?.model}
+                          sendExtra={buildChatSendExtra}
+                          headerExtra={
+                            <>
+                              <AgentChatChangedFiles
+                                taskId={curTask.id}
+                                taskTitle={curTask.title}
+                                isBusy={sessionState?.isBusy}
+                                sessionMessagesCount={sessionState?.messages?.length || 0}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setIsQaSelectorOpen(true)}
+                                className="h-[22px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] text-[10.5px] font-medium text-[#4b4b53]"
+                                title="选择要随消息发送的 QA 测试产物"
+                              >
+                                {selectedQaTotalCount > 0
+                                  ? `测试产物 · ${selectedQaTotalCount}`
+                                  : '测试产物'}
+                              </button>
+                              {sessionState?.isPaused && (
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRemoveChatAttachment(att.id);
-                                  }}
-                                  className="p-0.5 rounded bg-white/20 hover:bg-red-500/80 text-white"
-                                  title="移除"
+                                  disabled={isPausingSession}
+                                  onClick={handleTogglePauseSession}
+                                  className="h-[22px] px-2 rounded-[5px] bg-[#1c1c21] text-white text-[10.5px] font-medium hover:bg-[#2e2f36]"
                                 >
-                                  <X size={10} />
+                                  {isPausingSession ? '恢复中' : '继续'}
                                 </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-
-                        {pendingChatUploads.map((pending) => (
-                          <div
-                            key={pending.tempId}
-                            className={`group relative w-[46px] h-[46px] shrink-0 rounded-[6px] border overflow-hidden shadow-xs transition-all cursor-pointer ${
-                              pending.status === 'error' ? 'border-red-300 bg-red-50/50' : 'border-[#4f46e5]/40 bg-[#f4f4f6]'
-                            }`}
-                            title={
-                              pending.status === 'error'
-                                ? `${pending.name}\n上传失败: ${pending.errorMessage || '异常'}\n点击重新上传`
-                                : pending.name
-                            }
-                            onClick={() => {
-                              if (pending.status === 'error') {
-                                handleRetryChatUpload(pending);
-                              } else {
-                                const validPendingList: TaskAttachment[] = pendingChatUploads
-                                  .filter((p) => p.status !== 'error')
-                                  .map((p) => ({
-                                    name: p.name,
-                                    url: p.previewUrl,
-                                    size: p.size,
-                                    id: p.tempId,
-                                    mimeType: p.file.type,
-                                    path: '',
-                                    createdAt: Date.now(),
-                                  }));
-                                setActiveDetailImageList(validPendingList);
-                                setActiveDetailImage({
-                                  name: pending.name,
-                                  url: pending.previewUrl,
-                                  size: pending.size,
-                                  id: pending.tempId,
-                                  mimeType: pending.file.type,
-                                  path: '',
-                                  createdAt: Date.now(),
-                                });
-                              }
-                            }}
-                          >
-                            <img
-                              src={pending.previewUrl}
-                              alt={pending.name}
-                              className={`w-full h-full object-cover ${pending.status === 'uploading' ? 'opacity-60 blur-[0.5px]' : ''}`}
-                            />
-                            {pending.status === 'uploading' ? (
-                              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/30 text-white">
-                                <Loader2 size={11} className="animate-spin text-white mb-0.5" />
-                                <span className="text-[7px] font-mono">上传中</span>
-                              </div>
-                            ) : (
-                              <div className="absolute inset-0 flex flex-col items-center justify-center bg-red-900/60 text-white p-0.5 text-center">
-                                <AlertCircle size={10} className="text-red-300 mb-0.5" />
-                                <span className="text-[6.5px] truncate max-w-full text-red-200">重试</span>
-                              </div>
-                            )}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRemovePendingChat(pending.tempId);
-                              }}
-                              className="absolute top-0.5 right-0.5 w-3 h-3 rounded-full bg-black/60 hover:bg-black text-white flex items-center justify-center text-[8px]"
-                              title="取消"
-                            >
-                              <X size={8} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* 精选 QA 自动化测试产物微胶囊面板 */}
-                    {selectedQaArtifacts && (selectedQaArtifacts.screenshots?.length > 0 || selectedQaArtifacts.steps?.length > 0) ? (
-                      <div className="mb-2 p-2 rounded-[7px] bg-[#f9f9fb] border border-[#e3e3e8] space-y-1.5">
-                        <div className="flex items-center justify-between text-[11px]">
-                          <div className="flex items-center gap-1.5 font-medium text-[#4f46e5]">
-                            <FlaskConical size={12} />
-                            <span>已选测试产物</span>
-                            <span className="text-[10px] text-[#71717a] font-normal">
-                              ({selectedQaArtifacts.steps?.length || 0} 流程, {selectedQaArtifacts.screenshots?.length || 0} 截图)
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setIsQaSelectorOpen(true)}
-                              className="text-[10.5px] text-[#4f46e5] hover:underline cursor-pointer font-medium"
-                            >
-                              修改选择
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedQaArtifacts(null)}
-                              className="text-[10.5px] text-[#85858d] hover:text-[#dc2626] cursor-pointer"
-                            >
-                              清空
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* 选中的截图横排微缩略图 */}
-                        {selectedQaArtifacts.screenshots && selectedQaArtifacts.screenshots.length > 0 && (
-                          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-0.5">
-                            {selectedQaArtifacts.screenshots.map((sc, scIdx) => (
-                              <div
-                                key={sc.name + scIdx}
-                                className="group/sc relative shrink-0 w-[46px] h-[32px] rounded-[4px] border border-[#d8d6fb] overflow-hidden bg-black/5"
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleResumeTerminal(curTask.id)}
+                                className="h-[22px] px-1.5 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[10.5px] text-[#85858d] hover:text-[#1c1c21]"
+                                title="在系统终端中接管此会话"
                               >
-                                <img src={sc.url} alt={sc.name} className="w-full h-full object-cover" />
-                                <div className="absolute inset-0 bg-black/35 opacity-0 group-hover/sc:opacity-100 transition-opacity flex items-center justify-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveLightboxImage({ name: sc.name, url: sc.url })}
-                                    className="text-white hover:scale-110 transition-transform cursor-pointer"
-                                    title="放大预览"
-                                  >
-                                    <ZoomIn size={10} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedQaArtifacts((prev) => {
-                                        if (!prev) return null;
-                                        const nextScreenshots = prev.screenshots.filter((_, idx) => idx !== scIdx);
-                                        return { ...prev, screenshots: nextScreenshots };
-                                      });
-                                    }}
-                                    className="text-white hover:text-red-300 transition-colors cursor-pointer"
-                                    title="移除此截图"
-                                  >
-                                    <X size={10} />
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* 选中的操作步骤流程标签 */}
-                        {selectedQaArtifacts.steps && selectedQaArtifacts.steps.length > 0 && (
-                          <div className="flex flex-wrap gap-1">
-                            {selectedQaArtifacts.steps.map((st, stIdx) => (
-                              <span
-                                key={st.stepIndex}
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] font-medium border ${
-                                  st.status === 'failed'
-                                    ? 'bg-[#fef2f2] text-[#dc2626] border-[#fecaca]/70'
-                                    : 'bg-white text-[#4b4b53] border-[#e3e3e8]'
-                                }`}
-                              >
-                                <span className="font-mono">#{st.stepIndex + 1}</span>
-                                <span className="truncate max-w-[150px]">{st.prompt}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedQaArtifacts((prev) => {
-                                      if (!prev) return null;
-                                      const nextSteps = prev.steps.filter((_, idx) => idx !== stIdx);
-                                      return { ...prev, steps: nextSteps };
-                                    });
-                                  }}
-                                  className="hover:opacity-75 cursor-pointer ml-0.5"
-                                  title="移除此步骤"
-                                >
-                                  <X size={9} />
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : includeQaArtifacts ? (
-                      /* 原有全量附带测试产物微胶囊 */
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-1 bg-[#f0f0ff] border border-[#d8d6fb] rounded-[5px] px-2 py-1">
-                        <div className="inline-flex items-center gap-1.5 text-[#4f46e5] text-[10.5px] font-medium select-none">
-                          <FlaskConical size={11} className="text-[#4f46e5]" />
-                          <span>本次将附带全量最新测试产物</span>
-                          {currentQaRunId && (
-                            <span
-                              className="text-[9.5px] font-mono text-[#4f46e5]/80 bg-white/90 px-1 py-0.5 rounded border border-[#4f46e5]/20 max-w-[130px] truncate"
-                              title={currentQaRunId}
-                            >
-                              {currentQaRunId}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setIsQaSelectorOpen(true)}
-                            className="text-[10px] text-[#4f46e5] hover:underline cursor-pointer font-medium"
-                          >
-                            精细选择...
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setIncludeQaArtifacts(false)}
-                            className="w-3.5 h-3.5 rounded-full hover:bg-[#4f46e5]/15 flex items-center justify-center text-[#4f46e5] transition-colors cursor-pointer"
-                            title="取消附带测试产物"
-                          >
-                            <X size={9} strokeWidth={2.5} />
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <AgentAutocompletePopover
-                      ref={chatAutocompleteRef}
-                      taskId={curTask.id}
-                      textareaRef={chatTextareaRef}
-                      value={chatInput}
-                      onChange={setChatInput}
-                      onClearSession={() => {
-                        if (sessionState) {
-                          const next = { ...sessionState, messages: [] };
-                          cacheSessionState(curTask.id, next);
-                          setSessionState(next);
-                        }
-                      }}
-                      onPauseSession={handleTogglePauseSession}
-                      onResumeSession={handleTogglePauseSession}
-                    />
-
-                    <textarea
-                      ref={chatTextareaRef}
-                      value={chatInput}
-                      onChange={(e) => {
-                        setChatInput(e.target.value);
-                        e.target.style.height = 'auto';
-                        e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
-                      }}
-                      onPaste={handleChatPaste}
-                      onKeyDown={(e) => {
-                        if (chatAutocompleteRef.current?.handleKeyDown(e)) {
-                          return;
-                        }
-                        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                          e.preventDefault();
-                          handleSendChat();
-                        }
-                      }}
-                      placeholder="给 Agent 发送指令或反馈... 支持粘贴截图 ⌘V 或拖拽图片"
-                      rows={2}
-                      className="w-full resize-none border-none outline-none text-[12px] text-[#1c1c21] placeholder:text-[#a5a5b0] bg-transparent leading-relaxed"
-                    />
-
-                    {/* 底部工具条：添加图片 + 附带测试产物 + 重测QA + 字数 + 发送按钮 */}
-                    <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1.5 border-t border-[#f4f4f6]">
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => chatFileInputRef.current?.click()}
-                          className="h-[22px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] hover:border-[#1c1c21]/30 text-[#63636b] hover:text-[#1c1c21] text-[10.5px] font-medium flex items-center gap-1 transition-all"
-                          title="选择本地图片发送给 Agent"
-                        >
-                          <Plus size={10.5} strokeWidth={2.5} />
-                          <ImageIcon size={10.5} />
-                          <span>图片</span>
-                        </button>
-
-                        {/* 选择测试产物按钮 */}
-                        {hasQaArtifacts && (
-                          <button
-                            type="button"
-                            onClick={() => setIsQaSelectorOpen(true)}
-                            className={`h-[22px] px-2 rounded-[5px] border text-[10.5px] font-medium flex items-center gap-1 transition-all cursor-pointer ${
-                              (selectedQaArtifacts && (selectedQaArtifacts.screenshots?.length > 0 || selectedQaArtifacts.steps?.length > 0)) || includeQaArtifacts
-                                ? 'border-[#4f46e5]/40 bg-[#eeedfd] text-[#4f46e5] shadow-xs font-semibold'
-                                : 'border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] hover:border-[#1c1c21]/30 text-[#63636b] hover:text-[#1c1c21]'
-                            }`}
-                            title="精细选择 UI 自动化测试截帧与操作流程发给 Agent"
-                          >
-                            <FlaskConical size={10.5} className={(selectedQaArtifacts || includeQaArtifacts) ? 'text-[#4f46e5]' : ''} />
-                            <span>
-                              {selectedQaArtifacts && (selectedQaArtifacts.screenshots?.length > 0 || selectedQaArtifacts.steps?.length > 0)
-                                ? `已选产物 (${(selectedQaArtifacts.steps?.length || 0) + (selectedQaArtifacts.screenshots?.length || 0)})`
-                                : includeQaArtifacts
-                                ? '已带全量测试产物'
-                                : '选择测试产物'}
-                            </span>
-                            {(selectedQaArtifacts || includeQaArtifacts) && <Check size={10} strokeWidth={2.5} />}
-                          </button>
-                        )}
-
-                        {hasQaArtifacts && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const targetQaNodeId = resolveQaTestNodeId(curTask, wfDef);
-                              if (import.meta.env?.DEV) {
-                                console.log('[KanbanView:AgentPanel] 点击重测 QA 节点:', {
-                                  taskId: curTask.id,
-                                  workflowId: curTask.workflowId,
-                                  targetQaNodeId,
-                                });
-                              }
-                              handleRetryNode(curTask.id, targetQaNodeId);
-                            }}
-                            disabled={retryingNodeKey?.startsWith(curTask.id)}
-                            className="h-[22px] px-2 rounded-[5px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[10.5px] font-medium flex items-center gap-1 transition-all cursor-pointer"
-                            title="修改代码后直接重新跑 QA 自动化测试与截帧"
-                          >
-                            <RotateCcw size={10} className={retryingNodeKey?.startsWith(curTask.id) ? 'animate-spin' : ''} />
-                            <span>重测 QA</span>
-                          </button>
-                        )}
-                        {chatAttachments.length > 0 && (
-                          <span className="text-[10px] font-mono text-[#85858d]">
-                            已选 {chatAttachments.length} 张
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {/* 当前使用的模型微胶囊 */}
-                        <div
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#71717a] hover:text-[#1c1c21] border border-[#e3e3e8] hover:border-[#d0d0d7] text-[10px] font-mono select-none transition-colors shrink-0"
-                          title={`当前使用模型: ${effectiveChatModel}${sessionState?.pendingModel ? ` (待生效: ${sessionState.pendingModel})` : ''}`}
-                        >
-                          <Cpu size={10} className="text-[#85858d] shrink-0" />
-                          <span className="truncate max-w-[120px]">{effectiveChatModel}</span>
-                          {sessionState?.pendingModel && (
-                            <span className="text-[9px] text-[#d97706] shrink-0 font-sans">(切换中)</span>
-                          )}
-                        </div>
-
-                        {chatInput.length > 0 && (
-                          <span className="text-[10px] text-[#85858d] font-mono shrink-0">
-                            {chatInput.length} 字
-                          </span>
-                        )}
-                        <button
-                          disabled={
-                            (!chatInput.trim() &&
-                              chatAttachments.length === 0 &&
-                              !includeQaArtifacts &&
-                              !(selectedQaArtifacts && (selectedQaArtifacts.screenshots?.length > 0 || selectedQaArtifacts.steps?.length > 0))) ||
-                            isSendingChat
+                                终端
+                              </button>
+                            </>
                           }
-                          onClick={handleSendChat}
-                          className={`h-[24px] px-3 rounded-[5px] text-[11px] font-medium flex items-center gap-1 transition-all ${
-                            (chatInput.trim() ||
-                              chatAttachments.length > 0 ||
-                              includeQaArtifacts ||
-                              (selectedQaArtifacts && (selectedQaArtifacts.screenshots?.length > 0 || selectedQaArtifacts.steps?.length > 0))) &&
-                            !isSendingChat
-                              ? 'bg-[#1c1c21] hover:bg-[#2e2f36] text-white shadow-sm active:scale-95 cursor-pointer'
-                              : 'bg-[#f4f4f6] text-[#a5a5b0] cursor-not-allowed'
-                          }`}
-                        >
-                          {isSendingChat ? <Loader2 size={10.5} className="animate-spin" /> : <Send size={10.5} />}
-                          <span>发送</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                      </div>
+                        />
                       </aside>
                     </>
                   )}

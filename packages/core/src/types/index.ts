@@ -110,13 +110,32 @@ export interface TaskNodeOverride {
   params?: Record<string, string>;   // 覆盖节点声明的可调参数
 }
 
+/** 工具卡形态分类：仅用于界面选择渲染样式，不参与业务判定 */
+export type ToolKind = 'execute' | 'read' | 'write' | 'search' | 'browse' | 'agent' | 'media' | 'other';
+
 export interface ToolExecutionRecord {
   id: string;
   name: string;
+  /** 原始入参（保持 pi 的事件结构，不做裁剪） */
   args?: any;
+  /** 结构化输入摘要，供工具卡直接渲染（命令、路径、查询等） */
+  input?: Record<string, any>;
   result?: any;
   status: 'running' | 'success' | 'error';
   durationMs?: number;
+  /** 工具卡形态提示 */
+  kind?: ToolKind;
+}
+
+/** 单条消息的模型用量，用于输入框上方统计胶囊 */
+export interface SessionUsage {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  totalTokens?: number;
+  /** 累计成本（美元），来自 pi 的 cost.total */
+  cost?: number;
 }
 
 export interface SessionChatMessage {
@@ -131,6 +150,14 @@ export interface SessionChatMessage {
   attachments?: TaskAttachment[];
   errorMessage?: string;
   stopReason?: string;
+  /** 所属轮次序号（从 1 开始），用于轮次分组与跳转 */
+  turn?: number;
+  /** 该条消息的模型用量 */
+  usage?: SessionUsage;
+  /** 产出该条消息的模型标识 */
+  model?: string;
+  /** 消息来源：live=实时进程，history=历史会话回放 */
+  source?: 'live' | 'history';
 }
 
 export interface TaskSessionState {
@@ -692,17 +719,6 @@ export interface StorageCleanResult {
   vacuumExecuted: boolean;
   durationMs: number;
 }
-
-export interface PiWebStatus {
-  running: boolean;
-  status: 'stopped' | 'starting' | 'running' | 'error';
-  port: number;
-  url: string;
-  pid?: number;
-  error?: string;
-  installed?: boolean;
-}
-
 
 
 

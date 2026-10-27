@@ -22,7 +22,7 @@ import {
   StorageStats,
   StorageCleanOptions,
   StorageCleanResult,
-  PiWebStatus,
+  SessionChatMessage,
 } from '@openloop/core';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
@@ -880,6 +880,90 @@ export class DesktopApiService {
     });
   }
 
+  // 全局 Agent 会话（不绑定任务）：pi 会话浏览 + 直接对话
+  async getAgentSessions(params?: { cwd?: string; limit?: number }): Promise<{
+    root: string;
+    total: number;
+    sessions: Array<{
+      id: string;
+      path: string;
+      cwd: string;
+      createdAt: string;
+      modifiedAt: string;
+      messageCount: number;
+      firstUserMessage: string;
+      lastModel?: string;
+    }>;
+  }> {
+    const search = new URLSearchParams();
+    if (params?.cwd) search.set('cwd', params.cwd);
+    if (params?.limit) search.set('limit', String(params.limit));
+    const qs = search.toString() ? `?${search.toString()}` : '';
+    return requestJson(`${BASE_URL}/api/agent/sessions${qs}`);
+  }
+
+  async getAgentSession(sessionId: string, limit?: number): Promise<{
+    summary: any;
+    messages: SessionChatMessage[];
+    leafEntryId?: string;
+    model?: string;
+  }> {
+    const qs = limit ? `?limit=${limit}` : '';
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}${qs}`);
+  }
+
+  async getLiveAgentSessions(): Promise<{ sessions: string[] }> {
+    return requestJson(`${BASE_URL}/api/agent/live`);
+  }
+
+  async getLiveAgentSessionState(sessionId: string): Promise<{ state: TaskSessionState | null }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/live`);
+  }
+
+  async openAgentSession(
+    sessionId: string,
+    options?: { cwd?: string; model?: string; thinking?: string }
+  ): Promise<{ sessionId: string; state: TaskSessionState; created: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/open`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options || {}),
+    });
+  }
+
+  async sendAgentSessionMessage(
+    sessionId: string,
+    message: string,
+    options?: { cwd?: string; model?: string; thinking?: string; attachments?: TaskAttachment[] }
+  ): Promise<TaskSessionState> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 发送全局 Agent 会话消息 (${sessionId}):`, message.slice(0, 40));
+    }
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, ...(options || {}) }),
+    });
+  }
+
+  async pauseAgentSession(sessionId: string): Promise<{ success: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/pause`, {
+      method: 'POST',
+    });
+  }
+
+  async resumeAgentSession(sessionId: string): Promise<{ success: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/resume`, {
+      method: 'POST',
+    });
+  }
+
+  async stopAgentSession(sessionId: string): Promise<{ success: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/stop`, {
+      method: 'POST',
+    });
+  }
+
   async clearTaskSession(taskId: string): Promise<{ success: boolean }> {
     if (import.meta.env?.DEV) {
       console.log(`[UI:API] 请求清空任务 [${taskId}] 的 Agent 会话消息`);
@@ -1282,39 +1366,6 @@ export class DesktopApiService {
     });
   }
 
-  // ================= Pi Web Agent Studio API =================
-
-  async getPiWebStatus(): Promise<PiWebStatus> {
-    return requestJson<PiWebStatus>(`${BASE_URL}/api/pi-web/status`);
-  }
-
-  async startPiWeb(port?: number): Promise<PiWebStatus> {
-    if (import.meta.env?.DEV) {
-      console.log('[UI:PiWeb] 请求启动 Pi Web 服务, port:', port);
-    }
-    return requestJson<PiWebStatus>(`${BASE_URL}/api/pi-web/start`, {
-      method: 'POST',
-      body: JSON.stringify({ port }),
-    });
-  }
-
-  async stopPiWeb(): Promise<PiWebStatus> {
-    if (import.meta.env?.DEV) {
-      console.log('[UI:PiWeb] 请求停止 Pi Web 服务');
-    }
-    return requestJson<PiWebStatus>(`${BASE_URL}/api/pi-web/stop`, {
-      method: 'POST',
-    });
-  }
-
-  async restartPiWeb(): Promise<PiWebStatus> {
-    if (import.meta.env?.DEV) {
-      console.log('[UI:PiWeb] 请求重启 Pi Web 服务');
-    }
-    return requestJson<PiWebStatus>(`${BASE_URL}/api/pi-web/restart`, {
-      method: 'POST',
-    });
-  }
 }
 
 export const api = new DesktopApiService();

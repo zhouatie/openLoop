@@ -30,7 +30,7 @@ import type { Task, WorkflowDefinition, LogEntry, NodeStatus } from '@openloop/c
 import { api } from '../../services/api';
 import { toast } from '../../components/Toast';
 import { NodeExecutionTimeline } from '../../components/NodeExecutionTimeline';
-import { AgentSessionDrawer } from '../../components/AgentSessionDrawer';
+import { AgentSessionDrawerHost } from '../../agent-ui';
 import { resolveNodeMeta, formatDurationHuman } from '../../utils/nodeMeta';
 
 export interface WorkflowExecutionHistoryViewProps {
@@ -1242,18 +1242,13 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
         </div>
       )}
 
-      {/* Agent 实时交互与历史会话抽屉 */}
-      {activeTaskId && (
-        <AgentSessionDrawer
-          isOpen={isAgentSessionOpen}
-          onClose={() => setIsAgentSessionOpen(false)}
-          taskId={activeTaskId}
-          taskTitle={activeTaskDetail?.title}
-          nodeId={selectedSessionNodeId}
-          nodeName={selectedSessionNodeName}
-          workspace={activeTaskDetail?.workspace}
-        />
-      )}
+      {/* Agent 实时交互与历史会话抽屉（新面板） */}
+      <AgentSessionDrawerHost
+        isOpen={isAgentSessionOpen && Boolean(activeTaskId)}
+        onClose={() => setIsAgentSessionOpen(false)}
+        taskId={activeTaskId}
+        taskTitle={activeTaskDetail?.title}
+      />
     </div>
   );
 };

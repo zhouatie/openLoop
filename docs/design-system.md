@@ -129,3 +129,21 @@
   </div>
 </div>
 ```
+
+## 6. 智能体面板例外条款 (Agent Panel Exception)
+
+`packages/desktop/src/agent-ui/` 采用 DSH（DeepSeek Harness）的视觉层，与上文 Zinc 规范并存但不混用：
+
+| 维度 | 主界面 | 智能体面板 |
+|---|---|---|
+| 底色 | 页面 `#f4f4f6` + 白卡片 | `--dsw-alias-bg-base` / `--dsw-specific-sidebar-fill` |
+| 字号 | 12px 为主 | 正文 14px，流程行 13px，时间戳 10-11px |
+| 行高 | 38-42px 单行 | 项目行 34px、会话行 32px、工具行 24px |
+| 圆角 | 8px | 12px（md）、20px（xl）、28px（panel） |
+| 样式方案 | Tailwind + 设计令牌 | CSS Modules + `tokens.css` |
+
+约束：
+
+- 令牌必须落在 `.agent-scope` 作用域内，禁止泄漏到主界面。
+- 面板内禁止再用 Tailwind 原子类，几何取 DSH 源值。
+- 不引入 DeepSeek 品牌资产（鱼形 logo、wordmark、Montserrat 字体）。
