@@ -51,7 +51,12 @@ interface CacheEntry {
 }
 
 /** 单个会话文件最多解析的字节数，防止异常大文件拖垮列表 */
-const MAX_FILE_BYTES = 32 * 1024 * 1024;
+/** 摘要扫描：从头读这么多，够了（首条用户消息 + 消息计数） */
+const HEAD_SCAN_BYTES = 4 * 1024 * 1024;
+/** 摘要扫描：再从尾部补一段，拿到最后一次 model_change */
+const TAIL_SCAN_BYTES = 1 * 1024 * 1024;
+/** 消息读取窗口：优先读文件尾部，长会话的最新几轮永远可见 */
+const MAX_MESSAGE_BYTES = 12 * 1024 * 1024;
 /** 首条用户消息截断长度 */
 const TITLE_MAX_CHARS = 120;
 
@@ -210,9 +215,12 @@ export class PiSessionIndex {
   }
 
   private async readEntries(filePath: string): Promise<any[]> {
-    const raw = await readFileHead(filePath);
+    const window = await readFileTail(filePath, MAX_MESSAGE_BYTES);
+    const lines = window.text.split('\n');
+    // 窗口从中间切进来时，首行一定是残缺的
+    if (!window.fromStart) lines.shift();
     const entries: any[] = [];
-    for (const line of raw.split('\n')) {
+    for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
@@ -225,14 +233,33 @@ export class PiSessionIndex {
   }
 }
 
-async function readFileHead(filePath: string): Promise<string> {
+async function readFileHead(filePath: string, maxBytes = HEAD_SCAN_BYTES): Promise<string> {
   const handle = await fsp.open(filePath, 'r');
   try {
     const stat = await handle.stat();
-    const length = Math.min(stat.size, MAX_FILE_BYTES);
+    const length = Math.min(stat.size, maxBytes);
     const buffer = Buffer.alloc(length);
     await handle.read(buffer, 0, length, 0);
     return buffer.toString('utf-8');
+  } finally {
+    await handle.close();
+  }
+}
+
+/** 读文件尾部 window 字节；fromStart 表示是否整份读完（没被截断） */
+async function readFileTail(
+  filePath: string,
+  maxBytes: number
+): Promise<{ text: string; fromStart: boolean }> {
+  const handle = await fsp.open(filePath, 'r');
+  try {
+    const stat = await handle.stat();
+    const length = Math.min(stat.size, maxBytes);
+    const fromStart = length >= stat.size;
+    const offset = fromStart ? 0 : stat.size - length;
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, offset);
+    return { text: buffer.toString('utf-8'), fromStart };
   } finally {
     await handle.close();
   }
@@ -252,18 +279,27 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
   let firstUserMessage = '';
   let lastModel: string | undefined;
 
+  /** 开头没有 session 头的文件（例如 pi 分叉只写了增量条目）也要能读 */
+  let hasSessionHeader = false;
+  let firstLineChecked = false;
+
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    if (!header) {
+    if (!firstLineChecked) {
+      firstLineChecked = true;
       try {
-        header = JSON.parse(trimmed);
+        const first = JSON.parse(trimmed);
+        if (first?.type === 'session') {
+          header = first;
+          hasSessionHeader = true;
+          continue;
+        }
       } catch (_) {
         // 首行损坏：放弃这个文件
         return undefined;
       }
-      if (header?.type !== 'session') return undefined;
-      continue;
+      // 首行不是 session 头：当成无头文件，继续用这一行做统计
     }
     if (!trimmed.includes('"type":"message"')) {
       if (trimmed.includes('"type":"model_change"')) {
@@ -286,18 +322,36 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
     }
   }
 
-  if (!header) return undefined;
+  // 长会话：再扫一段尾部，补齐总消息数与最后一次模型
+  if (stat.size > HEAD_SCAN_BYTES) {
+    try {
+      const tail = await readFileTail(filePath, TAIL_SCAN_BYTES);
+      for (const line of tail.text.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('{') === false) continue;
+        if (trimmed.includes('"type":"message"')) messageCount += 1;
+        else if (trimmed.includes('"type":"model_change"')) {
+          try {
+            const entry = JSON.parse(trimmed);
+            if (entry?.modelId) {
+              lastModel = entry.provider ? `${entry.provider}/${entry.modelId}` : entry.modelId;
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
 
   return {
-    id: header.id || idFromFileName(filePath),
+    id: (hasSessionHeader && header?.id) || idFromFileName(filePath),
     path: filePath,
-    cwd: header.cwd || '',
-    createdAt: header.timestamp || stat.birthtime.toISOString(),
+    cwd: (hasSessionHeader && header?.cwd) || '',
+    createdAt: (hasSessionHeader && header?.timestamp) || stat.birthtime.toISOString(),
     modifiedAt: stat.mtime.toISOString(),
     messageCount,
     firstUserMessage: firstUserMessage || deriveFolderTitle(filePath),
     lastModel,
-    parentSession: header.parentSession,
+    parentSession: hasSessionHeader ? header?.parentSession : undefined,
     size: stat.size,
   };
 }

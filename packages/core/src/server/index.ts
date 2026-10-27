@@ -694,7 +694,8 @@ export class OpenLoopServer {
       if (pathname === '/api/agent/sessions' && method === 'GET') {
         const cwd = parsedUrl.searchParams.get('cwd') || undefined;
         const limit = Number(parsedUrl.searchParams.get('limit') || 0);
-        const raw = await piSessionIndex.list({ cwd, limit });
+        // 先取全量再按 limit 截断，total 才是真实会话总数
+        const raw = await piSessionIndex.list({ cwd });
         const projectMeta = agentSessionMeta.listProjects();
         const sessions = raw
           .map((session) => {
@@ -712,10 +713,12 @@ export class OpenLoopServer {
             };
           })
           .filter((session) => !session.deleted);
+        const total = sessions.length;
+        const page = limit > 0 ? sessions.slice(0, limit) : sessions;
         return this.sendJson(
           res,
           200,
-          { root: piSessionIndex.getRootDir(), total: sessions.length, sessions },
+          { root: piSessionIndex.getRootDir(), total, sessions: page },
           reqMeta
         );
       }
@@ -751,6 +754,8 @@ export class OpenLoopServer {
           title: typeof body?.title === 'string' ? body.title : undefined,
           archived: typeof body?.archived === 'boolean' ? body.archived : undefined,
           pinned: typeof body?.pinned === 'boolean' ? body.pinned : undefined,
+          // deleted:false 用于把软删除的会话恢复回来
+          deleted: typeof body?.deleted === 'boolean' ? body.deleted : undefined,
         });
         return this.sendJson(res, 200, { sessionId: sessionKey, meta }, reqMeta);
       }

@@ -76,6 +76,8 @@ export interface AgentPanelShellProps {
   onRegenerate?: () => void;
   /** 从某一轮的用户消息分叉出新会话 */
   onFork?: (entryId: string) => void;
+  /** 切换会话时用来隔离输入框草稿 */
+  draftKey?: string;
   /** 面板当前可见时才监听面板快捷键 */
   shortcutsEnabled?: boolean;
 }
@@ -116,9 +118,24 @@ export function AgentPanelShell({
   dock,
   onRegenerate,
   onFork,
+  draftKey,
   shortcutsEnabled = true,
 }: AgentPanelShellProps) {
   const [draft, setDraft] = useState('');
+  /** 每个会话各自的草稿，切换会话时不会串味 */
+  const draftsRef = useRef<Record<string, string>>({});
+  const draftKeyRef = useRef(draftKey || '');
+
+  useEffect(() => {
+    const next = draftKey || '';
+    if (next === draftKeyRef.current) {
+      draftsRef.current[next] = draft;
+      return;
+    }
+    draftsRef.current[draftKeyRef.current] = draft;
+    draftKeyRef.current = next;
+    setDraft(draftsRef.current[next] || '');
+  }, [draftKey, draft]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const lastEscRef = useRef(0);
@@ -355,6 +372,7 @@ export function TaskAgentPanel({
     <AgentPanelShell
       title={taskTitle || 'Agent 协作流'}
       subtitle={mode === 'inline' ? '与任务同屏协作' : undefined}
+      draftKey={`task_${taskId}`}
       messages={messages}
       isBusy={isBusy}
       awaitingInput={awaitingInput}
@@ -563,7 +581,7 @@ export function GlobalAgentPanel({
     setLoading(true);
     try {
       const [list, live] = await Promise.all([
-        api.getAgentSessions({ limit: 300 }),
+        api.getAgentSessions({ limit: 0 }),
         api.getLiveAgentSessions().catch(() => ({ sessions: [] as string[], busy: [] as string[] })),
       ]);
       const liveList = live.sessions || [];
@@ -1189,6 +1207,7 @@ export function GlobalAgentPanel({
               : undefined
           }
           onFork={handleFork}
+          draftKey={activeId || ''}
           dock={
             dockTab ? (
               <WorkspaceDock
