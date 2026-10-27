@@ -21,29 +21,11 @@ export interface SortOptionItem {
 }
 
 export const DEFAULT_SORT_RULE: ColumnSortRule = {
-  field: 'createdAt',
+  field: 'updatedAt',
   direction: 'desc',
 };
 
 export const SORT_OPTIONS: SortOptionItem[] = [
-  {
-    id: 'createdAt-desc',
-    field: 'createdAt',
-    direction: 'desc',
-    label: '创建时间 (最新优先)',
-    shortLabel: '最新创建',
-    description: '按任务创建时间降序',
-    category: 'time',
-  },
-  {
-    id: 'createdAt-asc',
-    field: 'createdAt',
-    direction: 'asc',
-    label: '创建时间 (最早优先)',
-    shortLabel: '最早创建',
-    description: '按任务创建时间升序',
-    category: 'time',
-  },
   {
     id: 'updatedAt-desc',
     field: 'updatedAt',
@@ -60,6 +42,24 @@ export const SORT_OPTIONS: SortOptionItem[] = [
     label: '更新时间 (最早更新)',
     shortLabel: '最早更新',
     description: '按活动时间升序',
+    category: 'time',
+  },
+  {
+    id: 'createdAt-desc',
+    field: 'createdAt',
+    direction: 'desc',
+    label: '创建时间 (最新优先)',
+    shortLabel: '最新创建',
+    description: '按任务创建时间降序',
+    category: 'time',
+  },
+  {
+    id: 'createdAt-asc',
+    field: 'createdAt',
+    direction: 'asc',
+    label: '创建时间 (最早优先)',
+    shortLabel: '最早创建',
+    description: '按任务创建时间升序',
     category: 'time',
   },
   {
