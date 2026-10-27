@@ -1,0 +1,77 @@
+/* 取自 DSH ReasoningRow.module.css，去掉内容字体增量变量（本项目固定 14/13） */
+.root {
+  display: flex;
+  flex-direction: column;
+}
+
+.root:not([data-expanded]) {
+  contain: size layout;
+  height: 24px;
+}
+
+.row {
+  overflow: hidden;
+}
+
+/* 展开后正文会滚动，折叠头部仍需随手可点 */
+.root[data-expanded] [data-open] [data-disclosure-header] {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--dsw-alias-bg-base);
+}
+
+.leading {
+  flex-shrink: 0;
+}
+
+.title {
+  font-weight: 400;
+}
+
+.separator {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background: var(--dsw-alias-label-caption);
+}
+
+.summary {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.summaryText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summary[data-streaming] {
+  mask-image: linear-gradient(to right, black calc(100% - 48px), transparent);
+}
+
+.summary[data-streaming] .summaryText {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.root:not([data-preview]) .separator,
+.root:not([data-preview]) .summary {
+  display: none;
+}
+
+.thinkBody {
+  /* 缩进对齐标题起点：leading 16px + gap 6px */
+  padding: 4px 0 4px 22px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}

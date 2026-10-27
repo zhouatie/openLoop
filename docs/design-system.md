@@ -147,3 +147,21 @@
 - 令牌必须落在 `.agent-scope` 作用域内，禁止泄漏到主界面。
 - 面板内禁止再用 Tailwind 原子类，几何取 DSH 源值。
 - 不引入 DeepSeek 品牌资产（鱼形 logo、wordmark、Montserrat 字体）。
+- 语法高亮统一走 `dsh/highlight.ts` 的 shiki 内核（`shiki` + `@shikijs/langs` 已加入 desktop 依赖），颜色只取 `--shiki-*` 令牌；不要再引入 Prism 或自写分词。
+- 门户层（Tooltip、图片预览、用量明细等 portal 到 `document.body` 的节点）必须自带 `agent-scope` 类，否则令牌失效、背景变透明。
+- 直接搬运的 DSH 原语放在 `packages/desktop/src/agent-ui/dsh/`，文件头保留 MIT 归属注释；改动仅限于替换图标导入与文案，结构与样式取原值。
+
+### 6.1 已搬运的 DSH 原语
+
+| 本项目文件 | DSH 来源 | 用途 |
+|---|---|---|
+| `dsh/TextShimmer.tsx` | ui-primitives | 运行中文字的扫光装饰 |
+| `dsh/DisclosureRow.tsx` | ui-primitives | 24px 单行披露（思考行、工具行） |
+| `dsh/Tooltip.tsx` | ui-primitives | 所有图标按钮的悬浮说明 |
+| `dsh/CodeToolbar.tsx` + `CodeCard.module.css` | ui-primitives | 代码卡头部：语言 + 折行 + 复制 |
+| `dsh/CodeBlock.tsx` + `dsh/highlight.ts` + `dsh/useViewportHighlighting.ts` | ui-primitives/markdown | shiki 语法高亮代码卡（流式增量臂 + 行号槽 + 可视区激活） |
+| `dsh/DiffBlock.tsx` | ui-primitives | 写入类工具的逐行差分卡 |
+| `dsh/ImageLightbox.tsx` | ui-primitives | 原图预览（portal、焦点还原） |
+| `dsh/ReasoningRow.tsx` | ui-chat | 思考行（摘要 + 展开正文） |
+| `dsh/MessageActions.tsx` | ui-chat | 消息操作条 |
+| `dsh/TurnUsagePanel.tsx` | ui-chat | 本轮用量药丸 + 明细对话框 |

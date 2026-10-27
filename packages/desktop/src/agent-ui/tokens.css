@@ -593,3 +593,51 @@
   --dsh-workspace-indent: 0px;
   --dsw-elevation-stroke-color: transparent;
 }
+
+/* ---------------------------------------------------------------------------
+ * 代码卡 / 遮罩补充令牌
+ * 取自 deepseek-harness ui-theme/src/styles/gradient-shadow-text.css 的
+ * --dsw-font-markdown-code-block(-small) 与 --dsw-mask-blur，作用域收敛到
+ * .agent-scope，避免泄漏到 Tailwind 页面。字号取本项目既有代码块字号。
+ * ------------------------------------------------------------------------- */
+.agent-scope {
+  --dsh-code-font-size: 12.5px;
+  --dsh-code-font-delta: 0px;
+  --dsh-frame-chrome-top: 0px;
+  --dsw-mask-blur: none;
+  --dsw-menu-backdrop-filter: blur(40px) saturate(150%);
+  --dsw-font-markdown-code-block: var(--dsh-code-font-size) / calc(19px + var(--dsh-code-font-delta))
+    var(--ds-font-family-code);
+  --dsw-font-markdown-code-block-small: var(--dsh-code-font-size) / calc(16px + var(--dsh-code-font-delta))
+    var(--ds-font-family-code);
+}
+
+/* ---------------------------------------------------------------------------
+ * shiki 语法高亮调色板（DSH ui-theme/src/styles/shiki.css，作用域收敛）
+ * 颜色由 shiki 的 css-variables 主题写成 --shiki-* 自定义属性，令牌只在这里取值。
+ * ------------------------------------------------------------------------- */
+.agent-scope {
+  --shiki-foreground: var(--dsw-alias-label-primary);
+  --shiki-background: var(--dsw-alias-markdown-code-block);
+  --shiki-token-constant: #1c7ed6;
+  --shiki-token-string: #2f9e44;
+  --shiki-token-comment: #868e96;
+  --shiki-token-keyword: #d6336c;
+  --shiki-token-parameter: #e8590c;
+  --shiki-token-function: #6741d9;
+  --shiki-token-string-expression: #2b8a3e;
+  --shiki-token-punctuation: #495057;
+  --shiki-token-link: #1971c2;
+}
+
+.agent-scope[data-ds-dark-theme] {
+  --shiki-token-constant: #4dabf7;
+  --shiki-token-string: #69db7c;
+  --shiki-token-comment: #adb5bd;
+  --shiki-token-keyword: #faa2c1;
+  --shiki-token-parameter: #ffa94d;
+  --shiki-token-function: #b197fc;
+  --shiki-token-string-expression: #8ce99a;
+  --shiki-token-punctuation: #ced4da;
+  --shiki-token-link: #74c0fc;
+}

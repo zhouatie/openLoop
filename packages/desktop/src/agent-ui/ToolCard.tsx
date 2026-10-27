@@ -1,9 +1,20 @@
 import React, { memo, useMemo, useState } from 'react';
-import { diffLines } from 'diff';
+import { DiffBlock, type DiffBlockLabels, type DiffHunk } from './dsh/DiffBlock';
 import type { ToolExecutionRecord } from '@openloop/core/types';
-import { IconChevronDown } from './icons';
+import { IconCode, IconCommand, IconGlobe, IconSearch, IconThink } from './icons';
 import { ImageThumb } from './ImageLightbox';
+import { DisclosureRow } from './dsh/DisclosureRow';
+import { TextShimmer } from './dsh/TextShimmer';
 import styles from './ToolCard.module.css';
+
+/** 工具行图标：与 DSH 的 flow row 一致，16px 盒子里 14px 图形 */
+function kindIcon(kind: string) {
+  if (kind === 'browse') return <IconGlobe size={14} />;
+  if (kind === 'search') return <IconSearch size={14} />;
+  if (kind === 'read' || kind === 'write') return <IconCode size={14} />;
+  if (kind === 'agent') return <IconThink size={14} />;
+  return <IconCommand size={14} />;
+}
 
 const KIND_LABEL: Record<string, string> = {
   execute: '命令',
@@ -87,26 +98,6 @@ function renderResult(result: any): string {
   return String(result);
 }
 
-interface DiffRow {
-  sign: '+' | '-' | ' ';
-  text: string;
-}
-
-function buildDiffRows(before: string | undefined, after: string): DiffRow[] {
-  const parts = (
-    before === undefined ? [{ added: true, value: after }] : diffLines(before, after)
-  ) as Array<{ added?: boolean; removed?: boolean; value: string }>;
-  const rows: DiffRow[] = [];
-  for (const part of parts) {
-    const sign: DiffRow['sign'] = part.added ? '+' : part.removed ? '-' : ' ';
-    for (const line of String(part.value).split('\n')) {
-      if (line === '' && part.value.endsWith('\n')) continue;
-      rows.push({ sign, text: line });
-    }
-  }
-  return rows;
-}
-
 function pickStringOf(source: any, keys: string[]): string | undefined {
   if (!source || typeof source !== 'object') return undefined;
   for (const key of keys) {
@@ -117,68 +108,41 @@ function pickStringOf(source: any, keys: string[]): string | undefined {
 }
 
 /**
- * 写入类工具的差分分组：pi 的 edit 工具把改动放在 edits[] 里，
- * write 工具则是整份 content，两种形态都要能画出来。
+ * 写入类工具的差分：pi 的 edit 工具把改动放在 edits[] 里，write 工具则是整份 content。
+ * 转换成 DSH DiffBlock 需要的 {path, oldText, newText} 形状。
  */
-function diffGroupsOfInput(tool: ToolExecutionRecord): DiffRow[][] | null {
+function diffHunksOfInput(tool: ToolExecutionRecord): DiffHunk[] | null {
   const input = tool.input || {};
-  const groups: DiffRow[][] = [];
+  const path = pickStringOf(input, ['path', 'file_path', 'filePath', 'target']) || '';
+  const hunks: DiffHunk[] = [];
   const edits = Array.isArray(input.edits) ? input.edits : [];
   for (const edit of edits) {
-    const before = pickStringOf(edit, ['oldText', 'oldString', 'old_text']);
     const after = pickStringOf(edit, ['newText', 'newString', 'new_text']);
     if (after === undefined) continue;
-    const rows = buildDiffRows(before, after);
-    if (rows.length > 0) groups.push(rows);
+    const before = pickStringOf(edit, ['oldText', 'oldString', 'old_text']);
+    hunks.push({ path, oldText: before ?? null, newText: after });
   }
-  if (groups.length === 0) {
-    const before = pickStringOf(input, ['oldString', 'oldText', 'before']);
+  if (hunks.length === 0) {
     const after = pickStringOf(input, ['content', 'newString', 'newText', 'after', 'text']);
     if (after !== undefined) {
-      const rows = buildDiffRows(before, after);
-      if (rows.length > 0) groups.push(rows);
+      const before = pickStringOf(input, ['oldString', 'oldText', 'before']);
+      hunks.push({ path, oldText: before ?? null, newText: after });
     }
   }
-  return groups.length > 0 ? groups : null;
+  return hunks.length > 0 ? hunks : null;
 }
 
-const MAX_DIFF_ROWS = 120;
-
-const DiffBlock = memo(function DiffBlock({ rows, label = '改动' }: { rows: DiffRow[]; label?: string }) {
-  const [showAll, setShowAll] = useState(false);
-  const added = rows.filter((row) => row.sign === '+').length;
-  const removed = rows.filter((row) => row.sign === '-').length;
-  const visible = showAll ? rows : rows.slice(0, MAX_DIFF_ROWS);
-  return (
-    <div className={styles.section}>
-      <div className={styles.sectionLabel}>
-        {label}
-        <span className={styles.diffStat}>
-          <span className={styles.diffAdd}>+{added}</span>
-          <span className={styles.diffRemove}>-{removed}</span>
-        </span>
-      </div>
-      <div className={styles.diff}>
-        {visible.map((row, index) => (
-          <div
-            key={`${index}-${row.sign}`}
-            className={`${styles.diffRow} ${
-              row.sign === '+' ? styles.diffRowAdd : row.sign === '-' ? styles.diffRowRemove : ''
-            }`}
-          >
-            <span className={styles.diffSign}>{row.sign}</span>
-            <span className={styles.diffText}>{row.text}</span>
-          </div>
-        ))}
-      </div>
-      {rows.length > MAX_DIFF_ROWS && (
-        <button type="button" className={styles.more} onClick={() => setShowAll((value) => !value)}>
-          {showAll ? '收起' : `展开其余 ${rows.length - MAX_DIFF_ROWS} 行`}
-        </button>
-      )}
-    </div>
-  );
-});
+const DIFF_LABELS: DiffBlockLabels = {
+  codeLabel: '代码',
+  wrapLabel: '关闭自动折行',
+  unwrapLabel: '按面板宽度自动折行',
+  copy: '复制改动',
+  copied: '已复制',
+  collapseAria: '收起改动',
+  expandAria: (hidden) => `展开其余 ${hidden} 行改动`,
+  collapse: '收起',
+  expand: (hidden) => `展开其余 ${hidden} 行`,
+};
 
 export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRecord }) {
   const [expanded, setExpanded] = useState(false);
@@ -186,55 +150,52 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
   const summary = useMemo(() => summarize(tool), [tool.input, tool.name]);
   const output = useMemo(() => renderResult(tool.result), [tool.result]);
   const hasOutput = output.trim().length > 0;
-  const diffGroups = useMemo(
-    () => (kind === 'write' ? diffGroupsOfInput(tool) : null),
+  const diffHunks = useMemo(
+    () => (kind === 'write' ? diffHunksOfInput(tool) : null),
     [kind, tool.input]
   );
   const images = tool.imageUrls || [];
   const isRunning = tool.status === 'running';
+  const failed = tool.status === 'error';
 
-  const statusClass = isRunning
-    ? styles.statusRunning
-    : tool.status === 'error'
-      ? styles.statusError
-      : styles.statusSuccess;
+  const title = KIND_LABEL[kind] || KIND_LABEL.other;
 
-  return (
-    <div className={`${styles.card} ${expanded ? styles.cardExpanded : ''}`}>
-      <button
-        type="button"
-        className={styles.header}
-        onClick={() => setExpanded((value) => !value)}
-        aria-expanded={expanded}
-      >
-        <span className={`${styles.dot} ${statusClass}`} aria-hidden />
-        <span className={styles.kind}>{KIND_LABEL[kind] || KIND_LABEL.other}</span>
-        {summary !== tool.name && !GENERIC_TOOL_NAMES.has((tool.name || '').toLowerCase()) && (
-          <>
-            <span className={styles.name}>{tool.name}</span>
-            <span className={styles.separator} aria-hidden />
-          </>
-        )}
-        <span className={styles.summary}>{summary}</span>
+  // 折叠态摘要：分隔点 + 摘要 + 耗时
+  const collapsed = useMemo(
+    () => (
+      <>
+        <span className={styles.separator} data-shimmer-decoration aria-hidden />
+        <span className={styles.summary} data-error={failed || undefined}>
+          <TextShimmer>{summary}</TextShimmer>
+        </span>
         {tool.durationMs !== undefined && (
           <span className={styles.duration}>{formatDuration(tool.durationMs)}</span>
         )}
-        <span className={`${styles.chevron} ${expanded ? styles.chevronOpen : ''}`} aria-hidden>
-          <IconChevronDown size={12} />
-        </span>
-      </button>
+      </>
+    ),
+    [failed, summary, tool.durationMs]
+  );
 
-      {expanded && (
+  const canExpand = Boolean(diffHunks) || hasOutput || images.length > 0 || Boolean(tool.input);
+  const open = expanded && canExpand;
+
+  return (
+    <div className={styles.root} data-state={tool.status}>
+      <DisclosureRow
+        icon={kindIcon(kind)}
+        title={title}
+        running={isRunning}
+        open={open}
+        expandable={canExpand}
+        expandOnRowClick
+        keepContentWhenOpen
+        onToggle={() => setExpanded((value) => !value)}
+        collapsedContent={collapsed}
+        titleClassName={styles.title}
+      >
         <div className={styles.body}>
-          {diffGroups &&
-            diffGroups.map((rows, index) => (
-              <DiffBlock
-                key={index}
-                rows={rows}
-                label={diffGroups.length > 1 ? `改动 ${index + 1}` : '改动'}
-              />
-            ))}
-          {!diffGroups && tool.input && Object.keys(tool.input).length > 0 && (
+          {diffHunks && <DiffBlock diffs={diffHunks} labels={DIFF_LABELS} />}
+          {!diffHunks && tool.input && Object.keys(tool.input).length > 0 && (
             <div className={styles.section}>
               <div className={styles.sectionLabel}>入参</div>
               <pre className={styles.pre}>{JSON.stringify(tool.input, null, 2)}</pre>
@@ -245,21 +206,25 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
               <div className={styles.sectionLabel}>输出图片</div>
               <div className={styles.images}>
                 {images.map((url, index) => (
-                  <ImageThumb key={`${index}-${url.slice(-12)}`} image={{ url, name: `输出图片 ${index + 1}` }} size={120} />
+                  <ImageThumb
+                    key={`${index}-${url.slice(-12)}`}
+                    image={{ url, name: `输出图片 ${index + 1}` }}
+                    size={120}
+                  />
                 ))}
               </div>
             </div>
           )}
           {hasOutput && (
             <div className={styles.section}>
-              <div className={styles.sectionLabel}>{tool.status === 'error' ? '错误输出' : '输出'}</div>
-              <pre className={`${styles.pre} ${tool.status === 'error' ? styles.preError : ''}`}>{output}</pre>
+              <div className={styles.sectionLabel}>{failed ? '错误输出' : '输出'}</div>
+              <pre className={`${styles.pre} ${failed ? styles.preError : ''}`}>{output}</pre>
             </div>
           )}
           {!hasOutput && !isRunning && <div className={styles.empty}>本次调用没有输出</div>}
           {isRunning && <div className={styles.empty}>执行中…</div>}
         </div>
-      )}
+      </DisclosureRow>
     </div>
   );
 });

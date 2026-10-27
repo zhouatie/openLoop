@@ -1,87 +1,18 @@
-/* 工具行：DSH 的 24px 单行披露结构，展开内容以代码块呈现 */
-.card {
+/* 工具行：几何与交互来自 DSH DisclosureRow，本模块只剩下摘要与展开体 */
+.root {
   display: flex;
   flex-direction: column;
-  margin: 1px 0;
 }
 
-.header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  height: 24px;
-  padding: 0 6px;
-  margin: 0 -6px;
-  box-sizing: content-box;
-  border: none;
-  border-radius: var(--dsw-radius-sm);
-  background: transparent;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+.title {
+  font-weight: 400;
 }
 
-@media (hover: hover) {
-  .header:hover {
-    background: var(--dsw-alias-interactive-bg-hover);
-  }
-}
-
-.dot {
-  flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-}
-
-.statusSuccess {
-  background: var(--dsw-alias-state-success-primary);
-}
-
-.statusRunning {
-  background: var(--dsw-alias-state-business-primary);
-  animation: tool-pulse 1.2s var(--ds-ease-in-out) infinite;
-}
-
-.statusError {
-  background: var(--dsw-alias-state-error-primary);
-}
-
-@keyframes tool-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
-}
-
-.kind {
-  flex: none;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-primary);
-}
-
-.name {
-  flex: none;
-  max-width: 40%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-secondary);
-}
-
-/* 2px 圆点分隔，与 DSH ReasoningRow 的 separator 一致 */
 .separator {
   flex: none;
   width: 2px;
   height: 2px;
+  margin: 0 8px;
   border-radius: 1px;
   background: var(--dsw-alias-label-caption);
 }
@@ -90,38 +21,30 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
   text-overflow: ellipsis;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.summary[data-error] {
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .duration {
   flex: none;
+  margin-left: 8px;
   font-size: 11px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-caption);
   font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-caption);
 }
 
-.chevron {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  color: var(--dsw-alias-label-tertiary);
-  transition: transform 150ms var(--ds-ease-in-out);
-}
-
-.chevronOpen {
-  transform: rotate(180deg);
-}
-
+/* 展开体沿用 DSH 命令卡的缩进：左边 4px，上下 4px */
 .body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px 0 10px;
+  margin: 4px 0 4px 4px;
 }
 
 .section {
@@ -131,6 +54,9 @@
 }
 
 .sectionLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
@@ -141,6 +67,7 @@
   max-height: 260px;
   overflow: auto;
   padding: 12px 16px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: var(--dsw-radius-lg);
   background: var(--dsw-alias-markdown-code-block);
   color: var(--dsw-alias-label-primary);
@@ -159,77 +86,6 @@
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
-}
-
-/* 写入类工具的逐行差分：与代码块同底色，+/- 用状态色 */
-.diffStat {
-  display: inline-flex;
-  gap: 8px;
-  margin-left: 8px;
-  font-family: var(--ds-font-family-code);
-  font-size: 11px;
-}
-
-.diffAdd {
-  color: var(--dsw-alias-state-success-primary);
-}
-
-.diffRemove {
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.diff {
-  max-height: 320px;
-  overflow: auto;
-  padding: 8px 0;
-  border-radius: var(--dsw-radius-lg);
-  background: var(--dsw-alias-markdown-code-block);
-  font-family: var(--ds-font-family-code);
-  font-size: 12.5px;
-  line-height: 20px;
-}
-
-.diffRow {
-  display: flex;
-  gap: 8px;
-  padding: 0 12px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.diffRowAdd {
-  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);
-  color: var(--dsw-alias-label-primary);
-}
-
-.diffRowRemove {
-  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
-  color: var(--dsw-alias-label-secondary);
-}
-
-.diffSign {
-  flex: none;
-  width: 8px;
-  color: var(--dsw-alias-label-caption);
-}
-
-.diffText {
-  flex: 1;
-  min-width: 0;
-}
-
-.more {
-  align-self: flex-start;
-  padding: 0;
-  border: none;
-  background: transparent;
-  font-size: 12px;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-}
-
-.more:hover {
-  color: var(--dsw-alias-state-business-primary);
 }
 
 .images {

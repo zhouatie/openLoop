@@ -1,0 +1,63 @@
+/* 几何取自 DSH MessageIconActions.module.css：28px 行高、8px 间距、28px 按钮、
+   默认常显（只有更早的用户行才在悬停时显隐）。 */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.action svg {
+  width: 15px;
+  height: 15px;
+}
+
+@media (hover: hover) {
+  .action:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-secondary);
+  }
+}
+
+.copied {
+  font-size: 12px;
+  line-height: 1;
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: 8px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.usage,
+.time {
+  font-size: 12px;
+  line-height: 24px;
+  color: inherit;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.streaming {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}

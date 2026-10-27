@@ -1,156 +1,43 @@
-import React, { memo, useCallback, useState } from 'react';
+import { createContext, memo, useContext } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import Prism from 'prismjs';
+import { CodeBlock } from './dsh/CodeBlock';
 import styles from './Markdown.module.css';
 
-import 'prismjs/components/prism-typescript';
-import 'prismjs/components/prism-jsx';
-import 'prismjs/components/prism-tsx';
-import 'prismjs/components/prism-bash';
-import 'prismjs/components/prism-json';
-import 'prismjs/components/prism-yaml';
-import 'prismjs/components/prism-python';
-import 'prismjs/components/prism-markdown';
-import 'prismjs/components/prism-sql';
-import 'prismjs/components/prism-diff';
-
-const LANG_MAP: Record<string, string> = {
-  ts: 'typescript',
-  tsx: 'tsx',
-  js: 'javascript',
-  jsx: 'jsx',
-  sh: 'bash',
-  shell: 'bash',
-  zsh: 'bash',
-  py: 'python',
-  yml: 'yaml',
-  md: 'markdown',
+const CODE_LABELS = {
+  codeLabel: '代码',
+  wrapLabel: '关闭自动折行',
+  unwrapLabel: '按面板宽度自动折行',
 };
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+/** 流式标记：流式围栏走 DSH CodeBlock 的增量高亮臂，避免每个分片重排整段代码 */
+const StreamingContext = createContext(false);
 
-function highlight(code: string, language: string): string {
-  const key = LANG_MAP[language] || language;
-  const grammar = key && Prism.languages[key];
-  if (grammar) {
-    try {
-      return Prism.highlight(code, grammar, key);
-    } catch (_) {
-      /* 回退到纯文本 */
-    }
-  }
-  return escapeHtml(code);
-}
-
-/** 把高亮后的 HTML 按行切开，未闭合的行内标签在行尾闭合、行首重开，保证行号与内容对齐 */
-function splitHighlightedLines(html: string): string[] {
-  const lines: string[] = [];
-  const open: string[] = [];
-  let current = '';
-  let index = 0;
-  const tagName = (tag: string) => (/^<\/?([a-zA-Z0-9]+)/.exec(tag)?.[1] || '').toLowerCase();
-
-  while (index < html.length) {
-    const char = html[index];
-    if (char === '<') {
-      const end = html.indexOf('>', index);
-      if (end === -1) {
-        current += html.slice(index);
-        break;
-      }
-      const tag = html.slice(index, end + 1);
-      current += tag;
-      if (tag.startsWith('</')) open.pop();
-      else if (!tag.endsWith('/>')) open.push(tag);
-      index = end + 1;
-      continue;
-    }
-    if (char === '\n') {
-      lines.push(current + open.slice().reverse().map((tag) => `</${tagName(tag)}>`).join(''));
-      current = open.join('');
-      index += 1;
-      continue;
-    }
-    current += char;
-    index += 1;
-  }
-  lines.push(current);
-  return lines;
-}
-
-const MAX_NUMBERED_LINES = 800;
-
-const CodeBlock = memo(function CodeBlock({ code, language }: { code: string; language: string }) {
-  const [copied, setCopied] = useState(false);
-  const [wrap, setWrap] = useState(false);
-  const handleCopy = useCallback(() => {
-    navigator.clipboard?.writeText(code).then(
-      () => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1400);
-      },
-      () => undefined
-    );
-  }, [code]);
-
-  const highlighted = React.useMemo(() => highlight(code, language), [code, language]);
-  const lines = React.useMemo(
-    () => (code.split('\n').length > MAX_NUMBERED_LINES ? null : splitHighlightedLines(highlighted)),
-    [highlighted, code]
-  );
-
+/** 围栏代码块：交给 DSH CodeBlock（shiki 高亮 + 行号槽 + 代码卡头部） */
+const FenceCodeBlock = memo(function FenceCodeBlock({ code, language }: { code: string; language: string }) {
+  const streaming = useContext(StreamingContext);
   return (
-    <div className={styles.codeBlock}>
-      <div className={styles.codeHeader}>
-        <span className={styles.codeLang}>{language || 'text'}</span>
-        <span className={styles.codeActions}>
-          <button
-            type="button"
-            className={styles.codeCopy}
-            onClick={() => setWrap((value) => !value)}
-            title={wrap ? '关闭自动折行' : '按面板宽度自动折行'}
-          >
-            {wrap ? '不折行' : '折行'}
-          </button>
-          <button type="button" className={styles.codeCopy} onClick={handleCopy}>
-            {copied ? '已复制' : '复制'}
-          </button>
-        </span>
-      </div>
-      <pre className={`${styles.codePre} ${wrap ? styles.codePreWrap : ''}`}>
-        {lines ? (
-          <code className={`${styles.codeLines} language-${language || 'text'}`}>
-            {lines.map((line, index) => (
-              <span key={index} className={styles.codeLine}>
-                <span className={styles.codeLineNo} aria-hidden>
-                  {index + 1}
-                </span>
-                <span className={styles.codeLineText} dangerouslySetInnerHTML={{ __html: line || ' ' }} />
-              </span>
-            ))}
-          </code>
-        ) : (
-          <code
-            className={`language-${language || 'text'}`}
-            dangerouslySetInnerHTML={{ __html: highlighted }}
-          />
-        )}
-      </pre>
-    </div>
+    <CodeBlock
+      code={code}
+      lang={language || undefined}
+      streaming={streaming}
+      lineNumbers
+      copyLabel="复制代码"
+      copiedLabel="已复制"
+      toolbarLabels={CODE_LABELS}
+    />
   );
 });
 
-/** 会话内的 Markdown 渲染：样式全部走 DSH 令牌，不依赖 openLoop 的 Tailwind 主题 */
-export const AgentMarkdown = memo(function AgentMarkdown({ content }: { content: string }) {
+export const AgentMarkdown = memo(function AgentMarkdown({
+  content,
+  streaming = false,
+}: {
+  content: string;
+  streaming?: boolean;
+}) {
   return (
+    <StreamingContext.Provider value={streaming}>
     <div className={styles.root}>
       <Markdown
         remarkPlugins={[remarkGfm]}
@@ -172,7 +59,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({ content }: { content:
                 </code>
               );
             }
-            return <CodeBlock code={text.replace(/\n$/, '')} language={match?.[1] || ''} />;
+            return <FenceCodeBlock code={text} language={match?.[1] || ''} />;
           },
           table: ({ children }) => (
             <div className={styles.tableWrap}>
@@ -184,5 +71,6 @@ export const AgentMarkdown = memo(function AgentMarkdown({ content }: { content:
         {content}
       </Markdown>
     </div>
+    </StreamingContext.Provider>
   );
 });

@@ -180,6 +180,48 @@ export const IconPanelLeft = createIcon('IconPanelLeft', 16, () => (
   </>
 ));
 
+/** DSH artwork: check-outline */
+export const IconCheck = createIcon('IconCheck', 14, () => (
+  <path d="M2.25 8.5L5.49732 11.7473C5.90519 12.1552 6.57263 12.1344 6.95426 11.7018L13.75 4" />
+));
+
+/** DSH artwork: database-outline */
+export const IconDatabase = createIcon('IconDatabase', 15, () => (
+  <>
+    <path d="M13.1967 5.1869C13.7232 4.77378 14.0003 4.30517 14.0001 3.82819C14.0003 3.3512 13.7232 2.88259 13.1967 2.46947C12.6702 2.05635 11.9128 1.71328 11.0006 1.47475C10.0885 1.23621 9.05371 1.11062 8.00039 1.1106C6.94707 1.11057 5.9123 1.23612 5.00009 1.47461C4.08742 1.71301 3.32948 2.05604 2.80249 2.46919C2.2755 2.88235 1.99805 3.35106 1.99805 3.82819C1.99805 4.30531 2.2755 4.77402 2.80249 5.18718C3.32948 5.60033 4.08742 5.94336 5.00009 6.18176C5.9123 6.42025 6.94707 6.5458 8.00039 6.54578C9.05371 6.54575 10.0885 6.42016 11.0006 6.18163C11.9128 5.94309 12.6702 5.60002 13.1967 5.1869Z" />
+    <path d="M2 3.80371V11.7848" />
+    <path d="M14 3.80371V11.7848" />
+    <path d="M2 7.81396C2 8.60524 2.63214 9.36411 3.75736 9.92363C4.88258 10.4832 6.4087 10.7975 8 10.7975C9.5913 10.7975 11.1174 10.4832 12.2426 9.92363C13.3679 9.36411 14 8.60524 14 7.81396" />
+    <path d="M2 11.7847C2 12.6081 2.63214 13.3977 3.75736 13.98C4.88258 14.5622 6.4087 14.8893 8 14.8893C9.5913 14.8893 11.1174 14.5622 12.2426 13.98C13.3679 13.3977 14 12.6081 14 11.7847" />
+  </>
+));
+
+/** DSH artwork: wrap-fill */
+export const IconWrap = createIcon('IconWrap', 14, () => (
+  <>
+    <path
+      d="M10.9999 8C10.9999 6.89543 10.1046 6 9 6H4.5V5H9C10.6568 5 11.9999 6.34315 11.9999 8C11.9999 9.65685 10.6568 11 9 11H6.20703L6.85351 11.6465L6.14648 12.3535L4.64652 10.8536C4.45126 10.6583 4.45126 10.3417 4.64652 10.1464L6.14648 8.64648L6.85351 9.35352L6.20703 10H9C10.1046 10 10.9999 9.10457 10.9999 8Z"
+      fill="currentColor"
+      stroke="none"
+    />
+    <path d="M2 15H1V1H2V15Z" fill="currentColor" stroke="none" />
+    <path d="M15 15H14V1H15V15Z" fill="currentColor" stroke="none" />
+  </>
+));
+
+/** DSH artwork: nowrap-fill */
+export const IconNoWrap = createIcon('IconNoWrap', 14, () => (
+  <>
+    <path d="M2 15H1V1H2V15Z" fill="currentColor" stroke="none" />
+    <path
+      d="M12.3535 7.64645C12.5487 7.84171 12.5487 8.15829 12.3535 8.35355L9.85352 10.8535L9.14648 10.1465L10.793 8.5H3.5V7.5H10.793L9.14648 5.85352L9.85352 5.14648L12.3535 7.64645Z"
+      fill="currentColor"
+      stroke="none"
+    />
+    <path d="M15 15H14V1H15V15Z" fill="currentColor" stroke="none" />
+  </>
+));
+
 /** 赞 */
 export const IconThumbUp = createIcon('IconThumbUp', 16, () => (
   <path
@@ -240,3 +282,46 @@ export const IconThink = createIcon('IconThink', 16, () => (
     />
   </>
 ));
+
+/** 上折角：DSH chevrons-up-outline */
+export const IconChevronUp = createIcon('IconChevronUp', 12, () => (
+  <path d="M3.5 9.5L8 5L12.5 9.5" stroke="currentColor" strokeLinecap="round" />
+));
+
+/** 命令：DSH api-outline */
+export const IconCommand = createIcon('IconCommand', 14, () => (
+  <>
+    <path d="M3 4L7 8L3 12" stroke="currentColor" />
+    <path d="M9 12H13" stroke="currentColor" />
+  </>
+));
+
+/** 网络：DSH globe-outline */
+export const IconGlobe = createIcon('IconGlobe', 14, () => (
+  <>
+    <path
+      d="M7.99986 14.0887C11.3626 14.0887 14.0886 11.3627 14.0886 7.99998C14.0886 4.63727 11.3626 1.91125 7.99986 1.91125C4.63715 1.91125 1.91113 4.63727 1.91113 7.99998C1.91113 11.3627 4.63715 14.0887 7.99986 14.0887Z"
+      stroke="currentColor"
+    />
+    <path d="M2.34619 8H13.6538" stroke="currentColor" />
+    <path
+      d="M7.99976 14.0889C9.23509 14.0889 10.1743 11.3629 10.1743 8.00006C10.1743 4.63739 9.23509 1.91138 7.99976 1.91138"
+      stroke="currentColor"
+    />
+    <path
+      d="M7.99973 14.0889C6.76445 14.0889 5.8252 11.3629 5.8252 8.00006C5.8252 4.63739 6.76445 1.91138 7.99973 1.91138"
+      stroke="currentColor"
+    />
+  </>
+));
+
+/** 代码：DSH code-outline */
+export const IconCode = createIcon('IconCode', 14, () => (
+  <>
+    <path d="M6.27612 1.5L4.52612 14.5" stroke="currentColor" />
+    <path d="M11.4739 1.5L9.72388 14.5" stroke="currentColor" />
+    <path d="M2.39868 5.5H14.0681" stroke="currentColor" />
+    <path d="M1.93188 10.5H13.6013" stroke="currentColor" />
+  </>
+));
+

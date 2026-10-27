@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionChatMessage, SessionUsage } from '@openloop/core/types';
 import { MessageRow } from './MessageRow';
 import { TurnRail, type TurnRailItem } from './TurnRail';
+import { TextShimmer } from './dsh/TextShimmer';
 import styles from './AgentChatView.module.css';
 
 export interface AgentChatViewProps {
@@ -56,10 +57,13 @@ const RunningStatus = React.memo(function RunningStatus({ startedAt }: { started
   const seconds = startedAt ? Math.max(1, Math.round((now - startedAt) / 1000)) : 0;
 
   return (
-    <div className={styles.running} role="status">
-      <span className={styles.runningDot} aria-hidden />
-      <span className={styles.runningText}>
-        {seconds > 0 ? `深度求索中，用时 ${seconds} 秒 ···` : '深度求索中 ···'}
+    <div className={styles.running} role="status" data-chat-running>
+      <span className={styles.runningDivider} aria-hidden />
+      <span className={styles.runningContent}>
+        <span className={styles.runningDot} aria-hidden />
+        <TextShimmer active className={styles.runningText}>
+          {seconds > 0 ? `深度求索中，用时 ${seconds} 秒 ···` : '深度求索中 ···'}
+        </TextShimmer>
       </span>
     </div>
   );
