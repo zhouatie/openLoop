@@ -816,6 +816,16 @@ export class OpenLoopServer {
         }
       }
 
+      if (pathname === '/api/agent/fs/stat' && method === 'GET') {
+        const target = parsedUrl.searchParams.get('path') || '';
+        try {
+          const info = statFile(target);
+          return this.sendJson(res, 200, info, reqMeta);
+        } catch (err: any) {
+          return this.sendJson(res, 404, { error: err?.message || '文件不存在' }, reqMeta);
+        }
+      }
+
       if (pathname === '/api/agent/fs/raw' && method === 'GET') {
         const target = parsedUrl.searchParams.get('path') || '';
         try {

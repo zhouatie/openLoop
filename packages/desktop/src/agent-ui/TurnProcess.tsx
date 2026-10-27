@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import type { SessionChatMessage } from '@openloop/core/types';
 import { MessageRow } from './MessageRow';
 import { IconChevronDown } from './icons';
@@ -18,6 +18,15 @@ function countTools(steps: SessionChatMessage[]): number {
 /** 一轮里的过程节点：思考与工具调用折叠成一行，点击展开 */
 export const TurnProcess = memo(function TurnProcess({ steps, live, busy }: TurnProcessProps) {
   const [open, setOpen] = useState(false);
+  /** 用户手动点过之后就不再自动开合 */
+  const [manual, setManual] = useState(false);
+
+  // 运行中自动展开，一轮结束后自动折回
+  useEffect(() => {
+    if (manual) return;
+    setOpen(Boolean(live && busy));
+  }, [live, busy, manual]);
+
   if (steps.length === 0) return null;
 
   const tools = countTools(steps);
@@ -29,7 +38,10 @@ export const TurnProcess = memo(function TurnProcess({ steps, live, busy }: Turn
       <button
         type="button"
         className={styles.header}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          setManual(true);
+          setOpen((value) => !value);
+        }}
         aria-expanded={open}
       >
         <span className={busy && live ? styles.dotBusy : styles.dot} aria-hidden />

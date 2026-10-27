@@ -512,6 +512,8 @@ export function GlobalAgentPanel({
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   /** 刚发过消息、文件还没落盘的会话：id -> 占位行信息 */
   const pendingRows = useRef<Record<string, { title: string; cwd: string }>>({});
+  /** 历史快照对应的会话修改时间，用于发现外部写入 */
+  const historyStampRef = useRef('');
   const attachments = useAttachments();
 
   // 斜杠指令（提供方为 /api/agent/commands-and-skills）
@@ -611,6 +613,7 @@ export function GlobalAgentPanel({
       const detail = await api.getAgentSession(id);
       setHistory(detail.messages || []);
       setCwd(detail.summary?.cwd || '');
+      historyStampRef.current = '';
     } catch (err) {
       if (import.meta.env?.DEV) console.warn('[AgentPanel] 读取历史会话失败:', err);
       setHistory([]);
@@ -799,6 +802,7 @@ export function GlobalAgentPanel({
     const liveList = live.sessions || [];
     const busyList = live.busy || [];
     setLiveIds(liveList);
+    setBusyIds(busyList);
     setSessions((prev) => {
       const known = new Set(prev.map((item) => item.id));
       const nowIso = new Date().toISOString();
@@ -832,6 +836,41 @@ export function GlobalAgentPanel({
     const timer = window.setInterval(() => void applyLiveState(), 2000);
     return () => window.clearInterval(timer);
   }, [active, applyLiveState]);
+
+  // 当前会话被外部写入（同一会话在终端或客户端里继续）时重载历史，避免停在半轮的旧快照
+  useEffect(() => {
+    if (!active || !activeId || busyIds.includes(activeId)) return;
+    const path = sessions.find((entry) => entry.id === activeId)?.path;
+    if (!path) return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const info = await api.statAgentFs(path);
+        if (cancelled) return;
+        const stamp = `${info.size}:${info.mtime}`;
+        if (!historyStampRef.current) {
+          historyStampRef.current = stamp;
+          return;
+        }
+        if (historyStampRef.current === stamp) return;
+        // 写入还在进行时先等一轮，避免每 3 秒重载一次大文件
+        if (Date.now() - info.mtime < 1500) return;
+        historyStampRef.current = stamp;
+        const detail = await api.getAgentSession(activeId);
+        if (cancelled) return;
+        setHistory(detail.messages || []);
+        if (import.meta.env?.DEV) console.log('[AgentPanel] 会话文件已更新，重载历史', activeId);
+      } catch (err) {
+        if (import.meta.env?.DEV) console.warn('[AgentPanel] 检查会话文件失败:', err);
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [active, activeId, busyIds, sessions]);
 
   // 运行指示跟随实时事件：一轮结束（agent_settled）就熄灭
   useEffect(() => {

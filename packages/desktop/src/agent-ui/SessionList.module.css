@@ -1,5 +1,9 @@
 /* 项目列：几何取自 DSH ui-sidebar / ui-workspace（38px 新会话、36px 区头、34/32px 行） */
 .root {
+  /* 几何取自 DSH WorkspaceBrowser：列表右侧为滚动条让出 5px，滚动条离边 2px */
+  --dsh-session-list-edge-inset: 12px;
+  --dsh-session-list-scrollbar-width: 5px;
+  --dsh-session-list-scrollbar-offset: 2px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -8,7 +12,7 @@
   max-width: 420px;
   height: 100%;
   flex: none;
-  padding: 6px 12px 10px;
+  padding: 6px var(--dsh-session-list-edge-inset) 10px;
   box-sizing: border-box;
   background: var(--dsw-specific-sidebar-fill);
   border-right: 1px solid var(--dsw-alias-border-l3);
@@ -166,6 +170,14 @@
   flex-direction: column;
   gap: 2px;
   scrollbar-gutter: stable;
+  /* 让滚动条贴近列右缘，行背景延伸到滚动条内侧 */
+  margin-right: calc(-1 * (var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-offset)));
+  padding-right: calc(
+    var(--dsh-session-list-edge-inset)
+    - var(--dsh-session-list-scrollbar-width)
+    - var(--dsh-session-list-scrollbar-offset)
+  );
+  padding-bottom: 6px;
 }
 
 .group {

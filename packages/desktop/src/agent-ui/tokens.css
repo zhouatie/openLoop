@@ -520,13 +520,13 @@
    ones the standard properties silence, and Firefox has no hover
    pseudo-element to fall back on.
 
-   `not selector(.agent-scope ::-webkit-scrollbar)` is true only where the pseudo-element
+   `not selector(::-webkit-scrollbar)` is true only where the pseudo-element
    is unimplemented, so Firefox takes the standard path and WebKit-based
    engines take the pseudo-element path. An engine too old for the
    `selector()` function makes the condition invalid, which evaluates false
    and selects the pseudo-element path — the correct side for the pre-16.4
    Safari that is the realistic case. */
-@supports not selector(.agent-scope ::-webkit-scrollbar) {
+@supports not selector(::-webkit-scrollbar) {
   /* Declared on every element rather than inherited from `body`. Inheriting
      would pass down the COLOUR already substituted at `body`, so a descendant
      rebinding --dsh-scrollbar-thumb could not change it; re-declaring makes
@@ -537,8 +537,8 @@
 
      No hover counterpart exists on this path: `scrollbar-color` states one
      thumb colour and the engine derives its own hover treatment. */
-  body,
-  body * {
+  .agent-scope,
+  .agent-scope * {
     scrollbar-width: thin;
     scrollbar-color: var(--dsh-scrollbar-thumb) transparent;
   }

@@ -1091,6 +1091,16 @@ export class DesktopApiService {
     return requestJson(`${BASE_URL}/api/agent/fs/read?path=${encodeURIComponent(path)}`);
   }
 
+  /** 只取文件 stat：用来判断会话文件是否被外部写入 */
+  async statAgentFs(path: string): Promise<{
+    path: string;
+    size: number;
+    mtime: number;
+    mime: string;
+  }> {
+    return requestJson(`${BASE_URL}/api/agent/fs/stat?path=${encodeURIComponent(path)}`);
+  }
+
   agentFsRawUrl(path: string): string {
     return `${BASE_URL}/api/agent/fs/raw?path=${encodeURIComponent(path)}`;
   }

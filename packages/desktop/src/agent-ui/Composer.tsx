@@ -521,8 +521,9 @@ export const Composer = React.memo(function Composer({
               onClick={busy && onStop ? onStop : submit}
               disabled={busy ? false : !canSend}
               title={busy ? '中止本轮' : '发送'}
+              aria-label={busy ? '停止' : '发送'}
             >
-              {busy ? <IconStop size={14} /> : <IconSend size={14} />}
+              {busy ? <IconStop size={16} /> : <IconSend size={16} />}
             </button>
           </div>
         </div>

@@ -46,6 +46,30 @@ function summarize(tool: ToolExecutionRecord): string {
   return name;
 }
 
+/** pi 内置工具的 id 本身没有信息量（读取 / read），只保留种类标签和摘要 */
+const GENERIC_TOOL_NAMES = new Set([
+  'read',
+  'bash',
+  'write',
+  'edit',
+  'grep',
+  'find',
+  'ls',
+  'glob',
+  'view',
+  'cat',
+  'patch',
+  'apply_patch',
+  'multiedit',
+  'search',
+  'fetch',
+  'task',
+  'subagent',
+  'todo',
+  'todoread',
+  'todowrite',
+]);
+
 function renderResult(result: any): string {
   if (result === undefined || result === null) return '';
   if (typeof result === 'string') return result;
@@ -85,7 +109,7 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
       >
         <span className={`${styles.dot} ${statusClass}`} aria-hidden />
         <span className={styles.kind}>{KIND_LABEL[kind] || KIND_LABEL.other}</span>
-        {summary !== tool.name && (
+        {summary !== tool.name && !GENERIC_TOOL_NAMES.has((tool.name || '').toLowerCase()) && (
           <>
             <span className={styles.name}>{tool.name}</span>
             <span className={styles.separator} aria-hidden />

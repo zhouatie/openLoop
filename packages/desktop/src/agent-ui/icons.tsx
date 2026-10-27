@@ -132,18 +132,17 @@ export const IconClose = createIcon('IconClose', 16, () => (
   </>
 ));
 
-export const IconSend = createIcon('IconSend', 14, () => (
-  <>
-    <path
-      d="M6.97211 1.94476C7.55785 1.35914 8.50767 1.35919 9.09343 1.94476L13.921 6.77228L13.2138 7.47939L8.38632 2.65187C8.19108 2.45682 7.87443 2.45677 7.67922 2.65187L2.74397 7.58711L2.03687 6.88L6.97211 1.94476Z"
-      fill="currentColor"
-    />
-    <path d="M7.97571 14.5732L8.02421 2.34139" stroke="currentColor" />
-  </>
+/* 发送箭头：DSH InputBar 主按钮的实心箭头（16 栅格，y 1 → 15） */
+export const IconSend = createIcon('IconSend', 16, () => (
+  <path
+    d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z"
+    fill="currentColor"
+  />
 ));
 
-export const IconStop = createIcon('IconStop', 14, () => (
-  <rect x="4" y="4" width="8" height="8" rx="2" fill="currentColor" />
+/* 停止方块：与 DSH 同一矩形（10x10，圆角 3，居中于 16 栅格） */
+export const IconStop = createIcon('IconStop', 16, () => (
+  <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />
 ));
 
 export const IconFile = createIcon('IconFile', 16, () => (
