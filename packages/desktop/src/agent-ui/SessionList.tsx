@@ -90,6 +90,8 @@ export interface SessionListProps {
 }
 
 const SESSION_VISIBLE_COUNT = 5;
+/** 悬浮卡停留时长：对齐 DSH HoverCard 的 openDelayMs={800} */
+const HOVER_CARD_DELAY_MS = 800;
 const HOME_PATTERN = /^\/Users\/[^/]+/;
 
 /** 视图选项：对齐 DSH WorkspaceBrowser 的 ViewOptionsMenu（分组方式 / 排序方式 / 筛选会话） */
@@ -328,6 +330,16 @@ export const SessionList = memo(function SessionList({
   }, [contentHits, groups, titleHits]);
 
   const [card, setCard] = useState<HoverCardState | null>(null);
+  /** 悬浮卡的停留计时器与「本列表已显示过」预热标记 */
+  const cardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warm = useRef(false);
+  // 卸载时清掉未到期的停留计时
+  useEffect(
+    () => () => {
+      if (cardTimer.current !== null) clearTimeout(cardTimer.current);
+    },
+    []
+  );
   const [menu, setMenu] = useState<MenuState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -392,17 +404,37 @@ export const SessionList = memo(function SessionList({
     };
   }, [menu]);
 
-  /** 悬浮卡：贴住行右侧，跟随行的垂直位置 */
+  /** 悬浮卡：首次停留 800ms 才显示，同一列表内已显示过则立即跟随（对齐 DSH HoverCardGroup 的 grouped 预热） */
   const showCard = (element: HTMLElement, title: string, path: string, time: string) => {
-    const rect = element.getBoundingClientRect();
-    setCard({
-      title,
-      path: homeShortened(path),
-      time,
-      top: Math.min(Math.max(12, rect.top - 4), window.innerHeight - 150),
-      left: Math.min(rect.right + 10, window.innerWidth - 312),
-      host: element.closest<HTMLElement>('.agent-scope') || document.body,
-    });
+    if (cardTimer.current !== null) clearTimeout(cardTimer.current);
+    cardTimer.current = null;
+    const open = () => {
+      const rect = element.getBoundingClientRect();
+      warm.current = true;
+      setCard({
+        title,
+        path: homeShortened(path),
+        time,
+        top: Math.min(Math.max(12, rect.top - 4), window.innerHeight - 150),
+        left: Math.min(rect.right + 10, window.innerWidth - 312),
+        host: element.closest<HTMLElement>('.agent-scope') || document.body,
+      });
+    };
+    if (warm.current) {
+      open();
+      return;
+    }
+    cardTimer.current = setTimeout(() => {
+      cardTimer.current = null;
+      open();
+    }, HOVER_CARD_DELAY_MS);
+  };
+
+  /** 收起悬浮卡，并取消尚未到期的停留计时 */
+  const hideCard = () => {
+    if (cardTimer.current !== null) clearTimeout(cardTimer.current);
+    cardTimer.current = null;
+    setCard(null);
   };
 
   const openMenu = (event: React.MouseEvent<HTMLElement>, next: Omit<MenuState, 'top' | 'left'>) => {
@@ -504,7 +536,7 @@ export const SessionList = memo(function SessionList({
                         createdLabel(session.createdAt)
                       )
                     }
-                    onMouseLeave={() => setCard(null)}
+                    onMouseLeave={hideCard}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !renamingSession) onSelectSession(session.id);
                     }}
@@ -631,7 +663,13 @@ export const SessionList = memo(function SessionList({
   }
 
   return (
-    <aside className={styles.root}>
+    <aside
+      className={styles.root}
+      onMouseLeave={() => {
+        warm.current = false;
+        hideCard();
+      }}
+    >
       {brandSlot}
 
       <button
@@ -845,7 +883,7 @@ export const SessionList = memo(function SessionList({
                 onMouseEnter={(event) =>
                   showCard(event.currentTarget, group.label, group.cwd, createdLabel(group.createdAt))
                 }
-                onMouseLeave={() => setCard(null)}
+                onMouseLeave={hideCard}
                 role="treeitem"
                 aria-expanded={!isCollapsed}
                 tabIndex={0}
