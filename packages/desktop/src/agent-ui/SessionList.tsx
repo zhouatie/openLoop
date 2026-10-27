@@ -33,6 +33,8 @@ export interface SessionListItem {
   path?: string;
   archived?: boolean;
   pinned?: boolean;
+  /** 未落盘的新会话占位行（对齐 DSH blank session）：只显示标题，不显示时间与操作 */
+  draft?: boolean;
 }
 
 export interface SessionGroupItem {
@@ -520,6 +522,8 @@ export const SessionList = memo(function SessionList({
   /** 会话行：工作区树与单列表共用同一份交互（选中、悬停卡、置顶、菜单、行内重命名） */
   const renderSessionRow = (session: SessionListItem) => {
     const renamingSession = rename?.kind === 'session' && rename.key === session.id;
+    // 新会话占位行本身就是当前会话，不响应点击，也不提供文件级操作
+    const draftRow = session.draft === true;
     return (
                   <div
                     key={session.id}
@@ -527,7 +531,7 @@ export const SessionList = memo(function SessionList({
                       session.id === activeId ? styles.sessionSelected : ''
                     } ${session.archived ? styles.sessionArchived : ''}`}
                     onClick={() => {
-                      if (renamingSession) return;
+                      if (renamingSession || draftRow) return;
                       onSelectSession(session.id);
                     }}
                     role="treeitem"
@@ -543,7 +547,7 @@ export const SessionList = memo(function SessionList({
                     }
                     onMouseLeave={hideCard}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !renamingSession) onSelectSession(session.id);
+                      if (event.key === 'Enter' && !renamingSession && !draftRow) onSelectSession(session.id);
                     }}
                   >
                     {/* 状态槽固定 16px（对齐 DSH）：运行指示在槽内显隐，标题位置不随之左右跳 */}
@@ -578,39 +582,43 @@ export const SessionList = memo(function SessionList({
                         <IconPin size={13} />
                       </span>
                     )}
-                    <span className={styles.time}>{relativeTime(session.modifiedAt)}</span>
-                    <span className={styles.rowActions}>
-                      {onPinSession && (
-                        <button
-                          type="button"
-                          className={`${styles.rowIcon} ${session.pinned ? styles.rowIconActive : ''}`}
-                          aria-label={session.pinned ? '取消置顶' : '置顶会话'}
-                          title={session.pinned ? '取消置顶' : '置顶会话'}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onPinSession(session.id, !session.pinned);
-                          }}
-                        >
-                          <IconPin size={14} />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className={styles.rowIcon}
-                        aria-label="会话操作"
-                        onClick={(event) =>
-                          openMenu(event, {
-                            kind: 'session',
-                            cwd: session.cwd,
-                            sessionId: session.id,
-                            archived: session.archived,
-                            pinned: session.pinned,
-                          })
-                        }
-                      >
-                        <IconMore size={16} />
-                      </button>
-                    </span>
+                    {!draftRow && (
+                      <>
+                        <span className={styles.time}>{relativeTime(session.modifiedAt)}</span>
+                        <span className={styles.rowActions}>
+                          {onPinSession && (
+                            <button
+                              type="button"
+                              className={`${styles.rowIcon} ${session.pinned ? styles.rowIconActive : ''}`}
+                              aria-label={session.pinned ? '取消置顶' : '置顶会话'}
+                              title={session.pinned ? '取消置顶' : '置顶会话'}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onPinSession(session.id, !session.pinned);
+                              }}
+                            >
+                              <IconPin size={14} />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className={styles.rowIcon}
+                            aria-label="会话操作"
+                            onClick={(event) =>
+                              openMenu(event, {
+                                kind: 'session',
+                                cwd: session.cwd,
+                                sessionId: session.id,
+                                archived: session.archived,
+                                pinned: session.pinned,
+                              })
+                            }
+                          >
+                            <IconMore size={16} />
+                          </button>
+                        </span>
+                      </>
+                    )}
                   </div>
 
     );

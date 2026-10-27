@@ -625,6 +625,8 @@ export function GlobalAgentPanel({
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [activeId, setActiveId] = useState<string | null>(initialSessionId || newSessionId());
+  /** 新会话占位行：对齐 DSH 的 blank session，点「新会话」后立刻在工作区里插入并选中 */
+  const [draft, setDraft] = useState<{ id: string; cwd: string } | null>(null);
   const [streamKey, setStreamKey] = useState<string | null>(() => {
     const id = initialSessionId || newSessionId();
     return `agent_${id}`;
@@ -790,6 +792,8 @@ export function GlobalAgentPanel({
     setActiveId(id);
     setStreamKey(`agent_${id}`);
     setHistory(undefined);
+    // 离开新会话就撤掉占位行
+    setDraft((prev) => (prev?.id === id ? prev : null));
     try {
       const detail = await api.getAgentSession(id);
       setHistory(detail.messages || []);
@@ -847,6 +851,7 @@ export function GlobalAgentPanel({
     setStreamKey(`agent_${id}`);
     setHistory([]);
     setCwd(safeCwd);
+    setDraft({ id, cwd: safeCwd });
     if (projectCwd && projectCwd !== TEMP_PROJECT_KEY) {
       setExtraProjects((prev) => (prev.includes(projectCwd) ? prev : [projectCwd, ...prev]));
       setCollapsed((prev) => prev.filter((key) => key !== projectCwd));
@@ -877,6 +882,8 @@ export function GlobalAgentPanel({
       if (!activeId) return;
       setSending(true);
       if (!streamKey) setStreamKey(`agent_${activeId}`);
+      // 首条消息发出后由实时状态/磁盘列表接管该行
+      setDraft(null);
       try {
         await sendMessage(message, attachments.ready);
         attachments.clear();
@@ -898,10 +905,27 @@ export function GlobalAgentPanel({
   );
 
   const keyword = query.trim().toLowerCase();
+  /** 列表数据源：当前新会话先以占位行出现，等文件落盘后换成真实会话行 */
+  const listedSessions = useMemo(() => {
+    if (!draft || draft.id !== activeId || keyword) return sessions;
+    if (sessions.some((item) => item.id === draft.id)) return sessions;
+    const nowIso = new Date().toISOString();
+    const row: SessionListItem = {
+      id: draft.id,
+      title: '新会话',
+      cwd: draft.cwd,
+      modifiedAt: nowIso,
+      createdAt: nowIso,
+      messageCount: 0,
+      draft: true,
+    };
+    return [row, ...sessions];
+  }, [sessions, draft, activeId, keyword]);
+
   const filteredSessions = useMemo(() => {
-    if (!keyword) return sessions;
-    return sessions.filter((item) => item.title.toLowerCase().includes(keyword));
-  }, [sessions, keyword]);
+    if (!keyword) return listedSessions;
+    return listedSessions.filter((item) => item.title.toLowerCase().includes(keyword));
+  }, [listedSessions, keyword]);
 
   const groups = useMemo<ProjectGroup[]>(() => {
     const map = new Map<string, ProjectGroup>();
@@ -1105,10 +1129,11 @@ export function GlobalAgentPanel({
         setActiveId(next);
         setStreamKey(`agent_${next}`);
         setHistory([]);
+        setDraft({ id: next, cwd });
       }
       await refresh();
     },
-    [activeId, refresh]
+    [activeId, refresh, cwd]
   );
 
   const renameProject = useCallback(
@@ -1185,6 +1210,7 @@ export function GlobalAgentPanel({
         setStreamKey(`agent_${nextId}`);
         setHistory([]);
         setUiRequest(null);
+        setDraft(null);
         setLiveIds((prev) => [...new Set([...prev, nextId])]);
         if (result.cwd) setCwd(result.cwd);
         // 读取新会话已落盘的历史，让分叉点之前的上下文立刻可见
