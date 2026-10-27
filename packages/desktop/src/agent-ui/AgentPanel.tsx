@@ -135,7 +135,6 @@ export function AgentPanelShell({
   shortcutsEnabled = true,
 }: AgentPanelShellProps) {
   const [draft, setDraft] = useState('');
-  const [focusSignal, setFocusSignal] = useState(0);
   /** 每个会话各自的草稿，切换会话时不会串味 */
   const draftsRef = useRef<Record<string, string>>({});
   const draftKeyRef = useRef(draftKey || '');
@@ -161,12 +160,6 @@ export function AgentPanelShell({
     },
     [onSend]
   );
-
-  /** 编辑历史用户消息：回填草稿并聚焦输入框 */
-  const handleEditUserMessage = useCallback((content: string) => {
-    setDraft(content);
-    setFocusSignal((value) => value + 1);
-  }, []);
 
   /** Super + Enter：打断当前回答并立刻发送 */
   const handleAcceleratedSend = useCallback(
@@ -227,7 +220,6 @@ export function AgentPanelShell({
       actions={composerActions}
       commands={commands}
       onRequestMentions={onRequestMentions}
-      focusSignal={focusSignal}
       permission={permission}
       onPermissionSelect={onPermissionSelect}
       models={models}
@@ -303,7 +295,6 @@ export function AgentPanelShell({
                 contentWidth={contentWidth}
                 onRegenerate={onRegenerate}
                 onFork={onFork}
-                onEditUserMessage={handleEditUserMessage}
               />
               {banner}
               {composer}

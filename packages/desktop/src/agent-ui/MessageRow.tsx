@@ -3,7 +3,7 @@ import type { SessionChatMessage } from '@openloop/core/types';
 import { AgentMarkdown } from './Markdown';
 import { ToolCard } from './ToolCard';
 import { ImageThumb } from './ImageLightbox';
-import { IconCopy, IconEdit, IconFork, IconRefresh } from './icons';
+import { IconCopy, IconFork, IconRefresh } from './icons';
 import styles from './MessageRow.module.css';
 
 const ThinkingBlock = memo(function ThinkingBlock({
@@ -55,8 +55,6 @@ export interface MessageRowProps {
   onRegenerate?: () => void;
   /** 从该轮用户消息分叉出新会话 */
   onFork?: () => void;
-  /** 编辑该条用户消息（回填输入框） */
-  onEdit?: (content: string) => void;
 }
 
 export const MessageRow = memo(function MessageRow({
@@ -64,7 +62,6 @@ export const MessageRow = memo(function MessageRow({
   compact,
   onRegenerate,
   onFork,
-  onEdit,
 }: MessageRowProps) {
   if (message.role === 'system') {
     return (
@@ -102,7 +99,7 @@ export const MessageRow = memo(function MessageRow({
           {message.content.trim().length > 0 && <div className={styles.userText}>{message.content}</div>}
         </div>
         {!compact && message.content.trim().length > 0 && (
-          <UserActions text={message.content} onEdit={onEdit} />
+          <UserActions text={message.content} />
         )}
       </div>
     );
@@ -154,14 +151,8 @@ function formatClock(timestamp: number): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
-/** 用户消息操作条：复制 / 编辑重发 */
-const UserActions = memo(function UserActions({
-  text,
-  onEdit,
-}: {
-  text: string;
-  onEdit?: (content: string) => void;
-}) {
+/** 用户消息操作条：复制（与 DSH 一致，不提供编辑） */
+const UserActions = memo(function UserActions({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -182,17 +173,6 @@ const UserActions = memo(function UserActions({
       >
         <IconCopy size={15} />
       </button>
-      {onEdit && (
-        <button
-          type="button"
-          className={styles.iconAction}
-          onClick={() => onEdit(text)}
-          title="编辑后重发"
-          aria-label="编辑消息"
-        >
-          <IconEdit size={15} />
-        </button>
-      )}
     </div>
   );
 });

@@ -65,8 +65,6 @@ export interface ComposerProps {
   commands?: ComposerCommand[];
   /** @ 候选：文件 / 目录 / 会话 */
   onRequestMentions?: (query: string) => Promise<ComposerMentionItem[]>;
-  /** 变化时聚焦输入框（编辑历史消息后回填） */
-  focusSignal?: number;
   /** 工具权限预设 */
   permission?: ComposerPermission;
   onPermissionSelect?: (preset: ComposerPermission) => void;
@@ -110,7 +108,6 @@ export const Composer = React.memo(function Composer({
   actions,
   commands,
   onRequestMentions,
-  focusSignal,
   permission,
   onPermissionSelect,
   models,
@@ -326,15 +323,6 @@ export const Composer = React.memo(function Composer({
       });
     }
   };
-
-  useEffect(() => {
-    if (!focusSignal) return;
-    const node = textareaRef.current;
-    if (!node) return;
-    node.focus();
-    const end = node.value.length;
-    node.setSelectionRange(end, end);
-  }, [focusSignal]);
 
   const canSend = value.trim().length > 0 && !disabled;
   useEffect(() => {

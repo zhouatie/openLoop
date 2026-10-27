@@ -17,6 +17,8 @@
 .content {
   max-width: var(--agent-content-width, 920px);
   margin: 0 auto;
+  /* body 全局关闭了选中，会话正文需要单独放开，支持划词复制 */
+  user-select: text;
 }
 
 .empty {

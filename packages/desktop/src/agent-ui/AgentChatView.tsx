@@ -16,8 +16,6 @@ export interface AgentChatViewProps {
   onRegenerate?: () => void;
   /** 从某一轮的用户消息分叉出新会话 */
   onFork?: (entryId: string) => void;
-  /** 编辑某条用户消息：回填输入框 */
-  onEditUserMessage?: (content: string) => void;
 }
 
 /** 距底部多少像素内仍视为「贴底」，超过则停止自动滚动 */
@@ -146,7 +144,6 @@ export const AgentChatView = React.memo(function AgentChatView({
   contentWidth,
   onRegenerate,
   onFork,
-  onEditUserMessage,
 }: AgentChatViewProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -280,10 +277,7 @@ export const AgentChatView = React.memo(function AgentChatView({
                 {separator}
                 <div className={styles.turn} data-turn={block.turn || undefined}>
                   {block.user !== null && (
-                    <MessageRow
-                      message={messages[block.user]}
-                      onEdit={onEditUserMessage}
-                    />
+                    <MessageRow message={messages[block.user]} />
                   )}
                   <TurnProcess
                     steps={block.steps.map((index) => messages[index])}
