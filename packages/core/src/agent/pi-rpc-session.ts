@@ -13,6 +13,7 @@ import {
   RuntimeSettingsApplySummary,
 } from '../types';
 import { createLogger } from '../logger';
+import { compactToolResult } from './agent-format';
 
 const logger = createLogger('PiRpcSession');
 
@@ -396,7 +397,7 @@ export class PiRpcSessionInstance extends EventEmitter {
         }
         let toolName = '';
         if (targetTool) {
-          targetTool.result = record.result;
+          targetTool.result = compactToolResult(record.result);
           targetTool.status = record.isError ? 'error' : 'success';
           targetTool.durationMs = record.durationMs;
           toolName = targetTool.name;

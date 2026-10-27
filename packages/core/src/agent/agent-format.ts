@@ -45,6 +45,24 @@ export function extractToolResultText(result: any): string {
 }
 
 /**
+ * 压缩工具结果：剥离内联图片 base64 数据。
+ * 会话消息会被持久化并随每次流式更新广播，内联图片会让单条消息膨胀到数 MB，
+ * 曾导致 Core 服务堆内存耗尽而崩溃。界面只渲染文本部分，剥离 base64 不影响展示。
+ */
+export function compactToolResult(result: any): any {
+  if (!result || typeof result !== 'object' || !Array.isArray(result.content)) return result;
+
+  let stripped = false;
+  const content = result.content.map((item: any) => {
+    if (!item || item.type !== 'image' || typeof item.data !== 'string') return item;
+    stripped = true;
+    return { ...item, data: '' };
+  });
+
+  return stripped ? { ...result, content } : result;
+}
+
+/**
  * 格式化工具调用参数，提取最关键的入参展示（如 bash 命令、文件路径等），避免 JSON 字符串杂乱堆叠
  */
 export function formatToolArgs(toolName: string, args: any): string {
