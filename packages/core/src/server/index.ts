@@ -26,7 +26,7 @@ import { createLogger } from '../logger';
 import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
 import { sanitizeChatMessages } from '../agent/agent-format';
 import { piSessionIndex } from '../agent/session-index';
-import { agentSessionHost, type AgentPermissionPreset } from '../agent/agent-session-host';
+import { agentSessionHost, GLOBAL_AGENT_PREFIX, type AgentPermissionPreset } from '../agent/agent-session-host';
 import { agentSessionMeta, moveSessionFileToTrash } from '../agent/session-meta';
 import { listDirectory, readTextFile, statFile } from '../agent/fs-browser';
 import { terminalHost } from '../agent/terminal-host';
@@ -112,6 +112,16 @@ export class OpenLoopServer {
     return this.engine;
   }
 
+  /**
+   * 流水线 agent 节点跑的就是同一份 pi 会话，事件再按 `agent_<sessionId>` 路由一份，
+   * 让「智能体开发」面板打开这个会话时也能看到运行状态与流式输出
+   */
+  private globalAgentAlias(taskId: string | undefined): string | undefined {
+    if (!taskId) return undefined;
+    const session = PiRpcSessionManager.getInstance().getSession(taskId);
+    return session ? `${GLOBAL_AGENT_PREFIX}${session.sessionId}` : undefined;
+  }
+
   private setupEngineEvents() {
     this.engine.on('task:update', (task: Task) => {
       this.broadcastTaskUpdate(task);
@@ -127,11 +137,15 @@ export class OpenLoopServer {
 
     this.engine.on('agent:chat_update', (data) => {
       this.broadcast({ type: 'agent:chat_update', data });
+      const alias = this.globalAgentAlias(data.taskId);
+      if (alias) this.broadcast({ type: 'agent:chat_update', data: { ...data, taskId: alias } });
     });
 
     // Agent 会话增量事件：流式期间只推变化部分，快照仍走 agent:chat_update
     this.engine.on('agent:stream', (event) => {
       this.broadcast({ type: 'agent:stream', data: event });
+      const alias = this.globalAgentAlias(event.taskId);
+      if (alias) this.broadcast({ type: 'agent:stream', data: { ...event, taskId: alias } });
     });
 
     // 不绑定任务的全局 Agent 会话（侧边栏「智能体开发」）：事件同样并入同一条推流通道
@@ -782,7 +796,11 @@ export class OpenLoopServer {
         return this.sendJson(
           res,
           200,
-          { sessions: agentSessionHost.listLive(), busy: agentSessionHost.listBusy() },
+          {
+            sessions: agentSessionHost.listLive(),
+            // 流水线 agent 节点也在跑 pi 会话，运行指示要一并统计
+            busy: [...agentSessionHost.listBusy(), ...PiRpcSessionManager.getInstance().listBusySessionIds()],
+          },
           reqMeta
         );
       }
@@ -924,7 +942,12 @@ export class OpenLoopServer {
       const agentLiveMatch = pathname.match(/^\/api\/agent\/sessions\/(.+)\/live$/);
       if (agentLiveMatch && method === 'GET') {
         const sessionKey = decodeURIComponent(agentLiveMatch[1]);
-        return this.sendJson(res, 200, { state: agentSessionHost.getState(sessionKey) || null }, reqMeta);
+        const state =
+          agentSessionHost.getState(sessionKey) ||
+          // 流水线 agent 节点的会话不在全局宿主里，接上同一份实时状态
+          PiRpcSessionManager.getInstance().getStateBySessionId(sessionKey) ||
+          null;
+        return this.sendJson(res, 200, { state }, reqMeta);
       }
 
       // 回应扩展 UI 请求：approval 卡片的选择结果
