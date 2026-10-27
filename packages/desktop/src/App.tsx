@@ -121,15 +121,18 @@ export const AppContent: React.FC = () => {
     },
     onToggleSidebar: handleToggleSidebar,
     onEscape: () => {
+      if (isAgentOverlayOpen) {
+        // 浮层自己处理 Esc（先收瞬时层，再关闭浮层），这里不抢
+        return;
+      }
       if (isQuickRunModalOpen) {
         setIsQuickRunModalOpen(false);
       }
       if (isCommandPaletteOpen) {
         setIsCommandPaletteOpen(false);
       }
-      setIsAgentOverlayOpen(false);
     },
-  });
+  }, !isAgentOverlayOpen);
 
   const handleWorkspaceFilterChange = (workspace: string) => {
     setSelectedWorkspaceFilter(workspace);
@@ -525,7 +528,11 @@ export const AppContent: React.FC = () => {
         }
         aria-hidden={!isAgentOverlayOpen}
       >
-        <GlobalAgentPanel mode="overlay" onClose={() => setIsAgentOverlayOpen(false)} />
+        <GlobalAgentPanel
+          mode="overlay"
+          active={isAgentOverlayOpen}
+          onClose={() => setIsAgentOverlayOpen(false)}
+        />
       </div>
 
       {/* 实时终端抽屉 */}

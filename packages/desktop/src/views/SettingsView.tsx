@@ -59,6 +59,8 @@ import {
 import { PROMPT_METAS, DEFAULT_PROMPT_TEMPLATES } from '../constants/prompts';
 import { useShortcuts } from '../context/ShortcutContext';
 import { Kbd } from '../components/Kbd';
+import { ShortcutRecorder } from '../components/ShortcutRecorder';
+import { SHORTCUT_COMMANDS } from '../constants/agentShortcuts';
 import { toast } from '../components/Toast';
 import { PluginManagerView } from './PluginManagerView';
 import {
@@ -303,7 +305,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // 快捷键状态
-  const { superKey, setSuperKey, superKeyLabel } = useShortcuts();
+  const {
+    superKey,
+    setSuperKey,
+    superKeyLabel,
+    bindings,
+    setBinding,
+    resetBindings,
+    describeShortcut,
+  } = useShortcuts();
 
   // 表单状态
   const [agentProvider, setAgentProvider] = useState<AgentProviderType>('pi');
@@ -2312,6 +2322,67 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11.5px] text-[#85858d] mb-1.5 px-0.5 font-normal flex items-center justify-between">
+                <span>智能体面板快捷键</span>
+                <button
+                  type="button"
+                  onClick={() => void resetBindings()}
+                  className="text-[11px] text-[#4f46e5] hover:text-[#4338ca] cursor-pointer"
+                >
+                  全部恢复默认
+                </button>
+              </div>
+
+              <div className="bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                {(['chat', 'panel'] as const).map((group, groupIndex) => (
+                  <div key={group} className={groupIndex > 0 ? 'border-t border-[#ececf0]' : ''}>
+                    <div className="px-3.5 pt-3 pb-1 text-[11.5px] text-[#a1a1aa]">
+                      {group === 'chat' ? '对话手势' : '面板与工作区'}
+                    </div>
+                    {SHORTCUT_COMMANDS.filter((command) => command.group === group).map((command) => (
+                      <div
+                        key={command.id}
+                        className="min-h-[48px] px-3.5 py-2 flex items-center justify-between gap-6 border-t border-[#f2f2f5] first:border-t-0"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[12.5px] font-medium text-[#1c1c21]">{command.label}</div>
+                          <div className="text-[11px] text-[#85858d] mt-0.5 leading-relaxed">
+                            {command.description}
+                          </div>
+                        </div>
+                        <div className="shrink-0 flex items-center gap-2">
+                          {command.fixed ? (
+                            <Kbd keys={['Esc', 'Esc']} size="xs" />
+                          ) : (
+                            <>
+                              <ShortcutRecorder
+                                commandId={command.id}
+                                title={`当前：${describeShortcut(command.id).join(' ')}，点击后按下新的组合键`}
+                              />
+                              {bindings[command.id] !== command.defaultBinding && (
+                                <button
+                                  type="button"
+                                  onClick={() => void setBinding(command.id, command.defaultBinding)}
+                                  className="text-[11px] text-[#85858d] hover:text-[#1c1c21] cursor-pointer"
+                                >
+                                  重置
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-2 text-[11px] text-[#a1a1aa] px-0.5 leading-relaxed">
+                组合键中的 Command 位置统一使用上方配置的 Super 键；固定手势与输入框内的 Enter 不受此处影响
               </div>
             </div>
           </div>

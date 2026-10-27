@@ -16,10 +16,14 @@ export interface ShortcutActions {
   onEscape?: () => void;
 }
 
-export const useGlobalShortcuts = (actions: ShortcutActions) => {
+export const useGlobalShortcuts = (actions: ShortcutActions, enabled = true) => {
   const { superKey } = useShortcuts();
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
+
+  // 智能体浮层打开时会接管键盘，全局导航快捷键必须让位
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
   const superKeyRef = useRef(superKey);
   superKeyRef.current = superKey;
@@ -46,6 +50,10 @@ export const useGlobalShortcuts = (actions: ShortcutActions) => {
           target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT' ||
           target.isContentEditable);
+
+      if (!enabledRef.current) {
+        return;
+      }
 
       // 处理 Escape 键
       if (e.key === 'Escape' || e.code === 'Escape') {

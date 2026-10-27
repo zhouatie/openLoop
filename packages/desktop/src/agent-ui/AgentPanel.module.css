@@ -1,5 +1,6 @@
 /* 面板外壳：整页 / 抽屉 / 内联三种形态共用一套底色与边框语义 */
 .panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;

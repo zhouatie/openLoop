@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   IconFolderClose,
   IconMore,
@@ -57,6 +57,8 @@ export interface SessionListProps {
   onReorderProjects?: (keys: string[]) => void;
   /** 顶部的品牌标识插槽 */
   brandSlot?: React.ReactNode;
+  /** 变化时展开并聚焦搜索（快捷键触发） */
+  searchSignal?: number;
 }
 
 const SESSION_VISIBLE_COUNT = 5;
@@ -127,11 +129,18 @@ export const SessionList = memo(function SessionList({
   onHideProject,
   onReorderProjects,
   brandSlot,
+  searchSignal,
 }: SessionListProps) {
   const searching = query.trim().length > 0;
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [sortDesc, setSortDesc] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // 外部触发（Super + K）：展开搜索并聚焦输入框
+  useEffect(() => {
+    if (!searchSignal) return;
+    setSearchOpen(true);
+  }, [searchSignal]);
 
   const toggleGroupSessions = (key: string) => {
     setExpandedGroups((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
@@ -161,6 +170,43 @@ export const SessionList = memo(function SessionList({
 
   const [card, setCard] = useState<HoverCardState | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // 搜索展开后聚焦输入框（点击与快捷键共用）
+  useEffect(() => {
+    if (!searchOpen) return;
+    const timer = window.setTimeout(() => searchInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [searchOpen, searchSignal]);
+
+  // 菜单打开后聚焦首项，便于 ↑↓ / Enter 操作
+  useEffect(() => {
+    if (!menu) return;
+    const first = menuRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])');
+    first?.focus();
+  }, [menu]);
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      setMenu(null);
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not([disabled])') || []
+    );
+    if (items.length === 0) return;
+    event.preventDefault();
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next =
+      event.key === 'ArrowDown'
+        ? items[(index + 1 + items.length) % items.length]
+        : items[(index - 1 + items.length) % items.length];
+    next?.focus();
+  };
 
   useEffect(() => {
     if (!menu) return;
@@ -222,6 +268,7 @@ export const SessionList = memo(function SessionList({
           <label className={styles.searchPill}>
             <IconSearch size={14} className={styles.searchIcon} />
             <input
+              ref={searchInputRef}
               className={styles.search}
               value={query}
               placeholder="搜索会话"
@@ -280,7 +327,7 @@ export const SessionList = memo(function SessionList({
       </div>
 
       {searching && (
-        <div className={styles.searchPanel}>
+        <div className={styles.searchPanel} data-agent-transient>
           <div className={styles.searchPanelHead}>
             {searchHits.length > 0 ? `${searchHits.length} 个匹配会话` : '没有匹配的会话'}
           </div>
@@ -465,7 +512,12 @@ export const SessionList = memo(function SessionList({
       </div>
 
       {card && (
-        <div className={styles.hoverCard} style={{ top: card.top, left: card.left }} role="presentation">
+        <div
+          className={styles.hoverCard}
+          style={{ top: card.top, left: card.left }}
+          role="presentation"
+          data-agent-transient
+        >
           <div className={styles.hoverTitle}>{card.title}</div>
           {card.path && <div className={styles.hoverPath}>{card.path}</div>}
           {card.time && <div className={styles.hoverTime}>{card.time}</div>}
@@ -474,10 +526,13 @@ export const SessionList = memo(function SessionList({
 
       {menu && (
         <div
+          ref={menuRef}
           className={styles.menu}
           style={{ top: menu.top, left: menu.left }}
           role="menu"
+          data-agent-transient
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={handleMenuKeyDown}
         >
           {menu.kind === 'project' && (
             <>

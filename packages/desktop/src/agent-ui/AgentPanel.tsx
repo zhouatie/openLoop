@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionChatMessage } from '@openloop/core/types';
 import { api } from '../services/api';
 import type { TaskAttachment } from '@openloop/core/types';
@@ -13,6 +13,8 @@ import { WorkspaceDock, type DockTab } from './WorkspaceDock';
 import { IconClose, IconMinimize, IconPanelRight } from './icons';
 import { BrandLogo } from '../components/BrandLogo';
 import { ApprovalCard, type AgentUiRequest } from './ApprovalCard';
+import { ShortcutSheet } from './ShortcutSheet';
+import { useShortcutBindings } from '../hooks/useShortcutBindings';
 import { IconChevronDown, IconFolderOpen } from './icons';
 import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
@@ -72,6 +74,8 @@ export interface AgentPanelShellProps {
   dock?: React.ReactNode;
   /** 重新生成最后一轮回答 */
   onRegenerate?: () => void;
+  /** 面板当前可见时才监听面板快捷键 */
+  shortcutsEnabled?: boolean;
 }
 
 /** 三种挂载共用的会话外壳：顶栏 + 消息列 + 输入卡 */
@@ -109,8 +113,12 @@ export function AgentPanelShell({
   onModelSelect,
   dock,
   onRegenerate,
+  shortcutsEnabled = true,
 }: AgentPanelShellProps) {
   const [draft, setDraft] = useState('');
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const lastEscRef = useRef(0);
 
   const handleSend = useCallback(
     (message: string) => {
@@ -120,11 +128,53 @@ export function AgentPanelShell({
     [onSend]
   );
 
+  /** Super + Enter：打断当前回答并立刻发送 */
+  const handleAcceleratedSend = useCallback(
+    (message: string) => {
+      setDraft('');
+      if (import.meta.env?.DEV) {
+        console.log('[AgentPanel] 加速发送：先中断当前回答', { length: message.length });
+      }
+      onStop?.();
+      void onSend(message);
+    },
+    [onSend, onStop]
+  );
+
+  useShortcutBindings(
+    { 'shortcuts.sheet': () => setSheetOpen(true) },
+    shortcutsEnabled && !sheetOpen
+  );
+
+  /**
+   * Esc 分层处理：双击 Esc 停止生成；有瞬时层（popover / 菜单 / 审批卡）时交给它们；
+   * 否则关闭面板。
+   */
+  const handleEscape = useCallback(() => {
+    const now = Date.now();
+    const isDouble = now - lastEscRef.current < 500;
+    lastEscRef.current = now;
+    if (isBusy && onStop) {
+      // 生成中：单击 Esc 只关闭瞬时层（由它们自己处理），双击才停止生成
+      if (isDouble) {
+        if (import.meta.env?.DEV) {
+          console.log('[AgentPanel] 双击 Esc 停止生成');
+        }
+        lastEscRef.current = 0;
+        onStop();
+      }
+      return;
+    }
+    if (rootRef.current?.querySelector('[data-agent-transient]')) return;
+    onClose?.();
+  }, [isBusy, onStop, onClose]);
+
   const composer = (
     <Composer
       value={draft}
       onChange={setDraft}
       onSend={handleSend}
+      onAcceleratedSend={handleAcceleratedSend}
       onStop={onStop}
       busy={isBusy}
       awaitingInput={awaitingInput}
@@ -147,7 +197,13 @@ export function AgentPanelShell({
   const isBlank = messages.length === 0;
 
   return (
-    <div className={`agent-scope ${styles.panel}`}>
+    <div
+      ref={rootRef}
+      className={`agent-scope ${styles.panel}`}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') handleEscape();
+      }}
+    >
       {!headerless && (
       <header className={styles.header}>
         <div className={styles.headerMain}>
@@ -182,6 +238,8 @@ export function AgentPanelShell({
         </div>
       </header>
       )}
+
+      {sheetOpen && <ShortcutSheet onClose={() => setSheetOpen(false)} />}
 
       <div className={styles.mainRow}>
         <div className={styles.mainCol}>
@@ -248,6 +306,13 @@ export function TaskAgentPanel({
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   const attachments = useAttachments();
 
+  // 面板内快捷键：工作台开合与页签
+  useShortcutBindings({
+    'dock.toggle': () => setDockTab((prev) => (prev ? null : 'files')),
+    'dock.files': () => setDockTab('files'),
+    'dock.terminal': () => setDockTab('terminal'),
+  });
+
   const load = useCallback(() => api.getTaskSession(taskId).catch(() => null), [taskId]);
 
   const transport = useMemo(
@@ -300,11 +365,12 @@ export function TaskAgentPanel({
           {headerExtra}
           <button
             type="button"
-            className={styles.cwdButton}
+            className={`${styles.iconButton} ${dockTab ? styles.iconButtonActive : ''}`}
             onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
-            title="工作区面板：文件 / 终端 / 预览"
+            title={dockTab ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
+            aria-label="工作台"
           >
-            {dockTab ? '收起面板' : '工作区'}
+            <IconPanelRight size={16} />
           </button>
         </>
       }
@@ -334,6 +400,8 @@ export interface GlobalAgentPanelProps {
   mode: 'page' | 'overlay' | 'drawer';
   onClose?: () => void;
   initialSessionId?: string | null;
+  /** 不可见时关闭面板级快捷键 */
+  active?: boolean;
 }
 
 interface ProjectGroup {
@@ -409,7 +477,12 @@ function readJsonArray(key: string): string[] {
 }
 
 /** 全局会话：左侧项目（工作目录）树，展开后是该项目下的会话 */
-export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgentPanelProps) {
+export function GlobalAgentPanel({
+  mode,
+  onClose,
+  initialSessionId,
+  active = true,
+}: GlobalAgentPanelProps) {
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [liveIds, setLiveIds] = useState<string[]>([]);
   const [extraProjects, setExtraProjects] = useState<string[]>(() => readJsonArray(PROJECTS_KEY));
@@ -793,6 +866,24 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
   );
 
   const activeSession = sessions.find((item) => item.id === activeId);
+  const [searchSignal, setSearchSignal] = useState(0);
+
+  // 面板导航快捷键：命令表在 constants/agentShortcuts.ts，可在设置页改键
+  useShortcutBindings({
+    'session.new': () => startNewSession(activeCwd),
+    'session.search': () => setSearchSignal((prev) => prev + 1),
+    'workspace.add': () => void handleAddProject(),
+    'session.rename': () => {
+      if (activeId) void renameSession(activeId);
+    },
+    'session.archive': () => {
+      const target = sessions.find((item) => item.id === activeId);
+      if (target) void archiveSession(target.id, !target.archived);
+    },
+    'dock.toggle': () => setDockTab((prev) => (prev ? null : 'files')),
+    'dock.files': () => setDockTab('files'),
+    'dock.terminal': () => setDockTab('terminal'),
+  });
   // 仅 Electron（macOS）需要为红黄绿窗口按钮让位；浏览器里不偏移
   const trafficLightInset = (() => {
     if (typeof window === 'undefined') return false;
@@ -846,6 +937,7 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
           collapsed={collapsed}
           onQueryChange={setQuery}
           onToggleGroup={handleToggleGroup}
+          searchSignal={searchSignal}
           onSelectSession={(id) => void selectSession(id)}
           onNewInGroup={startNewSession}
           onAddProject={() => void handleAddProject()}

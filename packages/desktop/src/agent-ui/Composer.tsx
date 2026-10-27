@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { IconPlus, IconSend, IconStop, IconFolderClose, IconChevronDown, IconFile } from './icons';
 import styles from './Composer.module.css';
+import { useShortcuts } from '../context/ShortcutContext';
 
 export interface ComposerAttachmentItem {
   id: string;
@@ -27,6 +28,8 @@ export interface ComposerProps {
   value: string;
   onChange: (value: string) => void;
   onSend: (message: string) => void;
+  /** Super + Enter：打断当前回答后立即发送 */
+  onAcceleratedSend?: (message: string) => void;
   onStop?: () => void;
   busy?: boolean;
   awaitingInput?: boolean;
@@ -65,6 +68,7 @@ export const Composer = React.memo(function Composer({
   value,
   onChange,
   onSend,
+  onAcceleratedSend,
   onStop,
   busy,
   awaitingInput,
@@ -83,6 +87,7 @@ export const Composer = React.memo(function Composer({
   models,
   onModelSelect,
 }: ComposerProps) {
+  const { matchShortcut } = useShortcuts();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -197,6 +202,7 @@ export const Composer = React.memo(function Composer({
         }
         if (event.key === 'Escape') {
           event.preventDefault();
+          event.stopPropagation();
           setMenu(null);
           return;
         }
@@ -208,6 +214,12 @@ export const Composer = React.memo(function Composer({
       }
 
       if (event.key === 'Enter' && !event.shiftKey) {
+        // Super + Enter：打断当前回答并立刻发送
+        if (onAcceleratedSend && matchShortcut(event.nativeEvent, 'chat.acceleratedSend') && value.trim()) {
+          event.preventDefault();
+          onAcceleratedSend(value.trim());
+          return;
+        }
         event.preventDefault();
         submit();
       }
@@ -282,6 +294,7 @@ export const Composer = React.memo(function Composer({
         <div
           className={`${styles.popover} ${menu.kind === 'mention' ? styles.popoverList : ''}`}
           role="listbox"
+          data-agent-transient
         >
           {menu.kind === 'mention' && <div className={styles.popoverHeader}>文件与文件夹</div>}
           {menu.items.map((item, index) => (
