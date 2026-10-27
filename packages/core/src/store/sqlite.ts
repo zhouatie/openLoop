@@ -341,18 +341,12 @@ export class SqliteStore {
       // 忽略
     }
 
-    // 如果是首次启动空库，插入初始内置数据
-    const countWf = this.db.prepare('SELECT count(*) as cnt FROM workflows').get() as { cnt: number };
-    if (countWf.cnt === 0) {
-      this.seedInitialData();
-    } else {
-      // 检查并增量补齐/更新内置核心工作流
-      this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
-    }
+    // 内置插件仅在缺失时补齐；流水线不内置，完全由用户创建或导入
+    const countPlugin = this.db.prepare('SELECT count(*) as cnt FROM plugins').get() as { cnt: number };
+    if (countPlugin.cnt === 0) this.seedBuiltinPlugins();
 
-    // 清理已废弃的内置工作流与示例自动化任务
+    // 清理已废弃的示例自动化任务
     try {
-      this.db.prepare("DELETE FROM workflows WHERE id IN ('wf_app_build_deploy', 'wf_agent_feature_dev', 'wf_auto_dev_qa')").run();
       this.db.prepare("DELETE FROM automation_tasks WHERE id IN ('auto_gh_issues_sync', 'auto_twitter_pipeline', 'auto_cli_polling')").run();
     } catch {
       // 忽略
@@ -360,9 +354,6 @@ export class SqliteStore {
 
     // 平滑补齐或迁移标签数据
     try {
-      const defaultTagMap: Record<string, string[]> = {
-        wf_worktree_auto_dev_qa_merge: ['研发', '沙箱', 'QA'],
-      };
       const rows = this.db.prepare('SELECT id, name, tags_json, variables_json FROM workflows').all() as any[];
       const updateStmt = this.db.prepare('UPDATE workflows SET tags_json = ?, variables_json = ? WHERE id = ?');
       for (const row of rows) {
@@ -386,9 +377,8 @@ export class SqliteStore {
             }
           } catch {}
         }
-        if (!hasTagsSource && defaultTagMap[row.id]) {
-          tags = defaultTagMap[row.id];
-          hasTagsSource = true;
+        if (!hasTagsSource) {
+          continue;
         }
 
         let varsObj: any = null;
@@ -418,75 +408,6 @@ export class SqliteStore {
         const val = JSON.parse(row.value_json);
         if (typeof val === 'string' && (val === process.cwd() || path.resolve(val) === path.resolve(process.cwd()) || process.cwd().startsWith(val))) {
           this.db.prepare("DELETE FROM settings WHERE key = 'defaultCwd'").run();
-        }
-      }
-    } catch {
-      // 忽略
-    }
-
-    // 平滑升级 wf_rn_ios_chitu_qa 流水线：支持目标 App 参数配置
-    try {
-      const row = this.db.prepare("SELECT nodes_json, variables_json FROM workflows WHERE id = 'wf_rn_ios_chitu_qa'").get() as { nodes_json: string; variables_json: string } | undefined;
-      if (row) {
-        let changed = false;
-        let nodes: any[] = [];
-        try { nodes = JSON.parse(row.nodes_json); } catch {}
-        let variables: Record<string, any> = {};
-        try { variables = JSON.parse(row.variables_json || '{}'); } catch {}
-
-        if (!variables.appPackage) {
-          variables.appPackage = 'com.netease.cloudmusicother';
-          changed = true;
-        }
-
-        for (const n of nodes) {
-          if (n.id === 'node_ios_deeplink') {
-            const ep = Array.isArray(n.config?.editableParams) ? n.config.editableParams : [];
-            if (!ep.some((p: any) => p.key === 'appPackage')) {
-              n.config = {
-                ...n.config,
-                editableParams: [
-                  {
-                    key: 'appPackage',
-                    label: '目标 App 包名 (Bundle ID)',
-                    placeholder: 'com.netease.cloudmusicother',
-                    hint: 'iOS Bundle ID (如 com.netease.cloudmusicother / com.netease.cloudmusicinhouse / com.netease.cloudmusic)',
-                  },
-                  ...ep,
-                ],
-              };
-              changed = true;
-            }
-          } else if (n.id === 'node_rn_midscene_test') {
-            if (n.config?.appPackage === 'com.netease.cloudmusicother' || !n.config?.appPackage) {
-              n.config = {
-                ...n.config,
-                appPackage: '{{appPackage}}',
-              };
-              changed = true;
-            }
-            const ep = Array.isArray(n.config?.editableParams) ? n.config.editableParams : [];
-            if (!ep.some((p: any) => p.key === 'appPackage')) {
-              n.config = {
-                ...n.config,
-                editableParams: [
-                  {
-                    key: 'appPackage',
-                    label: '目标 App 包名 (Bundle ID)',
-                    placeholder: 'com.netease.cloudmusicother',
-                    hint: 'iOS Bundle ID (如 com.netease.cloudmusicother / com.netease.cloudmusicinhouse / com.netease.cloudmusic)',
-                  },
-                  ...ep,
-                ],
-              };
-              changed = true;
-            }
-          }
-        }
-
-        if (changed) {
-          this.db.prepare("UPDATE workflows SET nodes_json = ?, variables_json = ?, updated_at = ? WHERE id = 'wf_rn_ios_chitu_qa'")
-            .run(JSON.stringify(nodes), JSON.stringify(variables), Date.now());
         }
       }
     } catch {
@@ -531,139 +452,7 @@ export class SqliteStore {
     }
   }
 
-  private getWorktreeDevQaMergeWorkflowDefinition(): WorkflowDefinition {
-    return {
-      id: 'wf_worktree_auto_dev_qa_merge',
-      name: 'Worktree 隔离开发与视觉 QA 自动验收流水线',
-      description: '端到端全闭环研发流水线：根据需求创建 Git Worktree 与独立端口靶机，Agent 隔离编写代码，Playwright 真实浏览器 UI 自动化截帧，查看连贯截图回放验收通过后自动合并到开发分支并清理沙箱',
-      tags: ['研发', '沙箱', 'QA'],
-      taskTemplate: {
-        titlePlaceholder: '输入特性需求说明 (如: 新增个人中心关注列表骨架屏)',
-        descriptionTemplate: [
-          '### 特性与开发范围',
-          '- 需求说明: ',
-          '- 关联分支: feat/',
-          '- 本地服务依赖端口: 5175',
-        ].join('\n'),
-        acceptanceTemplate: [
-          '- [ ] AI 开发者修改代码后本地编译正常通过',
-          '- [ ] 自动化 UI 截帧回放无明显错位或白屏',
-          '- [ ] QA 人工确认后自动合入目标分支并清理沙箱',
-        ].join('\n'),
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      nodes: [
-        {
-          id: 'node_wt_setup',
-          name: '1. Worktree 隔离沙箱就绪',
-          type: 'worktree-setup',
-          position: { x: 100, y: 150 },
-          config: {
-            allocatePorts: ['webPort', 'corePort'],
-            basePort: 5175,
-            portBases: { webPort: 5175, corePort: 19890 },
-            sharedPaths: ['node_modules', 'packages/*/node_modules'],
-            timeoutSec: 120,
-          },
-        },
-        {
-          id: 'node_agent_coder',
-          name: '2. AI 开发者隔离编码实现',
-          type: 'agent',
-          position: { x: 380, y: 150 },
-          config: {
-            agentName: 'Pi Coding Agent',
-            prompt: '请在当前 Worktree 隔离工作区中完成任务代码修改与验证：\n任务需求：{{task.title}}\n详细说明：{{task.description}}\n执行规范：保持代码极简整洁，修改完毕后确保基础编译通过。',
-            timeoutSec: 600,
-          },
-        },
-        {
-          id: 'node_qa_plan',
-          name: '3. QA 黑盒验收用例设计',
-          type: 'qa-planner',
-          position: { x: 660, y: 150 },
-          config: {
-            timeoutSec: 60,
-          },
-        },
-        {
-          id: 'node_env_prep',
-          name: '4. 测试现场准备与服务就绪',
-          type: 'env-prepare',
-          position: { x: 940, y: 150 },
-          config: {
-            command: 'pnpm --filter @openloop/desktop dev --port {{ports.webPort}} --strictPort --host 0.0.0.0',
-            healthUrl: 'http://127.0.0.1:{{ports.webPort}}',
-            targetPlatform: 'web',
-            warmupTimeoutMs: 30000,
-            background: true,
-            timeoutSec: 120,
-          },
-        },
-        {
-          id: 'node_qa_test',
-          name: '5. 自动化测试执行与视觉截帧',
-          type: 'midscene',
-          position: { x: 1220, y: 150 },
-          config: {
-            platform: 'web',
-            instructions: [
-              '等待页面完全加载，检查首屏主视觉元素',
-              '定位核心交互按钮并触发点击',
-              '校验页面无报错与异常提示',
-            ],
-            timeoutSec: 180,
-          },
-        },
-        {
-          id: 'node_qa_gate',
-          name: '6. 视觉操作回放与验收门禁',
-          type: 'qa-approval',
-          position: { x: 1500, y: 150 },
-          config: {
-            approvalPrompt: '请查看 UI 自动化截帧序列回放与变更统计，确认效果无误后点击【验收通过并合并】',
-            checklist: [
-              'AI 真实浏览器操作流程完整且无报错',
-              '截帧回放中界面交互符合预期',
-              '变更代码 Diff 准确且无冗余文件',
-            ],
-          },
-        },
-        {
-          id: 'node_wt_merge',
-          name: '7. 自动合并代码分支',
-          type: 'worktree-merge',
-          position: { x: 1780, y: 150 },
-          config: {
-            timeoutSec: 60,
-          },
-        },
-        {
-          id: 'node_wt_cleanup',
-          name: '8. 环境释放与沙箱清理',
-          type: 'worktree-cleanup',
-          position: { x: 2060, y: 150 },
-          config: {
-            timeoutSec: 60,
-          },
-        },
-      ],
-      edges: [
-        { id: 'e_wt_to_agent', source: 'node_wt_setup', target: 'node_agent_coder' },
-        { id: 'e_agent_to_qaplan', source: 'node_agent_coder', target: 'node_qa_plan' },
-        { id: 'e_qaplan_to_prep', source: 'node_qa_plan', target: 'node_env_prep' },
-        { id: 'e_prep_to_qa', source: 'node_env_prep', target: 'node_qa_test' },
-        { id: 'e_qa_to_gate', source: 'node_qa_test', target: 'node_qa_gate' },
-        { id: 'e_gate_to_merge', source: 'node_qa_gate', target: 'node_wt_merge' },
-        { id: 'e_merge_to_cleanup', source: 'node_wt_merge', target: 'node_wt_cleanup' },
-      ],
-    };
-  }
-
-  private seedInitialData() {
-    this.saveWorkflow(this.getWorktreeDevQaMergeWorkflowDefinition());
-
+  private seedBuiltinPlugins() {
     // 预置插件
     const builtinPlugins: PluginManifest[] = [
       {
