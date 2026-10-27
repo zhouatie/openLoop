@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionChatMessage, SessionUsage } from '@openloop/core/types';
-import { MessageRow, formatTokens } from './MessageRow';
+import { MessageRow } from './MessageRow';
 import { TurnProcess } from './TurnProcess';
 import { TurnRail, type TurnRailItem } from './TurnRail';
 import styles from './AgentChatView.module.css';
@@ -14,6 +14,8 @@ export interface AgentChatViewProps {
   contentWidth?: number;
   /** 重新生成最后一轮回答 */
   onRegenerate?: () => void;
+  /** 从某一轮的用户消息分叉出新会话 */
+  onFork?: (entryId: string) => void;
 }
 
 /** 距底部多少像素内仍视为「贴底」，超过则停止自动滚动 */
@@ -77,13 +79,26 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
     }
     const turn = current as TurnBlock;
 
-    if (message.content.trim()) {
+    const hasTools = (message.tools?.length || 0) > 0;
+    const hasText = message.content.trim().length > 0;
+
+    if (hasTools) {
+      // 带工具调用的助手消息正文是过渡说明，与工具行一起进过程折叠
+      if (turn.answer !== null) {
+        turn.steps.push(turn.answer);
+        turn.answer = null;
+      }
+      turn.steps.push(index);
+    } else if (hasText) {
       if (turn.answer !== null) turn.steps.push(turn.answer);
       turn.answer = index;
-      const rail = railItems[railItems.length - 1];
-      if (rail) rail.response = clip(message.content, PREVIEW_RESPONSE_CHARS);
     } else {
       turn.steps.push(index);
+    }
+
+    if (hasText) {
+      const rail = railItems[railItems.length - 1];
+      if (rail) rail.response = clip(message.content, PREVIEW_RESPONSE_CHARS);
     }
     if (message.usage) turn.usage = message.usage;
     if (message.model) turn.model = message.model;
@@ -99,6 +114,7 @@ export const AgentChatView = React.memo(function AgentChatView({
   emptyHint,
   contentWidth,
   onRegenerate,
+  onFork,
 }: AgentChatViewProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -180,6 +196,15 @@ export const AgentChatView = React.memo(function AgentChatView({
     [contentWidth]
   );
 
+  // 分叉锚点是该轮用户消息的 pi 条目 id
+  const forkEntryIdOf = useCallback(
+    (block: TurnBlock): string | undefined => {
+      if (block.user === null) return undefined;
+      return messages[block.user]?.entryId;
+    },
+    [messages]
+  );
+
   const isEmpty = messages.length === 0;
   const lastTurn = blocks.length > 0 ? blocks[blocks.length - 1] : undefined;
 
@@ -221,18 +246,13 @@ export const AgentChatView = React.memo(function AgentChatView({
                     <MessageRow
                       message={messages[block.answer]}
                       onRegenerate={isLiveTurn && onRegenerate ? onRegenerate : undefined}
+                      onFork={forkEntryIdOf(block) && onFork ? () => onFork(forkEntryIdOf(block) as string) : undefined}
                     />
                   )}
                   {isLiveTurn && isBusy && block.answer === null && block.steps.length === 0 && (
                     <div className={styles.waiting}>
                       <span className={styles.waitingDot} aria-hidden />
                       正在处理…
-                    </div>
-                  )}
-                  {block.usage && (
-                    <div className={styles.turnFooter}>
-                      {block.usage.totalTokens ? `${formatTokens(block.usage.totalTokens)} tokens` : ''}
-                      {block.usage.cost ? ` · $${block.usage.cost.toFixed(4)}` : ''}
                     </div>
                   )}
                 </div>

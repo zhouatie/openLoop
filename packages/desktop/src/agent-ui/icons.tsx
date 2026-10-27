@@ -164,3 +164,45 @@ export const IconPanelRight = createIcon('IconPanelRight', 16, () => (
     <path d="M9.8 3.9v8.2" stroke="currentColor" />
   </>
 ));
+
+/** 复制 */
+export const IconCopy = createIcon('IconCopy', 16, () => (
+  <>
+    <rect x="5.5" y="5.5" width="8" height="8.5" rx="1.8" stroke="currentColor" />
+    <path d="M10.5 5.2V4.1A1.6 1.6 0 0 0 8.9 2.5H4.1A1.6 1.6 0 0 0 2.5 4.1v4.8a1.6 1.6 0 0 0 1.6 1.6h1.1" stroke="currentColor" />
+  </>
+));
+
+/** 赞 */
+export const IconThumbUp = createIcon('IconThumbUp', 16, () => (
+  <path
+    d="M5.2 13.5V6.9l2.9-4.4a1 1 0 0 1 1.7.2l.5 1.4a2 2 0 0 1-.1 1.6l-.9 1.5h2.6a1.6 1.6 0 0 1 1.6 1.9l-.7 3.6a1.6 1.6 0 0 1-1.6 1.3H5.2Zm0 0H3.1a.6.6 0 0 1-.6-.6V7.5a.6.6 0 0 1 .6-.6h2.1"
+    stroke="currentColor"
+  />
+));
+
+/** 踩 */
+export const IconThumbDown = createIcon('IconThumbDown', 16, () => (
+  <path
+    d="M10.8 2.5v6.6l-2.9 4.4a1 1 0 0 1-1.7-.2l-.5-1.4a2 2 0 0 1 .1-1.6l.9-1.5H4.1a1.6 1.6 0 0 1-1.6-1.9l.7-3.6A1.6 1.6 0 0 1 4.8 2h6Zm0 0h2.1a.6.6 0 0 1 .6.6v5.4a.6.6 0 0 1-.6.6h-2.1"
+    stroke="currentColor"
+  />
+));
+
+/** 分叉：从消息生出新分支 */
+export const IconFork = createIcon('IconFork', 16, () => (
+  <>
+    <circle cx="4" cy="3.6" r="1.5" stroke="currentColor" />
+    <circle cx="4" cy="12.4" r="1.5" stroke="currentColor" />
+    <circle cx="12" cy="6.4" r="1.5" stroke="currentColor" />
+    <path d="M4 5.1v5.8M5.5 8.4h3.2a1.8 1.8 0 0 0 1.8-1.8V7.9" stroke="currentColor" />
+  </>
+));
+
+/** 重新生成 */
+export const IconRefresh = createIcon('IconRefresh', 16, () => (
+  <>
+    <path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.7" stroke="currentColor" />
+    <path d="M13.4 2.4v3h-3" stroke="currentColor" />
+  </>
+));

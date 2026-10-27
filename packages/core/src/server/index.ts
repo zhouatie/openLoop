@@ -888,7 +888,7 @@ export class OpenLoopServer {
 
       // 全局 Agent 会话控制：打开 / 发消息 / 暂停 / 继续 / 停止
       const agentActionMatch = pathname.match(
-        /^\/api\/agent\/sessions\/(.+)\/(chat|open|pause|resume|stop|model|permission|regenerate)$/
+        /^\/api\/agent\/sessions\/(.+)\/(chat|open|pause|resume|stop|model|permission|regenerate|fork)$/
       );
       if (agentActionMatch) {
         const sessionKey = decodeURIComponent(agentActionMatch[1]);
@@ -944,6 +944,15 @@ export class OpenLoopServer {
             await agentSessionHost.pause(sessionKey).catch(() => false);
             const next = await agentSessionHost.chat(sessionKey, lastUser.content, {});
             return this.sendJson(res, 200, next, reqMeta);
+          }
+          if (action === 'fork') {
+            const entryId = typeof body?.entryId === 'string' ? body.entryId.trim() : '';
+            if (!entryId) {
+              return this.sendJson(res, 400, { error: '缺少 entryId' }, reqMeta);
+            }
+            const result = await agentSessionHost.fork(sessionKey, entryId);
+            this.broadcast({ type: 'agent:forked', data: { from: sessionKey, ...result } });
+            return this.sendJson(res, 200, result, reqMeta);
           }
           if (action === 'pause') {
             return this.sendJson(res, 200, { success: await agentSessionHost.pause(sessionKey) }, reqMeta);

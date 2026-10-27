@@ -651,6 +651,38 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /**
+   * 从历史用户消息分叉出新会话（pi fork 会切换子进程的活动会话）
+   */
+  public async fork(entryId: string): Promise<{
+    cancelled?: boolean;
+    text?: string;
+    sessionId: string;
+  }> {
+    if (!this.active) throw new Error('会话未启动，无法分叉');
+    // sendCommand 直接返回 response.data，失败会以 reject 抛出
+    const data = (await this.sendCommand({ type: 'fork', entryId })) || {};
+    let nextSessionId = this.sessionId;
+    if (!data.cancelled) {
+      try {
+        const state = await this.sendCommand({ type: 'get_state' });
+        const sid = state?.sessionId;
+        if (typeof sid === 'string' && sid) nextSessionId = sid;
+      } catch (err: any) {
+        this.onLog?.('system', `分叉后读取状态失败: ${err?.message || err}`);
+      }
+    }
+    this.sessionId = nextSessionId;
+    // 分叉后当前上下文已被替换，清空本地消息，由前端重新加载历史
+    this.messages = [];
+    this.currentAssistantMessage = null;
+    this.isBusy = false;
+    this.isPaused = false;
+    this.awaitingInput = false;
+    logger.info(`会话分叉: ${entryId} -> ${nextSessionId}`, undefined, { taskId: this.taskId });
+    return { cancelled: Boolean(data.cancelled), text: data.text, sessionId: nextSessionId };
+  }
+
+  /**
    * 发送普通提示词（启动新轮次）
    */
   public async sendPrompt(message: string, attachments?: TaskAttachment[]): Promise<any> {

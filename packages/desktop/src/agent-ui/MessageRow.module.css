@@ -62,34 +62,68 @@
   margin: 4px 0 18px;
 }
 
-.assistantMeta {
+/* 回答操作条：图标左侧、用量与时间随后，图标静默到悬停 */
+.assistantActions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 12px;
+  margin-top: 10px;
+  height: 22px;
   font-size: 11.5px;
   color: var(--dsw-alias-label-caption);
 }
 
-.author {
-  font-weight: 500;
+.actionGroup {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms var(--ds-ease-in-out);
+}
+
+.assistantRow:hover .actionGroup,
+.assistantRow:focus-within .actionGroup {
+  opacity: 1;
+}
+
+.iconAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--dsw-radius-xs);
+  background: transparent;
   color: var(--dsw-alias-label-tertiary);
-  max-width: 60%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 120ms var(--ds-ease-in-out), background-color 120ms var(--ds-ease-in-out);
 }
 
-.time {
+.iconAction:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.iconActionActive {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.iconActionDone {
+  color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-primary));
+}
+
+.actionMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.usage,
+.metaTime {
   font-variant-numeric: tabular-nums;
-}
-
-.streamingDot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--dsw-alias-state-business-primary);
-  animation: streamPulse 1s ease-in-out infinite;
+  white-space: nowrap;
 }
 
 @keyframes streamPulse {
@@ -217,28 +251,4 @@
   font-size: 13px;
 }
 
-/* 消息操作：静默到悬停才出现 */
-.assistantRow:hover .action {
-  opacity: 1;
-}
 
-.action {
-  margin-left: auto;
-  padding: 0 6px;
-  height: 20px;
-  border: none;
-  border-radius: var(--dsw-radius-xs);
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font-family: inherit;
-  font-size: 11px;
-  line-height: 20px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 120ms var(--ds-ease-in-out), color 120ms var(--ds-ease-in-out);
-}
-
-.action:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}

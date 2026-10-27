@@ -158,6 +158,8 @@ export interface SessionChatMessage {
   model?: string;
   /** 消息来源：live=实时进程，history=历史会话回放 */
   source?: 'live' | 'history';
+  /** pi 会话条目的稳定 id，用于分叉定位 */
+  entryId?: string;
 }
 
 export interface TaskSessionState {

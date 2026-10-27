@@ -175,6 +175,44 @@ export class AgentSessionHost extends EventEmitter {
     return session.resume();
   }
 
+  /**
+   * 从某条历史用户消息分叉：pi 会在子进程里切到新会话，
+   * 这里把同一个子进程重新登记到新 session id 下，并同步 taskId。
+   */
+  public async fork(
+    sessionId: string,
+    entryId: string
+  ): Promise<{ sessionId: string; cwd: string; cancelled?: boolean; text?: string }> {
+    if (!entryId) throw new Error('缺少分叉定位');
+    if (!this.isLive(sessionId)) {
+      await this.open(sessionId, {});
+    }
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error('Agent 会话启动失败');
+
+    const cwd = this.cwdBySession.get(sessionId) || os.homedir();
+    const settings = this.settingsBySession.get(sessionId);
+    const result = await session.fork(entryId);
+    const nextSessionId = result.sessionId;
+    if (result.cancelled) {
+      return { sessionId: nextSessionId, cwd, cancelled: true };
+    }
+
+    if (nextSessionId !== sessionId) {
+      this.sessions.delete(sessionId);
+      this.sessions.set(nextSessionId, session);
+      this.cwdBySession.delete(sessionId);
+      this.cwdBySession.set(nextSessionId, cwd);
+      this.settingsBySession.delete(sessionId);
+      if (settings) this.settingsBySession.set(nextSessionId, settings);
+      // 事件按 taskId 过滤，改登记后要同步，否则新会话收不到本进程的事件
+      session.taskId = `${GLOBAL_AGENT_PREFIX}${nextSessionId}`;
+    }
+    this.emit('forked', { from: sessionId, sessionId: nextSessionId, cwd, text: result.text });
+    logger.info(`全局 Agent 会话分叉: ${sessionId} -> ${nextSessionId}`);
+    return { sessionId: nextSessionId, cwd, text: result.text };
+  }
+
   /** 模型 / 思考等级：进程在线时热切换，离线时记入下次启动参数 */
   public async setModel(
     sessionId: string,

@@ -28,7 +28,12 @@ function summarize(tool: ToolExecutionRecord): string {
   const input = tool.input;
   const name = tool.name || '';
   const command = pickString(input, ['command', 'cmd', 'script']);
-  if (command) return command;
+  if (command) {
+    // 多行脚本只展示首行，完整内容在展开后的入参里
+    const firstLine = command.split('\n').find((line) => line.trim()) || '';
+    const flat = firstLine.replace(/\s+/g, ' ').trim();
+    return flat.length > 100 ? `${flat.slice(0, 100)}…` : flat;
+  }
   const path = pickString(input, ['path', 'file', 'filePath', 'file_path', 'target']);
   const pattern = pickString(input, ['pattern', 'query', 'q', 'regex', 'search']);
   if (pattern && path) return `${pattern} · ${path}`;
@@ -80,8 +85,12 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
       >
         <span className={`${styles.dot} ${statusClass}`} aria-hidden />
         <span className={styles.kind}>{KIND_LABEL[kind] || KIND_LABEL.other}</span>
-        <span className={styles.name}>{tool.name}</span>
-        <span className={styles.separator} aria-hidden />
+        {summary !== tool.name && (
+          <>
+            <span className={styles.name}>{tool.name}</span>
+            <span className={styles.separator} aria-hidden />
+          </>
+        )}
         <span className={styles.summary}>{summary}</span>
         {tool.durationMs !== undefined && (
           <span className={styles.duration}>{formatDuration(tool.durationMs)}</span>

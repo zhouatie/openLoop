@@ -1,5 +1,6 @@
 /* 项目列：几何取自 DSH ui-sidebar / ui-workspace（38px 新会话、36px 区头、34/32px 行） */
 .root {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: var(--agent-sidebar-width, 280px);
@@ -300,13 +301,29 @@
   font-variant-numeric: tabular-nums;
 }
 
-.liveDot {
+/* 运行中的会话：标题前置旋转小环 */
+.liveSpinner {
   flex: none;
-  width: 5px;
-  height: 5px;
-  margin-right: 4px;
+  width: 10px;
+  height: 10px;
+  margin-right: 2px;
   border-radius: 50%;
-  background: var(--dsw-alias-state-business-primary);
+  border: 1.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 22%, transparent);
+  border-top-color: var(--dsw-alias-state-business-primary);
+  animation: liveSpin 0.75s linear infinite;
+}
+
+@keyframes liveSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liveSpinner {
+    animation: none;
+    border-top-color: var(--dsw-alias-state-business-primary);
+  }
 }
 
 /* 展开其余 N 个会话：28px，12px 三级文字 */
@@ -463,11 +480,11 @@
 
 /* 搜索弹层：结果列表浮在会话列右侧 */
 .searchPanel {
-  position: fixed;
+  position: absolute;
   z-index: 55;
-  top: 96px;
-  left: calc(var(--agent-sidebar-width, 280px) + 224px);
-  width: 320px;
+  top: 92px;
+  left: calc(100% + 8px);
+  width: 340px;
   max-height: 60vh;
   display: flex;
   flex-direction: column;

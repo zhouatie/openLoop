@@ -74,6 +74,8 @@ export interface AgentPanelShellProps {
   dock?: React.ReactNode;
   /** 重新生成最后一轮回答 */
   onRegenerate?: () => void;
+  /** 从某一轮的用户消息分叉出新会话 */
+  onFork?: (entryId: string) => void;
   /** 面板当前可见时才监听面板快捷键 */
   shortcutsEnabled?: boolean;
 }
@@ -113,6 +115,7 @@ export function AgentPanelShell({
   onModelSelect,
   dock,
   onRegenerate,
+  onFork,
   shortcutsEnabled = true,
 }: AgentPanelShellProps) {
   const [draft, setDraft] = useState('');
@@ -261,6 +264,7 @@ export function AgentPanelShell({
                 emptyHint={emptyHint}
                 contentWidth={contentWidth}
                 onRegenerate={onRegenerate}
+                onFork={onFork}
               />
               {banner}
               {composer}
@@ -843,6 +847,39 @@ export function GlobalAgentPanel({
     [activeId]
   );
 
+  // 分叉：pi 在同一个子进程里切到新会话，前端跟着切过去
+  const handleFork = useCallback(
+    async (entryId: string) => {
+      if (!activeId) return;
+      try {
+        const result = await api.forkAgentSession(activeId, entryId);
+        if (result.cancelled) return;
+        const nextId = result.sessionId;
+        if (import.meta.env?.DEV) {
+          console.log('[AgentPanel] 分叉会话:', { from: activeId, to: nextId });
+        }
+        setActiveId(nextId);
+        setStreamKey(`agent_${nextId}`);
+        setHistory([]);
+        setUiRequest(null);
+        setLiveIds((prev) => [...new Set([...prev, nextId])]);
+        if (result.cwd) setCwd(result.cwd);
+        // 读取新会话已落盘的历史，让分叉点之前的上下文立刻可见
+        try {
+          const detail = await api.getAgentSession(nextId);
+          setHistory(detail.messages || []);
+          if (!result.cwd && detail.summary?.cwd) setCwd(detail.summary.cwd);
+        } catch (err) {
+          if (import.meta.env?.DEV) console.warn('[AgentPanel] 读取分叉会话历史失败:', err);
+        }
+        void refresh();
+      } catch (err) {
+        if (import.meta.env?.DEV) console.warn('[AgentPanel] 分叉失败:', err);
+      }
+    },
+    [activeId, refresh]
+  );
+
   // @ 文件候选：按输入前缀列目录
   const requestFiles = useCallback(
     async (query: string): Promise<string[]> => {
@@ -1002,6 +1039,7 @@ export function GlobalAgentPanel({
                 }
               : undefined
           }
+          onFork={handleFork}
           dock={
             dockTab ? (
               <WorkspaceDock

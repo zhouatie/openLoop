@@ -369,6 +369,7 @@ function mapEntriesToMessages(branch: any[], sessionId: string) {
         content: entry.summary ? `上下文已压缩：${String(entry.summary).slice(0, 200)}` : '上下文已压缩',
         timestamp: Date.parse(entry.timestamp) || Date.now(),
         source: 'history',
+        entryId: entry.id,
       });
       continue;
     }
@@ -381,6 +382,7 @@ function mapEntriesToMessages(branch: any[], sessionId: string) {
         content: textOfContent(entry.content),
         timestamp: Date.parse(entry.timestamp) || Date.now(),
         source: 'history',
+        entryId: entry.id,
       });
       continue;
     }
@@ -398,6 +400,7 @@ function mapEntriesToMessages(branch: any[], sessionId: string) {
         content,
         timestamp,
         source: 'history',
+        entryId: entry.id,
       });
       continue;
     }
@@ -436,6 +439,7 @@ function mapEntriesToMessages(branch: any[], sessionId: string) {
         model: msg.model,
         stopReason: msg.stopReason,
         source: 'history',
+        entryId: entry.id,
       };
       messages.push(chatMessage);
       for (const tool of tools) {

@@ -472,8 +472,8 @@ export const SessionList = memo(function SessionList({
                         if (event.key === 'Enter') onSelectSession(session.id);
                       }}
                     >
+                      {session.live && <span className={styles.liveSpinner} aria-label="进行中" />}
                       <span className={styles.sessionTitle}>{session.title || '未命名会话'}</span>
-                      {session.live && <span className={styles.liveDot} aria-label="进行中" />}
                       <span className={styles.time}>{relativeTime(session.modifiedAt)}</span>
                       <span className={styles.rowActions}>
                         <button
