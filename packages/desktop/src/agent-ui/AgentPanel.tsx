@@ -456,6 +456,14 @@ const TEMP_PROJECT_KEY = '__temp__';
 /** 运行指示的熄灭延时：躲开 pi 一轮之间 turn_end → 下一轮 busy 的短暂间隙 */
 const RUNNING_IDLE_GRACE_MS = 700;
 
+/** pi 会话名可能是路径（任务会话用 workspace 命名），这类名字没有信息量，交回首条消息兜底 */
+function usableSessionTitle(title: string | undefined): string {
+  const raw = (title || '').replace(/^openLoop:\s*/i, '').trim();
+  if (!raw) return '';
+  if (/^(\/|~\/|[A-Za-z]:[\\/])/.test(raw)) return '';
+  return raw;
+}
+
 /** 临时目录、仓库子包与会话工作树都归入所属项目，避免侧栏被内部路径刷屏 */
 function normalizeProjectCwd(cwd: string): string {
   if (!cwd) return TEMP_PROJECT_KEY;
@@ -659,7 +667,9 @@ export function GlobalAgentPanel({
       busyRef.current = new Set(busyList);
       const fromDisk: SessionListItem[] = (list.sessions || []).map((item) => ({
         id: item.id,
-        title: item.title || sessionTitleOf(item.firstUserMessage, item.modifiedAt),
+        // pi 会话名优先（TUI 侧由扩展 AI 生成）；openLoop 任务会话会带 "openLoop: " 前缀，展示时去掉
+        title:
+          usableSessionTitle(item.title) || sessionTitleOf(item.firstUserMessage, item.modifiedAt),
         cwd: item.cwd || '',
         modifiedAt: item.modifiedAt,
         messageCount: item.messageCount,

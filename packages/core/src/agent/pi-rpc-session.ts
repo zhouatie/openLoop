@@ -159,11 +159,11 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   private spawnRpcProcess(options: PiRpcSessionOptions) {
-    const args: string[] = [
-      '--mode', 'rpc',
-      '--session-id', options.sessionId,
-      '--name', `openLoop: ${options.taskTitle.slice(0, 50)}`,
-    ];
+    const args: string[] = ['--mode', 'rpc', '--session-id', options.sessionId];
+    // 有真实标题才写会话名：空标题会污染 pi 的 session_info，挡住后续 AI 命名
+    if (options.taskTitle && options.taskTitle.trim()) {
+      args.push('--name', `openLoop: ${options.taskTitle.trim().slice(0, 50)}`);
+    }
 
     if (options.model && options.model.trim()) {
       args.push('--model', options.model.trim());

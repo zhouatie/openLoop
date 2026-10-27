@@ -30,6 +30,8 @@ export interface PiSessionSummary {
   firstUserMessage: string;
   /** 最后一条助手消息使用的模型 */
   lastModel?: string;
+  /** pi 自己的会话名（--name 或 TUI 侧自动重命名写入的 session_info.name） */
+  sessionName?: string;
   parentSession?: string;
   /** 文件大小，用于变更检测与调试 */
   size: number;
@@ -378,6 +380,8 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
   let messageCount = 0;
   let firstUserMessage = '';
   let lastModel: string | undefined;
+  /** pi 自己的会话名（--name 或 TUI 自动重命名写入的 session_info.name） */
+  let sessionName: string | undefined;
 
   /** 开头没有 session 头的文件（例如 pi 分叉只写了增量条目）也要能读 */
   let hasSessionHeader = false;
@@ -400,6 +404,15 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
         return undefined;
       }
       // 首行不是 session 头：当成无头文件，继续用这一行做统计
+    }
+    if (trimmed.includes('"type":"session_info"')) {
+      try {
+        const entry = JSON.parse(trimmed);
+        if (typeof entry?.name === 'string' && entry.name.trim()) {
+          sessionName = entry.name.trim().slice(0, TITLE_MAX_CHARS);
+        }
+      } catch (_) {}
+      continue;
     }
     if (!trimmed.includes('"type":"message"')) {
       if (trimmed.includes('"type":"model_change"')) {
@@ -429,7 +442,14 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
       for (const line of tail.text.split('\n')) {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('{') === false) continue;
-        if (trimmed.includes('"type":"message"')) messageCount += 1;
+        if (trimmed.includes('"type":"session_info"')) {
+          try {
+            const entry = JSON.parse(trimmed);
+            if (typeof entry?.name === 'string' && entry.name.trim()) {
+              sessionName = entry.name.trim().slice(0, TITLE_MAX_CHARS);
+            }
+          } catch (_) {}
+        } else if (trimmed.includes('"type":"message"')) messageCount += 1;
         else if (trimmed.includes('"type":"model_change"')) {
           try {
             const entry = JSON.parse(trimmed);
@@ -445,12 +465,13 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
   return {
     id: (hasSessionHeader && header?.id) || idFromFileName(filePath),
     path: filePath,
-    cwd: (hasSessionHeader && header?.cwd) || '',
+    cwd: (hasSessionHeader && header?.cwd) || deriveCwdFromFolder(filePath),
     createdAt: (hasSessionHeader && header?.timestamp) || stat.birthtime.toISOString(),
     modifiedAt: stat.mtime.toISOString(),
     messageCount,
     firstUserMessage: firstUserMessage || deriveFolderTitle(filePath),
     lastModel,
+    sessionName,
     parentSession: hasSessionHeader ? header?.parentSession : undefined,
     size: stat.size,
   };
@@ -466,11 +487,48 @@ function snippetAround(text: string, keyword: string): string {
   return `${start > 0 ? '…' : ''}${flat.slice(start, end)}${end < flat.length ? '…' : ''}`;
 }
 
-function deriveFolderTitle(filePath: string): string {
+/** 目录名里的 `-` 同时代表路径分隔符和连字符，只能按真实文件系统贪心还原 */
+function decodeEncodedPath(encoded: string, base: string): string {
+  const segments = encoded.split('-').filter(Boolean);
+  let dir = base;
+  let index = 0;
+  while (index < segments.length) {
+    let next = '';
+    // 尽量吃下更长的片段：`rn-community-collect-cards` 这类真实目录名含连字符
+    for (let end = segments.length; end > index; end--) {
+      const candidate = path.join(dir, segments.slice(index, end).join('-'));
+      try {
+        if (fs.statSync(candidate).isDirectory()) {
+          next = candidate;
+          index = end;
+          break;
+        }
+      } catch (_) {
+        // 该组合不存在，继续缩短
+      }
+    }
+    if (!next) return '';
+    dir = next;
+  }
+  return dir === base ? '' : dir;
+}
+
+const folderCwdCache = new Map<string, string>();
+
+/** pi 用 `--<路径，/ 换成 ->--` 命名项目目录；缺会话头的文件只能靠目录名反推工作目录 */
+function deriveCwdFromFolder(filePath: string): string {
   const folder = path.basename(path.dirname(filePath));
-  const match = folder.match(/^--(.+)--$/);
-  if (!match) return folder;
-  return match[1].replace(/-/g, '/');
+  if (folderCwdCache.has(folder)) return folderCwdCache.get(folder) as string;
+  const encoded = folder.replace(/^-+|-+$/g, '');
+  const resolved = encoded
+    ? decodeEncodedPath(encoded, '/') || decodeEncodedPath(encoded, os.homedir()) || ''
+    : '';
+  folderCwdCache.set(folder, resolved);
+  return resolved;
+}
+
+function deriveFolderTitle(filePath: string): string {
+  return deriveCwdFromFolder(filePath) || path.basename(path.dirname(filePath));
 }
 
 /**

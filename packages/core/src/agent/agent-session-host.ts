@@ -95,7 +95,7 @@ export class AgentSessionHost extends EventEmitter {
 
     const session = new PiRpcSessionInstance({
       taskId,
-      taskTitle: summary?.firstUserMessage || 'Agent 会话',
+      taskTitle: summary?.firstUserMessage || '',
       sessionId,
       cwd,
       model,

@@ -733,7 +733,8 @@ export class OpenLoopServer {
             const project = projectMeta[session.cwd] || {};
             return {
               ...session,
-              title: meta.title,
+              // 标题优先级：面板手动重命名 > pi 自己的会话名 > 渲染层用首条消息兜底
+              title: meta.title || session.sessionName,
               archived: meta.archived === true,
               deleted: meta.deleted === true,
               pinned: meta.pinned === true,
