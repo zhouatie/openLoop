@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionChatMessage, SessionUsage } from '@openloop/core/types';
 import { MessageRow } from './MessageRow';
-import { TurnProcess } from './TurnProcess';
 import { TurnRail, type TurnRailItem } from './TurnRail';
 import styles from './AgentChatView.module.css';
 
@@ -45,19 +44,42 @@ function clockLabel(timestamp: number): string {
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
+/** 进行中状态行：DSH 的「深度求索中，用时 N 秒 ···」 */
+const RunningStatus = React.memo(function RunningStatus({ startedAt }: { startedAt?: number }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const seconds = startedAt ? Math.max(1, Math.round((now - startedAt) / 1000)) : 0;
+
+  return (
+    <div className={styles.running} role="status">
+      <span className={styles.runningDot} aria-hidden />
+      <span className={styles.runningText}>
+        {seconds > 0 ? `深度求索中，用时 ${seconds} 秒 ···` : '深度求索中 ···'}
+      </span>
+    </div>
+  );
+});
+
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
-/** 一轮渲染块：用户消息 + 过程折叠 + 最终回答 + 用量 */
+/** 一轮渲染块：用户消息 + 按顺序平铺的思考/工具/回答 + 用量 */
 interface TurnBlock {
   kind: 'turn';
   turn: number;
   day: string;
   user: number | null;
+  /** 该轮全部助手消息，按出现顺序平铺渲染（不折叠） */
   steps: number[];
-  answer: number | null;
+  /** 轮末操作条锚点：该轮最后一条助手消息 */
+  tail: number | null;
   usage?: SessionUsage;
   model?: string;
 }
@@ -73,7 +95,8 @@ type Block = TurnBlock | RowBlock;
 
 /**
  * 把消息流切成「轮」。
- * 用户消息开新一轮；同轮中除最后一条有正文的助手消息外，其余都归入过程折叠。
+ * 用户消息开新一轮；轮内助手消息按顺序平铺，只有轮末那条挂操作条。
+ * 与 DSH 一致：思考行和工具行都是流内单行，不做二级折叠。
  * 历史会话没有 turn 字段，轮次由视图层推导。
  */
 function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railItems: TurnRailItem[] } {
@@ -90,7 +113,7 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
         day: dayLabel(message.timestamp),
         user: index,
         steps: [],
-        answer: null,
+        tail: null,
       };
       blocks.push(current);
       railItems.push({ turn, prompt: clip(message.content, PREVIEW_PROMPT_CHARS), response: '' });
@@ -103,29 +126,22 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
     }
 
     if (!current) {
-      current = { kind: 'turn', turn: 0, day: dayLabel(message.timestamp), user: null, steps: [], answer: null };
+      current = {
+        kind: 'turn',
+        turn: 0,
+        day: dayLabel(message.timestamp),
+        user: null,
+        steps: [],
+        tail: null,
+      };
       blocks.push(current);
     }
     const turn = current as TurnBlock;
 
-    const hasTools = (message.tools?.length || 0) > 0;
-    const hasText = message.content.trim().length > 0;
+    turn.steps.push(index);
+    turn.tail = index;
 
-    if (hasTools) {
-      // 带工具调用的助手消息正文是过渡说明，与工具行一起进过程折叠
-      if (turn.answer !== null) {
-        turn.steps.push(turn.answer);
-        turn.answer = null;
-      }
-      turn.steps.push(index);
-    } else if (hasText) {
-      if (turn.answer !== null) turn.steps.push(turn.answer);
-      turn.answer = index;
-    } else {
-      turn.steps.push(index);
-    }
-
-    if (hasText) {
+    if (message.content.trim().length > 0) {
       const rail = railItems[railItems.length - 1];
       if (rail) rail.response = clip(message.content, PREVIEW_RESPONSE_CHARS);
     }
@@ -272,6 +288,7 @@ export const AgentChatView = React.memo(function AgentChatView({
               }
 
               const isLiveTurn = block === lastTurn;
+              const forkEntryId = forkEntryIdOf(block);
               return (
                 <React.Fragment key={`turn-${block.turn}-${blockIndex}`}>
                 {separator}
@@ -279,23 +296,20 @@ export const AgentChatView = React.memo(function AgentChatView({
                   {block.user !== null && (
                     <MessageRow message={messages[block.user]} />
                   )}
-                  <TurnProcess
-                    steps={block.steps.map((index) => messages[index])}
-                    live={isLiveTurn}
-                    busy={isBusy}
-                  />
-                  {block.answer !== null && (
-                    <MessageRow
-                      message={messages[block.answer]}
-                      onRegenerate={isLiveTurn && onRegenerate ? onRegenerate : undefined}
-                      onFork={forkEntryIdOf(block) && onFork ? () => onFork(forkEntryIdOf(block) as string) : undefined}
-                    />
-                  )}
-                  {isLiveTurn && isBusy && block.answer === null && block.steps.length === 0 && (
-                    <div className={styles.waiting}>
-                      <span className={styles.waitingDot} aria-hidden />
-                      正在处理…
-                    </div>
+                  {block.steps.map((index) => {
+                    const isTail = index === block.tail;
+                    return (
+                      <MessageRow
+                        key={`m-${index}`}
+                        message={messages[index]}
+                        compact={!isTail}
+                        onRegenerate={isTail && isLiveTurn && onRegenerate ? onRegenerate : undefined}
+                        onFork={isTail && forkEntryId && onFork ? () => onFork(forkEntryId) : undefined}
+                      />
+                    );
+                  })}
+                  {isLiveTurn && isBusy && (
+                    <RunningStatus startedAt={block.user !== null ? messages[block.user]?.timestamp : undefined} />
                   )}
                 </div>
                 </React.Fragment>

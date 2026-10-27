@@ -14,7 +14,10 @@
   flex: none;
   padding: 6px var(--dsh-session-list-edge-inset) 10px;
   box-sizing: border-box;
-  background: var(--dsw-specific-sidebar-fill);
+  /* 半透明底 + 背景模糊：与 DSH 在 macOS 上的毛玻璃侧栏对齐 */
+  background-color: color-mix(in srgb, var(--dsw-specific-sidebar-fill) 72%, transparent);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
   border-right: 1px solid var(--dsw-alias-border-l3);
   color: var(--dsw-alias-label-primary);
   font-family: var(--dsw-font-family);

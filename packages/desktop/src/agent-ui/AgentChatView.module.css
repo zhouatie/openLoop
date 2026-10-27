@@ -86,33 +86,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.waiting {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  font-size: 13px;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.waitingDot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--dsw-alias-state-business-primary);
-  animation: waiting-pulse 1.2s var(--ds-ease-in-out) infinite;
-}
-
-@keyframes waiting-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
-}
-
 /* 日期分隔：两侧细线夹一个日期标签 */
 .daySeparator {
   display: flex;
@@ -132,4 +105,70 @@
   font-size: 11.5px;
   line-height: 18px;
   color: var(--dsw-alias-label-caption);
+}
+
+/* 进行中状态行：DSH RunningStatus */
+.running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  margin: 4px 0 2px;
+}
+
+.runningDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--dsw-alias-state-business-primary);
+  animation: runningPulse 1.2s ease-in-out infinite;
+}
+
+.runningText {
+  font-size: 13px;
+  line-height: 20px;
+  background: linear-gradient(
+    90deg,
+    var(--dsw-alias-state-business-primary) 0%,
+    color-mix(in srgb, var(--dsw-alias-state-business-primary) 40%, transparent) 50%,
+    var(--dsw-alias-state-business-primary) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: runningShimmer 2s linear infinite;
+}
+
+@keyframes runningPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes runningShimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runningDot,
+  .runningText {
+    animation: none;
+  }
+  .runningText {
+    background: none;
+    color: var(--dsw-alias-state-business-primary);
+  }
 }

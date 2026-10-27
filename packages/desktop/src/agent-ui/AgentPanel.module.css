@@ -23,6 +23,15 @@
   height: 100%;
 }
 
+/* 浮层形态：侧栏透出下层页面做毛玻璃，正文列保持实底 */
+.panelOverlay {
+  background: transparent;
+}
+
+.panelOverlay .main {
+  background: var(--dsw-alias-bg-base);
+}
+
 .main {
   display: flex;
   flex-direction: column;

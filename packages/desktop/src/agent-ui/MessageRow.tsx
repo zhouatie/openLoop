@@ -3,9 +3,30 @@ import type { SessionChatMessage } from '@openloop/core/types';
 import { AgentMarkdown } from './Markdown';
 import { ToolCard } from './ToolCard';
 import { ImageThumb } from './ImageLightbox';
-import { IconCopy, IconFork, IconRefresh } from './icons';
+import { IconCopy, IconFork, IconRefresh, IconThink } from './icons';
 import styles from './MessageRow.module.css';
 
+/** 首行摘要：DSH 折叠态只显示第一行；流式时用最近一段完整段落的首行 */
+function firstLineOf(text: string): string {
+  const newline = text.indexOf('\n');
+  return newline === -1 ? text : text.slice(0, newline);
+}
+
+function latestParagraphFirstLine(text: string): string {
+  let summary = '';
+  let cursor = 0;
+  while (cursor < text.length) {
+    const nextBreak = text.indexOf('\n\n', cursor);
+    const chunk = text.slice(cursor, nextBreak === -1 ? text.length : nextBreak);
+    const line = firstLineOf(chunk).trim();
+    if (line) summary = line;
+    if (nextBreak === -1) break;
+    cursor = nextBreak + 2;
+  }
+  return summary;
+}
+
+/** 思考行：与 DSH 一致的单行披露，折叠态只给「思考 · 首行摘要」 */
 const ThinkingBlock = memo(function ThinkingBlock({
   thinking,
   active,
@@ -17,7 +38,7 @@ const ThinkingBlock = memo(function ThinkingBlock({
   const startedRef = useRef<number | null>(null);
   const [seconds, setSeconds] = useState<number | null>(null);
 
-  // 思考耗时：流式开始时打点，结束时结算，折叠态即可看到「已思考 N 秒」
+  // 思考耗时：流式开始打点，结束时结算，展开后可见
   useEffect(() => {
     if (active) {
       startedRef.current = Date.now();
@@ -32,17 +53,32 @@ const ThinkingBlock = memo(function ThinkingBlock({
 
   if (!thinking.trim() && !active) return null;
 
-  const label = active ? '思考中' : seconds ? `已思考 ${seconds} 秒` : '思考过程';
+  const summary = (active ? latestParagraphFirstLine(thinking) : firstLineOf(thinking)).split('**').join('');
 
   return (
-    <div className={styles.thinking}>
-      <button type="button" className={styles.thinkingToggle} onClick={() => setOpen((value) => !value)}>
-        <span className={active ? styles.thinkingPulse : styles.thinkingDot} aria-hidden />
-        <span className={active ? styles.thinkingLive : undefined}>{label}</span>
-        {thinking.length > 0 && <span className={styles.thinkingCount}>{thinking.length} 字</span>}
-        <span className={styles.thinkingChevron}>{open ? '收起' : '展开'}</span>
+    <div className={styles.think}>
+      <button
+        type="button"
+        className={styles.thinkToggle}
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-label={open ? '收起思考' : '展开思考'}
+      >
+        <span className={styles.thinkIcon} aria-hidden>
+          <IconThink size={14} />
+        </span>
+        <span className={styles.thinkTitle}>思考</span>
+        <span className={styles.thinkDot} aria-hidden />
+        <span className={styles.thinkSummary} data-streaming={active || undefined}>
+          <span className={styles.thinkSummaryText}>{summary || (active ? '正在思考' : '无摘要')}</span>
+        </span>
       </button>
-      {open && <div className={styles.thinkingBody}>{thinking}</div>}
+      {open && (
+        <div className={styles.thinkBody}>
+          {seconds !== null && <div className={styles.thinkMeta}>本次思考 {seconds} 秒</div>}
+          <div className={styles.thinkText}>{thinking}</div>
+        </div>
+      )}
     </div>
   );
 });
