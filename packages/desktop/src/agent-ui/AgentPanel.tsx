@@ -793,6 +793,15 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
   );
 
   const activeSession = sessions.find((item) => item.id === activeId);
+  // 仅 Electron（macOS）需要为红黄绿窗口按钮让位；浏览器里不偏移
+  const trafficLightInset = (() => {
+    if (typeof window === 'undefined') return false;
+    const electron = (window as any).electronAPI;
+    if (!electron) return false;
+    const platform = electron.platform as string | undefined;
+    if (platform) return platform === 'darwin';
+    return /mac/i.test(navigator.userAgent);
+  })();
   const isLive = activeId ? liveIds.includes(activeId) : false;
   const title = activeSession?.title || (activeId ? '新会话' : '智能体开发');
   const activeCwd = cwd || activeSession?.cwd || '';
@@ -820,7 +829,11 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
       {mode !== 'drawer' && (
         <SessionList
           brandSlot={
-            <div className={styles.brandRow}>
+            <div
+              className={styles.brandRow}
+              // macOS 桌面端左上角被红黄绿窗口按钮占用，留出同样的让位
+              style={trafficLightInset ? { paddingLeft: 72 } : undefined}
+            >
               <BrandLogo size={18} className={styles.brandLogo} />
               <span className={styles.brandName}>openLoop</span>
               <span className={styles.brandTag}>智能体</span>
