@@ -321,14 +321,6 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 运行中追加提示 */
-.queueHint {
-  margin-right: 6px;
-  font-size: 11px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-caption);
-}
-
 /* 文件与文件夹候选：与输入卡同宽、同圆角，行内带图标 */
 .popoverList {
   gap: 0;
