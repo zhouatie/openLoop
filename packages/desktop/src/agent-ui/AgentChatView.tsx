@@ -3,6 +3,7 @@ import type { SessionChatMessage, SessionUsage } from '@openloop/core/types';
 import { MessageRow } from './MessageRow';
 import { TurnRail, type TurnRailItem } from './TurnRail';
 import { TextShimmer } from './dsh/TextShimmer';
+import { splitPromptImages } from './local-image';
 import styles from './AgentChatView.module.css';
 
 export interface AgentChatViewProps {
@@ -120,7 +121,8 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
         tail: null,
       };
       blocks.push(current);
-      railItems.push({ turn, prompt: clip(message.content, PREVIEW_PROMPT_CHARS), response: '' });
+      const promptText = splitPromptImages(message.content).text;
+      railItems.push({ turn, prompt: clip(promptText || '图片', PREVIEW_PROMPT_CHARS), response: '' });
       return;
     }
 

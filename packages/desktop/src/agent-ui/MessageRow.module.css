@@ -37,12 +37,12 @@
   margin-top: 2px;
 }
 
-/* 历史图片：缩略图网格，点击放大 */
+/* 历史图片：缩略图网格，贴在气泡底部，点击放大 */
 .imageGrid {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-top: 8px;
 }
 
 /* 用户气泡：DSH UserMessageBubble —— radius-xl、10/16 内距、22px 行高 */
@@ -65,7 +65,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 6px;
+  margin-top: 6px;
 }
 
 .attachment {

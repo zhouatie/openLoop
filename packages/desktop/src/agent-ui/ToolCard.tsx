@@ -2,7 +2,9 @@ import React, { memo, useMemo, useState } from 'react';
 import { DiffBlock, type DiffBlockLabels, type DiffHunk } from './dsh/DiffBlock';
 import type { ToolExecutionRecord } from '@openloop/core/types';
 import { IconCode, IconCommand, IconGlobe, IconSearch, IconThink } from './icons';
-import { ImageThumb } from './ImageLightbox';
+import { ImageThumb, LIGHTBOX_LABELS } from './ImageLightbox';
+import { ImageLightbox } from './dsh/ImageLightbox';
+import { imageSrc, isImagePath } from './local-image';
 import { DisclosureRow } from './dsh/DisclosureRow';
 import { TextShimmer } from './dsh/TextShimmer';
 import styles from './ToolCard.module.css';
@@ -146,6 +148,7 @@ const DIFF_LABELS: DiffBlockLabels = {
 
 export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRecord }) {
   const [expanded, setExpanded] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
   const kind = tool.kind || 'other';
   const summary = useMemo(() => summarize(tool), [tool.input, tool.name]);
   const output = useMemo(() => renderResult(tool.result), [tool.result]);
@@ -157,23 +160,43 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
   const images = tool.imageUrls || [];
   const isRunning = tool.status === 'running';
   const failed = tool.status === 'error';
+  // 工具行里的图片路径（如 读取 /tmp/shot.png）：点击直接预览原图
+  const imagePath = useMemo(() => {
+    const target = pickString(tool.input, ['path', 'file', 'filePath', 'file_path', 'target']);
+    return isImagePath(target) ? target! : undefined;
+  }, [tool.input]);
 
   const title = KIND_LABEL[kind] || KIND_LABEL.other;
 
-  // 折叠态摘要：分隔点 + 摘要 + 耗时
+  // 折叠态摘要：分隔点 + 摘要 + 耗时；图片路径可点击预览
   const collapsed = useMemo(
     () => (
       <>
         <span className={styles.separator} data-shimmer-decoration aria-hidden />
-        <span className={styles.summary} data-error={failed || undefined}>
-          <TextShimmer>{summary}</TextShimmer>
-        </span>
+        {imagePath ? (
+          <button
+            type="button"
+            className={`${styles.summary} ${styles.fileLink}`}
+            title={imagePath}
+            onClick={(event) => {
+              event.stopPropagation();
+              setPreview(imageSrc(imagePath));
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <TextShimmer>{summary}</TextShimmer>
+          </button>
+        ) : (
+          <span className={styles.summary} data-error={failed || undefined}>
+            <TextShimmer>{summary}</TextShimmer>
+          </span>
+        )}
         {tool.durationMs !== undefined && (
           <span className={styles.duration}>{formatDuration(tool.durationMs)}</span>
         )}
       </>
     ),
-    [failed, summary, tool.durationMs]
+    [failed, imagePath, summary, tool.durationMs]
   );
 
   const canExpand = Boolean(diffHunks) || hasOutput || images.length > 0 || Boolean(tool.input);
@@ -225,6 +248,14 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
           {isRunning && <div className={styles.empty}>执行中…</div>}
         </div>
       </DisclosureRow>
+      {preview && (
+        <ImageLightbox
+          src={preview}
+          alt={imagePath || '图片预览'}
+          labels={LIGHTBOX_LABELS}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 });

@@ -31,6 +31,29 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* 图片路径：可点击预览，DSH 的 fileLink 虚线引导下划线 */
+.fileLink {
+  flex: 0 1 auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  color: inherit;
+  text-decoration: underline dotted;
+  text-decoration-color: currentColor;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.fileLink:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
 .duration {
   flex: none;
   margin-left: 8px;

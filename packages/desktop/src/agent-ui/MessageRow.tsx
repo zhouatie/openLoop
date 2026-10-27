@@ -1,8 +1,9 @@
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import type { SessionChatMessage } from '@openloop/core/types';
 import { AgentMarkdown } from './Markdown';
 import { ToolCard } from './ToolCard';
 import { ImageThumb } from './ImageLightbox';
+import { imageSrc, isImagePath, splitPromptImages } from './local-image';
 import { ReasoningRow } from './dsh/ReasoningRow';
 import { MessageActions, formatTokens } from './dsh/MessageActions';
 import { Tooltip } from './dsh/Tooltip';
@@ -37,35 +38,7 @@ export const MessageRow = memo(function MessageRow({
   }
 
   if (message.role === 'user') {
-    const attachments = message.attachments || [];
-    const images = attachments.filter((item) => Boolean(item.url));
-    const files = attachments.filter((item) => !item.url);
-    return (
-      <div className={styles.userRow}>
-        <div className={styles.userBubble}>
-          {images.length > 0 && (
-            <div className={styles.imageGrid}>
-              {images.map((item) => (
-                <ImageThumb key={item.id || item.url} image={{ url: item.url, name: item.name }} size={96} />
-              ))}
-            </div>
-          )}
-          {files.length > 0 && (
-            <div className={styles.attachments}>
-              {files.map((attachment) => (
-                <span key={attachment.id || attachment.path} className={styles.attachment}>
-                  {attachment.name || '附件'}
-                </span>
-              ))}
-            </div>
-          )}
-          {message.content.trim().length > 0 && <div className={styles.userText}>{message.content}</div>}
-        </div>
-        {!compact && (message.content.trim().length > 0 || message.attachments?.length) && (
-          <UserActions text={message.content} timestamp={message.timestamp} />
-        )}
-      </div>
-    );
+    return <UserMessageRow message={message} compact={compact} />;
   }
 
   const tools = message.tools || [];
@@ -104,6 +77,59 @@ export const MessageRow = memo(function MessageRow({
           onFork={onFork}
           onRegenerate={onRegenerate}
         />
+      )}
+    </div>
+  );
+});
+
+/** 用户消息：正文在上，随附图片缩略图贴在气泡底部（点击放大） */
+const UserMessageRow = memo(function UserMessageRow({
+  message,
+  compact,
+}: {
+  message: SessionChatMessage;
+  compact?: boolean;
+}) {
+  const { text, images: promptImages } = useMemo(() => splitPromptImages(message.content), [message.content]);
+  const attachments = message.attachments || [];
+  const images = useMemo(
+    () => [
+      ...attachments
+        .filter((item) => Boolean(item.url))
+        .map((item) => ({ key: item.id || item.url, url: item.url, name: item.name })),
+      ...promptImages.map((item) => ({ key: item.path, url: imageSrc(item.path), name: item.name })),
+    ],
+    [message.attachments, promptImages]
+  );
+  const files = attachments.filter((item) => !item.url && !isImagePath(item.path));
+
+  return (
+    <div className={styles.userRow}>
+      <div className={styles.userBubble}>
+        {text.trim().length > 0 && <div className={styles.userText}>{text}</div>}
+        {images.length > 0 && (
+          <div className={styles.imageGrid}>
+            {images.map((item) => (
+              <ImageThumb
+                key={item.key}
+                image={{ url: item.url, name: item.name }}
+                size={images.length > 1 ? 96 : 220}
+              />
+            ))}
+          </div>
+        )}
+        {files.length > 0 && (
+          <div className={styles.attachments}>
+            {files.map((attachment) => (
+              <span key={attachment.id || attachment.path} className={styles.attachment}>
+                {attachment.name || '附件'}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      {!compact && (text.trim().length > 0 || attachments.length > 0) && (
+        <UserActions text={text} timestamp={message.timestamp} />
       )}
     </div>
   );

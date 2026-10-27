@@ -51,6 +51,24 @@ function summarizeToolInput(args: any): Record<string, any> | undefined {
   return Object.keys(summary).length > 0 ? summary : undefined;
 }
 
+/** 单张内联图片上限，超过则不给工具卡内联，避免快照体积失控 */
+const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_INLINE_IMAGES = 4;
+
+/** 工具结果里的图片块转成可渲染的 data URL（截图类工具的预览来源） */
+function resultImageUrls(result: any): string[] {
+  const content = Array.isArray(result?.content) ? result.content : [];
+  const urls: string[] = [];
+  for (const block of content) {
+    if (urls.length >= MAX_INLINE_IMAGES) break;
+    if (!block || block.type !== 'image' || typeof block.data !== 'string') continue;
+    const data = block.data;
+    if (!data || data.length > MAX_INLINE_IMAGE_BYTES) continue;
+    urls.push(`data:${block.mimeType || 'image/png'};base64,${data}`);
+  }
+  return urls;
+}
+
 export interface PiRpcSessionOptions {
   taskId: string;
   taskTitle: string;
@@ -487,6 +505,8 @@ export class PiRpcSessionInstance extends EventEmitter {
           owner.tool.result = compactToolResult(record.result);
           owner.tool.status = record.isError ? 'error' : 'success';
           owner.tool.durationMs = record.durationMs;
+          const images = resultImageUrls(record.result);
+          if (images.length > 0) owner.tool.imageUrls = images;
           toolName = owner.tool.name;
           this.emitTool(owner.messageId, owner.tool);
           this.notifyUpdate(true);

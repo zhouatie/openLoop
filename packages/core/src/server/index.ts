@@ -60,6 +60,8 @@ const MIME_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.woff': 'font/woff',
@@ -563,6 +565,29 @@ export class OpenLoopServer {
     res.end(JSON.stringify(data));
   }
 
+  /** 本地图片预览：只放行图片扩展名的绝对路径，用于会话里提到的截图 */
+  private serveLocalImage(
+    res: http.ServerResponse,
+    rawPath: string,
+    reqMeta: { method: string; pathname: string; startTime: number }
+  ) {
+    const targetPath = rawPath.trim();
+    const isImage = MIME_TYPES[path.extname(targetPath).toLowerCase()]?.startsWith('image/');
+    if (!targetPath || !path.isAbsolute(targetPath) || !isImage) {
+      return this.sendJson(res, 400, { error: 'Invalid image path' }, reqMeta);
+    }
+    if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isFile()) {
+      return this.sendJson(res, 404, { error: 'Image Not Found' }, reqMeta);
+    }
+    res.writeHead(200, {
+      'Content-Type': guessImageMimeType(targetPath),
+      'Content-Length': fs.statSync(targetPath).size,
+      'Cache-Control': 'public, max-age=3600',
+      'Access-Control-Allow-Origin': '*',
+    });
+    return fs.createReadStream(targetPath).pipe(res);
+  }
+
   private resolveStaticDir(): string | null {
     if (this.staticDir && fs.existsSync(this.staticDir)) {
       return this.staticDir;
@@ -674,6 +699,11 @@ export class OpenLoopServer {
         } else {
           return this.sendJson(res, 404, { error: 'Artifact Not Found' }, reqMeta);
         }
+      }
+
+      // 本地图片预览：会话里出现的绝对路径图片（如 /tmp/shot.png）
+      if (pathname === '/api/local-image' && method === 'GET') {
+        return this.serveLocalImage(res, parsedUrl.searchParams.get('path') || '', reqMeta);
       }
 
       // 静态资源托管 (支持独立 Web 生产部署，无需外部 Vite 开发服务器即可直接打开使用)
