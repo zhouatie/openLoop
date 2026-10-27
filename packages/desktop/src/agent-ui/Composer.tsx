@@ -564,11 +564,6 @@ export const Composer = React.memo(function Composer({
           </div>
 
           <div className={styles.trailing}>
-            {busy && (
-              <span className={styles.queueHint} title="运行中回车会把消息排入队列">
-                可追加消息
-              </span>
-            )}
             <button
               type="button"
               className={styles.primary}
