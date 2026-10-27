@@ -16,7 +16,8 @@ import { BrandLogo } from '../components/BrandLogo';
 import { ApprovalCard, type AgentUiRequest } from './ApprovalCard';
 import { ShortcutSheet } from './ShortcutSheet';
 import { useShortcutBindings } from '../hooks/useShortcutBindings';
-import { IconChevronDown, IconFolderOpen } from './icons';
+import { IconCheck, IconChevronDown, IconFolderClose, IconFolderOpen, IconPlus } from './icons';
+import { useDismissOnOutsidePointer } from './dsh/useDismissOnOutsidePointer.ts';
 import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
 import { useAgentStream } from './useAgentStream';
@@ -622,6 +623,17 @@ export function GlobalAgentPanel({
   const runningClearTimers = useRef<Map<string, number>>(new Map());
   const [extraProjects, setExtraProjects] = useState<string[]>(() => readJsonArray(PROJECTS_KEY));
   const [collapsed, setCollapsed] = useState<string[]>(() => readJsonArray(COLLAPSED_KEY));
+  const [wsMenuOpen, setWsMenuOpen] = useState(false);
+  const wsPickerRef = useRef<HTMLDivElement | null>(null);
+  useDismissOnOutsidePointer(wsPickerRef, wsMenuOpen, setWsMenuOpen);
+  useEffect(() => {
+    if (!wsMenuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setWsMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [wsMenuOpen]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [activeId, setActiveId] = useState<string | null>(initialSessionId || newSessionId());
@@ -859,19 +871,15 @@ export function GlobalAgentPanel({
   }, []);
 
   const handleAddProject = useCallback(async () => {
-    const bridge = (window as any).electronAPI;
-    let picked: string | undefined;
-    if (bridge?.openDirectory) {
-      picked = await bridge.openDirectory();
-    } else if (typeof window !== 'undefined') {
-      picked = window.prompt('输入项目目录的绝对路径') || undefined;
-    }
+    // 系统目录选择：Electron 走原生 IPC，Web 走 Core 服务系统调用
+    const picked = await api.selectDirectory({ defaultPath: cwd || undefined });
     if (!picked) return;
+    if (import.meta.env?.DEV) console.log('[AgentPanel] 添加工作区:', picked);
     setExtraProjects((prev) => (prev.includes(picked) ? prev : [picked, ...prev]));
     setCollapsed((prev) => prev.filter((key) => key !== picked));
-    // 还没发过消息的会话直接切到新目录
-    setCwd((prev) => (prev ? prev : picked));
-  }, []);
+    // 选中即是切换：会话的后续消息都跑在这个目录里
+    setCwd(picked);
+  }, [cwd]);
 
   const handleToggleGroup = useCallback((key: string) => {
     setCollapsed((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
@@ -1289,20 +1297,79 @@ export function GlobalAgentPanel({
   const title = activeSession?.title || (activeId ? '新会话' : '智能体开发');
   const activeCwd = cwd || activeSession?.cwd || '';
 
+  // 工作区选择：点芯片先开列表（与 DSH 一致），最后一项才是添加工作区
+  const activeProjectKey = normalizeProjectCwd(activeCwd);
+  const activeProject = groups.find((group) => group.key === activeProjectKey);
+  const wsLabelText = activeCwd && activeProject ? activeProject.label : '选择工作区';
+
+  const pickWorkspace = (group: ProjectGroup) => {
+    setWsMenuOpen(false);
+    const next = group.key === TEMP_PROJECT_KEY ? '' : group.cwd;
+    if (next) {
+      setExtraProjects((prev) => (prev.includes(next) ? prev : [next, ...prev]));
+      setCollapsed((prev) => prev.filter((key) => key !== next));
+    }
+    setCwd(next);
+  };
+
   const hero = (
     <>
       <div className={styles.headline}>开始一段新的会话</div>
       <div className={styles.chipRow}>
-        <button
-          type="button"
-          className={styles.wsChip}
-          onClick={() => void handleAddProject()}
-          title={activeCwd || '选择工作区'}
+        <div
+          ref={wsPickerRef}
+          className={styles.wsPicker}
+          data-agent-transient={wsMenuOpen ? '' : undefined}
         >
-          <IconFolderOpen size={16} className={styles.wsFolder} />
-          <span className={styles.wsLabel}>{activeCwd ? projectLabel(activeCwd) : '选择工作区'}</span>
-          <IconChevronDown size={12} className={styles.wsChevron} />
-        </button>
+          <button
+            type="button"
+            className={styles.wsChip}
+            onClick={() => setWsMenuOpen((prev) => !prev)}
+            title={activeCwd || '选择工作区'}
+            aria-haspopup="menu"
+            aria-expanded={wsMenuOpen}
+          >
+            <IconFolderOpen size={16} className={styles.wsFolder} />
+            <span className={styles.wsLabel}>{wsLabelText}</span>
+            <IconChevronDown size={12} className={styles.wsChevron} />
+          </button>
+          {wsMenuOpen && (
+            <div className={styles.wsMenu} role="menu">
+              <div className={styles.wsMenuList}>
+                {groups.map((group) => (
+                  <button
+                    key={group.key}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={Boolean(activeCwd) && group.key === activeProjectKey}
+                    className={styles.wsMenuItem}
+                    title={group.cwd || group.label}
+                    onClick={() => pickWorkspace(group)}
+                  >
+                    <IconFolderClose size={16} className={styles.wsMenuIcon} />
+                    <span className={styles.wsMenuLabel}>{group.label}</span>
+                    {activeCwd && group.key === activeProjectKey && (
+                      <IconCheck size={14} className={styles.wsMenuCheck} />
+                    )}
+                  </button>
+                ))}
+              </div>
+              {groups.length > 0 && <div className={styles.wsMenuDivider} />}
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.wsMenuItem}
+                onClick={() => {
+                  setWsMenuOpen(false);
+                  void handleAddProject();
+                }}
+              >
+                <IconPlus size={16} className={styles.wsMenuIcon} />
+                <span className={styles.wsMenuLabel}>添加工作区…</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
