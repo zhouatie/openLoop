@@ -489,6 +489,7 @@ export function GlobalAgentPanel({
 }: GlobalAgentPanelProps) {
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [liveIds, setLiveIds] = useState<string[]>([]);
+  const [busyIds, setBusyIds] = useState<string[]>([]);
   const [extraProjects, setExtraProjects] = useState<string[]>(() => readJsonArray(PROJECTS_KEY));
   const [collapsed, setCollapsed] = useState<string[]>(() => readJsonArray(COLLAPSED_KEY));
   const [loading, setLoading] = useState(true);
@@ -509,6 +510,8 @@ export function GlobalAgentPanel({
   >({});
   const [dockTab, setDockTab] = useState<DockTab | null>(null);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
+  /** 刚发过消息、文件还没落盘的会话：id -> 占位行信息 */
+  const pendingRows = useRef<Record<string, { title: string; cwd: string }>>({});
   const attachments = useAttachments();
 
   // 斜杠指令（提供方为 /api/agent/commands-and-skills）
@@ -559,10 +562,12 @@ export function GlobalAgentPanel({
     try {
       const [list, live] = await Promise.all([
         api.getAgentSessions({ limit: 300 }),
-        api.getLiveAgentSessions().catch(() => ({ sessions: [] as string[] })),
+        api.getLiveAgentSessions().catch(() => ({ sessions: [] as string[], busy: [] as string[] })),
       ]);
       const liveList = live.sessions || [];
+      const busyList = live.busy || [];
       setLiveIds(liveList);
+      setBusyIds(busyList);
       setSessions(
         (list.sessions || []).map((item) => ({
           id: item.id,
@@ -571,9 +576,11 @@ export function GlobalAgentPanel({
           modifiedAt: item.modifiedAt,
           messageCount: item.messageCount,
           live: liveList.includes(item.id),
+          running: busyList.includes(item.id),
           createdAt: item.createdAt,
           path: item.path,
           archived: item.archived === true,
+          pinned: item.pinned === true,
         }))
       );
     } catch (err) {
@@ -688,11 +695,16 @@ export function GlobalAgentPanel({
       try {
         await sendMessage(message, attachments.ready);
         attachments.clear();
+        // 新会话的文件还没落盘，先登记占位行，等实时状态把它带进列表
+        pendingRows.current[activeId] = { title: message.slice(0, 40) || '新会话', cwd };
+        void applyLiveState();
       } catch (err) {
         if (import.meta.env?.DEV) console.warn('[AgentPanel] 发送全局会话消息失败:', err);
       } finally {
         setSending(false);
         void refresh();
+        // 首条消息落盘后补一次刷新，补上真实标题与时间
+        window.setTimeout(() => void refresh(), 1500);
       }
     },
     [activeId, streamKey, sendMessage, refresh, attachments]
@@ -739,9 +751,10 @@ export function GlobalAgentPanel({
       .filter((group) => !projectMeta[group.key]?.hidden)
       .map((group) => ({
         ...group,
-        sessions: group.sessions.sort(
-          (a, b) => (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0)
-        ),
+        sessions: group.sessions.sort((a, b) => {
+          if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
+          return (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0);
+        }),
       }))
       .sort((a, b) => {
         if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
@@ -770,6 +783,102 @@ export function GlobalAgentPanel({
     },
     [refresh]
   );
+
+  const pinSession = useCallback(
+    async (id: string, pinned: boolean) => {
+      await api.setAgentSessionMeta(id, { pinned }).catch(() => null);
+      await refresh();
+    },
+    [refresh]
+  );
+
+  /** 把实时会话/运行状态并进列表：已存在的更新标记，文件未落盘的用占位行补上 */
+  const applyLiveState = useCallback(async () => {
+    const live = await api.getLiveAgentSessions().catch(() => null);
+    if (!live) return;
+    const liveList = live.sessions || [];
+    const busyList = live.busy || [];
+    setLiveIds(liveList);
+    setSessions((prev) => {
+      const known = new Set(prev.map((item) => item.id));
+      const nowIso = new Date().toISOString();
+      const placeholders: SessionListItem[] = Object.entries(pendingRows.current)
+        .filter(([id]) => !known.has(id) && (busyList.includes(id) || liveList.includes(id)))
+        .map(([id, info]) => ({
+          id,
+          title: info.title,
+          cwd: info.cwd,
+          modifiedAt: nowIso,
+          messageCount: 1,
+          running: busyList.includes(id),
+          live: true,
+          createdAt: nowIso,
+        }));
+      let changed = placeholders.length > 0;
+      const next = prev.map((item) => {
+        const running = busyList.includes(item.id);
+        const liveFlag = liveList.includes(item.id);
+        if (Boolean(item.running) === running && Boolean(item.live) === liveFlag) return item;
+        changed = true;
+        return { ...item, running, live: liveFlag };
+      });
+      return changed ? [...placeholders, ...next] : prev;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    void applyLiveState();
+    const timer = window.setInterval(() => void applyLiveState(), 2000);
+    return () => window.clearInterval(timer);
+  }, [active, applyLiveState]);
+
+  // 运行指示跟随实时事件：一轮结束（agent_settled）就熄灭
+  useEffect(() => {
+    if (!active) return;
+    const off = api.on('agent:stream', (event: any) => {
+      const taskId: string | undefined = event?.taskId;
+      if (!taskId || !taskId.startsWith('agent_')) return;
+      const sessionId = taskId.slice('agent_'.length);
+      const busy =
+        event?.kind === 'status'
+          ? event.patch?.isBusy
+          : event?.kind === 'message_delta' || event?.kind === 'message'
+            ? true
+            : undefined;
+      if (typeof busy !== 'boolean') return;
+      setSessions((prev) => {
+        const hit = prev.some((item) => item.id === sessionId);
+        if (!hit) {
+          // 文件还没落盘：先用占位行让运行指示立刻出现
+          const info = pendingRows.current[sessionId];
+          if (!busy || !info) return prev;
+          const nowIso = new Date().toISOString();
+          return [
+            {
+              id: sessionId,
+              title: info.title,
+              cwd: info.cwd,
+              modifiedAt: nowIso,
+              messageCount: 1,
+              running: true,
+              live: true,
+              createdAt: nowIso,
+            },
+            ...prev,
+          ];
+        }
+        let changed = false;
+        const next = prev.map((item) => {
+          if (item.id !== sessionId || Boolean(item.running) === busy) return item;
+          changed = true;
+          return { ...item, running: busy };
+        });
+        return changed ? next : prev;
+      });
+    });
+    return () => off?.();
+  }, [active]);
 
   const deleteSession = useCallback(
     async (id: string) => {
@@ -984,6 +1093,7 @@ export function GlobalAgentPanel({
           }}
           onRenameSession={(id) => void renameSession(id)}
           onArchiveSession={(id, archived) => void archiveSession(id, archived)}
+          onPinSession={(id, pinned) => void pinSession(id, pinned)}
           onDeleteSession={(id) => void deleteSession(id)}
           onRenameProject={(key) => void renameProject(key)}
           onHideProject={(key) => void hideProject(key)}

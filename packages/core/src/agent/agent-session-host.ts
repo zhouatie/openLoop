@@ -163,6 +163,11 @@ export class AgentSessionHost extends EventEmitter {
     return [...this.sessions.entries()].filter(([, session]) => session.active).map(([id]) => id);
   }
 
+  /** 正在跑一轮回复的会话（用于界面显示运行指示） */
+  public listBusy(): string[] {
+    return [...this.sessions.entries()].filter(([, session]) => session.isBusy).map(([id]) => id);
+  }
+
   public async pause(sessionId: string): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (!session) return false;

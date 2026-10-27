@@ -3,11 +3,13 @@ import os from 'os';
 import path from 'path';
 import { logger } from '../logger';
 
-/** 单条会话的可编辑元数据：标题覆盖、归档、删除标记 */
+/** 单条会话的可编辑元数据：标题覆盖、归档、删除、置顶标记 */
 export interface AgentSessionMeta {
   title?: string;
   archived?: boolean;
   deleted?: boolean;
+  /** 置顶：会话列中排在前面 */
+  pinned?: boolean;
   updatedAt?: number;
 }
 

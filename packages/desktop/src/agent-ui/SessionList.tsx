@@ -4,6 +4,7 @@ import {
   IconMore,
   IconFolderOpen,
   IconNewChat,
+  IconPin,
   IconProjectAdd,
   IconSearch,
   IconSort,
@@ -18,9 +19,12 @@ export interface SessionListItem {
   modifiedAt: string;
   messageCount: number;
   live?: boolean;
+  /** 正在跑一轮回复，用于运行指示 */
+  running?: boolean;
   createdAt?: string;
   path?: string;
   archived?: boolean;
+  pinned?: boolean;
 }
 
 export interface SessionGroupItem {
@@ -49,6 +53,7 @@ export interface SessionListProps {
   /** 会话元数据操作 */
   onRenameSession?: (id: string) => void;
   onArchiveSession?: (id: string, archived: boolean) => void;
+  onPinSession?: (id: string, pinned: boolean) => void;
   onDeleteSession?: (id: string) => void;
   /** 工作区元数据操作 */
   onRenameProject?: (key: string) => void;
@@ -77,6 +82,7 @@ interface MenuState {
   cwd: string;
   sessionId?: string;
   archived?: boolean;
+  pinned?: boolean;
   top: number;
   left: number;
 }
@@ -124,6 +130,7 @@ export const SessionList = memo(function SessionList({
   onRevealPath,
   onRenameSession,
   onArchiveSession,
+  onPinSession,
   onDeleteSession,
   onRenameProject,
   onHideProject,
@@ -472,10 +479,29 @@ export const SessionList = memo(function SessionList({
                         if (event.key === 'Enter') onSelectSession(session.id);
                       }}
                     >
-                      {session.live && <span className={styles.liveSpinner} aria-label="进行中" />}
+                      {session.running && <span className={styles.liveSpinner} aria-label="进行中" />}
                       <span className={styles.sessionTitle}>{session.title || '未命名会话'}</span>
+                      {session.pinned && (
+                        <span className={styles.pinMark} aria-label="已置顶">
+                          <IconPin size={13} />
+                        </span>
+                      )}
                       <span className={styles.time}>{relativeTime(session.modifiedAt)}</span>
                       <span className={styles.rowActions}>
+                        {onPinSession && (
+                          <button
+                            type="button"
+                            className={`${styles.rowIcon} ${session.pinned ? styles.rowIconActive : ''}`}
+                            aria-label={session.pinned ? '取消置顶' : '置顶会话'}
+                            title={session.pinned ? '取消置顶' : '置顶会话'}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onPinSession(session.id, !session.pinned);
+                            }}
+                          >
+                            <IconPin size={14} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           className={styles.rowIcon}
@@ -486,6 +512,7 @@ export const SessionList = memo(function SessionList({
                               cwd: session.cwd,
                               sessionId: session.id,
                               archived: session.archived,
+                              pinned: session.pinned,
                             })
                           }
                         >
@@ -577,6 +604,18 @@ export const SessionList = memo(function SessionList({
                   }}
                 >
                   重命名会话
+                </button>
+              )}
+              {onPinSession && (
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    onPinSession(menu.sessionId || '', !menu.pinned);
+                    setMenu(null);
+                  }}
+                >
+                  {menu.pinned ? '取消置顶' : '置顶会话'}
                 </button>
               )}
               {onArchiveSession && (

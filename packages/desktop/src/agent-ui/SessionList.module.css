@@ -268,7 +268,7 @@
   font-family: inherit;
   text-align: left;
   cursor: pointer;
-  user-select: none;
+  user-select: text;
 }
 
 @media (hover: hover) {
@@ -552,5 +552,18 @@
 .searchHitTime {
   flex: none;
   font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rowIconActive {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+/* 已置顶：常驻图钉标记 */
+.pinMark {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin: 0 4px 0 0;
   color: var(--dsw-alias-label-tertiary);
 }

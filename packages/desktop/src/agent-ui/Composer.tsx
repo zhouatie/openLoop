@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { IconPlus, IconSend, IconStop, IconFolderClose, IconChevronDown, IconFile } from './icons';
+import {
+  IconPlus,
+  IconSend,
+  IconStop,
+  IconFolderClose,
+  IconChevronDown,
+  IconClose,
+  IconFile,
+} from './icons';
 import styles from './Composer.module.css';
 import { useShortcuts } from '../context/ShortcutContext';
 
@@ -91,6 +99,7 @@ export const Composer = React.memo(function Composer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [files, setFiles] = useState<string[]>([]);
 
@@ -286,6 +295,18 @@ export const Composer = React.memo(function Composer({
   };
 
   const canSend = value.trim().length > 0 && !disabled;
+  useEffect(() => {
+    if (!preview) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setPreview(null);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [preview]);
+
   const hasAttachments = Boolean(attachments && attachments.length > 0);
 
   return (
@@ -360,7 +381,15 @@ export const Composer = React.memo(function Composer({
                 title={item.errorMessage || item.name}
               >
                 {item.previewUrl ? (
-                  <img className={styles.attachmentThumb} src={item.previewUrl} alt={item.name} />
+                  <button
+                    type="button"
+                    className={styles.attachmentThumbButton}
+                    onClick={() => setPreview({ url: item.previewUrl as string, name: item.name })}
+                    title="查看大图"
+                    aria-label={`预览 ${item.name}`}
+                  >
+                    <img className={styles.attachmentThumb} src={item.previewUrl} alt={item.name} />
+                  </button>
                 ) : (
                   <span className={styles.attachmentIcon}>▤</span>
                 )}
@@ -372,12 +401,41 @@ export const Composer = React.memo(function Composer({
                     className={styles.attachmentRemove}
                     onClick={() => onRemoveAttachment(item.id)}
                     title="移除"
+                    aria-label={`移除 ${item.name}`}
                   >
-                    ✕
+                    <IconClose size={10} />
                   </button>
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {preview && (
+          <div
+            className={styles.previewBackdrop}
+            data-agent-transient
+            role="dialog"
+            aria-label="图片预览"
+            onClick={() => setPreview(null)}
+          >
+            <img
+              className={styles.previewImage}
+              src={preview.url}
+              alt={preview.name}
+              onClick={(event) => event.stopPropagation()}
+            />
+            <div className={styles.previewBar}>
+              <span className={styles.previewName}>{preview.name}</span>
+              <button
+                type="button"
+                className={styles.previewClose}
+                onClick={() => setPreview(null)}
+                aria-label="关闭预览"
+              >
+                关闭
+              </button>
+            </div>
           </div>
         )}
 

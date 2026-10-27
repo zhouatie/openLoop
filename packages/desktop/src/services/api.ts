@@ -893,9 +893,10 @@ export class DesktopApiService {
       messageCount: number;
       firstUserMessage: string;
       lastModel?: string;
-      /** openLoop 侧元数据：标题覆盖 / 归档 / 所属工作区标题 */
+      /** openLoop 侧元数据：标题覆盖 / 归档 / 置顶 / 所属工作区标题 */
       title?: string;
       archived?: boolean;
+      pinned?: boolean;
       projectTitle?: string;
       projectHidden?: boolean;
       projectOrder?: number;
@@ -918,7 +919,7 @@ export class DesktopApiService {
     return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}${qs}`);
   }
 
-  async getLiveAgentSessions(): Promise<{ sessions: string[] }> {
+  async getLiveAgentSessions(): Promise<{ sessions: string[]; busy: string[] }> {
     return requestJson(`${BASE_URL}/api/agent/live`);
   }
 
@@ -980,7 +981,7 @@ export class DesktopApiService {
 
   async setAgentSessionMeta(
     sessionId: string,
-    patch: { title?: string; archived?: boolean }
+    patch: { title?: string; archived?: boolean; pinned?: boolean }
   ): Promise<{ sessionId: string; meta: any }> {
     return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/meta`, {
       method: 'PUT',

@@ -705,6 +705,7 @@ export class OpenLoopServer {
               title: meta.title,
               archived: meta.archived === true,
               deleted: meta.deleted === true,
+              pinned: meta.pinned === true,
               projectTitle: project.title,
               projectHidden: project.hidden === true,
               projectOrder: project.order,
@@ -733,7 +734,12 @@ export class OpenLoopServer {
 
       // 当前活跃的全局 Agent 会话（用于界面判断哪些会话可实时连接）
       if (pathname === '/api/agent/live' && method === 'GET') {
-        return this.sendJson(res, 200, { sessions: agentSessionHost.listLive() }, reqMeta);
+        return this.sendJson(
+          res,
+          200,
+          { sessions: agentSessionHost.listLive(), busy: agentSessionHost.listBusy() },
+          reqMeta
+        );
       }
 
       // 会话元数据：重命名 / 归档
@@ -744,6 +750,7 @@ export class OpenLoopServer {
         const meta = agentSessionMeta.setSession(sessionKey, {
           title: typeof body?.title === 'string' ? body.title : undefined,
           archived: typeof body?.archived === 'boolean' ? body.archived : undefined,
+          pinned: typeof body?.pinned === 'boolean' ? body.pinned : undefined,
         });
         return this.sendJson(res, 200, { sessionId: sessionKey, meta }, reqMeta);
       }

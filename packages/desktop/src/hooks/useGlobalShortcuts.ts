@@ -51,6 +51,21 @@ export const useGlobalShortcuts = (actions: ShortcutActions, enabled = true) => 
           target.tagName === 'SELECT' ||
           target.isContentEditable);
 
+      // Super + ` 始终可用：智能体浮层打开时它是唯一的退出快捷键
+      if (
+        isSuperPressed &&
+        (e.key === '`' || e.code === 'Backquote' || e.code === 'IntlBackslash') &&
+        actionsRef.current.onToggleAgent
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (import.meta.env?.DEV) {
+          console.log('[Shortcut] 触发快捷键: Super + ` -> 智能体浮层', { superKey: activeSuper });
+        }
+        actionsRef.current.onToggleAgent();
+        return;
+      }
+
       if (!enabledRef.current) {
         return;
       }
@@ -115,20 +130,6 @@ export const useGlobalShortcuts = (actions: ShortcutActions, enabled = true) => 
           console.log('[Shortcut] 触发快捷键: Super + 4 -> QA 自动化', { superKey: activeSuper });
         }
         actionsRef.current.onNavigateQa();
-        return;
-      }
-
-      // 5. Super + `: 切换全局智能体浮层
-      if (
-        (key === '`' || code === 'Backquote' || code === 'IntlBackslash') &&
-        actionsRef.current.onToggleAgent
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (import.meta.env?.DEV) {
-          console.log('[Shortcut] 触发快捷键: Super + ` -> 智能体浮层', { superKey: activeSuper });
-        }
-        actionsRef.current.onToggleAgent();
         return;
       }
 

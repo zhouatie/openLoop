@@ -2,7 +2,7 @@ import React, { memo, useCallback, useState } from 'react';
 import type { SessionChatMessage } from '@openloop/core/types';
 import { AgentMarkdown } from './Markdown';
 import { ToolCard } from './ToolCard';
-import { IconCopy, IconFork, IconRefresh, IconThumbDown, IconThumbUp } from './icons';
+import { IconCopy, IconFork, IconRefresh } from './icons';
 import styles from './MessageRow.module.css';
 
 const ThinkingBlock = memo(function ThinkingBlock({
@@ -113,7 +113,7 @@ function formatClock(timestamp: number): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
-/** 回答操作条：复制 / 反馈 / 分叉 / 重新生成，右侧是用量与时间 */
+/** 回答操作条：复制 / 分叉 / 重新生成，右侧是用量与时间 */
 const MessageActions = memo(function MessageActions({
   text,
   timestamp,
@@ -130,7 +130,6 @@ const MessageActions = memo(function MessageActions({
   onFork?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
 
   const handleCopy = useCallback(() => {
     if (!text.trim()) return;
@@ -154,26 +153,6 @@ const MessageActions = memo(function MessageActions({
             <IconCopy size={15} />
           </button>
         )}
-        <button
-          type="button"
-          className={`${styles.iconAction} ${feedback === 'up' ? styles.iconActionActive : ''}`}
-          onClick={() => setFeedback((prev) => (prev === 'up' ? null : 'up'))}
-          title="有帮助"
-          aria-label="有帮助"
-          aria-pressed={feedback === 'up'}
-        >
-          <IconThumbUp size={15} />
-        </button>
-        <button
-          type="button"
-          className={`${styles.iconAction} ${feedback === 'down' ? styles.iconActionActive : ''}`}
-          onClick={() => setFeedback((prev) => (prev === 'down' ? null : 'down'))}
-          title="没帮助"
-          aria-label="没帮助"
-          aria-pressed={feedback === 'down'}
-        >
-          <IconThumbDown size={15} />
-        </button>
         {onFork && (
           <button
             type="button"

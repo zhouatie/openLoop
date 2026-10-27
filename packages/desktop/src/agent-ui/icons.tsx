@@ -206,3 +206,12 @@ export const IconRefresh = createIcon('IconRefresh', 16, () => (
     <path d="M13.4 2.4v3h-3" stroke="currentColor" />
   </>
 ));
+
+/** 置顶：图钉 */
+export const IconPin = createIcon('IconPin', 16, () => (
+  <>
+    <path d="M6.4 3.1h3.2v4.3H6.4z" stroke="currentColor" />
+    <path d="M4.9 7.4h6.2" stroke="currentColor" />
+    <path d="M8 7.9v5.2" stroke="currentColor" />
+  </>
+));
