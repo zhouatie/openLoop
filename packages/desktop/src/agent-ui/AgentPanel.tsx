@@ -693,8 +693,8 @@ export function GlobalAgentPanel({
       });
       applyRunning(busyList);
     } catch (err) {
+      // 失败时保留上一次的列表，否则一次抖动就会把侧栏清成空工作区
       if (import.meta.env?.DEV) console.warn('[AgentPanel] 加载会话列表失败:', err);
-      setSessions([]);
     } finally {
       setLoading(false);
     }
