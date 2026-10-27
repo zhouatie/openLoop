@@ -3,6 +3,8 @@ import type { SessionChatMessage, SessionUsage } from '@openloop/core/types';
 import { MessageRow } from './MessageRow';
 import { TurnRail, type TurnRailItem } from './TurnRail';
 import { TextShimmer } from './dsh/TextShimmer';
+import { Tooltip } from './dsh/Tooltip';
+import { IconChevronDown } from './icons';
 import { splitPromptImages } from './local-image';
 import styles from './AgentChatView.module.css';
 
@@ -349,9 +351,18 @@ export const AgentChatView = React.memo(function AgentChatView({
       />
 
       {showJump && (
-        <button type="button" className={styles.jump} onClick={() => scrollToBottom('smooth')}>
-          回到最新
-        </button>
+        <div className={styles.jumpSlot}>
+          <Tooltip label="回到底部" side="top">
+            <button
+              type="button"
+              className={styles.jump}
+              aria-label="回到底部"
+              onClick={() => scrollToBottom('smooth')}
+            >
+              <IconChevronDown size={14} />
+            </button>
+          </Tooltip>
+        </div>
       )}
     </div>
   );
