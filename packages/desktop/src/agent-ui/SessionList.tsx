@@ -84,6 +84,8 @@ export interface SessionListProps {
   onSearchContent?: (query: string) => Promise<SessionContentHit[]>;
   /** 变化时对当前会话进入行内重命名 */
   renameSignal?: number;
+  /** 当前打开会话所属工作区的 cwd：左上角新会话默认建在这里 */
+  activeCwd?: string;
   /** 折叠成 56px 图标轨道 */
   rail?: boolean;
   onToggleRail?: () => void;
@@ -188,6 +190,7 @@ export const SessionList = memo(function SessionList({
   searchSignal,
   onSearchContent,
   renameSignal,
+  activeCwd,
   rail,
   onToggleRail,
 }: SessionListProps) {
@@ -206,6 +209,8 @@ export const SessionList = memo(function SessionList({
   const [hitIndex, setHitIndex] = useState(0);
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [rename, setRename] = useState<RenameState | null>(null);
+  /** 新会话的工作区：当前会话所在工作区优先（对齐 DSH），其次筛选的工作区、列表首个工作区 */
+  const newSessionCwd = activeCwd || projectFilter || groups[0]?.cwd || '';
   /** 首次扫描未回：只有工作区壳子、会话还没到，先不渲染半成品列表，避免先出现空工作区再跳成真实会话 */
   const scanning = Boolean(loading) && groups.every((group) => group.sessions.length === 0);
 
@@ -630,7 +635,7 @@ export const SessionList = memo(function SessionList({
           <button
             type="button"
             className={styles.railButton}
-            onClick={() => onNewInGroup(groups[0]?.cwd || '')}
+            onClick={() => onNewInGroup(newSessionCwd)}
             title="新会话"
             aria-label="新会话"
           >
@@ -675,7 +680,7 @@ export const SessionList = memo(function SessionList({
       <button
         type="button"
         className={styles.newSession}
-        onClick={() => onNewInGroup(projectFilter || groups[0]?.cwd || '')}
+        onClick={() => onNewInGroup(newSessionCwd)}
       >
         <IconNewChat size={14} />
         <span className={styles.newSessionLabel}>新会话</span>
