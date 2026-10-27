@@ -772,6 +772,7 @@ export function GlobalAgentPanel({
   const startNewSession = useCallback((projectCwd: string) => {
     const id = newSessionId();
     const safeCwd = projectCwd && projectCwd !== TEMP_PROJECT_KEY ? projectCwd : '';
+    if (import.meta.env?.DEV) console.log('[AgentPanel] 新建会话:', { id, cwd: safeCwd });
     setActiveId(id);
     setStreamKey(`agent_${id}`);
     setHistory([]);
@@ -1274,6 +1275,7 @@ export function GlobalAgentPanel({
           onReorderProjects={(keys) => void reorderProjects(keys)}
           onSearchContent={(text) => api.searchAgentSessions(text, 20).then((data) => data.results)}
           renameSignal={renameSignal}
+          activeCwd={activeCwd}
           rail={rail}
           onToggleRail={() => setRail((value) => !value)}
         />
