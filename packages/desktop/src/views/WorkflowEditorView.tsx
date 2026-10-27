@@ -102,6 +102,9 @@ import { WorkflowNodeBranchMenu } from '../components/workflow/WorkflowNodeBranc
 // ==========================================
 // 1. 自定义节点外观（极简高质感 + 智能体生成发光 + 幽灵预演态 + 编排调试实时运行态）
 // ==========================================
+// 工作流 variables 中由其他面板管理的字段，不作为自定义运行参数展示
+const WORKFLOW_VARIABLE_META_KEYS = new Set(['tags', 'taskTemplate', 'requireWorkspace', 'defaultWorkspace']);
+
 const CustomWorkflowNode: React.FC<NodeProps> = ({ data, selected }) => {
   const nodeData = data as any;
   const type: NodeType = nodeData.type || 'cli';
@@ -2505,6 +2508,10 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const selectedNodeData = selectedNode?.data as any;
 
+  const customVariableEntries = Object.entries(workflowVariables).filter(
+    ([key]) => !WORKFLOW_VARIABLE_META_KEYS.has(key)
+  );
+
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">
       {/* 编排器顶栏 (openLoop 极简设计系统，极致克制与现代感) */}
@@ -4288,9 +4295,7 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                     </div>
 
                     {/* 运行参数与变量 (Variables) */}
-                    {(workflowVariables.appPackage !== undefined ||
-                      activeWorkflow.variables?.appPackage !== undefined ||
-                      (activeWorkflow.variables && Object.keys(activeWorkflow.variables).length > 0)) && (
+                    {customVariableEntries.length > 0 && (
                       <div className="pt-2 border-t border-[#ececf0] space-y-2">
                         <div className="flex items-center justify-between">
                           <label className="text-[11.5px] font-medium text-[#1c1c21]">
@@ -4299,24 +4304,22 @@ const WorkflowEditorInner: React.FC<WorkflowEditorViewProps> = ({
                           <span className="text-[10px] text-[#85858d]">模板级生效</span>
                         </div>
                         <div className="space-y-2">
-                          <div>
-                            <div className="flex items-center justify-between mb-1">
-                              <label className="text-[10.5px] text-[#85858d] font-medium">目标 App 包名 (Bundle ID)</label>
-                              <span className="font-mono text-[9.5px] text-[#85858d]">appPackage</span>
+                          {customVariableEntries.map(([key, value]) => (
+                            <div key={key}>
+                              <label className="block mb-1 font-mono text-[10.5px] text-[#85858d]">
+                                {key}
+                              </label>
+                              <input
+                                type="text"
+                                value={typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')}
+                                onChange={(e) =>
+                                  setWorkflowVariables((prev) => ({ ...prev, [key]: e.target.value }))
+                                }
+                                placeholder={`{{${key}}}`}
+                                className="w-full h-[28px] font-mono text-[11px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5] transition-all"
+                              />
                             </div>
-                            <input
-                              type="text"
-                              value={workflowVariables.appPackage ?? activeWorkflow.variables?.appPackage ?? ''}
-                              onChange={(e) =>
-                                setWorkflowVariables((prev) => ({ ...prev, appPackage: e.target.value }))
-                              }
-                              placeholder="com.netease.cloudmusicother"
-                              className="w-full h-[28px] font-mono text-[11px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[#1c1c21] outline-none focus:bg-white focus:border-[#4f46e5] transition-all"
-                            />
-                            <p className="text-[9.5px] text-[#85858d] mt-0.5">
-                              例如: com.netease.cloudmusicother / com.netease.cloudmusicinhouse / com.netease.cloudmusic
-                            </p>
-                          </div>
+                          ))}
                         </div>
                       </div>
                     )}
