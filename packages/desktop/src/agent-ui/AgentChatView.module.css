@@ -52,25 +52,38 @@
   height: 12px;
 }
 
-.jump {
+/* 「回到底部」浮动按钮：与 DSH 一致，圆角图标按钮贴在内容列右侧下沿 */
+.jumpSlot {
   position: absolute;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid var(--dsw-alias-border-l3);
-  border-radius: 999px;
-  background: var(--dsw-alias-button-elevated-fill);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11.5px;
-  box-shadow: 0 4px 14px rgba(15, 17, 21, 0.08);
+  right: 0;
+  bottom: 16px;
+  left: 0;
+  z-index: 8;
+  display: flex;
+  justify-content: flex-end;
+  padding-right: max(16px, calc((100% - var(--agent-content-width, 920px)) / 2));
+  pointer-events: none;
+}
+
+.jump {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l3);
+  border-radius: 100px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-button-floating-fill);
+  box-shadow: var(--dsw-elevation-panel);
   cursor: pointer;
-  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+  pointer-events: auto;
 }
 
 .jump:hover {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
+  background: var(--dsw-alias-button-floating-hover);
 }
 
 /* 轮容器：同轮内容共享间距 */
