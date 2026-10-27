@@ -1,4 +1,5 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   IconFolderClose,
   IconMore,
@@ -113,6 +114,8 @@ interface HoverCardState {
   time: string;
   top: number;
   left: number;
+  /** 侧栏有 backdrop-filter，会成为 fixed 子元素的包含块并裁切浮层；挂到 agent-scope 根节点 */
+  host: HTMLElement;
 }
 
 interface MenuState {
@@ -395,7 +398,8 @@ export const SessionList = memo(function SessionList({
       path: homeShortened(path),
       time,
       top: Math.min(Math.max(12, rect.top - 4), window.innerHeight - 150),
-      left: rect.right + 10,
+      left: Math.min(rect.right + 10, window.innerWidth - 312),
+      host: element.closest<HTMLElement>('.agent-scope') || document.body,
     });
   };
 
@@ -938,18 +942,20 @@ export const SessionList = memo(function SessionList({
         })}
       </div>
 
-      {card && (
-        <div
-          className={styles.hoverCard}
-          style={{ top: card.top, left: card.left }}
-          role="presentation"
-          data-agent-transient
-        >
-          <div className={styles.hoverTitle}>{card.title}</div>
-          {card.path && <div className={styles.hoverPath}>{card.path}</div>}
-          {card.time && <div className={styles.hoverTime}>{card.time}</div>}
-        </div>
-      )}
+      {card &&
+        createPortal(
+          <div
+            className={styles.hoverCard}
+            style={{ top: card.top, left: card.left }}
+            role="presentation"
+            data-agent-transient
+          >
+            <div className={styles.hoverTitle}>{card.title}</div>
+            {card.path && <div className={styles.hoverPath}>{card.path}</div>}
+            {card.time && <div className={styles.hoverTime}>{card.time}</div>}
+          </div>,
+          card.host
+        )}
 
       {menu && (
         <div
