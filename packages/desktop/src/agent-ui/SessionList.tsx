@@ -201,6 +201,8 @@ export const SessionList = memo(function SessionList({
   const [hitIndex, setHitIndex] = useState(0);
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [rename, setRename] = useState<RenameState | null>(null);
+  /** 首次扫描未回：只有工作区壳子、会话还没到，先不渲染半成品列表，避免先出现空工作区再跳成真实会话 */
+  const scanning = Boolean(loading) && groups.every((group) => group.sessions.length === 0);
 
   // 外部触发（session.rename 快捷键）：进入当前会话的行内重命名
   useEffect(() => {
@@ -770,7 +772,7 @@ export const SessionList = memo(function SessionList({
       )}
 
       <div className={styles.list}>
-        {loading && groups.length === 0 && <div className={styles.placeholder}>正在扫描会话…</div>}
+        {scanning && <div className={styles.placeholder}>正在扫描会话…</div>}
         {!loading && groups.length === 0 && (
           <div className={styles.placeholder}>还没有工作区。点右上角图标选择一个目录。</div>
         )}
@@ -780,7 +782,7 @@ export const SessionList = memo(function SessionList({
           </div>
         )}
 
-        {groupBy === 'flat' && (
+        {!scanning && groupBy === 'flat' && (
           <>
             {flatSessions.length === 0 ? (
               <div className={styles.placeholder}>
@@ -801,7 +803,7 @@ export const SessionList = memo(function SessionList({
           </>
         )}
 
-        {groupBy === 'workspace' && filteredGroups.map((group) => {
+        {!scanning && groupBy === 'workspace' && filteredGroups.map((group) => {
           const isCollapsed = !searching && collapsed.includes(group.key);
           const isExpanded = searching || expandedGroups.includes(group.key);
           const sortedSessions = sortSessions(group.sessions);
