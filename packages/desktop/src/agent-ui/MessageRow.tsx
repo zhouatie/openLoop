@@ -96,7 +96,7 @@ const UserMessageRow = memo(function UserMessageRow({
     () => [
       ...attachments
         .filter((item) => Boolean(item.url))
-        .map((item) => ({ key: item.id || item.url, url: item.url, name: item.name })),
+        .map((item) => ({ key: item.id || item.url, url: imageSrc(item.url), name: item.name })),
       ...promptImages.map((item) => ({ key: item.path, url: imageSrc(item.path), name: item.name })),
     ],
     [message.attachments, promptImages]

@@ -1,4 +1,5 @@
 /** 会话里的图片引用（本地路径 / 附件 URL / data URL）统一解析成可渲染的图片地址 */
+import { backendUrl } from '../services/api';
 
 const IMAGE_EXTENSION = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
@@ -14,11 +15,12 @@ export function isImagePath(value: string | undefined | null): boolean {
 export function imageSrc(source: string | undefined | null): string {
   const target = (source || '').trim();
   if (!target) return '';
-  if (/^(data:|blob:|https?:)/i.test(target) || target.startsWith('/api/')) return target;
+  if (/^(data:|blob:|https?:)/i.test(target)) return target;
+  if (target.startsWith('/api/')) return backendUrl(target);
   if (target.startsWith('/')) {
-    return `/api/local-image?path=${encodeURIComponent(target)}`;
+    return backendUrl(`/api/local-image?path=${encodeURIComponent(target)}`);
   }
-  return `/api/attachments/${target}`;
+  return backendUrl(`/api/attachments/${target}`);
 }
 
 export interface PromptImage {
