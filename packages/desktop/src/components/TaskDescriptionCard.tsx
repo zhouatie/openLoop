@@ -21,6 +21,7 @@ export const TaskDescriptionCard: React.FC<TaskDescriptionCardProps> = ({
   const [draft, setDraft] = useState(task.description || '');
   const [isSaving, setIsSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   // 外部任务数据刷新时同步（仅在非编辑状态下同步）
   useEffect(() => {
@@ -104,6 +105,14 @@ export const TaskDescriptionCard: React.FC<TaskDescriptionCardProps> = ({
     }
   };
 
+  // 输入框失焦即退出编辑态；焦点仍在本卡片内时保持编辑（如点击保存/取消按钮）
+  const handleBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    // 整个窗口失焦（切换应用）时保留编辑内容，不退出编辑态
+    if (!document.hasFocus()) return;
+    if (cardRef.current?.contains(e.relatedTarget as Node | null)) return;
+    cancelEditing();
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
@@ -115,7 +124,10 @@ export const TaskDescriptionCard: React.FC<TaskDescriptionCardProps> = ({
   };
 
   return (
-    <div className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-2.5">
+    <div
+      ref={cardRef}
+      className="rounded-[8px] border border-[#e3e3e8] bg-white p-3.5 shadow-sm space-y-2.5"
+    >
       {/* 如果是子工序且存在父任务组公共信息，展示全局公共背景与共享参考图 */}
       {isSubtask && (parentGroupDescription || parentGroupAttachments.length > 0) && (
         <div className="rounded-[6px] border border-[#d8d6fb] bg-[#f8f8ff] p-2.5 space-y-2">
@@ -201,7 +213,7 @@ export const TaskDescriptionCard: React.FC<TaskDescriptionCardProps> = ({
               <span>{task.description ? '编辑内容' : '添加说明'}</span>
             </button>
           ) : (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5" onMouseDown={(e) => e.preventDefault()}>
               <button
                 type="button"
                 onClick={cancelEditing}
@@ -262,6 +274,7 @@ export const TaskDescriptionCard: React.FC<TaskDescriptionCardProps> = ({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
             disabled={isSaving}
             rows={5}
             placeholder={
