@@ -1191,6 +1191,21 @@ export class PiRpcSessionManager {
     return this.sessions.get(taskId);
   }
 
+  /** 正在跑一轮回复的 pi 会话 id：「智能体开发」面板据此显示运行指示 */
+  public listBusySessionIds(): string[] {
+    return [...this.sessions.values()]
+      .filter((session) => session.active && session.isBusy)
+      .map((session) => session.sessionId);
+  }
+
+  /** 按 pi 会话 id 取实时状态：流水线 agent 节点与全局会话共用同一份 pi 会话 */
+  public getStateBySessionId(sessionId: string): TaskSessionState | undefined {
+    for (const session of this.sessions.values()) {
+      if (session.sessionId === sessionId) return session.getState();
+    }
+    return undefined;
+  }
+
   /**
    * 将模型 / 思考强度变更同步到所有活跃会话
    * 并行下发，不重启进程，不阻塞设置保存
