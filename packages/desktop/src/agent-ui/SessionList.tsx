@@ -55,6 +55,8 @@ export interface SessionListProps {
   onHideProject?: (key: string) => void;
   /** 工作区拖拽排序：返回新的键顺序 */
   onReorderProjects?: (keys: string[]) => void;
+  /** 顶部的品牌标识插槽 */
+  brandSlot?: React.ReactNode;
 }
 
 const SESSION_VISIBLE_COUNT = 5;
@@ -124,6 +126,7 @@ export const SessionList = memo(function SessionList({
   onRenameProject,
   onHideProject,
   onReorderProjects,
+  brandSlot,
 }: SessionListProps) {
   const searching = query.trim().length > 0;
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -203,6 +206,8 @@ export const SessionList = memo(function SessionList({
 
   return (
     <aside className={styles.root}>
+      {brandSlot}
+
       <button
         type="button"
         className={styles.newSession}

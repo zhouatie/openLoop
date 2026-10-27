@@ -11,6 +11,7 @@ import {
 } from './Composer';
 import { WorkspaceDock, type DockTab } from './WorkspaceDock';
 import { IconClose, IconMinimize, IconPanelRight } from './icons';
+import { BrandLogo } from '../components/BrandLogo';
 import { ApprovalCard, type AgentUiRequest } from './ApprovalCard';
 import { IconChevronDown, IconFolderOpen } from './icons';
 import { useAttachments } from './useAttachments';
@@ -818,6 +819,13 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
     <div className={`agent-scope ${styles.panel} ${mode === 'drawer' ? styles.panelDrawer : styles.panelPage}`}>
       {mode !== 'drawer' && (
         <SessionList
+          brandSlot={
+            <div className={styles.brandRow}>
+              <BrandLogo size={18} className={styles.brandLogo} />
+              <span className={styles.brandName}>openLoop</span>
+              <span className={styles.brandTag}>智能体</span>
+            </div>
+          }
           groups={groups}
           activeId={activeId}
           loading={loading}
