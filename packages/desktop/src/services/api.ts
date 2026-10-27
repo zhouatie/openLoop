@@ -75,6 +75,11 @@ function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
 
 const { httpUrl: BASE_URL, wsUrl: WS_URL } = resolveBackendUrls();
 
+/** 后端相对路径转完整 URL：Electron 生产环境页面来自 file://，相对路径会解析失败 */
+export function backendUrl(pathname: string): string {
+  return `${BASE_URL}${pathname}`;
+}
+
 const isDev = import.meta.env?.DEV;
 
 async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
