@@ -723,6 +723,17 @@ export class OpenLoopServer {
         );
       }
 
+      // 会话全文搜索：必须在 /api/agent/sessions/:id 之前匹配，否则 search 会被当成 id
+      if (pathname === '/api/agent/sessions/search' && method === 'GET') {
+        const keyword = (parsedUrl.searchParams.get('q') || '').trim();
+        const limit = Number(parsedUrl.searchParams.get('limit') || 20);
+        if (!keyword) {
+          return this.sendJson(res, 200, { query: '', results: [] }, reqMeta);
+        }
+        const results = await piSessionIndex.searchContent(keyword, { limit });
+        return this.sendJson(res, 200, { query: keyword, results }, reqMeta);
+      }
+
       // 读取单个历史会话的消息序列（活动分支）
       const agentSessionMatch = pathname.match(/^\/api\/agent\/sessions\/([^/]+)$/);
       if (agentSessionMatch && method === 'GET') {

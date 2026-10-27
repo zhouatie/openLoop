@@ -7,6 +7,7 @@ import {
   Composer,
   ComposerAttachmentItem,
   ComposerCommand,
+  ComposerMentionItem,
   ComposerPermission,
 } from './Composer';
 import { WorkspaceDock, type DockTab } from './WorkspaceDock';
@@ -20,6 +21,18 @@ import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
 import { useAgentStream } from './useAgentStream';
 import styles from './AgentPanel.module.css';
+
+/** @ 菜单里的会话时间：够用即可，不做本地化库 */
+function relativeSessionTime(iso: string): string {
+  const time = Date.parse(iso);
+  if (!Number.isFinite(time)) return '';
+  const diff = Date.now() - time;
+  const minute = 60000;
+  if (diff < minute) return '刚刚';
+  if (diff < 60 * minute) return `${Math.floor(diff / minute)} 分钟前`;
+  if (diff < 24 * 60 * minute) return `${Math.floor(diff / (60 * minute))} 小时前`;
+  return `${Math.floor(diff / (24 * 60 * minute))} 天前`;
+}
 
 function newSessionId(): string {
   return `agent_${Date.now().toString(36)}`;
@@ -64,7 +77,7 @@ export interface AgentPanelShellProps {
   headerless?: boolean;
   /** 斜杠指令与 @ 文件候选 */
   commands?: ComposerCommand[];
-  onRequestFiles?: (query: string) => Promise<string[]>;
+  onRequestMentions?: (query: string) => Promise<ComposerMentionItem[]>;
   /** 工具权限与模型切换 */
   permission?: ComposerPermission;
   onPermissionSelect?: (preset: ComposerPermission) => void;
@@ -110,7 +123,7 @@ export function AgentPanelShell({
   hero,
   headerless,
   commands,
-  onRequestFiles,
+  onRequestMentions,
   permission,
   onPermissionSelect,
   models,
@@ -122,6 +135,7 @@ export function AgentPanelShell({
   shortcutsEnabled = true,
 }: AgentPanelShellProps) {
   const [draft, setDraft] = useState('');
+  const [focusSignal, setFocusSignal] = useState(0);
   /** 每个会话各自的草稿，切换会话时不会串味 */
   const draftsRef = useRef<Record<string, string>>({});
   const draftKeyRef = useRef(draftKey || '');
@@ -147,6 +161,12 @@ export function AgentPanelShell({
     },
     [onSend]
   );
+
+  /** 编辑历史用户消息：回填草稿并聚焦输入框 */
+  const handleEditUserMessage = useCallback((content: string) => {
+    setDraft(content);
+    setFocusSignal((value) => value + 1);
+  }, []);
 
   /** Super + Enter：打断当前回答并立刻发送 */
   const handleAcceleratedSend = useCallback(
@@ -206,7 +226,8 @@ export function AgentPanelShell({
       onRemoveAttachment={onRemoveAttachment}
       actions={composerActions}
       commands={commands}
-      onRequestFiles={onRequestFiles}
+      onRequestMentions={onRequestMentions}
+      focusSignal={focusSignal}
       permission={permission}
       onPermissionSelect={onPermissionSelect}
       models={models}
@@ -282,6 +303,7 @@ export function AgentPanelShell({
                 contentWidth={contentWidth}
                 onRegenerate={onRegenerate}
                 onFork={onFork}
+                onEditUserMessage={handleEditUserMessage}
               />
               {banner}
               {composer}
@@ -540,12 +562,19 @@ export function GlobalAgentPanel({
       .getAgentCommandsAndSkills?.()
       .then((data: any) => {
         const list = Array.isArray(data?.commands) ? data.commands : [];
-        setCommands(
-          list.map((item: any) => ({
+        const skills = Array.isArray(data?.skills) ? data.skills : [];
+        setCommands([
+          ...list.map((item: any) => ({
             name: String(item.name || '').replace(/^\//, ''),
             description: item.description || item.label,
-          }))
-        );
+            kind: item.action ? ('command' as const) : ('template' as const),
+          })),
+          ...skills.map((item: any) => ({
+            name: String(item.name || '').replace(/^\//, ''),
+            description: item.description || item.label,
+            kind: 'skill' as const,
+          })),
+        ]);
       })
       .catch(() => setCommands([]));
   }, []);
@@ -787,14 +816,12 @@ export function GlobalAgentPanel({
 
   // 会话与工作区元数据操作
   const renameSession = useCallback(
-    async (id: string) => {
-      const current = sessions.find((item) => item.id === id);
-      const next = window.prompt('重命名会话', current?.title || '');
-      if (next === null) return;
-      await api.setAgentSessionMeta(id, { title: next.trim() }).catch(() => null);
+    async (id: string, title: string) => {
+      // 空标题等于清掉覆盖，回到默认标题
+      await api.setAgentSessionMeta(id, { title: title.trim() }).catch(() => null);
       await refresh();
     },
-    [sessions, refresh]
+    [refresh]
   );
 
   const archiveSession = useCallback(
@@ -953,13 +980,11 @@ export function GlobalAgentPanel({
   );
 
   const renameProject = useCallback(
-    async (cwdKey: string) => {
-      const next = window.prompt('重命名工作区', projectMeta[cwdKey]?.title || projectLabel(cwdKey));
-      if (next === null) return;
-      await api.setAgentProjectMeta(cwdKey, { title: next.trim() }).catch(() => null);
+    async (cwdKey: string, title: string) => {
+      await api.setAgentProjectMeta(cwdKey, { title: title.trim() }).catch(() => null);
       await refreshProjectMeta();
     },
-    [projectMeta, refreshProjectMeta]
+    [refreshProjectMeta]
   );
 
   const hideProject = useCallback(
@@ -1046,30 +1071,56 @@ export function GlobalAgentPanel({
     [activeId, refresh]
   );
 
-  // @ 文件候选：按输入前缀列目录
-  const requestFiles = useCallback(
-    async (query: string): Promise<string[]> => {
+  // @ 候选：当前工作区文件 + 最近会话
+  const requestMentions = useCallback(
+    async (query: string): Promise<ComposerMentionItem[]> => {
       const base = cwd || sessions.find((item) => item.id === activeId)?.cwd || '';
-      if (!base) return [];
-      const slash = query.lastIndexOf('/');
-      const dirPart = slash >= 0 ? query.slice(0, slash + 1) : '';
-      const namePart = slash >= 0 ? query.slice(slash + 1) : query;
-      const dir = dirPart ? `${base.replace(/\/$/, '')}/${dirPart}` : base;
-      try {
-        const listing = await api.listAgentFs(dir);
-        return listing.entries
-          .filter((entry) => !namePart || entry.name.toLowerCase().includes(namePart.toLowerCase()))
-          .slice(0, 20)
-          .map((entry) => `${dirPart}${entry.name}${entry.isDir ? '/' : ''}`);
-      } catch (_) {
-        return [];
+      const items: ComposerMentionItem[] = [];
+
+      if (base) {
+        const slash = query.lastIndexOf('/');
+        const dirPart = slash >= 0 ? query.slice(0, slash + 1) : '';
+        const namePart = slash >= 0 ? query.slice(slash + 1) : query;
+        const dir = dirPart ? `${base.replace(/\/$/, '')}/${dirPart}` : base;
+        try {
+          const listing = await api.listAgentFs(dir);
+          for (const entry of listing.entries) {
+            if (namePart && !entry.name.toLowerCase().includes(namePart.toLowerCase())) continue;
+            items.push({
+              key: `${dirPart}${entry.name}${entry.isDir ? '/' : ''}`,
+              label: `${entry.name}${entry.isDir ? '/' : ''}`,
+              kind: entry.isDir ? 'dir' : 'file',
+            });
+            if (items.length >= 12) break;
+          }
+        } catch (_) {
+          /* 目录不可读就只列会话 */
+        }
       }
+
+      const keyword = query.toLowerCase();
+      const matched = sessions
+        .filter((item) => item.id !== activeId)
+        .filter((item) => !keyword || (item.title || '').toLowerCase().includes(keyword))
+        .slice(0, 5);
+      for (const item of matched) {
+        items.push({
+          key: item.title || item.id,
+          label: item.title || '未命名会话',
+          kind: 'session',
+          description: relativeSessionTime(item.modifiedAt),
+        });
+      }
+
+      return items;
     },
     [cwd, sessions, activeId]
   );
 
   const activeSession = sessions.find((item) => item.id === activeId);
   const [searchSignal, setSearchSignal] = useState(0);
+  const [renameSignal, setRenameSignal] = useState(0);
+  const [rail, setRail] = useState(false);
 
   // 面板导航快捷键：命令表在 constants/agentShortcuts.ts，可在设置页改键
   useShortcutBindings({
@@ -1077,7 +1128,8 @@ export function GlobalAgentPanel({
     'session.search': () => setSearchSignal((prev) => prev + 1),
     'workspace.add': () => void handleAddProject(),
     'session.rename': () => {
-      if (activeId) void renameSession(activeId);
+      // 快捷键触发页内搜索/重命名入口时，交给列表行内编辑
+      setRenameSignal((value) => value + 1);
     },
     'session.archive': () => {
       const target = sessions.find((item) => item.id === activeId);
@@ -1148,13 +1200,17 @@ export function GlobalAgentPanel({
           onRevealPath={(path) => {
             (window as any).electronAPI?.openPath?.(path);
           }}
-          onRenameSession={(id) => void renameSession(id)}
+          onRenameSession={(id, title) => void renameSession(id, title)}
           onArchiveSession={(id, archived) => void archiveSession(id, archived)}
           onPinSession={(id, pinned) => void pinSession(id, pinned)}
           onDeleteSession={(id) => void deleteSession(id)}
-          onRenameProject={(key) => void renameProject(key)}
+          onRenameProject={(key, title) => void renameProject(key, title)}
           onHideProject={(key) => void hideProject(key)}
           onReorderProjects={(keys) => void reorderProjects(keys)}
+          onSearchContent={(text) => api.searchAgentSessions(text, 20).then((data) => data.results)}
+          renameSignal={renameSignal}
+          rail={rail}
+          onToggleRail={() => setRail((value) => !value)}
         />
       )}
 
@@ -1169,7 +1225,7 @@ export function GlobalAgentPanel({
           awaitingInput={awaitingInput}
           model={state?.model}
           commands={commands}
-          onRequestFiles={requestFiles}
+          onRequestMentions={requestMentions}
           permission={permission}
           onPermissionSelect={handlePermissionSelect}
           models={models}

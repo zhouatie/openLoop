@@ -172,6 +172,25 @@ export const IconCopy = createIcon('IconCopy', 16, () => (
   </>
 ));
 
+/** 展开侧边栏（DSH panel-left-outline） */
+export const IconPanelLeft = createIcon('IconPanelLeft', 16, () => (
+  <>
+    <rect x="1.5" y="1.5" width="13" height="13" rx="1" stroke="currentColor" />
+    <path d="M5.5 1.5V14.5" stroke="currentColor" />
+  </>
+));
+
+/** 编辑（DSH edit-outline：方框 + 斜向笔画） */
+export const IconEdit = createIcon('IconEdit', 16, () => (
+  <>
+    <path
+      d="M8.856 2.7H4.2a1.5 1.5 0 0 0-1.5 1.5v7.6a1.5 1.5 0 0 0 1.5 1.5h7.6a1.5 1.5 0 0 0 1.5-1.5V7.9"
+      stroke="currentColor"
+    />
+    <path d="M7.785 8.239 13.888 2.136" stroke="currentColor" />
+  </>
+));
+
 /** 赞 */
 export const IconThumbUp = createIcon('IconThumbUp', 16, () => (
   <path

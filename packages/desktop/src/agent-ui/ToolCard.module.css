@@ -160,3 +160,80 @@
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* 写入类工具的逐行差分：与代码块同底色，+/- 用状态色 */
+.diffStat {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: 8px;
+  font-family: var(--ds-font-family-code);
+  font-size: 11px;
+}
+
+.diffAdd {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.diffRemove {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.diff {
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 0;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-markdown-code-block);
+  font-family: var(--ds-font-family-code);
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
+.diffRow {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diffRowAdd {
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);
+  color: var(--dsw-alias-label-primary);
+}
+
+.diffRowRemove {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.diffSign {
+  flex: none;
+  width: 8px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.diffText {
+  flex: 1;
+  min-width: 0;
+}
+
+.more {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.more:hover {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

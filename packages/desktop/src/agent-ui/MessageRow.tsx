@@ -1,8 +1,9 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionChatMessage } from '@openloop/core/types';
 import { AgentMarkdown } from './Markdown';
 import { ToolCard } from './ToolCard';
-import { IconCopy, IconFork, IconRefresh } from './icons';
+import { ImageThumb } from './ImageLightbox';
+import { IconCopy, IconEdit, IconFork, IconRefresh } from './icons';
 import styles from './MessageRow.module.css';
 
 const ThinkingBlock = memo(function ThinkingBlock({
@@ -13,12 +14,31 @@ const ThinkingBlock = memo(function ThinkingBlock({
   active?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const startedRef = useRef<number | null>(null);
+  const [seconds, setSeconds] = useState<number | null>(null);
+
+  // 思考耗时：流式开始时打点，结束时结算，折叠态即可看到「已思考 N 秒」
+  useEffect(() => {
+    if (active) {
+      startedRef.current = Date.now();
+      setSeconds(null);
+      return;
+    }
+    const started = startedRef.current;
+    if (!started) return;
+    startedRef.current = null;
+    setSeconds(Math.max(1, Math.round((Date.now() - started) / 1000)));
+  }, [active]);
+
   if (!thinking.trim() && !active) return null;
+
+  const label = active ? '思考中' : seconds ? `已思考 ${seconds} 秒` : '思考过程';
+
   return (
     <div className={styles.thinking}>
       <button type="button" className={styles.thinkingToggle} onClick={() => setOpen((value) => !value)}>
         <span className={active ? styles.thinkingPulse : styles.thinkingDot} aria-hidden />
-        思考过程
+        <span className={active ? styles.thinkingLive : undefined}>{label}</span>
         {thinking.length > 0 && <span className={styles.thinkingCount}>{thinking.length} 字</span>}
         <span className={styles.thinkingChevron}>{open ? '收起' : '展开'}</span>
       </button>
@@ -35,9 +55,17 @@ export interface MessageRowProps {
   onRegenerate?: () => void;
   /** 从该轮用户消息分叉出新会话 */
   onFork?: () => void;
+  /** 编辑该条用户消息（回填输入框） */
+  onEdit?: (content: string) => void;
 }
 
-export const MessageRow = memo(function MessageRow({ message, compact, onRegenerate, onFork }: MessageRowProps) {
+export const MessageRow = memo(function MessageRow({
+  message,
+  compact,
+  onRegenerate,
+  onFork,
+  onEdit,
+}: MessageRowProps) {
   if (message.role === 'system') {
     return (
       <div className={styles.systemRow}>
@@ -49,20 +77,33 @@ export const MessageRow = memo(function MessageRow({ message, compact, onRegener
   }
 
   if (message.role === 'user') {
+    const attachments = message.attachments || [];
+    const images = attachments.filter((item) => Boolean(item.url));
+    const files = attachments.filter((item) => !item.url);
     return (
       <div className={styles.userRow}>
         <div className={styles.userBubble}>
-          {message.attachments && message.attachments.length > 0 && (
+          {images.length > 0 && (
+            <div className={styles.imageGrid}>
+              {images.map((item) => (
+                <ImageThumb key={item.id || item.url} image={{ url: item.url, name: item.name }} size={96} />
+              ))}
+            </div>
+          )}
+          {files.length > 0 && (
             <div className={styles.attachments}>
-              {message.attachments.map((attachment) => (
+              {files.map((attachment) => (
                 <span key={attachment.id || attachment.path} className={styles.attachment}>
                   {attachment.name || '附件'}
                 </span>
               ))}
             </div>
           )}
-          <div className={styles.userText}>{message.content}</div>
+          {message.content.trim().length > 0 && <div className={styles.userText}>{message.content}</div>}
         </div>
+        {!compact && message.content.trim().length > 0 && (
+          <UserActions text={message.content} onEdit={onEdit} />
+        )}
       </div>
     );
   }
@@ -112,6 +153,49 @@ function formatClock(timestamp: number): string {
   const date = new Date(timestamp);
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
+
+/** 用户消息操作条：复制 / 编辑重发 */
+const UserActions = memo(function UserActions({
+  text,
+  onEdit,
+}: {
+  text: string;
+  onEdit?: (content: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    void navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    });
+  }, [text]);
+
+  return (
+    <div className={styles.userActions}>
+      <button
+        type="button"
+        className={`${styles.iconAction} ${copied ? styles.iconActionDone : ''}`}
+        onClick={handleCopy}
+        title={copied ? '已复制' : '复制'}
+        aria-label="复制消息"
+      >
+        <IconCopy size={15} />
+      </button>
+      {onEdit && (
+        <button
+          type="button"
+          className={styles.iconAction}
+          onClick={() => onEdit(text)}
+          title="编辑后重发"
+          aria-label="编辑消息"
+        >
+          <IconEdit size={15} />
+        </button>
+      )}
+    </div>
+  );
+});
 
 /** 回答操作条：复制 / 分叉 / 重新生成，右侧是用量与时间 */
 const MessageActions = memo(function MessageActions({

@@ -50,8 +50,47 @@ function highlight(code: string, language: string): string {
   return escapeHtml(code);
 }
 
+/** 把高亮后的 HTML 按行切开，未闭合的行内标签在行尾闭合、行首重开，保证行号与内容对齐 */
+function splitHighlightedLines(html: string): string[] {
+  const lines: string[] = [];
+  const open: string[] = [];
+  let current = '';
+  let index = 0;
+  const tagName = (tag: string) => (/^<\/?([a-zA-Z0-9]+)/.exec(tag)?.[1] || '').toLowerCase();
+
+  while (index < html.length) {
+    const char = html[index];
+    if (char === '<') {
+      const end = html.indexOf('>', index);
+      if (end === -1) {
+        current += html.slice(index);
+        break;
+      }
+      const tag = html.slice(index, end + 1);
+      current += tag;
+      if (tag.startsWith('</')) open.pop();
+      else if (!tag.endsWith('/>')) open.push(tag);
+      index = end + 1;
+      continue;
+    }
+    if (char === '\n') {
+      lines.push(current + open.slice().reverse().map((tag) => `</${tagName(tag)}>`).join(''));
+      current = open.join('');
+      index += 1;
+      continue;
+    }
+    current += char;
+    index += 1;
+  }
+  lines.push(current);
+  return lines;
+}
+
+const MAX_NUMBERED_LINES = 800;
+
 const CodeBlock = memo(function CodeBlock({ code, language }: { code: string; language: string }) {
   const [copied, setCopied] = useState(false);
+  const [wrap, setWrap] = useState(false);
   const handleCopy = useCallback(() => {
     navigator.clipboard?.writeText(code).then(
       () => {
@@ -63,20 +102,47 @@ const CodeBlock = memo(function CodeBlock({ code, language }: { code: string; la
   }, [code]);
 
   const highlighted = React.useMemo(() => highlight(code, language), [code, language]);
+  const lines = React.useMemo(
+    () => (code.split('\n').length > MAX_NUMBERED_LINES ? null : splitHighlightedLines(highlighted)),
+    [highlighted, code]
+  );
 
   return (
     <div className={styles.codeBlock}>
       <div className={styles.codeHeader}>
         <span className={styles.codeLang}>{language || 'text'}</span>
-        <button type="button" className={styles.codeCopy} onClick={handleCopy}>
-          {copied ? '已复制' : '复制'}
-        </button>
+        <span className={styles.codeActions}>
+          <button
+            type="button"
+            className={styles.codeCopy}
+            onClick={() => setWrap((value) => !value)}
+            title={wrap ? '关闭自动折行' : '按面板宽度自动折行'}
+          >
+            {wrap ? '不折行' : '折行'}
+          </button>
+          <button type="button" className={styles.codeCopy} onClick={handleCopy}>
+            {copied ? '已复制' : '复制'}
+          </button>
+        </span>
       </div>
-      <pre className={styles.codePre}>
-        <code
-          className={`language-${language || 'text'}`}
-          dangerouslySetInnerHTML={{ __html: highlighted }}
-        />
+      <pre className={`${styles.codePre} ${wrap ? styles.codePreWrap : ''}`}>
+        {lines ? (
+          <code className={`${styles.codeLines} language-${language || 'text'}`}>
+            {lines.map((line, index) => (
+              <span key={index} className={styles.codeLine}>
+                <span className={styles.codeLineNo} aria-hidden>
+                  {index + 1}
+                </span>
+                <span className={styles.codeLineText} dangerouslySetInnerHTML={{ __html: line || ' ' }} />
+              </span>
+            ))}
+          </code>
+        ) : (
+          <code
+            className={`language-${language || 'text'}`}
+            dangerouslySetInnerHTML={{ __html: highlighted }}
+          />
+        )}
       </pre>
     </div>
   );

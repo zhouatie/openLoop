@@ -1,6 +1,8 @@
 import React, { memo, useMemo, useState } from 'react';
+import { diffLines } from 'diff';
 import type { ToolExecutionRecord } from '@openloop/core/types';
 import { IconChevronDown } from './icons';
+import { ImageThumb } from './ImageLightbox';
 import styles from './ToolCard.module.css';
 
 const KIND_LABEL: Record<string, string> = {
@@ -85,12 +87,110 @@ function renderResult(result: any): string {
   return String(result);
 }
 
+interface DiffRow {
+  sign: '+' | '-' | ' ';
+  text: string;
+}
+
+function buildDiffRows(before: string | undefined, after: string): DiffRow[] {
+  const parts = (
+    before === undefined ? [{ added: true, value: after }] : diffLines(before, after)
+  ) as Array<{ added?: boolean; removed?: boolean; value: string }>;
+  const rows: DiffRow[] = [];
+  for (const part of parts) {
+    const sign: DiffRow['sign'] = part.added ? '+' : part.removed ? '-' : ' ';
+    for (const line of String(part.value).split('\n')) {
+      if (line === '' && part.value.endsWith('\n')) continue;
+      rows.push({ sign, text: line });
+    }
+  }
+  return rows;
+}
+
+function pickStringOf(source: any, keys: string[]): string | undefined {
+  if (!source || typeof source !== 'object') return undefined;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string') return value;
+  }
+  return undefined;
+}
+
+/**
+ * 写入类工具的差分分组：pi 的 edit 工具把改动放在 edits[] 里，
+ * write 工具则是整份 content，两种形态都要能画出来。
+ */
+function diffGroupsOfInput(tool: ToolExecutionRecord): DiffRow[][] | null {
+  const input = tool.input || {};
+  const groups: DiffRow[][] = [];
+  const edits = Array.isArray(input.edits) ? input.edits : [];
+  for (const edit of edits) {
+    const before = pickStringOf(edit, ['oldText', 'oldString', 'old_text']);
+    const after = pickStringOf(edit, ['newText', 'newString', 'new_text']);
+    if (after === undefined) continue;
+    const rows = buildDiffRows(before, after);
+    if (rows.length > 0) groups.push(rows);
+  }
+  if (groups.length === 0) {
+    const before = pickStringOf(input, ['oldString', 'oldText', 'before']);
+    const after = pickStringOf(input, ['content', 'newString', 'newText', 'after', 'text']);
+    if (after !== undefined) {
+      const rows = buildDiffRows(before, after);
+      if (rows.length > 0) groups.push(rows);
+    }
+  }
+  return groups.length > 0 ? groups : null;
+}
+
+const MAX_DIFF_ROWS = 120;
+
+const DiffBlock = memo(function DiffBlock({ rows, label = '改动' }: { rows: DiffRow[]; label?: string }) {
+  const [showAll, setShowAll] = useState(false);
+  const added = rows.filter((row) => row.sign === '+').length;
+  const removed = rows.filter((row) => row.sign === '-').length;
+  const visible = showAll ? rows : rows.slice(0, MAX_DIFF_ROWS);
+  return (
+    <div className={styles.section}>
+      <div className={styles.sectionLabel}>
+        {label}
+        <span className={styles.diffStat}>
+          <span className={styles.diffAdd}>+{added}</span>
+          <span className={styles.diffRemove}>-{removed}</span>
+        </span>
+      </div>
+      <div className={styles.diff}>
+        {visible.map((row, index) => (
+          <div
+            key={`${index}-${row.sign}`}
+            className={`${styles.diffRow} ${
+              row.sign === '+' ? styles.diffRowAdd : row.sign === '-' ? styles.diffRowRemove : ''
+            }`}
+          >
+            <span className={styles.diffSign}>{row.sign}</span>
+            <span className={styles.diffText}>{row.text}</span>
+          </div>
+        ))}
+      </div>
+      {rows.length > MAX_DIFF_ROWS && (
+        <button type="button" className={styles.more} onClick={() => setShowAll((value) => !value)}>
+          {showAll ? '收起' : `展开其余 ${rows.length - MAX_DIFF_ROWS} 行`}
+        </button>
+      )}
+    </div>
+  );
+});
+
 export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRecord }) {
   const [expanded, setExpanded] = useState(false);
   const kind = tool.kind || 'other';
   const summary = useMemo(() => summarize(tool), [tool.input, tool.name]);
   const output = useMemo(() => renderResult(tool.result), [tool.result]);
   const hasOutput = output.trim().length > 0;
+  const diffGroups = useMemo(
+    () => (kind === 'write' ? diffGroupsOfInput(tool) : null),
+    [kind, tool.input]
+  );
+  const images = tool.imageUrls || [];
   const isRunning = tool.status === 'running';
 
   const statusClass = isRunning
@@ -126,10 +226,28 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
 
       {expanded && (
         <div className={styles.body}>
-          {tool.input && Object.keys(tool.input).length > 0 && (
+          {diffGroups &&
+            diffGroups.map((rows, index) => (
+              <DiffBlock
+                key={index}
+                rows={rows}
+                label={diffGroups.length > 1 ? `改动 ${index + 1}` : '改动'}
+              />
+            ))}
+          {!diffGroups && tool.input && Object.keys(tool.input).length > 0 && (
             <div className={styles.section}>
               <div className={styles.sectionLabel}>入参</div>
               <pre className={styles.pre}>{JSON.stringify(tool.input, null, 2)}</pre>
+            </div>
+          )}
+          {images.length > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionLabel}>输出图片</div>
+              <div className={styles.images}>
+                {images.map((url, index) => (
+                  <ImageThumb key={`${index}-${url.slice(-12)}`} image={{ url, name: `输出图片 ${index + 1}` }} size={120} />
+                ))}
+              </div>
             </div>
           )}
           {hasOutput && (

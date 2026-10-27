@@ -140,6 +140,12 @@
   font-family: var(--ds-font-family-code);
 }
 
+.codeActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .codeCopy {
   height: 20px;
   padding: 0 6px;
@@ -160,9 +166,50 @@
 
 .codePre {
   margin: 0;
-  padding: 10px 12px;
+  padding: 10px 0;
   overflow-x: auto;
   font-family: var(--ds-font-family-code);
   font-size: 12.5px;
-  line-height: 1.65;
+  line-height: 20px;
+}
+
+/* 行号列：固定宽度、右对齐、不参与选中复制 */
+.codeLines {
+  display: block;
+  min-width: 100%;
+  width: max-content;
+}
+
+.codeLine {
+  display: flex;
+  gap: 12px;
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.codeLineNo {
+  flex: none;
+  width: 28px;
+  text-align: right;
+  color: var(--dsw-alias-label-caption);
+  user-select: none;
+}
+
+.codeLineText {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 折行模式：内容按面板宽度换行，行号仍与首行对齐 */
+.codePreWrap {
+  overflow-x: hidden;
+}
+
+.codePreWrap .codeLines {
+  width: 100%;
+}
+
+.codePreWrap .codeLine {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

@@ -4,7 +4,7 @@ import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { createLogger } from '../logger';
-import type { SessionChatMessage, ToolExecutionRecord } from '../types';
+import type { SessionChatMessage, TaskAttachment, ToolExecutionRecord } from '../types';
 import { classifyToolKind, compactUsage } from './agent-events';
 
 const logger = createLogger('PiSessionIndex');
@@ -35,6 +35,18 @@ export interface PiSessionSummary {
   size: number;
 }
 
+/** 会话全文搜索命中项 */
+export interface PiSessionSearchHit {
+  id: string;
+  path: string;
+  cwd: string;
+  modifiedAt: string;
+  /** 命中处的上下文片段 */
+  snippet: string;
+  /** 会话内命中次数 */
+  matches: number;
+}
+
 export interface PiSessionDetail {
   summary: PiSessionSummary;
   messages: SessionChatMessage[];
@@ -57,6 +69,9 @@ const HEAD_SCAN_BYTES = 4 * 1024 * 1024;
 const TAIL_SCAN_BYTES = 1 * 1024 * 1024;
 /** 消息读取窗口：优先读文件尾部，长会话的最新几轮永远可见 */
 const MAX_MESSAGE_BYTES = 12 * 1024 * 1024;
+/** 全文搜索每个文件只看尾部这么多，控住总 IO */
+const SEARCH_WINDOW_BYTES = 1024 * 1024;
+const SNIPPET_CHARS = 120;
 /** 首条用户消息截断长度 */
 const TITLE_MAX_CHARS = 120;
 
@@ -67,6 +82,32 @@ function textOfContent(content: any): string {
     .filter((block: any) => block && block.type === 'text')
     .map((block: any) => block.text || '')
     .join('');
+}
+
+/** 历史里的图片块上限：太大会把会话响应撑爆，超过就只保留占位说明 */
+const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_INLINE_IMAGES = 6;
+
+/** 把图片内容块还原成可直接渲染的附件（data URL），历史会话里的截图才能看见 */
+function imagesOfContent(content: any, entryId: string): TaskAttachment[] {
+  if (!Array.isArray(content)) return [];
+  const attachments: TaskAttachment[] = [];
+  for (const block of content) {
+    if (attachments.length >= MAX_INLINE_IMAGES) break;
+    if (!block || block.type !== 'image' || typeof block.data !== 'string') continue;
+    const mimeType = block.mimeType || 'image/png';
+    const oversize = block.data.length > MAX_INLINE_IMAGE_BYTES;
+    attachments.push({
+      id: `${entryId}_img${attachments.length + 1}`,
+      name: oversize ? '图片（过大，未内联）' : `图片 ${attachments.length + 1}`,
+      size: Math.floor((block.data.length * 3) / 4),
+      mimeType,
+      path: '',
+      url: oversize ? '' : `data:${mimeType};base64,${block.data}`,
+      createdAt: 0,
+    });
+  }
+  return attachments;
 }
 
 function thinkingOfContent(content: any): string {
@@ -142,6 +183,65 @@ export class PiSessionIndex {
     const { messages, model, totalUsage, leafEntryId } = mapEntriesToMessages(branch, summary.id);
     const limited = options?.limit && options.limit > 0 ? messages.slice(-options.limit) : messages;
     return { summary, messages: limited, leafEntryId, model, totalUsage };
+  }
+
+  /**
+   * 全文搜索：只看每个会话文件尾部的一段，避免把 2000 多个会话全量读进来。
+   * 标题匹配由调用方用 list() 处理，这里只负责正文。
+   */
+  public async searchContent(
+    query: string,
+    options?: { limit?: number; maxFiles?: number }
+  ): Promise<PiSessionSearchHit[]> {
+    const keyword = query.trim().toLowerCase();
+    if (keyword.length < 1) return [];
+    const limit = options?.limit && options.limit > 0 ? options.limit : 30;
+    const maxFiles = options?.maxFiles && options.maxFiles > 0 ? options.maxFiles : 160;
+    const summaries = await this.list();
+    const hits: PiSessionSearchHit[] = [];
+
+    for (const summary of summaries.slice(0, maxFiles)) {
+      if (hits.length >= limit) break;
+      let window: { text: string; fromStart: boolean };
+      try {
+        window = await readFileTail(summary.path, SEARCH_WINDOW_BYTES);
+      } catch (_) {
+        continue;
+      }
+      const lines = window.text.split('\n');
+      if (!window.fromStart) lines.shift();
+      let matches = 0;
+      let snippet = '';
+      for (const line of lines) {
+        if (!line || !line.toLowerCase().includes(keyword)) continue;
+        try {
+          const entry = JSON.parse(line);
+          const message = entry?.message;
+          if (!message) continue;
+          const text =
+            message.role === 'user' || message.role === 'assistant'
+              ? textOfContent(message.content)
+              : '';
+          if (!text || !text.toLowerCase().includes(keyword)) continue;
+          matches += 1;
+          if (!snippet) snippet = snippetAround(text, keyword);
+        } catch (_) {
+          // 非 JSON 行或半行直接跳过
+        }
+      }
+      if (matches > 0) {
+        hits.push({
+          id: summary.id,
+          path: summary.path,
+          cwd: summary.cwd,
+          modifiedAt: summary.modifiedAt,
+          snippet: snippet || query,
+          matches,
+        });
+      }
+    }
+
+    return hits;
   }
 
   /** 会话文件变更后主动失效缓存 */
@@ -356,6 +456,16 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
   };
 }
 
+/** 取命中词附近的一段文本作为摘要 */
+function snippetAround(text: string, keyword: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const index = flat.toLowerCase().indexOf(keyword);
+  if (index < 0) return flat.slice(0, SNIPPET_CHARS);
+  const start = Math.max(0, index - Math.floor(SNIPPET_CHARS / 2));
+  const end = Math.min(flat.length, start + SNIPPET_CHARS);
+  return `${start > 0 ? '…' : ''}${flat.slice(start, end)}${end < flat.length ? '…' : ''}`;
+}
+
 function deriveFolderTitle(filePath: string): string {
   const folder = path.basename(path.dirname(filePath));
   const match = folder.match(/^--(.+)--$/);
@@ -447,7 +557,8 @@ function mapEntriesToMessages(branch: any[], sessionId: string) {
 
     if (msg.role === 'user') {
       const content = textOfContent(msg.content);
-      if (!content.trim()) continue;
+      const images = imagesOfContent(msg.content, entry.id || `${sessionId}_${seq}`);
+      if (!content.trim() && images.length === 0) continue;
       messages.push({
         id: nextId('msg_u', entry),
         role: 'user',
@@ -455,6 +566,7 @@ function mapEntriesToMessages(branch: any[], sessionId: string) {
         timestamp,
         source: 'history',
         entryId: entry.id,
+        ...(images.length > 0 ? { attachments: images } : {}),
       });
       continue;
     }
@@ -507,6 +619,11 @@ function mapEntriesToMessages(branch: any[], sessionId: string) {
       if (!hit) continue;
       hit.tool.result = textOfContent(msg.content) || msg.content;
       hit.tool.status = msg.isError ? 'error' : 'success';
+      // 截图类工具的结果是图片块，抽出来给工具卡渲染缩略图
+      const images = imagesOfContent(msg.content, hit.tool.id);
+      if (images.length > 0) {
+        hit.tool.imageUrls = images.map((item) => item.url).filter(Boolean);
+      }
     }
   }
 

@@ -456,3 +456,75 @@
     opacity: 1;
   }
 }
+
+/* 追加消息的短暂提示：浮在卡片上方，不挤压输入区 */
+.notice {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-tooltip-bg);
+  color: var(--dsw-alias-label-inverse-primary, #fff);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  animation: noticeIn 120ms var(--ds-ease-in-out);
+  pointer-events: none;
+}
+
+@keyframes noticeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* 拖拽中的整卡提示层 */
+.dropOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--dsw-alias-state-business-primary);
+  border-radius: var(--dsw-radius-panel);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 6%, var(--dsw-alias-bg-base));
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+/* 图片附件：更大的预览块 */
+.attachmentImage {
+  height: 64px;
+  padding: 3px;
+}
+
+.attachmentImage .attachmentName {
+  display: none;
+}
+
+.attachmentImage .attachmentThumb {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--dsw-radius-sm);
+}
+
+/* 斜杠菜单里的类型徽标 */
+.popoverTag {
+  flex: none;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-interactive-bg-hover);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}

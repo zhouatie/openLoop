@@ -909,6 +909,22 @@ export class DesktopApiService {
     return requestJson(`${BASE_URL}/api/agent/sessions${qs}`);
   }
 
+  /** 会话全文搜索：返回命中会话与上下文片段 */
+  async searchAgentSessions(query: string, limit = 20): Promise<{
+    query: string;
+    results: Array<{
+      id: string;
+      path: string;
+      cwd: string;
+      modifiedAt: string;
+      snippet: string;
+      matches: number;
+    }>;
+  }> {
+    const qs = new URLSearchParams({ q: query, limit: String(limit) });
+    return requestJson(`${BASE_URL}/api/agent/sessions/search?${qs.toString()}`);
+  }
+
   async getAgentSession(sessionId: string, limit?: number): Promise<{
     summary: any;
     messages: SessionChatMessage[];

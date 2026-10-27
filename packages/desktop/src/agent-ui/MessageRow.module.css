@@ -22,8 +22,32 @@
 
 .userRow {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
   margin: 20px 0 8px;
+}
+
+/* 用户消息操作条：悬停才出现，避免抢视觉 */
+.userActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.userRow:hover .userActions,
+.userActions:focus-within {
+  opacity: 1;
+}
+
+/* 历史图片：缩略图网格，点击放大 */
+.imageGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 /* 用户气泡：DSH UserMessageBubble —— radius-xl、10/16 内距、22px 行高 */
@@ -251,3 +275,35 @@
 }
 
 
+
+/* 思考中的文字：渐变扫光，收起状态也能看出还在跑 */
+.thinkingLive {
+  background: linear-gradient(
+    90deg,
+    var(--dsw-alias-label-tertiary) 0%,
+    var(--dsw-alias-label-primary) 45%,
+    var(--dsw-alias-label-tertiary) 90%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinkingShimmer 1.8s linear infinite;
+}
+
+@keyframes thinkingShimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinkingLive {
+    animation: none;
+    background: none;
+    color: var(--dsw-alias-label-primary);
+  }
+}

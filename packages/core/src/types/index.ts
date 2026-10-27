@@ -125,6 +125,8 @@ export interface ToolExecutionRecord {
   durationMs?: number;
   /** 工具卡形态提示 */
   kind?: ToolKind;
+  /** 工具返回的图片（data URL），例如截图类工具 */
+  imageUrls?: string[];
 }
 
 /** 单条消息的模型用量，用于输入框上方统计胶囊 */

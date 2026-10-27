@@ -579,3 +579,135 @@
   margin: 0 4px 0 0;
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* ---- 折叠成 56px 图标轨道（DSH sidebar rail） ---- */
+.rootRail {
+  width: 56px;
+  min-width: 56px;
+  max-width: 56px;
+  padding: 6px 6px 10px;
+  align-items: center;
+}
+
+.railTop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 18px;
+}
+
+.railButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.railButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 工作区标题变成下拉触发器 */
+.sectionTitleButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 150px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sectionTitleButton:hover {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.sectionChevron {
+  flex: none;
+  transform: rotate(90deg);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.iconButtonActive {
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* 行内重命名输入框 */
+.renameInput {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--dsw-alias-state-business-primary);
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+/* 正文命中：标题下多一行片段 */
+.searchHitContent {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  height: auto;
+  padding: 6px 8px;
+}
+
+.searchHitBadge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-interactive-bg-hover);
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.searchHitSnippet {
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.searchPanelFoot {
+  padding: 6px 8px 8px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+}
+
+/* 当前项标记 */
+.menuItemActive {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.menuCount {
+  float: right;
+  color: var(--dsw-alias-label-caption);
+  font-size: 11px;
+}

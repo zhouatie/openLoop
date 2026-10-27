@@ -7,6 +7,7 @@ import {
   IconChevronDown,
   IconClose,
   IconFile,
+  IconNewChat,
 } from './icons';
 import styles from './Composer.module.css';
 import { useShortcuts } from '../context/ShortcutContext';
@@ -21,6 +22,15 @@ export interface ComposerAttachmentItem {
 
 export interface ComposerCommand {
   name: string;
+  description?: string;
+  /** 菜单里的分组标签：指令 / 模板指令 / 技能 */
+  kind?: 'command' | 'template' | 'skill';
+}
+
+export interface ComposerMentionItem {
+  key: string;
+  label: string;
+  kind: 'file' | 'dir' | 'session';
   description?: string;
 }
 
@@ -53,8 +63,10 @@ export interface ComposerProps {
   actions?: React.ReactNode;
   /** 斜杠指令候选（来自 /api/agent/commands-and-skills） */
   commands?: ComposerCommand[];
-  /** @ 文件候选：按前缀查询当前工作区文件 */
-  onRequestFiles?: (query: string) => Promise<string[]>;
+  /** @ 候选：文件 / 目录 / 会话 */
+  onRequestMentions?: (query: string) => Promise<ComposerMentionItem[]>;
+  /** 变化时聚焦输入框（编辑历史消息后回填） */
+  focusSignal?: number;
   /** 工具权限预设 */
   permission?: ComposerPermission;
   onPermissionSelect?: (preset: ComposerPermission) => void;
@@ -65,7 +77,15 @@ export interface ComposerProps {
 
 interface MenuState {
   kind: 'slash' | 'mention' | 'model' | 'permission';
-  items: Array<{ key: string; label: string; description?: string; isDir?: boolean }>;
+  items: Array<{
+    key: string;
+    label: string;
+    description?: string;
+    isDir?: boolean;
+    tag?: string;
+    group?: string;
+    mentionKind?: ComposerMentionItem['kind'];
+  }>;
   index: number;
 }
 
@@ -89,7 +109,8 @@ export const Composer = React.memo(function Composer({
   onRemoveAttachment,
   actions,
   commands,
-  onRequestFiles,
+  onRequestMentions,
+  focusSignal,
   permission,
   onPermissionSelect,
   models,
@@ -101,7 +122,7 @@ export const Composer = React.memo(function Composer({
   const [isDragging, setIsDragging] = useState(false);
   const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
-  const [files, setFiles] = useState<string[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // 高度随内容增长，最多 8 行
   useEffect(() => {
@@ -116,40 +137,52 @@ export const Composer = React.memo(function Composer({
   const submit = useCallback(() => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
+    if (busy) {
+      // 生成中发送会作为追加消息排入本轮
+      setNotice('已追加到当前一轮');
+      window.setTimeout(() => setNotice(null), 2400);
+    }
     onSend(trimmed);
-  }, [value, disabled, onSend]);
+  }, [value, disabled, busy, onSend]);
 
   /** 斜杠指令与 @ 文件：按光标前的 token 决定候选菜单 */
   const syncSuggestions = useCallback(
     (text: string) => {
       if (commands && commands.length > 0 && /^\/[^\s]*$/.test(text)) {
         const query = text.slice(1).toLowerCase();
-        const items = commands
-          .filter((command) => command.name.toLowerCase().includes(query))
-          .slice(0, 8)
-          .map((command) => ({
-            key: `/${command.name}`,
-            label: `/${command.name}`,
-            description: command.description,
-          }));
+        const matched = commands.filter((command) => command.name.toLowerCase().includes(query)).slice(0, 10);
+        const items = matched.map((command) => ({
+          key: `/${command.name}`,
+          label: `/${command.name}`,
+          description: command.description,
+          tag: command.kind === 'skill' ? '技能' : command.kind === 'template' ? '模板' : '指令',
+          group:
+            command.kind === 'skill'
+              ? '技能'
+              : command.kind === 'template'
+                ? '模板指令（可继续补充参数）'
+                : '指令',
+        }));
         setMenu(items.length > 0 ? { kind: 'slash', items, index: 0 } : null);
         return;
       }
 
       const mention = /(?:^|\s)@([^\s]*)$/.exec(text);
-      if (mention && onRequestFiles) {
+      if (mention && onRequestMentions) {
         const query = mention[1];
-        void onRequestFiles(query)
+        void onRequestMentions(query)
           .then((list) => {
-            setFiles(list);
             setMenu(
               list.length > 0
                 ? {
                     kind: 'mention',
-                    items: list.slice(0, 12).map((item) => ({
-                      key: item,
-                      label: item,
-                      isDir: item.endsWith('/'),
+                    items: list.slice(0, 14).map((item) => ({
+                      key: item.key,
+                      label: item.label,
+                      description: item.description,
+                      isDir: item.kind === 'dir',
+                      mentionKind: item.kind,
+                      group: item.kind === 'session' ? '会话' : '文件与文件夹',
                     })),
                     index: 0,
                   }
@@ -162,7 +195,7 @@ export const Composer = React.memo(function Composer({
 
       setMenu((prev) => (prev && (prev.kind === 'slash' || prev.kind === 'mention') ? null : prev));
     },
-    [commands, onRequestFiles]
+    [commands, onRequestMentions]
   );
 
   const applyMenuChoice = useCallback(
@@ -294,6 +327,15 @@ export const Composer = React.memo(function Composer({
     }
   };
 
+  useEffect(() => {
+    if (!focusSignal) return;
+    const node = textareaRef.current;
+    if (!node) return;
+    node.focus();
+    const end = node.value.length;
+    node.setSelectionRange(end, end);
+  }, [focusSignal]);
+
   const canSend = value.trim().length > 0 && !disabled;
   useEffect(() => {
     if (!preview) return;
@@ -311,42 +353,60 @@ export const Composer = React.memo(function Composer({
 
   return (
     <div className={styles.root}>
+      {notice && <div className={styles.notice}>{notice}</div>}
       {menu && menu.items.length > 0 && (
         <div
           className={`${styles.popover} ${menu.kind === 'mention' ? styles.popoverList : ''}`}
           role="listbox"
           data-agent-transient
         >
-          {menu.kind === 'mention' && <div className={styles.popoverHeader}>文件与文件夹</div>}
-          {menu.items.map((item, index) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`${styles.popoverItem} ${index === menu.index ? styles.popoverItemActive : ''} ${
-                menu.kind === 'mention' ? styles.popoverRow : ''
-              }`}
-              role="option"
-              aria-selected={index === menu.index}
-              onMouseEnter={() => setMenu({ ...menu, index })}
-              onClick={() => applyMenuChoice(item)}
-            >
-              {menu.kind === 'mention' && (
-                <span className={`${styles.popoverIcon} ${item.isDir ? styles.popoverIconDir : ''}`}>
-                  {item.isDir ? <IconFolderClose size={16} /> : <IconFile size={16} />}
-                </span>
-              )}
-              <span className={menu.kind === 'mention' ? styles.popoverName : styles.popoverLabel}>
-                {item.label}
-              </span>
-              {item.description && <span className={styles.popoverDesc}>{item.description}</span>}
-              {menu.kind === 'mention' && item.isDir && (
-                <span className={styles.popoverTrailing}>
-                  <span className={styles.popoverHint}>进入目录</span>
-                  <IconChevronDown size={12} className={styles.popoverChevron} />
-                </span>
-              )}
-            </button>
-          ))}
+          {menu.items.map((item, index) => {
+            const showGroup = Boolean(item.group) && item.group !== menu.items[index - 1]?.group;
+            return (
+              <React.Fragment key={`${item.group || ''}-${item.key}`}>
+                {showGroup && <div className={styles.popoverHeader}>{item.group}</div>}
+                <button
+                  type="button"
+                  className={`${styles.popoverItem} ${index === menu.index ? styles.popoverItemActive : ''} ${
+                    menu.kind === 'mention' ? styles.popoverRow : ''
+                  }`}
+                  role="option"
+                  aria-selected={index === menu.index}
+                  onMouseEnter={() => setMenu({ ...menu, index })}
+                  onClick={() => applyMenuChoice(item)}
+                >
+                  {menu.kind === 'mention' && (
+                    <span
+                      className={`${styles.popoverIcon} ${
+                        item.mentionKind === 'dir' ? styles.popoverIconDir : ''
+                      }`}
+                    >
+                      {item.mentionKind === 'session' ? (
+                        <IconNewChat size={16} />
+                      ) : item.isDir ? (
+                        <IconFolderClose size={16} />
+                      ) : (
+                        <IconFile size={16} />
+                      )}
+                    </span>
+                  )}
+                  <span className={menu.kind === 'mention' ? styles.popoverName : styles.popoverLabel}>
+                    {item.label}
+                  </span>
+                  {item.description && <span className={styles.popoverDesc}>{item.description}</span>}
+                  {menu.kind === 'mention' && item.isDir && (
+                    <span className={styles.popoverTrailing}>
+                      <span className={styles.popoverHint}>进入目录</span>
+                      <IconChevronDown size={12} className={styles.popoverChevron} />
+                    </span>
+                  )}
+                  {menu.kind === 'slash' && item.tag && (
+                    <span className={styles.popoverTag}>{item.tag}</span>
+                  )}
+                </button>
+              </React.Fragment>
+            );
+          })}
         </div>
       )}
 
@@ -376,8 +436,8 @@ export const Composer = React.memo(function Composer({
               <div
                 key={item.id}
                 className={`${styles.attachment} ${
-                  item.status === 'error' ? styles.attachmentError : ''
-                }`}
+                  item.previewUrl ? styles.attachmentImage : ''
+                } ${item.status === 'error' ? styles.attachmentError : ''}`}
                 title={item.errorMessage || item.name}
               >
                 {item.previewUrl ? (
@@ -436,6 +496,12 @@ export const Composer = React.memo(function Composer({
                 关闭
               </button>
             </div>
+          </div>
+        )}
+
+        {isDragging && (
+          <div className={styles.dropOverlay} aria-hidden>
+            松开以添加图片
           </div>
         )}
 

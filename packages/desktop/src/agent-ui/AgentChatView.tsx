@@ -16,6 +16,8 @@ export interface AgentChatViewProps {
   onRegenerate?: () => void;
   /** 从某一轮的用户消息分叉出新会话 */
   onFork?: (entryId: string) => void;
+  /** 编辑某条用户消息：回填输入框 */
+  onEditUserMessage?: (content: string) => void;
 }
 
 /** 距底部多少像素内仍视为「贴底」，超过则停止自动滚动 */
@@ -24,6 +26,26 @@ const STICK_THRESHOLD = 80;
 const RAIL_MIN_WIDTH = 720;
 const PREVIEW_PROMPT_CHARS = 80;
 const PREVIEW_RESPONSE_CHARS = 160;
+
+const pad2 = (value: number) => String(value).padStart(2, '0');
+
+/** 日期分隔标签：今天 / 昨天 / 2026 年 10 月 26 日 */
+function dayLabel(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+  const date = new Date(timestamp);
+  const today = new Date();
+  const startOf = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+  const days = Math.round((startOf(today) - startOf(date)) / 86400000);
+  if (days === 0) return '今天';
+  if (days === 1) return '昨天';
+  return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+}
+
+function clockLabel(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+  const date = new Date(timestamp);
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
 
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/g, ' ').trim();
@@ -34,6 +56,7 @@ function clip(text: string, max: number): string {
 interface TurnBlock {
   kind: 'turn';
   turn: number;
+  day: string;
   user: number | null;
   steps: number[];
   answer: number | null;
@@ -44,6 +67,7 @@ interface TurnBlock {
 interface RowBlock {
   kind: 'row';
   turn: number;
+  day: string;
   index: number;
 }
 
@@ -62,19 +86,26 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
   messages.forEach((message, index) => {
     if (message.role === 'user') {
       const turn = (current?.turn ?? 0) + 1;
-      current = { kind: 'turn', turn, user: index, steps: [], answer: null };
+      current = {
+        kind: 'turn',
+        turn,
+        day: dayLabel(message.timestamp),
+        user: index,
+        steps: [],
+        answer: null,
+      };
       blocks.push(current);
       railItems.push({ turn, prompt: clip(message.content, PREVIEW_PROMPT_CHARS), response: '' });
       return;
     }
 
     if (message.role === 'system') {
-      blocks.push({ kind: 'row', turn: current?.turn ?? 0, index });
+      blocks.push({ kind: 'row', turn: current?.turn ?? 0, day: dayLabel(message.timestamp), index });
       return;
     }
 
     if (!current) {
-      current = { kind: 'turn', turn: 0, user: null, steps: [], answer: null };
+      current = { kind: 'turn', turn: 0, day: dayLabel(message.timestamp), user: null, steps: [], answer: null };
       blocks.push(current);
     }
     const turn = current as TurnBlock;
@@ -115,6 +146,7 @@ export const AgentChatView = React.memo(function AgentChatView({
   contentWidth,
   onRegenerate,
   onFork,
+  onEditUserMessage,
 }: AgentChatViewProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -221,22 +253,38 @@ export const AgentChatView = React.memo(function AgentChatView({
         ) : (
           <div className={styles.content} style={contentStyle}>
             {blocks.map((block, blockIndex) => {
+              const previousDay = blockIndex > 0 ? blocks[blockIndex - 1].day : '';
+              const separator =
+                block.day && block.day !== previousDay ? (
+                  <div className={styles.daySeparator} key={`day-${block.day}-${blockIndex}`}>
+                    <span className={styles.dayLine} />
+                    <span className={styles.dayText}>{block.day}</span>
+                    <span className={styles.dayLine} />
+                  </div>
+                ) : null;
+
               if (block.kind === 'row') {
                 return (
-                  <div key={`row-${block.index}`} data-turn={block.turn || undefined}>
-                    <MessageRow message={messages[block.index]} />
-                  </div>
+                  <React.Fragment key={`row-${block.index}`}>
+                    {separator}
+                    <div data-turn={block.turn || undefined}>
+                      <MessageRow message={messages[block.index]} />
+                    </div>
+                  </React.Fragment>
                 );
               }
 
               const isLiveTurn = block === lastTurn;
               return (
-                <div
-                  key={`turn-${block.turn}-${blockIndex}`}
-                  className={styles.turn}
-                  data-turn={block.turn || undefined}
-                >
-                  {block.user !== null && <MessageRow message={messages[block.user]} />}
+                <React.Fragment key={`turn-${block.turn}-${blockIndex}`}>
+                {separator}
+                <div className={styles.turn} data-turn={block.turn || undefined}>
+                  {block.user !== null && (
+                    <MessageRow
+                      message={messages[block.user]}
+                      onEdit={onEditUserMessage}
+                    />
+                  )}
                   <TurnProcess
                     steps={block.steps.map((index) => messages[index])}
                     live={isLiveTurn}
@@ -256,6 +304,7 @@ export const AgentChatView = React.memo(function AgentChatView({
                     </div>
                   )}
                 </div>
+                </React.Fragment>
               );
             })}
             {isBusy && <div className={styles.busyTail} aria-hidden />}
