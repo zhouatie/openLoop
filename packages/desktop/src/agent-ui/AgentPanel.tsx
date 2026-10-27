@@ -1162,7 +1162,11 @@ export function GlobalAgentPanel({
   );
 
   return (
-    <div className={`agent-scope ${styles.panel} ${mode === 'drawer' ? styles.panelDrawer : styles.panelPage}`}>
+    <div
+      className={`agent-scope ${styles.panel} ${
+        mode === 'drawer' ? styles.panelDrawer : styles.panelPage
+      } ${mode === 'overlay' ? styles.panelOverlay : ''}`}
+    >
       {mode !== 'drawer' && (
         <SessionList
           brandSlot={

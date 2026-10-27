@@ -523,7 +523,7 @@ export const AppContent: React.FC = () => {
       <div
         className={
           isAgentOverlayOpen
-            ? 'fixed inset-0 z-[70] flex flex-col bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08)]'
+            ? 'fixed inset-0 z-[70] flex flex-col bg-transparent shadow-[0_0_0_1px_rgba(0,0,0,0.08)]'
             : 'hidden'
         }
         aria-hidden={!isAgentOverlayOpen}

@@ -14,13 +14,28 @@
   flex: none;
   padding: 6px var(--dsh-session-list-edge-inset) 10px;
   box-sizing: border-box;
-  /* 半透明底 + 背景模糊：与 DSH 在 macOS 上的毛玻璃侧栏对齐 */
-  background-color: color-mix(in srgb, var(--dsw-specific-sidebar-fill) 72%, transparent);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-  backdrop-filter: blur(30px) saturate(180%);
-  border-right: 1px solid var(--dsw-alias-border-l3);
+  /* 毛玻璃侧栏：底色渐变取自 DSH AppFrame 的 macOS 侧栏，叠加背景模糊模拟系统材质 */
+  background:
+    linear-gradient(to bottom, #7a9bf01a, #7a9bf000 35%, #8f89b800 68%, #8f89b817),
+    color-mix(in srgb, color-mix(in srgb, var(--dsw-specific-sidebar-fill) 97%, #7a9bf0) 40%, transparent);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
+  backdrop-filter: blur(40px) saturate(150%);
+  border-right: 0.5px solid var(--dsw-alias-border-l3);
   color: var(--dsw-alias-label-primary);
   font-family: var(--dsw-font-family);
+}
+
+:global(.agent-scope[data-ds-dark-theme]) .root {
+  background:
+    linear-gradient(to bottom, #7a9bf014, #7a9bf000 35%, #8f89b800 68%, #8f89b812),
+    color-mix(in srgb, var(--dsw-specific-sidebar-fill) 50%, transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .root,
+  :global(.agent-scope[data-ds-dark-theme]) .root {
+    background: color-mix(in srgb, var(--dsw-specific-sidebar-fill) 90%, transparent);
+  }
 }
 
 /* ---- 新会话 ---- */
@@ -36,7 +51,8 @@
   box-sizing: border-box;
   border: 0.5px solid var(--dsw-alias-border-l3);
   border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-button-elevated-fill);
+  /* 与 DSH 的 macOS 侧栏按钮一致：半透明白，让毛玻璃透出来 */
+  background: #ffffff8c;
   color: var(--dsw-alias-label-primary);
   font-family: inherit;
   font-size: 14px;
@@ -46,9 +62,17 @@
   transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
+:global(.agent-scope[data-ds-dark-theme]) .newSession {
+  background: #ffffff26;
+}
+
 @media (hover: hover) {
   .newSession:hover {
-    background: var(--dsw-alias-button-floating-hover);
+    background: #ffffff4d;
+  }
+
+  :global(.agent-scope[data-ds-dark-theme]) .newSession:hover {
+    background: #fff3;
   }
 }
 
