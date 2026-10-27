@@ -96,6 +96,30 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.iconButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.iconButtonActive {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-state-business-primary);
+}
+
 .closeButton {
   width: 26px;
   height: 26px;
@@ -212,8 +236,12 @@
 
 /* 输入卡内的面板开关（整页形态没有顶栏） */
 .dockToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0;
   border: none;
   border-radius: var(--dsw-radius-sm);
   background: transparent;
@@ -227,4 +255,9 @@
 .dockToggle:hover {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.dockToggleActive {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }

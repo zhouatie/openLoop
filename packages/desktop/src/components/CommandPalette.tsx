@@ -39,6 +39,8 @@ interface CommandPaletteProps {
   onToggleLogs: () => void;
   onRefresh: () => void;
   onToggleSidebar?: () => void;
+  /** 打开全局智能体浮层 */
+  onOpenAgent?: () => void;
 }
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
@@ -50,6 +52,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenQuickRun,
   onToggleLogs,
   onRefresh,
+  onOpenAgent,
   onToggleSidebar,
 }) => {
   const [query, setQuery] = useState('');
@@ -124,14 +127,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         },
       },
       {
-        id: 'nav-agent-studio',
+        id: 'nav-agent-overlay',
         category: '导航',
-        title: '智能体开发 (Pi Web)',
-        description: '深度交互开发工作台，支持会话分支、模型微调与代码预览',
-        icon: <Bot size={16} strokeWidth={1.8} className="text-[#8b5cf6]" />,
-        shortcutKeys: ['super', '5'],
+        title: '打开智能体',
+        description: '全屏浮层里与 pi 会话协作，支持读写文件与执行命令',
+        icon: <Bot size={16} strokeWidth={1.8} className="text-[#4f46e5]" />,
+        shortcutKeys: ['super', '`'],
         action: () => {
-          onNavigate('agent-studio');
+          onOpenAgent?.();
           onClose();
         },
       },
@@ -220,7 +223,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         },
       },
     ];
-  }, [onNavigate, onOpenCreateTask, onToggleLogs, onRefresh, onClose]);
+  }, [onNavigate, onOpenCreateTask, onToggleLogs, onRefresh, onClose, onOpenAgent]);
 
   const filteredCommands = useMemo(() => {
     const q = query.trim().toLowerCase();

@@ -45,6 +45,7 @@ export const AppContent: React.FC = () => {
   });
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isQuickRunModalOpen, setIsQuickRunModalOpen] = useState<boolean>(false);
+  const [isAgentOverlayOpen, setIsAgentOverlayOpen] = useState<boolean>(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
     try {
       // 权限向导依赖 Electron 主进程能力；浏览器预览（含靶机）无法检测与授权
@@ -98,8 +99,13 @@ export const AppContent: React.FC = () => {
     onNavigateQa: () => {
       setActivePluginId('qa-automation');
     },
-    onNavigateAgentStudio: () => {
-      setActivePluginId('agent-studio');
+    onToggleAgent: () => {
+      setIsAgentOverlayOpen((prev) => {
+        if (import.meta.env?.DEV) {
+          console.log('[App] 切换全局智能体浮层:', { next: !prev });
+        }
+        return !prev;
+      });
     },
     onNavigateSettings: () => {
       setActivePluginId('settings-agent');
@@ -121,6 +127,7 @@ export const AppContent: React.FC = () => {
       if (isCommandPaletteOpen) {
         setIsCommandPaletteOpen(false);
       }
+      setIsAgentOverlayOpen(false);
     },
   });
 
@@ -390,6 +397,14 @@ export const AppContent: React.FC = () => {
           isDaemonConnected={isDaemonConnected}
           onOpenCreateTask={() => setIsCreateTaskModalOpen(true)}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onOpenAgent={() => {
+            setIsAgentOverlayOpen((prev) => {
+              if (import.meta.env?.DEV) {
+                console.log('[App] 切换全局智能体浮层:', { next: !prev });
+              }
+              return !prev;
+            });
+          }}
           onToggleLogs={handleToggleLogs}
           isLogsOpen={isLogsOpen}
           unreadLogsCount={unreadLogsCount}
@@ -449,11 +464,6 @@ export const AppContent: React.FC = () => {
             <QaAutomationView />
           )}
 
-          {/* 智能体开发工作台：pi 会话整页形态，切换侧边栏时保留会话壳（面板内部自持状态） */}
-          <div className={`absolute inset-0 ${activePluginId === 'agent-studio' ? '' : 'hidden'}`}>
-            <GlobalAgentPanel mode="page" />
-          </div>
-
           {isSettings && (
             <SettingsView
               activeSubTab={activePluginId === 'plugin-manager' ? 'settings-plugins' : activePluginId}
@@ -476,7 +486,6 @@ export const AppContent: React.FC = () => {
             activePluginId !== 'workflow-editor' &&
             activePluginId !== 'automations' &&
             activePluginId !== 'qa-automation' &&
-            activePluginId !== 'agent-studio' &&
             activePluginId !== 'plugin-manager' &&
             !isSettings &&
             (currentPlugin?.entry ? (
@@ -505,6 +514,18 @@ export const AppContent: React.FC = () => {
               </div>
             ))}
         </main>
+      </div>
+
+      {/* 全局智能体浮层：全屏盖在当前页面上，快捷键 Super + ` 切换 */}
+      <div
+        className={
+          isAgentOverlayOpen
+            ? 'fixed inset-0 z-[70] flex flex-col bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08)]'
+            : 'hidden'
+        }
+        aria-hidden={!isAgentOverlayOpen}
+      >
+        <GlobalAgentPanel mode="overlay" onClose={() => setIsAgentOverlayOpen(false)} />
       </div>
 
       {/* 实时终端抽屉 */}
@@ -561,6 +582,9 @@ export const AppContent: React.FC = () => {
       <CommandPalette
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
+        onOpenAgent={() => {
+          setIsAgentOverlayOpen(true);
+        }}
         onNavigate={(id) => {
           setActivePluginId(id);
           if (id === 'workflow-editor') {

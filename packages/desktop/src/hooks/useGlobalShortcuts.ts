@@ -6,7 +6,8 @@ export interface ShortcutActions {
   onNavigateWorkflows: () => void;
   onNavigateAutomations?: () => void;
   onNavigateQa?: () => void;
-  onNavigateAgentStudio?: () => void;
+  /** Super + `：切换全局智能体浮层 */
+  onToggleAgent?: () => void;
   onNavigateSettings: () => void;
   onOpenCreateTask: () => void;
   onQuickRunWorkflow?: () => void;
@@ -109,14 +110,17 @@ export const useGlobalShortcuts = (actions: ShortcutActions) => {
         return;
       }
 
-      // 5. Super + 5: 导航至智能体开发 (Pi Web)
-      if ((key === '5' || code === 'Digit5' || code === 'Numpad5') && actionsRef.current.onNavigateAgentStudio) {
+      // 5. Super + `: 切换全局智能体浮层
+      if (
+        (key === '`' || code === 'Backquote' || code === 'IntlBackslash') &&
+        actionsRef.current.onToggleAgent
+      ) {
         e.preventDefault();
         e.stopPropagation();
         if (import.meta.env?.DEV) {
-          console.log('[Shortcut] 触发快捷键: Super + 5 -> 智能体开发', { superKey: activeSuper });
+          console.log('[Shortcut] 触发快捷键: Super + ` -> 智能体浮层', { superKey: activeSuper });
         }
-        actionsRef.current.onNavigateAgentStudio();
+        actionsRef.current.onToggleAgent();
         return;
       }
 

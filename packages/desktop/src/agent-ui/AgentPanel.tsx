@@ -10,6 +10,7 @@ import {
   ComposerPermission,
 } from './Composer';
 import { WorkspaceDock, type DockTab } from './WorkspaceDock';
+import { IconClose, IconMinimize, IconPanelRight } from './icons';
 import { ApprovalCard, type AgentUiRequest } from './ApprovalCard';
 import { IconChevronDown, IconFolderOpen } from './icons';
 import { useAttachments } from './useAttachments';
@@ -44,6 +45,8 @@ export interface AgentPanelShellProps {
   onStop?: () => void;
   headerExtra?: React.ReactNode;
   onClose?: () => void;
+  /** 提供时右上角显示最小化按钮（浮层形态） */
+  onMinimize?: () => void;
   children?: React.ReactNode;
   /** 输入卡上方的内容区（放行确认、提示条等由上层决定是否注入） */
   banner?: React.ReactNode;
@@ -88,6 +91,7 @@ export function AgentPanelShell({
   onStop,
   headerExtra,
   onClose,
+  onMinimize,
   children,
   banner,
   composerActions,
@@ -151,10 +155,28 @@ export function AgentPanelShell({
         </div>
         <div className={styles.headerActions}>
           {headerExtra}
-          {onClose && (
-            <button type="button" className={styles.closeButton} onClick={onClose} title="关闭">
-              ✕
+          {onMinimize ? (
+            <button
+              type="button"
+              className={styles.iconButton}
+              onClick={onMinimize}
+              title="最小化"
+              aria-label="最小化"
+            >
+              <IconMinimize size={16} />
             </button>
+          ) : (
+            onClose && (
+              <button
+                type="button"
+                className={styles.iconButton}
+                onClick={onClose}
+                title="关闭"
+                aria-label="关闭"
+              >
+                <IconClose size={14} />
+              </button>
+            )
           )}
         </div>
       </header>
@@ -307,7 +329,8 @@ export function TaskAgentPanel({
 }
 
 export interface GlobalAgentPanelProps {
-  mode: 'page' | 'drawer';
+  /** page：整页（带会话列）；overlay：全屏浮层（带会话列 + 关闭）；drawer：抽屉（无会话列） */
+  mode: 'page' | 'overlay' | 'drawer';
   onClose?: () => void;
   initialSessionId?: string | null;
 }
@@ -792,8 +815,8 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
   );
 
   return (
-    <div className={`agent-scope ${styles.panel} ${mode === 'page' ? styles.panelPage : styles.panelDrawer}`}>
-      {mode === 'page' && (
+    <div className={`agent-scope ${styles.panel} ${mode === 'drawer' ? styles.panelDrawer : styles.panelPage}`}>
+      {mode !== 'drawer' && (
         <SessionList
           groups={groups}
           activeId={activeId}
@@ -821,7 +844,9 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
       <div className={styles.main}>
         <AgentPanelShell
           title={title}
-          subtitle={mode === 'page' ? `${shortenPath(activeCwd)}${isLive ? ' · 运行中' : ''}` : undefined}
+          subtitle={
+            mode === 'drawer' ? undefined : `${shortenPath(activeCwd)}${isLive ? ' · 运行中' : ''}`
+          }
           messages={messages}
           isBusy={isBusy}
           awaitingInput={awaitingInput}
@@ -837,6 +862,7 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
           onSend={handleSend}
           onStop={() => void stop()}
           onClose={onClose}
+          onMinimize={mode === 'overlay' ? onClose : undefined}
           composerDisabled={!activeId}
           headerless={mode === 'page'}
           hero={hero}
@@ -847,19 +873,12 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
             <>
               <button
                 type="button"
-                className={styles.cwdButton}
-                onClick={() => void handleAddProject()}
-                title="切换工作目录"
-              >
-                {shortenPath(activeCwd)}
-              </button>
-              <button
-                type="button"
-                className={styles.cwdButton}
+                className={`${styles.iconButton} ${dockTab ? styles.iconButtonActive : ''}`}
                 onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
-                title="工作区面板：文件 / 终端 / 预览"
+                title={dockTab ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
+                aria-label="工作台"
               >
-                {dockTab ? '收起面板' : '工作区'}
+                <IconPanelRight size={16} />
               </button>
             </>
           }
@@ -882,14 +901,15 @@ export function GlobalAgentPanel({ mode, onClose, initialSessionId }: GlobalAgen
           }
           banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : undefined}
           composerActions={
-            mode === 'page' ? (
+            mode !== 'drawer' ? (
               <button
                 type="button"
-                className={styles.dockToggle}
+                className={`${styles.dockToggle} ${dockTab ? styles.dockToggleActive : ''}`}
                 onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
-                title="工作区面板：文件 / 终端 / 预览"
+                title={dockTab ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
+                aria-label="工作台"
               >
-                {dockTab ? '收起工作区' : '工作区'}
+                <IconPanelRight size={16} />
               </button>
             ) : undefined
           }

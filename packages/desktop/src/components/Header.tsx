@@ -1,5 +1,5 @@
 import React from 'react';
-import { PanelLeft, RefreshCw, Plus, Terminal, Command } from 'lucide-react';
+import { PanelLeft, RefreshCw, Plus, Terminal, Command, Sparkles } from 'lucide-react';
 import { Kbd } from './Kbd';
 import { useShortcuts } from '../context/ShortcutContext';
 
@@ -13,6 +13,8 @@ interface HeaderProps {
   unreadLogsCount: number;
   onRefresh: () => void;
   onOpenCommandPalette?: () => void;
+  /** 打开全局智能体浮层 */
+  onOpenAgent?: () => void;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
 }
@@ -27,6 +29,7 @@ export const Header: React.FC<HeaderProps> = ({
   unreadLogsCount,
   onRefresh,
   onOpenCommandPalette,
+  onOpenAgent,
   isSidebarOpen = true,
   onToggleSidebar,
 }) => {
@@ -100,6 +103,24 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* 右侧：动作按钮 */}
       <div className="flex items-center gap-2">
+        {/* 全局智能体浮层 */}
+        {onOpenAgent && (
+          <button
+            onClick={() => {
+              if (import.meta.env?.DEV) {
+                console.log('[Header] 点击打开全局智能体浮层');
+              }
+              onOpenAgent();
+            }}
+            className="flex items-center gap-1.5 h-[26px] px-2 rounded-[7px] border border-[#e3e3e8] bg-[#f9f9fb] hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] transition-all"
+            title="打开智能体（全屏浮层）"
+          >
+            <Sparkles size={12} strokeWidth={2} className="text-[#4f46e5]" />
+            <span className="text-[11.5px]">智能体</span>
+            <Kbd keys={['super', '`']} size="xs" variant="light" className="ml-0.5" />
+          </button>
+        )}
+
         {/* 命令面板快捷唤起 */}
         {onOpenCommandPalette && (
           <button

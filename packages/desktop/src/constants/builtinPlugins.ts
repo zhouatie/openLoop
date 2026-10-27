@@ -62,20 +62,6 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
     },
   },
   {
-    id: 'agent-studio',
-    name: '智能体开发',
-    version: '1.0.0',
-    description: 'Pi Web 智能体深度交互开发工作台，支持会话分支、模型微调与代码预览',
-    isBuiltin: true,
-    sidebarItem: {
-      id: 'agent-studio',
-      title: '智能体开发',
-      icon: 'Bot',
-      order: 5,
-      path: '/agent-studio',
-    },
-  },
-  {
     id: 'plugin-manager',
     name: '插件中心',
     version: '1.0.0',
@@ -99,6 +85,5 @@ export const BUILTIN_VIEW_TITLES: Record<string, string> = {
   'workflow-editor': '流程编排',
   automations: '自动化任务',
   'qa-automation': 'QA 自动化',
-  'agent-studio': '智能体开发',
   'plugin-manager': '插件扩展',
 };

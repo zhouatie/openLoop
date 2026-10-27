@@ -152,3 +152,15 @@ export const IconFile = createIcon('IconFile', 16, () => (
     stroke="currentColor"
   />
 ));
+
+export const IconMinimize = createIcon('IconMinimize', 16, () => (
+  <path d="M3.5 8h9" stroke="currentColor" />
+));
+
+/** 右侧工作台面板图标：方框 + 右侧分栏 */
+export const IconPanelRight = createIcon('IconPanelRight', 16, () => (
+  <>
+    <rect x="2.4" y="3.4" width="11.2" height="9.2" rx="2.2" stroke="currentColor" />
+    <path d="M9.8 3.9v8.2" stroke="currentColor" />
+  </>
+));
