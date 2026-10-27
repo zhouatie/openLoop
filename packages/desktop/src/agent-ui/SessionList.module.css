@@ -209,6 +209,11 @@
   justify-content: center;
 }
 
+/* 选中会话所属的工作区，文件夹图标用主色 */
+.folderActive {
+  color: var(--dsw-alias-state-business-primary);
+}
+
 .chevron {
   display: none;
   color: var(--dsw-alias-label-tertiary);

@@ -252,15 +252,17 @@
 /* 候选菜单：贴在输入卡上方 */
 .popover {
   position: absolute;
-  bottom: calc(100% + 6px);
-  left: 16px;
-  right: 16px;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100% - 32px, var(--agent-composer-max-width));
   z-index: 20;
   display: flex;
   flex-direction: column;
   gap: 1px;
   max-height: 260px;
   overflow: auto;
+  box-sizing: border-box;
   padding: 4px;
   border: 1px solid var(--dsw-alias-border-l3);
   border-radius: var(--dsw-radius-md);
@@ -310,4 +312,68 @@
   font-size: 11px;
   line-height: 20px;
   color: var(--dsw-alias-label-caption);
+}
+
+/* 文件与文件夹候选：与输入卡同宽、同圆角，行内带图标 */
+.popoverList {
+  gap: 0;
+  max-height: 320px;
+  padding: 8px 8px 12px;
+  border-radius: var(--dsw-radius-xl);
+}
+
+.popoverHeader {
+  padding: 4px 8px 8px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.popoverRow {
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  height: 38px;
+  border-radius: var(--dsw-radius-sm);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.popoverIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.popoverIconDir {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.popoverName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.popoverTrailing {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.popoverHint {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.popoverChevron {
+  transform: rotate(-90deg);
 }

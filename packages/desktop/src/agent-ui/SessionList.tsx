@@ -350,7 +350,11 @@ export const SessionList = memo(function SessionList({
                 }}
               >
                 <span className={styles.slot}>
-                  <span className={styles.folder}>
+                  <span
+                    className={`${styles.folder} ${
+                      group.sessions.some((item) => item.id === activeId) ? styles.folderActive : ''
+                    }`}
+                  >
                     {isCollapsed ? <IconFolderClose size={16} /> : <IconFolderOpen size={16} />}
                   </span>
                   <span className={`${styles.chevron} ${isCollapsed ? '' : styles.chevronOpen}`}>

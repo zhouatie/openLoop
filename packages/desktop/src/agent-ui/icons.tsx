@@ -145,3 +145,10 @@ export const IconSend = createIcon('IconSend', 14, () => (
 export const IconStop = createIcon('IconStop', 14, () => (
   <rect x="4" y="4" width="8" height="8" rx="2" fill="currentColor" />
 ));
+
+export const IconFile = createIcon('IconFile', 16, () => (
+  <path
+    d="M3.5 2.5h5.2l3.8 3.8v7.2a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5v-10.5a.5.5 0 0 1 .5-.5Z"
+    stroke="currentColor"
+  />
+));

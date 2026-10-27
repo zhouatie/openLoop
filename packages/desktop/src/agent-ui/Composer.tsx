@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { IconPlus, IconSend, IconStop } from './icons';
+import { IconPlus, IconSend, IconStop, IconFolderClose, IconChevronDown, IconFile } from './icons';
 import styles from './Composer.module.css';
 
 export interface ComposerAttachmentItem {
@@ -54,7 +54,7 @@ export interface ComposerProps {
 
 interface MenuState {
   kind: 'slash' | 'mention' | 'model' | 'permission';
-  items: Array<{ key: string; label: string; description?: string }>;
+  items: Array<{ key: string; label: string; description?: string; isDir?: boolean }>;
   index: number;
 }
 
@@ -132,7 +132,11 @@ export const Composer = React.memo(function Composer({
               list.length > 0
                 ? {
                     kind: 'mention',
-                    items: list.slice(0, 8).map((item) => ({ key: item, label: item })),
+                    items: list.slice(0, 12).map((item) => ({
+                      key: item,
+                      label: item,
+                      isDir: item.endsWith('/'),
+                    })),
                     index: 0,
                   }
                 : null
@@ -275,19 +279,38 @@ export const Composer = React.memo(function Composer({
   return (
     <div className={styles.root}>
       {menu && menu.items.length > 0 && (
-        <div className={styles.popover} role="listbox">
+        <div
+          className={`${styles.popover} ${menu.kind === 'mention' ? styles.popoverList : ''}`}
+          role="listbox"
+        >
+          {menu.kind === 'mention' && <div className={styles.popoverHeader}>文件与文件夹</div>}
           {menu.items.map((item, index) => (
             <button
               key={item.key}
               type="button"
-              className={`${styles.popoverItem} ${index === menu.index ? styles.popoverItemActive : ''}`}
+              className={`${styles.popoverItem} ${index === menu.index ? styles.popoverItemActive : ''} ${
+                menu.kind === 'mention' ? styles.popoverRow : ''
+              }`}
               role="option"
               aria-selected={index === menu.index}
               onMouseEnter={() => setMenu({ ...menu, index })}
               onClick={() => applyMenuChoice(item)}
             >
-              <span className={styles.popoverLabel}>{item.label}</span>
+              {menu.kind === 'mention' && (
+                <span className={`${styles.popoverIcon} ${item.isDir ? styles.popoverIconDir : ''}`}>
+                  {item.isDir ? <IconFolderClose size={16} /> : <IconFile size={16} />}
+                </span>
+              )}
+              <span className={menu.kind === 'mention' ? styles.popoverName : styles.popoverLabel}>
+                {item.label}
+              </span>
               {item.description && <span className={styles.popoverDesc}>{item.description}</span>}
+              {menu.kind === 'mention' && item.isDir && (
+                <span className={styles.popoverTrailing}>
+                  <span className={styles.popoverHint}>进入目录</span>
+                  <IconChevronDown size={12} className={styles.popoverChevron} />
+                </span>
+              )}
             </button>
           ))}
         </div>
