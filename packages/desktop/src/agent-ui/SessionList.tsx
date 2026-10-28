@@ -45,6 +45,8 @@ export interface SessionGroupItem {
   sessions: SessionListItem[];
   createdAt?: string;
   pinned?: boolean;
+  /** 只读组（已删除工作区落到这里）：没有新建、改名、置顶与排序 */
+  readonly?: boolean;
 }
 
 /** 全文搜索命中的会话 */
@@ -76,7 +78,8 @@ export interface SessionListProps {
   onDeleteSession?: (id: string) => void;
   /** 工作区元数据操作 */
   onRenameProject?: (key: string, title: string) => void;
-  onHideProject?: (key: string) => void;
+  /** 删除工作区：只从列表移除，文件夹与会话都保留 */
+  onDeleteProject?: (key: string) => void;
   onPinProject?: (key: string, pinned: boolean) => void;
   /** 工作区拖拽排序：返回新的键顺序 */
   onReorderProjects?: (keys: string[]) => void;
@@ -193,7 +196,7 @@ export const SessionList = memo(function SessionList({
   onPinSession,
   onDeleteSession,
   onRenameProject,
-  onHideProject,
+  onDeleteProject,
   onPinProject,
   onReorderProjects,
   brandSlot,
@@ -250,7 +253,9 @@ export const SessionList = memo(function SessionList({
       list.sort((a, b) => timeOf(b) - timeOf(a));
     }
     const pinned = list.filter((group) => group.pinned);
-    return pinned.length > 0 ? [...pinned, ...list.filter((group) => !group.pinned)] : list;
+    const rest = list.filter((group) => !group.pinned);
+    // 「未分组」是只读兜底组，固定落在末尾（对齐 DSH）
+    return [...pinned, ...rest.filter((group) => !group.readonly), ...rest.filter((group) => group.readonly)];
   }, [groups, orderBy]);
 
   /** 会话排序：置顶优先，其次按当前排序方式（手动 = 沿用上层顺序） */
@@ -359,6 +364,8 @@ export const SessionList = memo(function SessionList({
   );
   const [menu, setMenu] = useState<MenuState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  /** 待确认删除的工作区（对齐 DSH：删除只影响列表，不动文件夹与会话） */
+  const [deleteTarget, setDeleteTarget] = useState<{ key: string; title: string } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
@@ -420,6 +427,18 @@ export const SessionList = memo(function SessionList({
       window.removeEventListener('keydown', onKey);
     };
   }, [menu]);
+
+  // 删除工作区确认框：Esc 只关这一层，不再向外传递
+  useEffect(() => {
+    if (!deleteTarget) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setDeleteTarget(null);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [deleteTarget]);
 
   /** 悬浮卡：首次停留 800ms 才显示，同一列表内已显示过则立即跟随（对齐 DSH HoverCardGroup 的 grouped 预热） */
   const showCard = (element: HTMLElement, title: string, path: string, time: string) => {
@@ -897,19 +916,19 @@ export const SessionList = memo(function SessionList({
             <div key={group.key} className={styles.group}>
               <div
                 className={styles.projectRow}
-                draggable={Boolean(onReorderProjects) && !renamingProject}
+                draggable={Boolean(onReorderProjects) && !renamingProject && !group.readonly}
                 onDragStart={(event) => {
                   event.dataTransfer.setData('text/openloop-project', group.key);
                   event.dataTransfer.effectAllowed = 'move';
                 }}
                 onDragOver={(event) => {
-                  if (!onReorderProjects) return;
+                  if (!onReorderProjects || group.readonly) return;
                   if (!event.dataTransfer.types.includes('text/openloop-project')) return;
                   event.preventDefault();
                 }}
                 onDrop={(event) => {
                   const source = event.dataTransfer.getData('text/openloop-project');
-                  if (!onReorderProjects || !source || source === group.key) return;
+                  if (!onReorderProjects || group.readonly || !source || source === group.key) return;
                   event.preventDefault();
                   event.stopPropagation();
                   const keys = orderedGroups.map((item) => item.key).filter((key) => key !== source);
@@ -972,43 +991,45 @@ export const SessionList = memo(function SessionList({
                     <IconPin size={13} />
                   </span>
                 )}
-                <span className={styles.rowActions}>
-                  {onPinProject && (
+                {!group.readonly && (
+                  <span className={styles.rowActions}>
+                    {onPinProject && (
+                      <button
+                        type="button"
+                        className={`${styles.rowIcon} ${group.pinned ? styles.rowIconActive : ''}`}
+                        aria-label={group.pinned ? '取消置顶' : '置顶工作区'}
+                        title={group.pinned ? '取消置顶' : '置顶工作区'}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onPinProject(group.key, !group.pinned);
+                        }}
+                      >
+                        <IconPin size={14} />
+                      </button>
+                    )}
                     <button
                       type="button"
-                      className={`${styles.rowIcon} ${group.pinned ? styles.rowIconActive : ''}`}
-                      aria-label={group.pinned ? '取消置顶' : '置顶工作区'}
-                      title={group.pinned ? '取消置顶' : '置顶工作区'}
+                      className={styles.rowIcon}
+                      aria-label="更多操作"
+                      onClick={(event) =>
+                        openMenu(event, { kind: 'project', cwd: group.cwd, key: group.key })
+                      }
+                    >
+                      <IconMore size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.rowIcon}
+                      aria-label="在此工作区新建会话"
                       onClick={(event) => {
                         event.stopPropagation();
-                        onPinProject(group.key, !group.pinned);
+                        onNewInGroup(group.cwd);
                       }}
                     >
-                      <IconPin size={14} />
+                      <IconNewChat size={16} />
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    className={styles.rowIcon}
-                    aria-label="更多操作"
-                    onClick={(event) =>
-                      openMenu(event, { kind: 'project', cwd: group.cwd, key: group.key })
-                    }
-                  >
-                    <IconMore size={16} />
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.rowIcon}
-                    aria-label="在此工作区新建会话"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onNewInGroup(group.cwd);
-                    }}
-                  >
-                    <IconNewChat size={16} />
-                  </button>
-                </span>
+                  </span>
+                )}
               </div>
 
               {!isCollapsed && (
@@ -1055,6 +1076,48 @@ export const SessionList = memo(function SessionList({
             {card.time && <div className={styles.hoverTime}>{card.time}</div>}
           </div>,
           card.host
+        )}
+
+      {deleteTarget &&
+        createPortal(
+          <div
+            className={`agent-scope ${styles.dialogBackdrop}`}
+            role="presentation"
+            onMouseDown={() => setDeleteTarget(null)}
+          >
+            <div
+              className={styles.dialog}
+              role="alertdialog"
+              aria-modal="true"
+              aria-label="删除工作区"
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className={styles.dialogTitle}>删除工作区</div>
+              <div className={styles.dialogBody}>
+                将把“{deleteTarget.title}”从工作区列表中移除。文件夹与会话记录会保留，其会话将显示在“未分组”下。
+              </div>
+              <div className={styles.dialogActions}>
+                <button type="button" className={styles.dialogCancel} onClick={() => setDeleteTarget(null)}>
+                  取消
+                </button>
+                <button
+                  type="button"
+                  autoFocus
+                  className={styles.dialogDanger}
+                  onClick={() => {
+                    if (import.meta.env?.DEV) {
+                      console.log('[SessionList] 删除工作区:', deleteTarget.key);
+                    }
+                    onDeleteProject?.(deleteTarget.key);
+                    setDeleteTarget(null);
+                  }}
+                >
+                  删除工作区
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
         )}
 
       {menu && (
@@ -1129,16 +1192,20 @@ export const SessionList = memo(function SessionList({
                   {menuProject.pinned ? '取消置顶' : '置顶工作区'}
                 </button>
               )}
-              {onHideProject && (
+              {onDeleteProject && (
                 <button
                   type="button"
                   className={styles.menuItem}
                   onClick={() => {
-                    onHideProject(menuProject?.key || menu.cwd);
+                    const group = orderedGroups.find((item) => item.key === menuProject?.key);
+                    setDeleteTarget({
+                      key: menuProject?.key || menu.cwd,
+                      title: group?.label || menu.cwd,
+                    });
                     setMenu(null);
                   }}
                 >
-                  隐藏工作区
+                  删除工作区
                 </button>
               )}
             </>

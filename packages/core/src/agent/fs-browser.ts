@@ -62,6 +62,19 @@ export function listDirectory(target: string): FsListing {
   return { path: dir, parent: parent === dir ? null : parent, entries };
 }
 
+/** 新建子目录：名字必须是单段（不含路径分隔符），重名直接报错 */
+export function createDirectory(parent: string, name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('目录名不能为空');
+  if (trimmed === '.' || trimmed === '..') throw new Error('目录名不合法');
+  if (trimmed.includes('/') || trimmed.includes('\\')) throw new Error('目录名不能包含路径分隔符');
+
+  const target = path.join(absolute(parent || process.env.HOME || '/'), trimmed);
+  if (fs.existsSync(target)) throw new Error('同名文件或目录已存在');
+  fs.mkdirSync(target);
+  return target;
+}
+
 /** 文本读取：超限截断，二进制返回明确错误由前端转为预览不支持 */
 export function readTextFile(target: string, base?: string, maxBytes = MAX_TEXT_BYTES): FsFileContent {
   const file = absolute(target, base);
