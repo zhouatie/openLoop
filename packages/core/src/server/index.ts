@@ -989,7 +989,7 @@ export class OpenLoopServer {
 
       // 全局 Agent 会话控制：打开 / 发消息 / 暂停 / 继续 / 停止
       const agentActionMatch = pathname.match(
-        /^\/api\/agent\/sessions\/(.+)\/(chat|open|pause|resume|stop|model|permission|regenerate|fork|tree|navigate)$/
+        /^\/api\/agent\/sessions\/(.+)\/(chat|open|pause|resume|stop|model|permission|regenerate|fork|tree|navigate|withdraw)$/
       );
       if (agentActionMatch) {
         const sessionKey = decodeURIComponent(agentActionMatch[1]);
@@ -1017,6 +1017,7 @@ export class OpenLoopServer {
               cwd: body?.cwd,
               model: body?.model,
               thinking: body?.thinking,
+              permission: body?.permission,
             });
             return this.sendJson(res, 200, result, reqMeta);
           }
@@ -1074,6 +1075,15 @@ export class OpenLoopServer {
             const result = await agentSessionHost.fork(sessionKey, entryId);
             this.broadcast({ type: 'agent:forked', data: { from: sessionKey, ...result } });
             return this.sendJson(res, 200, result, reqMeta);
+          }
+          if (action === 'withdraw') {
+            const pendingId = typeof body?.pendingId === 'string' ? body.pendingId.trim() : '';
+            if (!pendingId) return this.sendJson(res, 400, { error: '缺少 pendingId' }, reqMeta);
+            const pipeline = PiRpcSessionManager.getInstance().findLiveBySessionId(sessionKey);
+            const success = pipeline
+              ? await pipeline.withdrawPending(pendingId)
+              : await agentSessionHost.withdrawPending(sessionKey, pendingId);
+            return this.sendJson(res, 200, { success }, reqMeta);
           }
           if (action === 'pause') {
             return this.sendJson(res, 200, { success: await agentSessionHost.pause(sessionKey) }, reqMeta);
@@ -2492,6 +2502,19 @@ ${existingSubSummary}
           return this.sendJson(res, 200, { success: paused }, reqMeta);
         }
         return this.sendJson(res, 400, { error: 'No active session to pause' }, reqMeta);
+      }
+
+      // Task session withdraw: /api/tasks/:id/session/withdraw
+      const taskWithdrawMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/withdraw$/);
+      if (taskWithdrawMatch && method === 'POST') {
+        const taskId = taskWithdrawMatch[1];
+        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+        const pendingId = typeof body?.pendingId === 'string' ? body.pendingId.trim() : '';
+        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        if (!pendingId || !rpcSession) {
+          return this.sendJson(res, 400, { error: '缺少 pendingId 或会话未启动' }, reqMeta);
+        }
+        return this.sendJson(res, 200, { success: await rpcSession.withdrawPending(pendingId) }, reqMeta);
       }
 
       // Task session resume: /api/tasks/:id/session/resume

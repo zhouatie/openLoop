@@ -175,6 +175,8 @@ export interface PendingUserInput {
   /** turn=等待新轮开始，steering=等待插入当前轮 */
   placement: 'turn' | 'steering';
   createdAt: number;
+  /** 已进入 pi 的等待队列：只有这类条目能整条撤回 */
+  queued?: boolean;
 }
 
 export interface TaskSessionState {

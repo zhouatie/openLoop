@@ -892,6 +892,15 @@ export class DesktopApiService {
     });
   }
 
+  /** 撤回一条还没被采纳的用户输入（排队中的插话） */
+  async withdrawTaskPending(taskId: string, pendingId: string): Promise<{ success: boolean }> {
+    return requestJson<{ success: boolean }>(`${BASE_URL}/api/tasks/${taskId}/session/withdraw`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pendingId }),
+    });
+  }
+
   async respondTaskUiRequest(
     taskId: string,
     payload: { id: string; value?: string; confirmed?: boolean; cancelled?: boolean }
@@ -974,7 +983,7 @@ export class DesktopApiService {
 
   async openAgentSession(
     sessionId: string,
-    options?: { cwd?: string; model?: string; thinking?: string }
+    options?: { cwd?: string; model?: string; thinking?: string; permission?: 'full' | 'readonly' | 'noshell' }
   ): Promise<{ sessionId: string; state: TaskSessionState; created: boolean }> {
     return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/open`, {
       method: 'POST',
@@ -1019,6 +1028,16 @@ export class DesktopApiService {
   async stopAgentSession(sessionId: string): Promise<{ success: boolean }> {
     return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/stop`, {
       method: 'POST',
+    });
+  }
+
+  /** 撤回一条排队中的输入（尚未被 Agent 采纳） */
+  async withdrawAgentPending(sessionId: string, pendingId: string): Promise<{ success: boolean }> {
+    if (import.meta.env?.DEV) console.log('[UI:API] 撤回排队输入:', { sessionId, pendingId });
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/withdraw`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pendingId }),
     });
   }
 

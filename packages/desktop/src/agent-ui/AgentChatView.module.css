@@ -16,6 +16,8 @@
 }
 
 .content {
+  /* 空对话等首条消息时 scroller 是 flex 容器，auto 外边距会让它收成内容宽度并居中：显式给满宽 */
+  width: 100%;
   max-width: var(--agent-content-width, 920px);
   margin: 0 auto;
   /* body 全局关闭了选中，会话正文需要单独放开，支持划词复制 */

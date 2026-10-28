@@ -66,6 +66,17 @@ function summarizeToolInput(args: any): Record<string, any> | undefined {
   return Object.keys(summary).length > 0 ? summary : undefined;
 }
 
+/** 附件按本地路径拼进正文：模型按需读取，不把图片塞进请求体 */
+function composeMessage(message: string, attachments?: TaskAttachment[]): string {
+  if (!attachments || attachments.length === 0) return message;
+  const imagesPrompt = attachments
+    .map((att, idx) => `[参考图片 ${idx + 1}: ${att.name}] 本地文件路径: ${att.path}`)
+    .join('\n');
+  return message
+    ? `${message}\n\n【用户随附参考图片】\n${imagesPrompt}`
+    : `【用户随附参考图片】\n${imagesPrompt}`;
+}
+
 /** 单张内联图片上限，超过则不给工具卡内联，避免快照体积失控 */
 const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_INLINE_IMAGES = 4;
@@ -322,13 +333,14 @@ export class PiRpcSessionInstance extends EventEmitter {
     content: string,
     attachments: TaskAttachment[] | undefined,
     placement: PendingUserInput['placement']
-  ) {
-    if (!content.trim()) return;
+  ): string | null {
+    if (!content.trim()) return null;
+    const id = `pending_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     logger.debug(`登记本地回显 (${placement}): "${content.slice(0, 40)}"`, undefined, { taskId: this.taskId });
     this.pendingInputs = [
       ...this.pendingInputs,
       {
-        id: `pending_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        id,
         content,
         attachments: attachments && attachments.length > 0 ? attachments : undefined,
         placement,
@@ -336,6 +348,45 @@ export class PiRpcSessionInstance extends EventEmitter {
       },
     ];
     this.emitPending();
+    return id;
+  }
+
+  /** pi 已确认把这条输入放进等待队列：此后可以整条撤回 */
+  private markPendingQueued(id: string | null, result: any) {
+    if (!id || result?.disposition !== 'queued') return;
+    const index = this.pendingInputs.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    const next = this.pendingInputs.slice();
+    next[index] = { ...next[index], queued: true };
+    this.pendingInputs = next;
+    this.emitPending();
+  }
+
+  /**
+   * 撤回一条尚未被采纳的输入。
+   * pi 的队列只能整队清空，所以清空后按原顺序补发其余条目，顺序不变。
+   */
+  public async withdrawPending(pendingId: string): Promise<boolean> {
+    const target = this.pendingInputs.find((item) => item.id === pendingId);
+    if (!target) return false;
+    this.pendingInputs = this.pendingInputs.filter((item) => item.id !== pendingId);
+    this.emitPending();
+    // 还没进 pi 队列的条目只存在于回显层，移除即可
+    if (!target.queued) return true;
+
+    const rest = this.pendingInputs.filter((item) => item.queued);
+    try {
+      await this.sendCommand({ type: 'clear_queue' });
+      for (const item of rest) {
+        await this.sendCommand({ type: 'steer', message: composeMessage(item.content, item.attachments) });
+      }
+    } catch (err: any) {
+      this.emitLog('stderr', `[Agent 队列] 撤回排队输入失败: ${err?.message || err}`);
+      return false;
+    }
+    logger.info(`撤回排队中的输入: "${target.content.slice(0, 40)}"`, undefined, { taskId: this.taskId });
+    this.notifyUpdate();
+    return true;
   }
 
   /**
@@ -343,13 +394,15 @@ export class PiRpcSessionInstance extends EventEmitter {
    * 回显文本可能追加【用户随附参考图片】说明，所以按前缀匹配。
    */
   private takePendingInput(content: string): PendingUserInput | null {
-    if (!content) return null;
+    if (!content || this.pendingInputs.length === 0) return null;
     const index = this.pendingInputs.findIndex(
       (pending) => content === pending.content || content.startsWith(pending.content)
     );
-    if (index < 0) return null;
-    const taken = this.pendingInputs[index];
-    this.pendingInputs = this.pendingInputs.filter((_, i) => i !== index);
+    // 正文被 pi 展开（模板 / 指令）时前缀对不上：pi 按先来后到采纳，取最旧的一条，
+    // 否则回显层会一直挂着这条，同一句提问在界面上出现两次。
+    const takenIndex = index >= 0 ? index : 0;
+    const taken = this.pendingInputs[takenIndex];
+    this.pendingInputs = this.pendingInputs.filter((_, i) => i !== takenIndex);
     logger.debug(`本地回显已被 Agent 采纳: "${content.slice(0, 40)}"`, undefined, { taskId: this.taskId });
     return taken;
   }
@@ -875,19 +928,9 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.markTurnStart();
 
     // 先只上回显层：气泡立即出现，会话流等 pi 采纳后再接管
-    this.queuePendingInput(message, attachments, 'turn');
+    const pendingId = this.queuePendingInput(message, attachments, 'turn');
     this.emitStatus({ isBusy: true, isPaused: false, awaitingInput: false, turnStartedAt: this.turnStartedAt });
     this.notifyUpdate(true);
-
-    let actualMessage = message;
-    if (attachments && attachments.length > 0) {
-      const imagesPrompt = attachments
-        .map((att, idx) => `[参考图片 ${idx + 1}: ${att.name}] 本地文件路径: ${att.path}`)
-        .join('\n');
-      actualMessage = actualMessage
-        ? `${actualMessage}\n\n【用户随附参考图片】\n${imagesPrompt}`
-        : `【用户随附参考图片】\n${imagesPrompt}`;
-    }
 
     logger.info(
       `向 Agent 会话发送 Prompt: "${message.slice(0, 40)}" (含 ${attachments?.length || 0} 个图片附件)`,
@@ -895,10 +938,12 @@ export class PiRpcSessionInstance extends EventEmitter {
       { taskId: this.taskId }
     );
 
-    return this.sendCommand({
+    const result = await this.sendCommand({
       type: 'prompt',
-      message: actualMessage,
+      message: composeMessage(message, attachments),
     });
+    this.markPendingQueued(pendingId, result);
+    return result;
   }
 
   /**
@@ -909,19 +954,9 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.awaitingInput = false;
     this.lastError = undefined;
     // 先只上回显层：气泡立即出现，会话流等 pi 采纳后再接管
-    this.queuePendingInput(message, attachments, 'steering');
+    const pendingId = this.queuePendingInput(message, attachments, 'steering');
     this.emitStatus({ awaitingInput: false });
     this.notifyUpdate(true);
-
-    let actualMessage = message;
-    if (attachments && attachments.length > 0) {
-      const imagesPrompt = attachments
-        .map((att, idx) => `[参考图片 ${idx + 1}: ${att.name}] 本地文件路径: ${att.path}`)
-        .join('\n');
-      actualMessage = actualMessage
-        ? `${actualMessage}\n\n【用户随附参考图片】\n${imagesPrompt}`
-        : `【用户随附参考图片】\n${imagesPrompt}`;
-    }
 
     logger.info(
       `向 Agent 会话进行 Steer 插话: "${message.slice(0, 40)}" (含 ${attachments?.length || 0} 个图片附件)`,
@@ -929,10 +964,12 @@ export class PiRpcSessionInstance extends EventEmitter {
       { taskId: this.taskId }
     );
 
-    return this.sendCommand({
+    const result = await this.sendCommand({
       type: 'steer',
-      message: actualMessage,
+      message: composeMessage(message, attachments),
     });
+    this.markPendingQueued(pendingId, result);
+    return result;
   }
 
   /**

@@ -10,7 +10,7 @@ import styles from './AgentChatView.module.css';
 
 export interface AgentChatViewProps {
   messages: SessionChatMessage[];
-  /** 已提交、等待 Agent 采纳的用户输入：渲染在会话流末尾，不参与轮次分组 */
+  /** 已提交、等待 Agent 采纳的用户输入：只有起新一轮的条目在流尾部显示，插话走输入卡上方的排队条 */
   pendingInputs?: PendingUserInput[];
   isBusy?: boolean;
   /** 会话标识：切换会话时落回最新消息（DSH 打开会话即 followTail） */
@@ -576,20 +576,22 @@ export const AgentChatView = React.memo(function AgentChatView({
                 </React.Fragment>
               );
             })}
-            {/* 本地回显：已提交、等待 Agent 采纳的输入；采纳后由会话流重建这一行 */}
-            {pendingInputs.map((input) => (
-              <MessageRow
-                key={input.id}
-                message={{
-                  id: input.id,
-                  role: 'user',
-                  content: input.content,
-                  attachments: input.attachments,
-                  timestamp: input.createdAt,
-                }}
-                pendingLabel={input.placement === 'steering' ? '插入中 · 等待当前步骤结束' : '发送中'}
-              />
-            ))}
+            {/* 本地回显：本次提交已起新一轮，按普通消息直接插入，pi 采纳后由会话流接管 */}
+            {pendingInputs.map((input) =>
+              input.placement === 'steering' ? null : (
+                <MessageRow
+                  key={input.id}
+                  message={{
+                    id: input.id,
+                    role: 'user',
+                    content: input.content,
+                    attachments: input.attachments,
+                    timestamp: input.createdAt,
+                  }}
+                  pending
+                />
+              )
+            )}
             {/* 状态行固定在流转尾部，与最后一块是会话轮还是系统行无关；切换会话加载期间不追加到上一段内容下 */}
             {loading ? null : isBusy ? (
               <RunningStatus startedAt={runningStartedAt} />
