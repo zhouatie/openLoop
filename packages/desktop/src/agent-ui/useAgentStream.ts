@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import type { SessionChatMessage, TaskAttachment, TaskSessionState } from '@openloop/core/types';
+import type { PendingUserInput, SessionChatMessage, TaskAttachment, TaskSessionState } from '@openloop/core/types';
 import { applyAgentEvent } from '@openloop/core/agent-events';
 import { api } from '../services/api';
 
@@ -32,6 +32,8 @@ export interface UseAgentStreamOptions {
 export interface UseAgentStreamResult {
   state: TaskSessionState | null;
   messages: SessionChatMessage[];
+  /** 已提交、等待 Agent 采纳的用户输入：不属于会话流，渲染在流尾部 */
+  pendingInputs: PendingUserInput[];
   isBusy: boolean;
   awaitingInput: boolean;
   active: boolean;
@@ -289,10 +291,16 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
     () => mergeMessages(historyRef.current, state?.messages, overlapCache.current),
     [state, historyRef.current]
   );
+  const pendingInputs = useMemo(() => state?.pendingInputs ?? [], [state]);
+  const pendingCount = pendingInputs.length;
+  useEffect(() => {
+    if (import.meta.env?.DEV) console.log('[AgentStream] 本地回显数量:', pendingCount);
+  }, [pendingCount]);
 
   return {
     state,
     messages,
+    pendingInputs,
     isBusy: steadyBusy,
     awaitingInput: Boolean(state?.awaitingInput),
     active: state ? state.active : true,

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { SessionChatMessage } from '@openloop/core/types';
+import type { PendingUserInput, SessionChatMessage } from '@openloop/core/types';
 import { api } from '../services/api';
 import type { TaskAttachment } from '@openloop/core/types';
 import { AgentChatView } from './AgentChatView';
@@ -92,6 +92,8 @@ export interface AgentPanelShellProps {
   title: string;
   subtitle?: string;
   messages: SessionChatMessage[];
+  /** 已提交、等待 Agent 采纳的用户输入：附在会话流尾部 */
+  pendingInputs?: PendingUserInput[];
   isBusy?: boolean;
   /** 会话标识：切换会话时消息区重新贴底 */
   sessionKey?: string;
@@ -154,6 +156,7 @@ export function AgentPanelShell({
   title,
   subtitle,
   messages,
+  pendingInputs,
   isBusy,
   sessionKey,
   loading,
@@ -351,6 +354,7 @@ export function AgentPanelShell({
             <>
               <AgentChatView
                 messages={messages}
+                pendingInputs={pendingInputs}
                 isBusy={running}
                 sessionKey={sessionKey}
                 loading={loading}
@@ -463,7 +467,7 @@ export function TaskAgentPanel({
     [taskId]
   );
 
-  const { messages, isBusy, awaitingInput, sendMessage, stop, state } = useAgentStream({
+  const { messages, pendingInputs, isBusy, awaitingInput, sendMessage, stop, state } = useAgentStream({
     streamKey: taskId,
     load,
     transport,
@@ -499,6 +503,7 @@ export function TaskAgentPanel({
       draftKey={`task_${taskId}`}
       sessionKey={`task_${taskId}`}
       messages={messages}
+      pendingInputs={pendingInputs}
       isBusy={isBusy}
       turnStartedAt={state?.turnStartedAt}
       lastTurnDurationMs={state?.lastTurnDurationMs}
@@ -912,7 +917,7 @@ export function GlobalAgentPanel({
     [activeId, cwd, permission]
   );
 
-  const { messages, isBusy, awaitingInput, sendMessage, stop, state } = useAgentStream({
+  const { messages, pendingInputs, isBusy, awaitingInput, sendMessage, stop, state } = useAgentStream({
     streamKey,
     load: loadLiveState,
     historyMessages: history,
@@ -1547,6 +1552,7 @@ export function GlobalAgentPanel({
             mode === 'drawer' ? undefined : `${shortenPath(activeCwd)}${isBusy ? ' · 运行中' : ''}`
           }
           messages={messages}
+          pendingInputs={pendingInputs}
           isBusy={isBusy}
           sessionKey={activeId || ''}
           loading={historyLoading}

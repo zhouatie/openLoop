@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { SessionChatMessage, SessionUsage } from '@openloop/core/types';
+import type { PendingUserInput, SessionChatMessage, SessionUsage } from '@openloop/core/types';
 import { MessageRow } from './MessageRow';
 import { TurnRail, type TurnRailItem } from './TurnRail';
 import { TextShimmer } from './dsh/TextShimmer';
@@ -10,6 +10,8 @@ import styles from './AgentChatView.module.css';
 
 export interface AgentChatViewProps {
   messages: SessionChatMessage[];
+  /** 已提交、等待 Agent 采纳的用户输入：渲染在会话流末尾，不参与轮次分组 */
+  pendingInputs?: PendingUserInput[];
   isBusy?: boolean;
   /** 会话标识：切换会话时落回最新消息（DSH 打开会话即 followTail） */
   sessionKey?: string;
@@ -35,6 +37,9 @@ const STICK_THRESHOLD = 80;
 const RAIL_MIN_WIDTH = 720;
 const PREVIEW_PROMPT_CHARS = 80;
 const PREVIEW_RESPONSE_CHARS = 160;
+
+/** 默认空回显列表：避免每次渲染新建数组，让 memo 不失效 */
+const EMPTY_PENDING: PendingUserInput[] = [];
 
 const pad2 = (value: number) => String(value).padStart(2, '0');
 
@@ -226,6 +231,7 @@ export const AgentChatView = React.memo(function AgentChatView({
   contentWidth,
   onRegenerate,
   onFork,
+  pendingInputs = EMPTY_PENDING,
 }: AgentChatViewProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -319,6 +325,18 @@ export const AgentChatView = React.memo(function AgentChatView({
   const lastMessage = shown[shown.length - 1];
   const lastLength = lastMessage ? lastMessage.content.length + (lastMessage.thinking?.length || 0) : 0;
   const lastUserId = lastMessage?.role === 'user' ? lastMessage.id : null;
+
+  /**
+   * 本地回显刚出现时必须可见（DSH 的 ownInput → followTail）。
+   * 只跟随新增，回显被采纳消失时不动滚动位置，避免内容上移。
+   */
+  const followedPendingRef = useRef<string | null>(null);
+  const lastPendingId = pendingInputs.length > 0 ? pendingInputs[pendingInputs.length - 1].id : null;
+  useLayoutEffect(() => {
+    if (!lastPendingId || lastPendingId === followedPendingRef.current) return;
+    followedPendingRef.current = lastPendingId;
+    scrollToBottom();
+  }, [lastPendingId, scrollToBottom]);
 
   /**
    * 自己刚发出的消息必须立刻可见（DSH 的 ownInput → followTail）。
@@ -467,6 +485,20 @@ export const AgentChatView = React.memo(function AgentChatView({
                 </React.Fragment>
               );
             })}
+            {/* 本地回显：已提交、等待 Agent 采纳的输入；采纳后由会话流重建这一行 */}
+            {pendingInputs.map((input) => (
+              <MessageRow
+                key={input.id}
+                message={{
+                  id: input.id,
+                  role: 'user',
+                  content: input.content,
+                  attachments: input.attachments,
+                  timestamp: input.createdAt,
+                }}
+                pendingLabel={input.placement === 'steering' ? '插入中 · 等待当前步骤结束' : '发送中'}
+              />
+            ))}
             {/* 状态行固定在流转尾部，与最后一块是会话轮还是系统行无关；切换会话加载期间不追加到上一段内容下 */}
             {loading ? null : isBusy ? (
               <RunningStatus startedAt={runningStartedAt} />

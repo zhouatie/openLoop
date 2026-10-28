@@ -5,6 +5,7 @@ import { ToolCard } from './ToolCard';
 import { ImageThumb } from './ImageLightbox';
 import { imageSrc, isImagePath, splitPromptImages } from './local-image';
 import { ReasoningRow } from './dsh/ReasoningRow';
+import { TextShimmer } from './dsh/TextShimmer';
 import { MessageActions, formatTokens } from './dsh/MessageActions';
 import { Tooltip } from './dsh/Tooltip';
 import { writeClipboard } from './dsh/clipboard';
@@ -15,6 +16,8 @@ export interface MessageRowProps {
   message: SessionChatMessage;
   /** 过程折叠内的紧凑形态：隐藏操作条 */
   compact?: boolean;
+  /** 本地回显：尚未被 Agent 采纳时显示的状态文案（此时不显示操作条） */
+  pendingLabel?: string;
   /** 重新生成该轮回答（后端支持时由挂载方注入） */
   onRegenerate?: () => void;
   /** 从该轮用户消息分叉出新会话 */
@@ -24,6 +27,7 @@ export interface MessageRowProps {
 export const MessageRow = memo(function MessageRow({
   message,
   compact,
+  pendingLabel,
   onRegenerate,
   onFork,
 }: MessageRowProps) {
@@ -38,7 +42,7 @@ export const MessageRow = memo(function MessageRow({
   }
 
   if (message.role === 'user') {
-    return <UserMessageRow message={message} compact={compact} />;
+    return <UserMessageRow message={message} compact={compact} pendingLabel={pendingLabel} />;
   }
 
   const tools = message.tools || [];
@@ -86,9 +90,11 @@ export const MessageRow = memo(function MessageRow({
 const UserMessageRow = memo(function UserMessageRow({
   message,
   compact,
+  pendingLabel,
 }: {
   message: SessionChatMessage;
   compact?: boolean;
+  pendingLabel?: string;
 }) {
   const { text, images: promptImages } = useMemo(() => splitPromptImages(message.content), [message.content]);
   const attachments = message.attachments || [];
@@ -105,7 +111,7 @@ const UserMessageRow = memo(function UserMessageRow({
 
   return (
     <div className={styles.userRow}>
-      <div className={styles.userBubble}>
+      <div className={`${styles.userBubble} ${pendingLabel ? styles.userBubblePending : ''}`}>
         {text.trim().length > 0 && <div className={styles.userText}>{text}</div>}
         {images.length > 0 && (
           <div className={styles.imageGrid}>
@@ -128,8 +134,15 @@ const UserMessageRow = memo(function UserMessageRow({
           </div>
         )}
       </div>
-      {!compact && (text.trim().length > 0 || attachments.length > 0) && (
-        <UserActions text={text} timestamp={message.timestamp} />
+      {pendingLabel ? (
+        <div className={styles.pendingLabel}>
+          <TextShimmer active>{pendingLabel}</TextShimmer>
+        </div>
+      ) : (
+        !compact &&
+        (text.trim().length > 0 || attachments.length > 0) && (
+          <UserActions text={text} timestamp={message.timestamp} />
+        )
       )}
     </div>
   );
