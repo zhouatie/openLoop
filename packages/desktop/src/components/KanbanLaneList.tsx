@@ -28,7 +28,6 @@ export interface KanbanLaneListProps {
   onVisualAcceptance: (task: Task) => void;
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
   onSetParentTask?: (task: Task) => void;
-  onUnlinkSubtask?: (parentId: string, subtaskId: string) => void;
   onAddSubtask?: (
     parentId: string,
     params: { title: string; workflowId?: string; attachments?: TaskAttachment[] }
@@ -61,7 +60,6 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
   onVisualAcceptance,
   onApprove,
   onSetParentTask,
-  onUnlinkSubtask,
   onAddSubtask,
   onAddSubtasks,
 }) => {
@@ -127,7 +125,6 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
           onVisualAcceptance={onVisualAcceptance}
           onApprove={onApprove}
           onSetParent={onSetParentTask}
-          onUnlinkSubtask={onUnlinkSubtask}
           onAddSubtask={onAddSubtask}
           onAddSubtasks={onAddSubtasks}
         />

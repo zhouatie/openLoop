@@ -31,7 +31,6 @@ import {
   Eye,
   XCircle,
   GitMerge,
-  Unlink,
   Plus,
   X,
   Workflow,
@@ -189,7 +188,6 @@ export interface KanbanCardProps {
   onVisualAcceptance: (task: Task) => void;
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
   onSetParent?: (task: Task) => void;
-  onUnlinkSubtask?: (parentId: string, subtaskId: string) => void;
   onAddSubtask?: (
     parentId: string,
     params: { title: string; workflowId?: string; attachments?: TaskAttachment[] }
@@ -222,7 +220,6 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   onVisualAcceptance,
   onApprove,
   onSetParent,
-  onUnlinkSubtask,
   onAddSubtask,
   onAddSubtasks,
 }) => {
@@ -876,17 +873,17 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                           <Eye size={10} />
                         </button>
                       )}
-                      {onUnlinkSubtask && st.status !== 'running' && task.status !== 'running' && (
+                      {st.status !== 'running' && task.status !== 'running' && (
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onUnlinkSubtask(task.id, st.id);
+                            onRun(st.id);
                           }}
-                          className="w-5 h-5 rounded hover:bg-[#fef2f2] text-[#85858d] hover:text-[#dc2626] flex items-center justify-center transition-colors"
-                          title="脱离任务组，恢复为独立任务"
+                          className="w-5 h-5 rounded hover:bg-[#eeedfd] text-[#4f46e5] flex items-center justify-center transition-colors"
+                          title="启动该工序"
                         >
-                          <Unlink size={10} />
+                          <Play size={10} strokeWidth={2.4} />
                         </button>
                       )}
                       <button
