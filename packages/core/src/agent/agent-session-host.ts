@@ -1,10 +1,11 @@
 import os from 'os';
 import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
-import type { TaskAttachment, TaskSessionState } from '../types';
+import type { SessionTreeSnapshot, TaskAttachment, TaskSessionState } from '../types';
 import type { AgentStreamEvent } from './agent-events';
 import { PiRpcSessionInstance } from './pi-rpc-session';
 import { piSessionIndex } from './session-index';
+import { readSessionTree } from './session-tree';
 
 const logger = createLogger('AgentSessionHost');
 
@@ -216,6 +217,50 @@ export class AgentSessionHost extends EventEmitter {
     this.emit('forked', { from: sessionId, sessionId: nextSessionId, cwd, text: result.text });
     logger.info(`全局 Agent 会话分叉: ${sessionId} -> ${nextSessionId}`);
     return { sessionId: nextSessionId, cwd, text: result.text };
+  }
+
+  /** 会话树：节点来自会话文件，叶子优先取进程内导航后的位置 */
+  public async getTree(sessionId: string): Promise<SessionTreeSnapshot> {
+    const sessionPath = await piSessionIndex.pathOf(sessionId).catch(() => undefined);
+    if (!sessionPath) return { nodes: [], activeIds: [], leafId: null };
+    return readSessionTree(sessionPath, this.sessions.get(sessionId)?.leafEntryId);
+  }
+
+  /** 进程内当前叶子（undefined 表示与文件末尾一致） */
+  public getLeafEntryId(sessionId: string): string | null | undefined {
+    return this.sessions.get(sessionId)?.leafEntryId;
+  }
+
+  /**
+   * 切到会话树上的任意条目：pi 只移动叶子指针，历史一条不删。
+   * 实时消息列表按新分支重建后推快照，界面无需额外拉取。
+   */
+  public async navigate(
+    sessionId: string,
+    entryId: string
+  ): Promise<{ sessionId: string; leafEntryId: string | null }> {
+    if (!entryId) throw new Error('缺少定位');
+    if (!this.isLive(sessionId)) {
+      await this.open(sessionId, {});
+    }
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error('Agent 会话启动失败');
+
+    const tree = await this.getTree(sessionId);
+    const node = tree.nodes.find((item) => item.id === entryId);
+    if (!node) throw new Error('该条目不在当前会话中');
+
+    await session.navigateTo(entryId);
+    // pi 的规则：选中用户消息时叶子落在它的父节点，正文交回输入框；其余条目直接落在自身
+    const nextLeaf = node.kind === 'user' ? node.parentId : node.id;
+    session.leafEntryId = nextLeaf;
+
+    const detail = await piSessionIndex
+      .read(sessionId, { leafId: nextLeaf })
+      .catch(() => undefined);
+    session.replaceMessages(detail?.messages || []);
+    logger.info(`会话树导航: ${sessionId} -> ${nextLeaf || 'root'}`);
+    return { sessionId, leafEntryId: nextLeaf };
   }
 
   /** 模型 / 思考等级：进程在线时热切换，离线时记入下次启动参数 */

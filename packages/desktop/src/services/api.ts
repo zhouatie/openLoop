@@ -24,6 +24,7 @@ import {
   StorageCleanResult,
   SessionChatMessage,
 } from '@openloop/core';
+import type { SessionTreeSnapshot } from '@openloop/core/types';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
@@ -1111,6 +1112,22 @@ export class DesktopApiService {
     entryId: string
   ): Promise<{ sessionId: string; cwd: string; cancelled?: boolean; text?: string }> {
     return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/fork`, {
+      method: 'POST',
+      body: JSON.stringify({ entryId }),
+    });
+  }
+
+  /** 会话树：节点 + 当前活动分支 */
+  async getAgentSessionTree(sessionId: string): Promise<SessionTreeSnapshot> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/tree`);
+  }
+
+  /** 在同一个会话文件内切到某条历史条目 */
+  async navigateAgentSessionTree(
+    sessionId: string,
+    entryId: string
+  ): Promise<{ sessionId: string; leafEntryId: string | null }> {
+    return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/navigate`, {
       method: 'POST',
       body: JSON.stringify({ entryId }),
     });

@@ -101,6 +101,14 @@ export const SHORTCUT_COMMANDS: ShortcutCommand[] = [
     group: 'panel',
     defaultBinding: 'super+t',
   },
+  {
+    id: 'session.tree',
+    label: '会话树',
+    description: '查看会话分支，回到任意历史节点继续',
+    group: 'panel',
+    defaultBinding: 'super+shift+t',
+    allowInInput: true,
+  },
 ];
 
 export const SHORTCUT_COMMAND_MAP: Record<string, ShortcutCommand> = Object.fromEntries(
