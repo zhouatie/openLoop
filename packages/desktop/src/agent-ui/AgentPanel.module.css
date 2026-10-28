@@ -316,39 +316,20 @@
   display: flex;
 }
 
+/* 无顶栏形态：工作台展开按钮留在右上角（DSH 的侧栏展开位） */
+.corner {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 2;
+}
+
 .mainCol {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-}
-
-/* 输入卡内的面板开关（整页形态没有顶栏） */
-.dockToggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: var(--dsw-radius-sm);
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 28px;
-  cursor: pointer;
-}
-
-.dockToggle:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.dockToggleActive {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
 
 /* 会话列品牌标识 */

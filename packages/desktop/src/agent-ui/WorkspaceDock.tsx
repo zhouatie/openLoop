@@ -202,12 +202,12 @@ interface PreviewState {
 }
 
 /** 文档预览：图片走原始字节，Markdown 走渲染，其余按代码展示 */
-const FilePreview = memo(function FilePreview({ target }: { target: PreviewState | null }) {
+const FilePreview = memo(function FilePreview({ target, cwd }: { target: PreviewState | null; cwd?: string }) {
   if (!target) return <div className={styles.dockEmpty}>在「文件」中选择一个文件即可预览</div>;
   if (target.image) {
     return (
       <div className={styles.imageWrap}>
-        <img className={styles.image} src={api.agentFsRawUrl(target.path)} alt={target.path} />
+        <img className={styles.image} src={api.agentFsRawUrl(target.path, cwd)} alt={target.path} />
       </div>
     );
   }
@@ -224,11 +224,19 @@ const FilePreview = memo(function FilePreview({ target }: { target: PreviewState
   );
 });
 
+export interface DockTarget {
+  path: string;
+  /** 重复点同一个文件也要重新加载 */
+  seq: number;
+}
+
 export interface WorkspaceDockProps {
   cwd?: string;
   activeTab: DockTab;
   onTabChange: (tab: DockTab) => void;
   onClose: () => void;
+  /** 会话里点开的文件：切到预览页并加载该路径 */
+  target?: DockTarget | null;
 }
 
 /** 右侧工作区面板：文件 / 终端 / 文档预览 */
@@ -237,24 +245,40 @@ export const WorkspaceDock = memo(function WorkspaceDock({
   activeTab,
   onTabChange,
   onClose,
+  target,
 }: WorkspaceDockProps) {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const root = cwd || '';
 
-  const openFile = useCallback(async (entry: FsEntry) => {
-    onTabChange('preview');
-    if (IMAGE_EXT.test(entry.path)) {
-      setPreview({ path: entry.path, image: true });
-      return;
-    }
-    setPreview({ path: entry.path });
-    try {
-      const file = await api.readAgentFsFile(entry.path);
-      setPreview({ path: file.path, content: file.content, truncated: file.truncated });
-    } catch (err: any) {
-      setPreview({ path: entry.path, error: err?.message || '无法读取文件' });
-    }
-  }, [onTabChange]);
+  // 路径可能来自消息里的相对引用，统一交给后端按工作区解析
+  const loadPath = useCallback(
+    async (path: string) => {
+      if (IMAGE_EXT.test(path)) {
+        setPreview({ path, image: true });
+        return;
+      }
+      setPreview({ path });
+      try {
+        const file = await api.readAgentFsFile(path, root);
+        setPreview({ path: file.path, content: file.content, truncated: file.truncated });
+      } catch (err: any) {
+        setPreview({ path, error: err?.message || '无法读取文件' });
+      }
+    },
+    [root]
+  );
+
+  useEffect(() => {
+    if (target) void loadPath(target.path);
+  }, [target, loadPath]);
+
+  const openFile = useCallback(
+    (entry: FsEntry) => {
+      onTabChange('preview');
+      void loadPath(entry.path);
+    },
+    [onTabChange, loadPath]
+  );
 
   const tabs = useMemo(
     () => [
@@ -286,7 +310,7 @@ export const WorkspaceDock = memo(function WorkspaceDock({
       <div className={styles.dockBody}>
         {activeTab === 'files' && <FileTree root={root} activePath={preview?.path} onPick={openFile} />}
         {activeTab === 'terminal' && <TerminalView cwd={root} />}
-        {activeTab === 'preview' && <FilePreview target={preview} />}
+        {activeTab === 'preview' && <FilePreview target={preview} cwd={root} />}
       </div>
     </aside>
   );

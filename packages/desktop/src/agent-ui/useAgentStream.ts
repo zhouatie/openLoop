@@ -47,14 +47,84 @@ export interface UseAgentStreamResult {
   reload: () => Promise<void>;
 }
 
+/**
+ * 同一条物理消息在两侧 id 不同（磁盘用 pi 条目 id，实时段用时间戳 id），只能按内容对齐。
+ * 流式中的实时内容可能只是磁盘内容的片段，所以按前缀兼容比较。
+ */
+function sameMessage(a: SessionChatMessage, b: SessionChatMessage): boolean {
+  if (a.role !== b.role) return false;
+  const left = a.content || '';
+  const right = b.content || '';
+  if (left === right) return true;
+  if (left.length === right.length || left.length === 0 || right.length === 0) return false;
+  return left.length > right.length ? left.startsWith(right) : right.startsWith(left);
+}
+
+interface OverlapCache {
+  history?: SessionChatMessage[];
+  head?: string;
+  start: number;
+}
+
+/**
+ * 实时段在历史里的起点
+ *
+ * 实时段是同一会话的尾部延续，定位只需要一个锚点：从后往前找第一条能与实时段连续对齐的历史消息。
+ * 越靠后的同文消息越可能是实时段的起点，所以从后往前扫、命中即停。
+ * 历史与实时段都不再变化时（同一数组 + 同一首条消息）直接复用上次结果，流式期间每帧都是 O(1)。
+ */
+function findOverlapStart(
+  history: SessionChatMessage[],
+  live: SessionChatMessage[],
+  cache: OverlapCache
+): number {
+  const head = live[0].id;
+  if (cache.history === history && cache.head === head) return cache.start;
+
+  let start = -1;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    if (!sameMessage(history[index], live[0])) continue;
+    let matched = 1;
+    while (
+      matched < live.length &&
+      index + matched < history.length &&
+      sameMessage(history[index + matched], live[matched])
+    ) {
+      matched += 1;
+    }
+    // 只认两种收尾：实时段全部对上，或历史尾部全部对上（实时段带着还没落盘的新消息）
+    if (matched === live.length || index + matched === history.length) {
+      start = index;
+      break;
+    }
+  }
+
+  cache.history = history;
+  cache.head = head;
+  cache.start = start;
+  return start;
+}
+
 function mergeMessages(
   history: SessionChatMessage[] | undefined,
-  live: SessionChatMessage[] | undefined
+  live: SessionChatMessage[] | undefined,
+  cache: OverlapCache
 ): SessionChatMessage[] {
-  if (!history || history.length === 0) return live || [];
-  if (!live || live.length === 0) return history;
-  const seen = new Set(history.map((message) => message.id));
-  return history.concat(live.filter((message) => !seen.has(message.id)));
+  if (!live || live.length === 0) return history || [];
+  if (!history || history.length === 0) return live;
+
+  const start = findOverlapStart(history, live, cache);
+  if (start < 0) {
+    const seen = new Set(history.map((message) => message.id));
+    const extra = live.filter((message) => !seen.has(message.id));
+    return extra.length === 0 ? history : history.concat(extra);
+  }
+
+  const covered = Math.min(live.length, history.length - start);
+  // 历史已被实时段完全覆盖：直接用实时段，不多一次数组拷贝
+  if (start === 0 && covered === history.length) return live;
+  // 重叠部分一律以实时段为准：它持有流式状态与工具记录，增量事件也按它的 id 打补丁
+  return history.slice(0, start).concat(live, history.slice(start + covered));
 }
 
 /**
@@ -83,6 +153,35 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
     });
   }, []);
 
+  /**
+   * busy 稳定化：置位立刻生效，熄灭延迟 BUSY_IDLE_GRACE_MS，跨过一轮之间的间隙。
+   * 由事件驱动而不是靠渲染副作用，避免某次渲染被合并后运行指示一直不熄灭。
+   */
+  const [steadyBusy, setSteadyBusy] = useState(false);
+  const idleTimerRef = useRef<number | null>(null);
+  const syncBusy = useCallback((busy: boolean) => {
+    if (import.meta.env?.DEV) console.log('[AgentStream] busy 同步:', busy);
+    if (idleTimerRef.current !== null) {
+      window.clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+    if (busy) {
+      setSteadyBusy(true);
+      return;
+    }
+    idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null;
+      setSteadyBusy(false);
+    }, BUSY_IDLE_GRACE_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
+    },
+    []
+  );
+
   const reload = useCallback(async () => {
     if (!load) return;
     // 快照请求在途期间若已有实时事件到达，说明快照比现状旧，直接丢弃，
@@ -92,13 +191,14 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
       const next = await load();
       if (!next || stamp !== stateStampRef.current) return;
       stateRef.current = next;
+      syncBusy(Boolean(next.isBusy));
       scheduleRender();
     } catch (err) {
       if (import.meta.env?.DEV) {
         console.warn('[AgentStream] 加载会话快照失败:', err);
       }
     }
-  }, [load, scheduleRender]);
+  }, [load, scheduleRender, syncBusy]);
 
   useEffect(() => {
     if (!enabled || !streamKey) return;
@@ -113,6 +213,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
       stateStampRef.current += 1;
       // 快照为权威状态：保留历史前缀，实时段整体替换
       stateRef.current = { ...state, messages: state.messages };
+      syncBusy(Boolean(state.isBusy));
       scheduleRender();
     });
 
@@ -125,6 +226,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
       if (next === stateRef.current) return;
       stateStampRef.current += 1;
       stateRef.current = next;
+      syncBusy(Boolean(next?.isBusy));
       scheduleRender();
     });
 
@@ -137,7 +239,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
         frameRef.current = null;
       }
     };
-  }, [streamKey, enabled, reload, scheduleRender]);
+  }, [streamKey, enabled, reload, scheduleRender, syncBusy]);
 
   const sendMessage = useCallback(
     async (message: string, attachments?: TaskAttachment[], extra?: Record<string, unknown>) => {
@@ -159,22 +261,10 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
     await transport?.stop?.();
   }, [transport]);
 
-  // busy 稳定化：置位立刻生效，熄灭延迟 BUSY_IDLE_GRACE_MS，跨过一轮之间的间隙
-  const rawBusy = Boolean(stateRef.current?.isBusy);
-  const [steadyBusy, setSteadyBusy] = useState(rawBusy);
-  useEffect(() => {
-    if (import.meta.env?.DEV) console.log('[AgentStream] rawBusy 变更:', rawBusy, streamKey);
-    if (rawBusy) {
-      setSteadyBusy(true);
-      return;
-    }
-    const timer = window.setTimeout(() => setSteadyBusy(false), BUSY_IDLE_GRACE_MS);
-    return () => window.clearTimeout(timer);
-  }, [rawBusy, streamKey]);
-
   const state = stateRef.current;
+  const overlapCache = useRef<OverlapCache>({ start: -1 });
   const messages = useMemo(
-    () => mergeMessages(historyRef.current, state?.messages),
+    () => mergeMessages(historyRef.current, state?.messages, overlapCache.current),
     [state, historyRef.current]
   );
 

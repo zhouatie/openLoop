@@ -11,6 +11,10 @@ import styles from './AgentChatView.module.css';
 export interface AgentChatViewProps {
   messages: SessionChatMessage[];
   isBusy?: boolean;
+  /** 本轮开始时间（毫秒），运行中用于显示用时 */
+  turnStartedAt?: number;
+  /** 上一轮用时（毫秒），结束后显示固定用时 */
+  lastTurnDurationMs?: number;
   emptyTitle?: string;
   emptyHint?: string;
   /** 内容列最大宽度，整页形态可以更宽 */
@@ -48,8 +52,14 @@ function clockLabel(timestamp: number): string {
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
-/** 进行中状态行：DSH 的「深度求索中，用时 N 秒 ···」 */
-const RunningStatus = React.memo(function RunningStatus({ startedAt }: { startedAt?: number }) {
+/** 用时读数：满 60 秒仍按秒展示，与运行行保持同一种量纲 */
+function elapsedLabel(startedAt: number, now: number): string {
+  const seconds = Math.max(1, Math.round((now - startedAt) / 1000));
+  return `${seconds} 秒`;
+}
+
+/** 进行中状态行：DSH 的「用时 N 秒 ···」 */
+const RunningStatus = React.memo(function RunningStatus({ startedAt }: { startedAt: number }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -57,16 +67,26 @@ const RunningStatus = React.memo(function RunningStatus({ startedAt }: { started
     return () => window.clearInterval(timer);
   }, []);
 
-  const seconds = startedAt ? Math.max(1, Math.round((now - startedAt) / 1000)) : 0;
-
   return (
     <div className={styles.running} role="status" data-chat-running>
       <span className={styles.runningDivider} aria-hidden />
       <span className={styles.runningContent}>
         <span className={styles.runningDot} aria-hidden />
         <TextShimmer active className={styles.runningText}>
-          {`用时 ${Math.max(1, seconds)} 秒 ···`}
+          {`用时 ${elapsedLabel(startedAt, now)} ···`}
         </TextShimmer>
+      </span>
+    </div>
+  );
+});
+
+/** 结束状态行：本轮结束后保留用时读数，避免运行行消失后读数也随之消失 */
+const TurnDuration = React.memo(function TurnDuration({ durationMs }: { durationMs: number }) {
+  return (
+    <div className={`${styles.running} ${styles.duration}`} role="status" data-chat-duration>
+      <span className={styles.runningContent}>
+        <span className={styles.runningDot} aria-hidden />
+        <span className={styles.runningText}>{`已完成，用时 ${Math.max(1, Math.round(durationMs / 1000))} 秒`}</span>
       </span>
     </div>
   );
@@ -163,6 +183,8 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
 export const AgentChatView = React.memo(function AgentChatView({
   messages,
   isBusy,
+  turnStartedAt,
+  lastTurnDurationMs,
   emptyTitle,
   emptyHint,
   contentWidth,
@@ -173,6 +195,8 @@ export const AgentChatView = React.memo(function AgentChatView({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const stickRef = useRef(true);
+  /** 未拿到本轮开始时间时的兜底起点（如接入已有进程） */
+  const mountAtRef = useRef(Date.now());
   const [showJump, setShowJump] = useState(false);
   const [activeTurn, setActiveTurn] = useState<number>(0);
   const [railVisible, setRailVisible] = useState(false);
@@ -276,10 +300,30 @@ export const AgentChatView = React.memo(function AgentChatView({
   const isEmpty = messages.length === 0;
   const lastTurn = blocks.length > 0 ? blocks[blocks.length - 1] : undefined;
 
+  // 本轮开始时间：优先用服务端记录的轮次起点，其次退回最后一条用户消息的时间
+  const lastUserAt = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'user' && messages[index].timestamp > 0) return messages[index].timestamp;
+    }
+    return undefined;
+  }, [messages]);
+  const runningStartedAt = turnStartedAt ?? lastUserAt ?? mountAtRef.current;
+  /** 已结束且本轮出过回答时显示固定用时；用户消息刚发出但未出结果时不显示旧读数 */
+  const showDuration =
+    !isBusy &&
+    typeof lastTurnDurationMs === 'number' &&
+    lastTurnDurationMs > 0 &&
+    lastTurn?.kind === 'turn' &&
+    lastTurn.tail !== null;
+
   return (
     <div ref={wrapRef} className={styles.wrap}>
-      <div ref={scrollerRef} className={styles.scroller} onScroll={handleScroll}>
-        {isEmpty ? (
+      <div
+        ref={scrollerRef}
+        className={`${styles.scroller} ${isEmpty && isBusy ? styles.awaitingFirst : ''}`}
+        onScroll={handleScroll}
+      >
+        {isEmpty && !isBusy ? (
           <div className={styles.empty}>
             <div className={styles.emptyTitle}>{emptyTitle || '开始一段新的会话'}</div>
             <div className={styles.emptyHint}>
@@ -331,13 +375,16 @@ export const AgentChatView = React.memo(function AgentChatView({
                       />
                     );
                   })}
-                  {isLiveTurn && isBusy && (
-                    <RunningStatus startedAt={block.user !== null ? messages[block.user]?.timestamp : undefined} />
-                  )}
                 </div>
                 </React.Fragment>
               );
             })}
+            {/* 状态行固定在流转尾部：与最后一块是会话轮还是系统行无关 */}
+            {isBusy ? (
+              <RunningStatus startedAt={runningStartedAt} />
+            ) : showDuration && lastTurnDurationMs !== undefined ? (
+              <TurnDuration durationMs={lastTurnDurationMs} />
+            ) : null}
             {isBusy && <div className={styles.busyTail} aria-hidden />}
           </div>
         )}

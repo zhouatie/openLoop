@@ -25,9 +25,10 @@ export interface FsFileContent {
 const MAX_TEXT_BYTES = 512 * 1024;
 const HIDDEN_NAMES = new Set(['.git', 'node_modules', '.DS_Store']);
 
-function absolute(target: string): string {
+/** 相对路径按调用方给的工作区解析（会话里引用的文件常是相对路径） */
+function absolute(target: string, base?: string): string {
   const expanded = target.startsWith('~') ? path.join(process.env.HOME || '', target.slice(1)) : target;
-  return path.resolve(expanded);
+  return path.resolve(base || process.cwd(), expanded);
 }
 
 /** 目录列举：只读，按文件夹优先 + 名称排序，隐藏 .git / node_modules */
@@ -62,8 +63,8 @@ export function listDirectory(target: string): FsListing {
 }
 
 /** 文本读取：超限截断，二进制返回明确错误由前端转为预览不支持 */
-export function readTextFile(target: string, maxBytes = MAX_TEXT_BYTES): FsFileContent {
-  const file = absolute(target);
+export function readTextFile(target: string, base?: string, maxBytes = MAX_TEXT_BYTES): FsFileContent {
+  const file = absolute(target, base);
   const stats = fs.statSync(file);
   if (!stats.isFile()) throw new Error('目标不是文件');
 
@@ -101,8 +102,8 @@ export function mimeOf(target: string): string {
   return MIME_BY_EXT[path.extname(target).toLowerCase()] || 'application/octet-stream';
 }
 
-export function statFile(target: string): { path: string; size: number; mtime: number; mime: string } {
-  const file = absolute(target);
+export function statFile(target: string, base?: string): { path: string; size: number; mtime: number; mime: string } {
+  const file = absolute(target, base);
   const stats = fs.statSync(file);
   return { path: file, size: stats.size, mtime: stats.mtimeMs, mime: mimeOf(file) };
 }

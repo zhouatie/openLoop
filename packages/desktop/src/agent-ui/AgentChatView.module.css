@@ -52,6 +52,13 @@
   height: 12px;
 }
 
+/* 消息已发出但还没有输出时：运行行贴底，紧跟输入卡（与 DSH 一致） */
+.scroller.awaitingFirst {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
 /* 「回到底部」浮动按钮：与 DSH 一致，圆角图标按钮贴在内容列右侧下沿 */
 .jumpSlot {
   position: absolute;
@@ -165,6 +172,16 @@
 .runningText {
   min-width: 0;
   font-variant-numeric: tabular-nums;
+}
+
+/* 结束后的固定用时：同一个槽位，去掉动画与高亮 */
+.duration {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.duration .runningDot {
+  animation: none;
+  opacity: 0.5;
 }
 
 @keyframes runningPulse {

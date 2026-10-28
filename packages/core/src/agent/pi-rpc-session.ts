@@ -115,6 +115,10 @@ export class PiRpcSessionInstance extends EventEmitter {
   public pendingModel?: string;
   public modelError?: string;
   public lastError?: string;
+  /** 本轮（一次用户提交）开始时间，运行中用于显示用时 */
+  public turnStartedAt?: number;
+  /** 上一轮从开始到结束的用时（毫秒） */
+  public lastTurnDurationMs?: number;
 
   private modelPattern?: string;
   private pendingThinking?: string;
@@ -242,7 +246,8 @@ export class PiRpcSessionInstance extends EventEmitter {
       logger.info(`Pi RPC 进程退出，退出码: ${code}`, undefined, { taskId: this.taskId });
       this.active = false;
       this.isBusy = false;
-      this.emitStatus({ active: false, isBusy: false });
+      this.finishTurn();
+      this.emitStatus({ active: false, isBusy: false, turnStartedAt: this.turnStartedAt });
       this.notifyUpdate(true);
       if (this.onFinishedCallback && !this.executionCompleted) {
         this.executionCompleted = true;
@@ -270,6 +275,18 @@ export class PiRpcSessionInstance extends EventEmitter {
         });
       }
     }, 400);
+  }
+
+  /** 记录本轮开始时间；一次用户提交可能含多个 turn（工具调用），只在首个 turn 定时 */
+  private markTurnStart() {
+    if (this.turnStartedAt === undefined) this.turnStartedAt = Date.now();
+  }
+
+  /** 本轮结束：冻结用时，供界面显示「已完成，用时 N 秒」 */
+  private finishTurn() {
+    if (this.turnStartedAt === undefined) return;
+    this.lastTurnDurationMs = Date.now() - this.turnStartedAt;
+    this.turnStartedAt = undefined;
   }
 
   private emitLog(stream: 'stdout' | 'stderr' | 'system', message: string) {
@@ -350,14 +367,16 @@ export class PiRpcSessionInstance extends EventEmitter {
     switch (record.type) {
       case 'agent_start':
         this.isBusy = true;
-        this.emitStatus({ isBusy: true, active: this.active });
+        this.markTurnStart();
+        this.emitStatus({ isBusy: true, active: this.active, turnStartedAt: this.turnStartedAt });
         this.notifyUpdate(true);
         break;
 
       case 'turn_start':
         this.isBusy = true;
         this.turnSeq += 1;
-        this.emitStatus({ isBusy: true });
+        this.markTurnStart();
+        this.emitStatus({ isBusy: true, turnStartedAt: this.turnStartedAt });
         this.notifyUpdate(true);
         break;
 
@@ -606,6 +625,7 @@ export class PiRpcSessionInstance extends EventEmitter {
 
       case 'agent_settled': {
         this.isBusy = false;
+        this.finishTurn();
         if (this.currentAssistantMessage) {
           // 流式增量拼接的文本也可能携带完成标记，兜底判定一次
           if (this.currentAssistantMessage.content?.includes(PIPELINE_DONE_MARKER)) this.doneMarkerSeen = true;
@@ -614,7 +634,12 @@ export class PiRpcSessionInstance extends EventEmitter {
           this.emitMessagePatch(this.currentAssistantMessage.id, { isStreaming: false, isThinking: false });
           this.currentAssistantMessage = null;
         }
-        this.emitStatus({ isBusy: false, active: this.active });
+        this.emitStatus({
+          isBusy: false,
+          active: this.active,
+          turnStartedAt: this.turnStartedAt,
+          lastTurnDurationMs: this.lastTurnDurationMs,
+        });
         this.notifyUpdate(true);
 
         // 本轮空闲后应用排队中的模型 / 思考强度变更
@@ -713,6 +738,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.awaitingInput = false;
     this.doneMarkerSeen = false;
     this.lastError = undefined;
+    this.markTurnStart();
 
     // 前置压入用户消息展示
     const userMessage: SessionChatMessage = {
@@ -726,7 +752,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     };
     this.messages.push(userMessage);
     this.emitMessage(userMessage);
-    this.emitStatus({ isBusy: true, isPaused: false, awaitingInput: false });
+    this.emitStatus({ isBusy: true, isPaused: false, awaitingInput: false, turnStartedAt: this.turnStartedAt });
     this.notifyUpdate(true);
 
     let actualMessage = message;
@@ -815,7 +841,8 @@ export class PiRpcSessionInstance extends EventEmitter {
     try {
       await this.sendCommand({ type: 'abort' });
       this.isBusy = false;
-      this.emitStatus({ isPaused: true, isBusy: false });
+      this.finishTurn();
+      this.emitStatus({ isPaused: true, isBusy: false, turnStartedAt: this.turnStartedAt });
       this.notifyUpdate(true);
       return true;
     } catch (e: any) {
@@ -1020,6 +1047,8 @@ export class PiRpcSessionInstance extends EventEmitter {
       isBusy: this.isBusy,
       isPaused: this.isPaused,
       awaitingInput: this.awaitingInput,
+      turnStartedAt: this.turnStartedAt,
+      lastTurnDurationMs: this.lastTurnDurationMs,
       messages: [...this.messages],
       agentName: this.agentName,
       model: this.model,
