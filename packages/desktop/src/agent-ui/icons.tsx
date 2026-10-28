@@ -370,6 +370,31 @@ export const IconQueue = createIcon('IconQueue', 16, () => (
   </>
 ));
 
+/** 编辑（DSH edit-outline）：排队中的输入回填到输入框 */
+export const IconEdit = createIcon('IconEdit', 16, () => (
+  <>
+    <path
+      d="M8.86 2.7H4.2C3.37 2.7 2.7 3.37 2.7 4.2v7.6c0 .83.67 1.5 1.5 1.5h7.6c.83 0 1.5-.67 1.5-1.5V7.9h1v3.9c0 1.38-1.12 2.5-2.5 2.5H4.2c-1.38 0-2.5-1.12-2.5-2.5V4.2c0-1.38 1.12-2.5 2.5-2.5h4.66v1Z"
+      fill="currentColor"
+      stroke="none"
+    />
+    <path d="M7.78 8.24 13.89 2.14" stroke="currentColor" />
+  </>
+));
+
+/** 删除（DSH trash-outline）：撤回排队中的输入 */
+export const IconTrash = createIcon('IconTrash', 16, () => (
+  <>
+    <path d="M1.28 3.89h13.44" stroke="currentColor" />
+    <path d="M5.42 3.89V2.48c0-.19.1-.37.3-.5.19-.13.46-.2.73-.2h3.1c.27 0 .54.07.73.2.19.13.3.31.3.5v1.41" stroke="currentColor" />
+    <path
+      d="M2.57 3.89l.62 9.4c.03.26.15.5.34.67.19.17.44.27.7.27h7.54c.26 0 .51-.1.7-.27.19-.17.31-.41.34-.67l.62-9.4"
+      stroke="currentColor"
+    />
+    <path d="M6.45 6.99v4.13M9.55 6.99v4.13" stroke="currentColor" />
+  </>
+));
+
 /** 最近更新（DSH clock-outline） */
 export const IconClock = createIcon('IconClock', 16, () => (
   <>

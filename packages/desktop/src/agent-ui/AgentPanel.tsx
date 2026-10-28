@@ -23,6 +23,7 @@ import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
 import { SessionTreePanel } from './SessionTreePanel';
 import { useAgentStream } from './useAgentStream';
+import { QueuedInputs } from './QueuedInputs';
 import styles from './AgentPanel.module.css';
 
 /** @ 菜单里的会话时间：够用即可，不做本地化库 */
@@ -93,7 +94,7 @@ export interface AgentPanelShellProps {
   title: string;
   subtitle?: string;
   messages: SessionChatMessage[];
-  /** 已提交、等待 Agent 采纳的用户输入：附在会话流尾部 */
+  /** 已提交、等待 Agent 采纳的用户输入：起新一轮的在消息流尾部，插话的进输入卡上方的排队条 */
   pendingInputs?: PendingUserInput[];
   isBusy?: boolean;
   /** 会话标识：切换会话时消息区重新贴底 */
@@ -114,6 +115,10 @@ export interface AgentPanelShellProps {
   sending?: boolean;
   onSend: (message: string) => void | Promise<void>;
   onStop?: () => void;
+  /** 编辑排队中的插话：正文回到输入框，原条目撤回 */
+  onEditQueued?: (item: PendingUserInput) => void;
+  /** 撤回排队中的插话 */
+  onWithdrawQueued?: (item: PendingUserInput) => void;
   headerExtra?: React.ReactNode;
   onClose?: () => void;
   /** 提供时右上角显示最小化按钮（浮层形态） */
@@ -179,6 +184,8 @@ export function AgentPanelShell({
   sending,
   onSend,
   onStop,
+  onEditQueued,
+  onWithdrawQueued,
   headerExtra,
   onClose,
   onMinimize,
@@ -310,6 +317,11 @@ export function AgentPanelShell({
 
   // 消息已发出但实时状态还没回来时也算运行中，否则新会话首轮开头没有运行指示
   const running = Boolean(isBusy || sending);
+  /** 运行中发出的插话：pi 收进队列后排在输入卡上方，等当前这一步结束再送进去 */
+  const queuedInputs = useMemo(
+    () => (pendingInputs || []).filter((item) => item.placement === 'steering'),
+    [pendingInputs]
+  );
   const isBlank = messages.length === 0 && !running && !loading;
 
   return (
@@ -388,6 +400,11 @@ export function AgentPanelShell({
                 forkPendingEntryId={forkPendingEntryId}
               />
               {banner}
+              <QueuedInputs
+                items={queuedInputs}
+                onEdit={onEditQueued}
+                onWithdraw={onWithdrawQueued}
+              />
               {composer}
             </>
           )}
@@ -431,6 +448,8 @@ export function TaskAgentPanel({
   const dockSeq = useRef(0);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   const [commands, setCommands] = useState<ComposerCommand[]>([]);
+  /** 回填输入框：seq 变化即生效 */
+  const [draftFill, setDraftFill] = useState<{ text: string; seq: number }>();
   const attachments = useAttachments();
 
   /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
@@ -488,6 +507,7 @@ export function TaskAgentPanel({
     () => ({
       send: (message: string, files?: TaskAttachment[], extra?: Record<string, unknown>) =>
         api.sendTaskChatMessage(taskId, message, files, extra as any),
+      withdraw: (pendingId: string) => api.withdrawTaskPending(taskId, pendingId),
       pause: () => api.pauseTaskSession(taskId),
       resume: () => api.resumeTaskSession(taskId),
       stop: () => api.pauseTaskSession(taskId),
@@ -495,11 +515,28 @@ export function TaskAgentPanel({
     [taskId]
   );
 
-  const { messages, pendingInputs, isBusy, awaitingInput, sendMessage, stop, state } = useAgentStream({
-    streamKey: taskId,
-    load,
-    transport,
-  });
+  const { messages, pendingInputs, isBusy, awaitingInput, sendMessage, withdraw, stop, state } =
+    useAgentStream({
+      streamKey: taskId,
+      load,
+      transport,
+    });
+
+  /** 编辑排队中的插话：先撤回，正文回到输入框 */
+  const handleEditQueued = useCallback(
+    async (item: PendingUserInput) => {
+      await withdraw?.(item.id);
+      setDraftFill({ text: item.content, seq: Date.now() });
+    },
+    [withdraw]
+  );
+
+  const handleWithdrawQueued = useCallback(
+    (item: PendingUserInput) => {
+      void withdraw?.(item.id);
+    },
+    [withdraw]
+  );
 
   const handleSend = useCallback(
     async (message: string) => {
@@ -545,6 +582,9 @@ export function TaskAgentPanel({
       onRequestMentions={requestMentions}
       onSend={handleSend}
       onStop={() => void stop()}
+      onEditQueued={handleEditQueued}
+      onWithdrawQueued={handleWithdrawQueued}
+      draftFill={draftFill}
       onClose={onClose}
       headerExtra={
         <>
@@ -614,6 +654,11 @@ const RUNNING_IDLE_GRACE_MS = 700;
 const LIST_POLL_MS = 60000;
 const LIVE_POLL_MS = 2000;
 const STAMP_POLL_MS = 5000;
+/**
+ * 预热延时：pi 冷启动要十几秒（装了扩展更久），等首条消息才起进程会让首条消息白等这一段。
+ * 选中会话后停顿这么久再预热：翻列表时只预热真正停留的那一条。
+ */
+const WARM_DELAY_MS = 600;
 
 /** 窗口在后台时不轮询：回到前台由下一次 tick 自动补上 */
 function pollAllowed(): boolean {
@@ -721,6 +766,8 @@ export function GlobalAgentPanel({
   const [commands, setCommands] = useState<ComposerCommand[]>([]);
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([]);
   const [permission, setPermission] = useState<ComposerPermission>('full');
+  /** 回填输入框：seq 变化即生效，同一句正文重复跳转也有效 */
+  const [draftFill, setDraftFill] = useState<{ text: string; seq: number }>();
   const [projectMeta, setProjectMeta] = useState<
     Record<string, { title?: string; hidden?: boolean; pinned?: boolean; order?: number }>
   >({});
@@ -736,6 +783,13 @@ export function GlobalAgentPanel({
   /** 历史快照对应的会话与修改时间：切换会话时旧的戳不能拿来比，否则会白读一次整段历史 */
   const historyStampRef = useRef<{ id: string; stamp: string }>({ id: '', stamp: '' });
   const attachments = useAttachments();
+
+  /**
+   * 预热槽：pi 冷启动要十几秒（装载扩展、扫目录），选中会话就先把进程拉起来，
+   * 首条消息就不用再等冷启动。只留一个槽：换会话时上一个预热进程若一条消息都没发过，直接收回，
+   * 避免快速翻会话拉出一堆进程。
+   */
+  const warmRef = useRef<{ id: string; used: boolean } | null>(null);
 
   /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
   const openDock = useCallback((kind: DockTab, path?: string) => {
@@ -940,6 +994,7 @@ export function GlobalAgentPanel({
                 attachments: files,
                 permission,
               }),
+            withdraw: (pendingId: string) => api.withdrawAgentPending(activeId, pendingId),
             pause: () => api.pauseAgentSession(activeId),
             resume: () => api.resumeAgentSession(activeId),
             stop: () => api.stopAgentSession(activeId),
@@ -948,13 +1003,30 @@ export function GlobalAgentPanel({
     [activeId, cwd, permission]
   );
 
-  const { messages, pendingInputs, isBusy, awaitingInput, sendMessage, stop, state, reload } = useAgentStream({
-    streamKey,
-    load: loadLiveState,
-    historyMessages: history,
-    transport,
-    enabled: Boolean(streamKey),
-  });
+  const { messages, pendingInputs, isBusy, awaitingInput, sendMessage, withdraw, stop, state, reload } =
+    useAgentStream({
+      streamKey,
+      load: loadLiveState,
+      historyMessages: history,
+      transport,
+      enabled: Boolean(streamKey),
+    });
+
+  /** 编辑排队中的插话：先撤回，正文回到输入框 */
+  const handleEditQueued = useCallback(
+    async (item: PendingUserInput) => {
+      await withdraw?.(item.id);
+      setDraftFill({ text: item.content, seq: Date.now() });
+    },
+    [withdraw]
+  );
+
+  const handleWithdrawQueued = useCallback(
+    (item: PendingUserInput) => {
+      void withdraw?.(item.id);
+    },
+    [withdraw]
+  );
 
   const startNewSession = useCallback((projectCwd: string) => {
     const id = newSessionId();
@@ -995,6 +1067,8 @@ export function GlobalAgentPanel({
       // 首条消息发出后由实时状态/磁盘列表接管该行
       setDraft(null);
       try {
+        // 预热过的会话已经发过消息：不能再当成可回收的预热槽
+        if (warmRef.current?.id === activeId) warmRef.current.used = true;
         await sendMessage(message, attachments.ready);
         attachments.clear();
         // 新会话的文件还没落盘，先登记占位行，等实时状态把它带进列表
@@ -1018,10 +1092,12 @@ export function GlobalAgentPanel({
     [activeId, streamKey, sendMessage, refresh, attachments, applyRunning, cwd]
   );
 
-  // 卸载时清掉未到期的补刷
+  // 卸载时清掉未到期的补刷，并收回没发过消息的预热进程
   useEffect(
     () => () => {
       if (postSendTimer.current !== null) window.clearTimeout(postSendTimer.current);
+      const warm = warmRef.current;
+      if (warm && !warm.used) void api.stopAgentSession(warm.id).catch(() => null);
     },
     []
   );
@@ -1423,7 +1499,6 @@ export function GlobalAgentPanel({
   const [treeOpen, setTreeOpen] = useState(false);
   const [tree, setTree] = useState<SessionTreeSnapshot | null>(null);
   const [treeLoading, setTreeLoading] = useState(false);
-  const [draftFill, setDraftFill] = useState<{ text: string; seq: number }>();
 
   const openTree = useCallback(async () => {
     if (!activeId) return;
@@ -1529,6 +1604,42 @@ export function GlobalAgentPanel({
   })();
   const title = activeSession?.title || (activeId ? '新会话' : '智能体开发');
   const activeCwd = cwd || activeSession?.cwd || '';
+
+  /**
+   * 预热 pi 进程
+   * 只是把进程拉起来、不发消息；进程在线后首条消息不必再等冷启动。
+   * 工作目录确定后才预热：进程的 cwd 在启动时固定，预热错目录等于白热。
+   * 只留一个槽：换会话时上一个预热进程若一条消息都没发过，直接收回，不让翻会话堆进程。
+   */
+  useEffect(() => {
+    if (!active || !activeId || !activeCwd || warmRef.current?.id === activeId) return;
+    const timer = window.setTimeout(() => {
+      const previous = warmRef.current;
+      if (previous && !previous.used) {
+        if (import.meta.env?.DEV) console.log('[AgentPanel] 收回未使用的预热进程:', previous.id);
+        void api.stopAgentSession(previous.id).catch(() => null);
+      }
+      warmRef.current = { id: activeId, used: false };
+      if (import.meta.env?.DEV) console.log('[AgentPanel] 预热 Agent 进程:', { id: activeId, cwd: activeCwd });
+      api
+        .openAgentSession(activeId, { cwd: activeCwd, permission })
+        .then((result) => {
+          // 预热期间已经切走：这条进程没人要了，立刻收回
+          if (warmRef.current?.id !== activeId) {
+            if (result.created) void api.stopAgentSession(activeId).catch(() => null);
+            return;
+          }
+          // 进程本来就在：这条槽没有可回收的进程
+          if (!result.created) warmRef.current = null;
+        })
+        .catch(() => {
+          if (warmRef.current?.id === activeId) warmRef.current = null;
+        });
+    }, WARM_DELAY_MS);
+    return () => window.clearTimeout(timer);
+    // permission 变了不重新预热：权限切换会重启进程，这里只负责首次拉起来
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, activeId, activeCwd]);
 
   // 工作区选择：点芯片先开列表（与 DSH 一致），最后一项才是添加工作区
   const activeProjectKey = normalizeProjectCwd(activeCwd);
@@ -1725,6 +1836,8 @@ export function GlobalAgentPanel({
           sending={sending}
           onSend={handleSend}
           onStop={() => void stop()}
+          onEditQueued={handleEditQueued}
+          onWithdrawQueued={handleWithdrawQueued}
           onClose={onClose}
           onMinimize={mode === 'overlay' ? onClose : undefined}
           composerDisabled={!activeId}

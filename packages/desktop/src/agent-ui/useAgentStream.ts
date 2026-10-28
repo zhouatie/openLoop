@@ -18,6 +18,8 @@ export interface AgentTransport {
     attachments?: TaskAttachment[],
     extra?: Record<string, unknown>
   ) => Promise<unknown>;
+  /** 撤回一条还没被采纳的排队输入 */
+  withdraw?: (pendingId: string) => Promise<unknown>;
   pause?: () => Promise<unknown>;
   resume?: () => Promise<unknown>;
   stop?: () => Promise<unknown>;
@@ -48,6 +50,8 @@ export interface UseAgentStreamResult {
     attachments?: TaskAttachment[],
     extra?: Record<string, unknown>
   ) => Promise<void>;
+  /** 撤回排队中的插话（未实现时不提供） */
+  withdraw?: (pendingId: string) => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   stop: () => Promise<void>;
@@ -301,6 +305,13 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   const pause = useCallback(async () => {
     await transport?.pause?.();
   }, [transport]);
+  const withdraw = useCallback(
+    async (pendingId: string) => {
+      if (import.meta.env?.DEV) console.log('[AgentStream] 撤回排队输入:', pendingId);
+      await transport?.withdraw?.(pendingId);
+    },
+    [transport]
+  );
 
   const resume = useCallback(async () => {
     await transport?.resume?.();
@@ -331,6 +342,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
     active: state ? state.active : true,
     lastError: state?.lastError,
     sendMessage,
+    withdraw,
     pause,
     resume,
     stop,

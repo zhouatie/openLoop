@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
 import type { SessionTreeSnapshot, TaskAttachment, TaskSessionState } from '../types';
 import type { AgentStreamEvent } from './agent-events';
-import { PiRpcSessionInstance } from './pi-rpc-session';
+import { PiRpcSessionInstance, PiRpcSessionManager } from './pi-rpc-session';
 import { piSessionIndex } from './session-index';
 import { agentSessionMeta } from './session-meta';
 import { readSessionTree } from './session-tree';
@@ -79,15 +79,34 @@ export class AgentSessionHost extends EventEmitter {
     return AgentSessionHost.instance;
   }
 
+  /**
+   * 持有该 pi 会话的进程：本宿主的优先，其次是任务流水线节点的常驻进程。
+   * 同一份会话文件只能有一个进程写，否则两侧的消息会互相覆盖。
+   */
+  private holderOf(sessionId: string): PiRpcSessionInstance | undefined {
+    const own = this.sessions.get(sessionId);
+    if (own && own.active) return own;
+    return PiRpcSessionManager.getInstance().findLiveBySessionId(sessionId);
+  }
+
+  /** 取（必要时拉起）会话的持有进程 */
+  private async ensureHolder(sessionId: string): Promise<PiRpcSessionInstance> {
+    if (!this.holderOf(sessionId)) await this.open(sessionId, {});
+    const holder = this.holderOf(sessionId);
+    if (!holder) throw new Error('Agent 会话启动失败');
+    return holder;
+  }
+
   /** 打开（或复用）一个全局会话进程，不发送任何消息 */
   public async open(sessionId: string, options: OpenAgentSessionOptions = {}): Promise<OpenAgentSessionResult> {
-    const existing = this.sessions.get(sessionId);
-    if (existing && existing.active) {
-      return { sessionId, state: existing.getState(), created: false };
+    const holder = this.holderOf(sessionId);
+    if (holder) {
+      return { sessionId, state: holder.getState(), created: false };
     }
 
-    const summary = await piSessionIndex.find(sessionId).catch(() => undefined);
     const previous = this.settingsBySession.get(sessionId);
+    // 已知工作目录就不去查会话文件：那次查寻要遍历全部会话目录，冷缓存下要好几秒
+    const summary = options.cwd || previous?.cwd ? undefined : await piSessionIndex.find(sessionId).catch(() => undefined);
     const cwd = options.cwd || previous?.cwd || summary?.cwd || os.homedir();
     const taskId = `${GLOBAL_AGENT_PREFIX}${sessionId}`;
     const permission = options.permission || previous?.permission || 'full';
@@ -138,24 +157,29 @@ export class AgentSessionHost extends EventEmitter {
 
   /** 向全局会话发送消息，进程不在时自动拉起 */
   public async chat(sessionId: string, message: string, options: OpenAgentSessionOptions = {}): Promise<TaskSessionState> {
-    let session = this.sessions.get(sessionId);
-    if (!session || !session.active) {
-      const opened = await this.open(sessionId, {
-        ...options,
-        initialPrompt: message,
-        initialAttachments: options.attachments,
-      });
-      session = this.sessions.get(sessionId);
-      if (!session) throw new Error('Agent 会话启动失败');
-      // open() 已经带着首条消息启动，直接返回当前状态
-      return opened.state;
+    const holder = this.holderOf(sessionId);
+    if (holder) {
+      await holder.sendUserMessage(message, options.attachments);
+      return holder.getState();
     }
-    await session.sendUserMessage(message, options.attachments);
-    return session.getState();
+    // open() 带着首条消息启动进程，不必再下发一次
+    const opened = await this.open(sessionId, {
+      ...options,
+      initialPrompt: message,
+      initialAttachments: options.attachments,
+    });
+    return opened.state;
   }
 
   public getState(sessionId: string): TaskSessionState | undefined {
     return this.sessions.get(sessionId)?.getState();
+  }
+
+  /** 撤回某条排队中的输入（仅对尚未被 Agent 采纳的条目生效） */
+  public async withdrawPending(sessionId: string, pendingId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (!session || !session.active) return false;
+    return session.withdrawPending(pendingId);
   }
 
   public isLive(sessionId: string): boolean {
@@ -193,11 +217,11 @@ export class AgentSessionHost extends EventEmitter {
     entryId: string
   ): Promise<{ sessionId: string; cwd: string; title?: string; cancelled?: boolean }> {
     if (!entryId) throw new Error('缺少分叉定位');
-    if (!this.isLive(sessionId)) {
-      await this.open(sessionId, {});
+    // 分叉会改掉进程的活动会话，流水线持有的会话交给它自己决定，别在别处切
+    if (!this.sessions.get(sessionId)?.active && this.holderOf(sessionId)) {
+      throw new Error('该会话正由任务流水线持有，无法在此分叉');
     }
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error('Agent 会话启动失败');
+    const session = await this.ensureHolder(sessionId);
 
     const cwd = this.cwdBySession.get(sessionId) || os.homedir();
     const settings = this.settingsBySession.get(sessionId);
@@ -252,12 +276,12 @@ export class AgentSessionHost extends EventEmitter {
   public async getTree(sessionId: string): Promise<SessionTreeSnapshot> {
     const sessionPath = await piSessionIndex.pathOf(sessionId).catch(() => undefined);
     if (!sessionPath) return { nodes: [], activeIds: [], leafId: null };
-    return readSessionTree(sessionPath, this.sessions.get(sessionId)?.leafEntryId);
+    return readSessionTree(sessionPath, this.holderOf(sessionId)?.leafEntryId);
   }
 
   /** 进程内当前叶子（undefined 表示与文件末尾一致） */
   public getLeafEntryId(sessionId: string): string | null | undefined {
-    return this.sessions.get(sessionId)?.leafEntryId;
+    return this.holderOf(sessionId)?.leafEntryId;
   }
 
   /**
@@ -269,11 +293,7 @@ export class AgentSessionHost extends EventEmitter {
     entryId: string
   ): Promise<{ sessionId: string; leafEntryId: string | null }> {
     if (!entryId) throw new Error('缺少定位');
-    if (!this.isLive(sessionId)) {
-      await this.open(sessionId, {});
-    }
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error('Agent 会话启动失败');
+    const session = await this.ensureHolder(sessionId);
 
     const tree = await this.getTree(sessionId);
     const node = tree.nodes.find((item) => item.id === entryId);
