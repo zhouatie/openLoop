@@ -11,6 +11,8 @@ import styles from './AgentChatView.module.css';
 export interface AgentChatViewProps {
   messages: SessionChatMessage[];
   isBusy?: boolean;
+  /** 会话标识：切换会话时重置贴底状态，落回最新消息（DSH 打开会话即 followTail） */
+  sessionKey?: string;
   /** 本轮开始时间（毫秒），运行中用于显示用时 */
   turnStartedAt?: number;
   /** 上一轮用时（毫秒），结束后显示固定用时 */
@@ -213,6 +215,7 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
 export const AgentChatView = React.memo(function AgentChatView({
   messages,
   isBusy,
+  sessionKey,
   turnStartedAt,
   lastTurnDurationMs,
   emptyTitle,
@@ -287,6 +290,20 @@ export const AgentChatView = React.memo(function AgentChatView({
     setShowJump(false);
   }, []);
 
+  /**
+   * 切换会话时无条件回到尾部。上一条会话可能停在历史位置（贴底标记为 false），
+   * 而面板在运行态不会卸载，标记会带到新会话，最新消息就停在视口外。
+   */
+  const followedUserIdRef = useRef<string | null>(null);
+  const sessionKeyRef = useRef(sessionKey);
+  useLayoutEffect(() => {
+    if (sessionKeyRef.current === sessionKey) return;
+    sessionKeyRef.current = sessionKey;
+    followedUserIdRef.current = null;
+    if (import.meta.env.DEV) console.log('[AgentChatView] 切换会话，回到最新消息:', sessionKey);
+    scrollToBottom();
+  }, [sessionKey, scrollToBottom]);
+
   const lastMessage = messages[messages.length - 1];
   const lastLength = lastMessage ? lastMessage.content.length + (lastMessage.thinking?.length || 0) : 0;
   const lastUserId = lastMessage?.role === 'user' ? lastMessage.id : null;
@@ -296,7 +313,6 @@ export const AgentChatView = React.memo(function AgentChatView({
    * 用户此前在翻历史、或输入卡变高把视口顶离底部时，贴底标记会是 false，
    * 新消息就会停在输入卡后面看不见；这里在绘制前无条件贴底。
    */
-  const followedUserIdRef = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (!lastUserId || lastUserId === followedUserIdRef.current) return;
     followedUserIdRef.current = lastUserId;
@@ -320,6 +336,7 @@ export const AgentChatView = React.memo(function AgentChatView({
 
   // 内容高度变化（工具输出、图片、代码高亮等不改变正文字数的异步布局）同样保持贴底，
   // 否则只在 messages.length/lastLength 变化时贴底会让最新内容被输入卡切掉一截。
+  // 视口高度变化（切换会话恢复草稿、输入卡变高）也要补一次贴底，否则末尾会被切掉。
   useEffect(() => {
     const node = scrollerRef.current;
     const content = contentRef.current;
@@ -329,6 +346,7 @@ export const AgentChatView = React.memo(function AgentChatView({
       node.scrollTop = node.scrollHeight;
     });
     observer.observe(content);
+    observer.observe(node);
     return () => observer.disconnect();
   }, []);
 
