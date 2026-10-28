@@ -12,6 +12,7 @@ export * from './executors';
 export * from './engine/dag-engine';
 export * from './engine/workflow-recommender';
 export * from './agent/pi-rpc-session';
+export * from './agent/pi-extensions';
 export * from './agent/agent-events';
 export * from './agent/session-index';
 export * from './agent/agent-session-host';

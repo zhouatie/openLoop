@@ -26,6 +26,12 @@ import { createLogger } from '../logger';
 import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
 import { sanitizeChatMessages } from '../agent/agent-format';
 import { piSessionIndex } from '../agent/session-index';
+import {
+  DEFAULT_PI_EXTENSION_PACKAGES,
+  getEnabledPiExtensions,
+  listInstalledPiExtensions,
+  setEnabledPiExtensions,
+} from '../agent/pi-extensions';
 import { agentSessionHost, GLOBAL_AGENT_PREFIX, type AgentPermissionPreset } from '../agent/agent-session-host';
 import { agentSessionMeta, moveSessionFileToTrash } from '../agent/session-meta';
 import { resolveSessionTitle } from '../agent/title-text';
@@ -248,6 +254,9 @@ export class OpenLoopServer {
 
       // 启动时把界面配置的多模态模型参数注入进程环境（Android 视觉推理依赖）
       applyQaModelEnv(this.store.getSettings()?.qaAutomation);
+      // 会话进程的扩展装载名单：只装设置页选中的包，避免每个节点加载全部全局扩展
+      setEnabledPiExtensions(this.store.getSettings()?.piExtensions);
+      serverLogger.info(`[PiExtensions] 会话进程装载扩展: ${getEnabledPiExtensions().join(', ') || '(仅 openLoop 桥接)'}`);
       // 把 Midscene 调试产物收拢到数据目录，避免污染工作目录并可被存储清理回收
       configureQaRuntimePaths(this.store.getDataDir());
 
@@ -3104,12 +3113,31 @@ ${existingSubSummary}
         return this.sendJson(res, 200, this.store.getSettings(), reqMeta);
       }
 
+      // Settings: 会话进程可装载的 pi 扩展清单
+      if (pathname === '/api/settings/pi-extensions' && method === 'GET') {
+        return this.sendJson(
+          res,
+          200,
+          {
+            enabled: getEnabledPiExtensions(),
+            defaults: DEFAULT_PI_EXTENSION_PACKAGES,
+            installed: listInstalledPiExtensions(),
+          },
+          reqMeta
+        );
+      }
+
       if (pathname === '/api/settings' && (method === 'PUT' || method === 'POST')) {
         const body = await this.parseJsonBody(req);
         serverLogger.info(`[Settings:Update] 更新全局配置`, { keys: Object.keys(body) });
         const previous = this.store.getSettings();
         const updated = this.store.updateSettings(body);
         applyQaModelEnv(updated.qaAutomation);
+        // 扩展名单只影响后续新开的会话进程，进行中的会话保持启动时的装载结果
+        if (body.piExtensions !== undefined) {
+          setEnabledPiExtensions(updated.piExtensions);
+          serverLogger.info(`[PiExtensions] 扩展名单已更新: ${getEnabledPiExtensions().join(', ') || '(仅 openLoop 桥接)'}`);
+        }
         this.broadcast({ type: 'settings:update', data: updated });
 
         // 仅有模型 / 思考强度变化时，才同步到已活跃的 Agent 会话（热切换，不重启进程）

@@ -338,6 +338,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
   const promptSaveDebounceRef = useRef<any>(null);
 
+  // Agent 扩展装载名单
+  const [piExtensions, setPiExtensions] = useState<string[]>([]);
+  const [piExtensionDefaults, setPiExtensionDefaults] = useState<string[]>([]);
+  const [piExtensionInstalled, setPiExtensionInstalled] = useState<
+    Array<{ name: string; version?: string; description?: string }>
+  >([]);
+
   // 导出配置状态
   const [isExporting, setIsExporting] = useState(false);
   const [hasExported, setHasExported] = useState(false);
@@ -501,6 +508,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           setQaModelFamily(settings.qaAutomation.modelFamily || '');
           setAutoOpenMirror(settings.qaAutomation.autoOpenMirror !== false);
         }
+      }
+      // 扩展清单单独取：需要本机已安装列表，不在设置体里
+      const extensions = await api.getPiExtensions().catch(() => null);
+      if (extensions) {
+        setPiExtensions(extensions.enabled || []);
+        setPiExtensionDefaults(extensions.defaults || []);
+        setPiExtensionInstalled(extensions.installed || []);
       }
     } catch (err) {
       console.error('加载系统设置失败:', err);
@@ -863,6 +877,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     toast.success('已保存数据生命周期维护配置');
   };
 
+  const applyPiExtensions = (next: string[]) => {
+    setPiExtensions(next);
+    handleSave({ piExtensions: next });
+    toast.success('已保存 Agent 扩展配置，对后续新开会话生效');
+  };
+
+  const handleTogglePiExtension = (name: string) => {
+    const next = piExtensions.includes(name)
+      ? piExtensions.filter((item) => item !== name)
+      : [...piExtensions, name];
+    if (import.meta.env?.DEV) {
+      console.log('[Settings:PiExtensions] 切换扩展装载:', { name, enabled: next.includes(name), next });
+    }
+    applyPiExtensions(next);
+  };
+
   // 拖拽排序处理
   const handleDragStart = (e: React.DragEvent, index: number) => {
     if (index < 4) {
@@ -1136,6 +1166,85 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     开启
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* Agent 扩展：会话进程按包装载，关掉不用的可大幅缩短节点启动时间 */}
+            <div className="bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,0.02)] overflow-hidden">
+              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium text-[#1c1c21]">Agent 扩展</div>
+                  <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                    会话进程装载的 pi 扩展包；每个包都会增加启动开销，只保留真正需要的扩展
+                  </div>
+                </div>
+
+                <div className="shrink-0 self-center flex items-center gap-2">
+                  <span className="text-[11px] text-[#85858d] font-mono">
+                    {piExtensions.length}/{piExtensionInstalled.length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => applyPiExtensions(piExtensionDefaults)}
+                    disabled={
+                      piExtensions.length === piExtensionDefaults.length &&
+                      piExtensions.every((name) => piExtensionDefaults.includes(name))
+                    }
+                    className="h-[26px] px-2.5 rounded-[6px] bg-white hover:bg-[#fafafc] text-[#4b4b53] border border-[#e3e3e8] hover:border-[#d0d0d7] text-[11.5px] font-medium flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-default disabled:active:scale-100"
+                    title="恢复为内置推荐名单"
+                  >
+                    <RotateCcw size={11.5} className="stroke-[2.2]" />
+                    <span>推荐名单</span>
+                  </button>
+                </div>
+              </div>
+
+              {piExtensionInstalled.length === 0 ? (
+                <div className="px-3.5 py-6 text-center text-[11.5px] text-[#85858d]">
+                  未在本机检测到 pi 扩展包
+                </div>
+              ) : (
+                <div className="divide-y divide-[#f1f1f4]">
+                  {piExtensionInstalled.map((ext) => {
+                    const enabled = piExtensions.includes(ext.name);
+                    return (
+                      <button
+                        key={ext.name}
+                        type="button"
+                        onClick={() => handleTogglePiExtension(ext.name)}
+                        className="w-full min-h-[42px] px-3.5 py-2 flex items-center gap-3 text-left hover:bg-[#fafafc] transition-colors cursor-pointer group"
+                      >
+                        <div
+                          className={`w-[15px] h-[15px] rounded-[4px] border flex items-center justify-center shrink-0 transition-colors ${
+                            enabled
+                              ? 'bg-[#4f46e5] border-[#4f46e5] text-white'
+                              : 'bg-white border-[#d4d4d8] text-transparent group-hover:border-[#b8b8c0]'
+                          }`}
+                        >
+                          <Check size={10} strokeWidth={3.2} />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[12px] truncate transition-colors ${enabled ? 'font-medium text-[#1c1c21]' : 'text-[#4b4b53]'}`}>
+                              {ext.name}
+                            </span>
+                            {ext.version && (
+                              <span className="font-mono text-[10px] text-[#a1a1aa] shrink-0">v{ext.version}</span>
+                            )}
+                          </div>
+                          {ext.description && (
+                            <div className="text-[11px] text-[#85858d] truncate mt-0.5">{ext.description}</div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="px-3.5 py-2.5 bg-[#fafafc] border-t border-[#ececf0] text-[11px] text-[#85858d]">
+                改动只对之后新开的会话生效；已运行的会话保持启动时的装载结果
               </div>
             </div>
           </div>

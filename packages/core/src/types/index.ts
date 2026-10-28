@@ -453,6 +453,8 @@ export interface OpenLoopSettings {
   prompts?: AgentPromptTemplates;
   storageRetention?: StorageRetentionSettings;
   qaAutomation?: QaAutomationSettings;
+  /** 会话进程装载的 pi 扩展包名单；未配置时用内置白名单，空数组表示只装 openLoop 桥接扩展 */
+  piExtensions?: string[];
   [key: string]: any;
 }
 
