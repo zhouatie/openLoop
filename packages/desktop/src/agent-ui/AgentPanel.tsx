@@ -567,6 +567,15 @@ const PROJECTS_KEY = 'openloop.agent.projects';
 const TEMP_PROJECT_KEY = '__temp__';
 /** 运行指示的熄灭延时：躲开 pi 一轮之间 turn_end → 下一轮 busy 的短暂间隙 */
 const RUNNING_IDLE_GRACE_MS = 700;
+/** 轮询间隔（毫秒）：磁盘列表 / 实时存活 / 外部写入检测 */
+const LIST_POLL_MS = 15000;
+const LIVE_POLL_MS = 2000;
+const STAMP_POLL_MS = 5000;
+
+/** 窗口在后台时不轮询：回到前台由下一次 tick 自动补上 */
+function pollAllowed(): boolean {
+  return typeof document === 'undefined' || document.visibilityState !== 'hidden';
+}
 
 /** pi 会话名可能是路径（任务会话用 workspace 命名），这类名字没有信息量，交回首条消息兜底 */
 function usableSessionTitle(title: string | undefined): string {
@@ -684,6 +693,8 @@ export function GlobalAgentPanel({
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   /** 刚发过消息、文件还没落盘的会话：id -> 占位行信息 */
   const pendingRows = useRef<Record<string, { title: string; cwd: string }>>({});
+  /** 首条消息落盘后的补刷计时器 */
+  const postSendTimer = useRef<number | null>(null);
   /** 历史快照对应的会话修改时间，用于发现外部写入 */
   const historyStampRef = useRef('');
   const attachments = useAttachments();
@@ -816,7 +827,9 @@ export function GlobalAgentPanel({
   useEffect(() => {
     if (!active) return;
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 15000);
+    const timer = window.setInterval(() => {
+      if (pollAllowed()) void refresh();
+    }, LIST_POLL_MS);
     return () => window.clearInterval(timer);
   }, [active, refresh]);
 
@@ -832,6 +845,8 @@ export function GlobalAgentPanel({
     setActiveId(id);
     setStreamKey(`agent_${id}`);
     setHistory(undefined);
+    // 上一个会话遗留的审批卡不能带到新会话
+    setUiRequest(null);
     // 离开新会话就撤掉占位行
     setDraft((prev) => (prev?.id === id ? prev : null));
     try {
@@ -934,10 +949,22 @@ export function GlobalAgentPanel({
         setSending(false);
         void refresh();
         // 首条消息落盘后补一次刷新，补上真实标题与时间
-        window.setTimeout(() => void refresh(), 1500);
+        if (postSendTimer.current !== null) window.clearTimeout(postSendTimer.current);
+        postSendTimer.current = window.setTimeout(() => {
+          postSendTimer.current = null;
+          void refresh();
+        }, 1500);
       }
     },
     [activeId, streamKey, sendMessage, refresh, attachments, applyRunning, cwd]
+  );
+
+  // 卸载时清掉未到期的补刷
+  useEffect(
+    () => () => {
+      if (postSendTimer.current !== null) window.clearTimeout(postSendTimer.current);
+    },
+    []
   );
 
   const keyword = query.trim().toLowerCase();
@@ -1076,19 +1103,21 @@ export function GlobalAgentPanel({
   useEffect(() => {
     if (!active) return;
     void applyLiveState();
-    const timer = window.setInterval(() => void applyLiveState(), 2000);
+    const timer = window.setInterval(() => {
+      if (pollAllowed()) void applyLiveState();
+    }, LIVE_POLL_MS);
     return () => window.clearInterval(timer);
   }, [active, applyLiveState]);
 
   // 当前会话被外部写入（同一会话在终端或客户端里继续）时重载历史，避免停在半轮的旧快照
+  const activePath = sessions.find((entry) => entry.id === activeId)?.path;
+  const activeRunning = Boolean(activeId && busyIds.includes(activeId));
   useEffect(() => {
-    if (!active || !activeId || busyIds.includes(activeId)) return;
-    const path = sessions.find((entry) => entry.id === activeId)?.path;
-    if (!path) return;
+    if (!active || !activeId || activeRunning || !activePath) return;
     let cancelled = false;
     const check = async () => {
       try {
-        const info = await api.statAgentFs(path);
+        const info = await api.statAgentFs(activePath);
         if (cancelled) return;
         const stamp = `${info.size}:${info.mtime}`;
         if (!historyStampRef.current) {
@@ -1108,12 +1137,15 @@ export function GlobalAgentPanel({
       }
     };
     void check();
-    const timer = window.setInterval(() => void check(), 5000);
+    const timer = window.setInterval(() => {
+      if (pollAllowed()) void check();
+    }, STAMP_POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [active, activeId, busyIds, sessions]);
+    // 只跟会话本身与运行态：列表每次轮询都会换数组，用 sessions 当依赖会让计时器被反复重建
+  }, [active, activeId, activeRunning, activePath]);
 
   // 运行指示跟随实时事件：一轮结束（agent_settled）就熄灭
   useEffect(() => {

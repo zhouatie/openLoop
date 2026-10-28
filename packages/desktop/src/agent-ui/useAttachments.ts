@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { TaskAttachment } from '@openloop/core/types';
 import { api } from '../services/api';
 import type { ComposerAttachmentItem } from './Composer';
@@ -84,9 +84,14 @@ export function useAttachments(): UseAttachmentsResult {
     });
   }, []);
 
-  const ready = items
-    .filter((item) => item.status === 'ready' && item.attachment)
-    .map((item) => item.attachment as TaskAttachment);
+  // 引用稳定：否则每次渲染都会让挂载方的发送回调重建
+  const ready = useMemo(
+    () =>
+      items
+        .filter((item) => item.status === 'ready' && item.attachment)
+        .map((item) => item.attachment as TaskAttachment),
+    [items]
+  );
 
   return {
     items,

@@ -86,6 +86,8 @@ interface MenuState {
 }
 
 const PERMISSION_ORDER: ComposerPermission[] = ['full', 'readonly', 'noshell'];
+/** @ 候选的本地防抖：每次按键都请求会让工作区文件列表接口排队 */
+const MENTION_DEBOUNCE_MS = 120;
 
 /** 输入卡：28px 圆角面板 + 底部控件行，交互保留 textarea（中文输入法最稳） */
 export const Composer = React.memo(function Composer({
@@ -139,9 +141,17 @@ export const Composer = React.memo(function Composer({
     onSend(trimmed);
   }, [value, disabled, busy, onSend]);
 
+  /** @ 候选的请求序号：连续输入时只采纳最后一次的结果，避免旧结果盖掉新候选 */
+  const mentionSeq = useRef(0);
+  const mentionTimer = useRef<number | null>(null);
+
   /** 斜杠指令与 @ 文件：按光标前的 token 决定候选菜单 */
   const syncSuggestions = useCallback(
     (text: string) => {
+      if (mentionTimer.current !== null) {
+        window.clearTimeout(mentionTimer.current);
+        mentionTimer.current = null;
+      }
       if (commands && commands.length > 0 && /^\/[^\s]*$/.test(text)) {
         const query = text.slice(1).toLowerCase();
         const matched = commands.filter((command) => command.name.toLowerCase().includes(query)).slice(0, 10);
@@ -164,32 +174,46 @@ export const Composer = React.memo(function Composer({
       const mention = /(?:^|\s)@([^\s]*)$/.exec(text);
       if (mention && onRequestMentions) {
         const query = mention[1];
-        void onRequestMentions(query)
-          .then((list) => {
-            setMenu(
-              list.length > 0
-                ? {
-                    kind: 'mention',
-                    items: list.slice(0, 14).map((item) => ({
-                      key: item.key,
-                      label: item.label,
-                      description: item.description,
-                      isDir: item.kind === 'dir',
-                      mentionKind: item.kind,
-                      group: item.kind === 'session' ? '会话' : '文件与文件夹',
-                    })),
-                    index: 0,
-                  }
-                : null
-            );
-          })
-          .catch(() => setMenu(null));
+        const seq = ++mentionSeq.current;
+        mentionTimer.current = window.setTimeout(() => {
+          mentionTimer.current = null;
+          void onRequestMentions(query)
+            .then((list) => {
+              if (seq !== mentionSeq.current) return;
+              setMenu(
+                list.length > 0
+                  ? {
+                      kind: 'mention',
+                      items: list.slice(0, 14).map((item) => ({
+                        key: item.key,
+                        label: item.label,
+                        description: item.description,
+                        isDir: item.kind === 'dir',
+                        mentionKind: item.kind,
+                        group: item.kind === 'session' ? '会话' : '文件与文件夹',
+                      })),
+                      index: 0,
+                    }
+                  : null
+              );
+            })
+            .catch(() => {
+              if (seq === mentionSeq.current) setMenu(null);
+            });
+        }, MENTION_DEBOUNCE_MS);
         return;
       }
 
       setMenu((prev) => (prev && (prev.kind === 'slash' || prev.kind === 'mention') ? null : prev));
     },
     [commands, onRequestMentions]
+  );
+
+  useEffect(
+    () => () => {
+      if (mentionTimer.current !== null) window.clearTimeout(mentionTimer.current);
+    },
+    []
   );
 
   const applyMenuChoice = useCallback(

@@ -76,6 +76,25 @@ const SEARCH_WINDOW_BYTES = 1024 * 1024;
 const SNIPPET_CHARS = 120;
 /** 首条用户消息截断长度 */
 const TITLE_MAX_CHARS = 120;
+/** 文件 IO 并发上限：扫描与搜索都是 IO 密集，串行会让列表接口随会话数变慢 */
+const IO_CONCURRENCY = 16;
+/** 全文搜索每批并行读取的文件数：到达上限就停，避免多读无关会话 */
+const SEARCH_BATCH = 8;
+
+/** 按并发上限映射：保持结果顺序，同时限制在途请求 */
+async function mapLimit<T, R>(items: T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await task(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 function textOfContent(content: any): string {
   if (typeof content === 'string') return content;
@@ -168,6 +187,10 @@ export class PiSessionIndex {
     if (idOrPath.endsWith('.jsonl') && fs.existsSync(idOrPath)) {
       return this.describeFile(idOrPath);
     }
+    // 先查已解析的缓存：切会话不该重扫整个目录，会话列表打开后这里几乎总是命中
+    for (const entry of this.cache.values()) {
+      if (entry.summary.id === idOrPath) return entry.summary;
+    }
     const all = await this.list();
     return all.find((item) => item.id === idOrPath);
   }
@@ -201,45 +224,54 @@ export class PiSessionIndex {
     const maxFiles = options?.maxFiles && options.maxFiles > 0 ? options.maxFiles : 160;
     const summaries = await this.list();
     const hits: PiSessionSearchHit[] = [];
+    const candidates = summaries.slice(0, maxFiles);
 
-    for (const summary of summaries.slice(0, maxFiles)) {
-      if (hits.length >= limit) break;
-      let window: { text: string; fromStart: boolean };
-      try {
-        window = await readFileTail(summary.path, SEARCH_WINDOW_BYTES);
-      } catch (_) {
-        continue;
-      }
-      const lines = window.text.split('\n');
-      if (!window.fromStart) lines.shift();
-      let matches = 0;
-      let snippet = '';
-      for (const line of lines) {
-        if (!line || !line.toLowerCase().includes(keyword)) continue;
-        try {
-          const entry = JSON.parse(line);
-          const message = entry?.message;
-          if (!message) continue;
-          const text =
-            message.role === 'user' || message.role === 'assistant'
-              ? textOfContent(message.content)
-              : '';
-          if (!text || !text.toLowerCase().includes(keyword)) continue;
-          matches += 1;
-          if (!snippet) snippet = snippetAround(text, keyword);
-        } catch (_) {
-          // 非 JSON 行或半行直接跳过
-        }
-      }
-      if (matches > 0) {
-        hits.push({
-          id: summary.id,
-          path: summary.path,
-          cwd: summary.cwd,
-          modifiedAt: summary.modifiedAt,
-          snippet: snippet || query,
-          matches,
-        });
+    for (let start = 0; start < candidates.length && hits.length < limit; start += SEARCH_BATCH) {
+      const batch = candidates.slice(start, start + SEARCH_BATCH);
+      const found = await Promise.all(
+        batch.map(async (summary): Promise<PiSessionSearchHit | undefined> => {
+          let window: { text: string; fromStart: boolean };
+          try {
+            window = await readFileTail(summary.path, SEARCH_WINDOW_BYTES);
+          } catch (_) {
+            return undefined;
+          }
+          const lines = window.text.split('\n');
+          if (!window.fromStart) lines.shift();
+          let matches = 0;
+          let snippet = '';
+          for (const line of lines) {
+            if (!line || !line.toLowerCase().includes(keyword)) continue;
+            try {
+              const entry = JSON.parse(line);
+              const message = entry?.message;
+              if (!message) continue;
+              const text =
+                message.role === 'user' || message.role === 'assistant'
+                  ? textOfContent(message.content)
+                  : '';
+              if (!text || !text.toLowerCase().includes(keyword)) continue;
+              matches += 1;
+              if (!snippet) snippet = snippetAround(text, keyword);
+            } catch (_) {
+              // 非 JSON 行或半行直接跳过
+            }
+          }
+          if (matches === 0) return undefined;
+          return {
+            id: summary.id,
+            path: summary.path,
+            cwd: summary.cwd,
+            modifiedAt: summary.modifiedAt,
+            snippet: snippet || query,
+            matches,
+          };
+        })
+      );
+      for (const hit of found) {
+        if (!hit) continue;
+        if (hits.length >= limit) break;
+        hits.push(hit);
       }
     }
 
@@ -253,19 +285,9 @@ export class PiSessionIndex {
   }
 
   private async scan(): Promise<PiSessionSummary[]> {
-    const summaries: PiSessionSummary[] = [];
-    let dirs: string[] = [];
+    let rootEntries: fs.Dirent[];
     try {
-      const entries = await fsp.readdir(this.rootDir, { withFileTypes: true });
-      dirs = entries.filter((entry) => entry.isDirectory()).map((entry) => path.join(this.rootDir, entry.name));
-      // 兼容直接放在根目录下的会话文件
-      const rootFiles = entries
-        .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
-        .map((entry) => path.join(this.rootDir, entry.name));
-      for (const file of rootFiles) {
-        const summary = await this.describeFile(file);
-        if (summary) summaries.push(summary);
-      }
+      rootEntries = await fsp.readdir(this.rootDir, { withFileTypes: true });
     } catch (err: any) {
       if (err?.code !== 'ENOENT') {
         logger.warn(`读取 pi 会话根目录失败: ${err?.message || err}`);
@@ -273,18 +295,30 @@ export class PiSessionIndex {
       return [];
     }
 
-    for (const dir of dirs) {
-      let files: string[];
-      try {
-        files = (await fsp.readdir(dir)).filter((name) => name.endsWith('.jsonl'));
-      } catch (_) {
-        continue;
-      }
-      for (const name of files) {
-        const summary = await this.describeFile(path.join(dir, name));
-        if (summary) summaries.push(summary);
-      }
-    }
+    // 兼容直接放在根目录下的会话文件
+    const files = rootEntries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
+      .map((entry) => path.join(this.rootDir, entry.name));
+
+    const dirs = rootEntries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(this.rootDir, entry.name));
+
+    const nested = await Promise.all(
+      dirs.map(async (dir) => {
+        try {
+          return (await fsp.readdir(dir))
+            .filter((name) => name.endsWith('.jsonl'))
+            .map((name) => path.join(dir, name));
+        } catch (_) {
+          return [];
+        }
+      })
+    );
+    for (const list of nested) files.push(...list);
+
+    const described = await mapLimit(files, IO_CONCURRENCY, (file) => this.describeFile(file));
+    const summaries = described.filter((item): item is PiSessionSummary => item !== undefined);
 
     // 清理已删除文件的缓存
     const alive = new Set(summaries.map((item) => item.path));

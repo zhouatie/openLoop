@@ -248,7 +248,13 @@ export const WorkspaceDock = memo(function WorkspaceDock({
   target,
 }: WorkspaceDockProps) {
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  /** 终端首次打开后才挂载，之后切页签只隐藏不卸载：shell 与回滚不会丢 */
+  const [terminalMounted, setTerminalMounted] = useState(activeTab === 'terminal');
   const root = cwd || '';
+
+  useEffect(() => {
+    if (activeTab === 'terminal') setTerminalMounted(true);
+  }, [activeTab]);
 
   // 路径可能来自消息里的相对引用，统一交给后端按工作区解析
   const loadPath = useCallback(
@@ -309,7 +315,11 @@ export const WorkspaceDock = memo(function WorkspaceDock({
 
       <div className={styles.dockBody}>
         {activeTab === 'files' && <FileTree root={root} activePath={preview?.path} onPick={openFile} />}
-        {activeTab === 'terminal' && <TerminalView cwd={root} />}
+        {terminalMounted && (
+          <div className={`${styles.pane} ${activeTab === 'terminal' ? '' : styles.paneHidden}`}>
+            <TerminalView cwd={root} />
+          </div>
+        )}
         {activeTab === 'preview' && <FilePreview target={preview} cwd={root} />}
       </div>
     </aside>
