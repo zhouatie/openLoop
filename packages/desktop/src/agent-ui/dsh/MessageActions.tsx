@@ -4,7 +4,6 @@
 import { memo, useCallback, useId, useState } from 'react';
 import type { SessionUsage } from '@openloop/core/types';
 import { IconCopy, IconFork, IconRefresh } from '../icons';
-import { TextShimmer } from './TextShimmer';
 import { TurnUsagePanel } from './TurnUsagePanel';
 import { Tooltip } from './Tooltip';
 import { writeClipboard } from './clipboard';
@@ -24,9 +23,8 @@ export interface MessageActionsProps {
   timestamp?: number;
   usage?: SessionUsage;
   model?: string;
-  streaming?: boolean;
   onFork?: (() => void) | undefined;
-  /** 分叉入口存在但当前不可用（轮次还在跑，或这条还没有落盘条目） */
+  /** 分叉入口存在但当前不可用（这条还没有落盘条目） */
   forkUnavailable?: boolean;
   /** 正在为这条消息创建分支：图标换成转圈，点击不再触发 */
   forkPending?: boolean;
@@ -39,7 +37,6 @@ export const MessageActions = memo(function MessageActions({
   timestamp,
   usage,
   model,
-  streaming,
   onFork,
   forkUnavailable = false,
   forkPending = false,
@@ -96,7 +93,7 @@ export const MessageActions = memo(function MessageActions({
       {showFork && forkUnavailable && (
         <span id={forkReasonId} className={css.visuallyHidden}>{FORK_UNAVAILABLE}</span>
       )}
-      {onRegenerate && !streaming && (
+      {onRegenerate && (
         <Tooltip label="重新生成" side="bottom">
           <button type="button" className={css.action} aria-label="重新生成" onClick={onRegenerate}>
             <IconRefresh size={14} />
@@ -105,7 +102,6 @@ export const MessageActions = memo(function MessageActions({
       )}
       <span className={css.end}>
         {usage && (usage.totalTokens || 0) > 0 && <TurnUsagePanel usage={usage} model={model} />}
-        {streaming && <TextShimmer active className={css.streaming}>生成中</TextShimmer>}
         {time && <span className={css.time}>{time}</span>}
       </span>
     </div>

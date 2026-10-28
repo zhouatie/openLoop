@@ -553,14 +553,16 @@ export const AgentChatView = React.memo(function AgentChatView({
                   {block.steps.map((index) => {
                     const isTail = index === block.tail;
                     // 分叉锚点是这条回答本身：新会话保留到这条为止，源会话不动。
-                    // 运行中或该行还没有落盘条目时不隐藏按钮，只置灰并说明原因（与 DSH 一致）。
+                    // 该行还没有落盘条目时不隐藏按钮，只置灰并说明原因（与 DSH 一致）。
                     const forkEntryId = isTail ? shown[index]?.entryId : undefined;
-                    const canFork = Boolean(forkEntryId) && !isBusy && Boolean(onFork);
+                    // 运行中整行操作条不出现（DSH 的轮末操作条只在轮次收尾后渲染）
+                    const canFork = Boolean(forkEntryId) && Boolean(onFork);
                     return (
                       <MessageRow
                         key={`m-${index}`}
                         message={shown[index]}
                         compact={!isTail}
+                        running={isBusy && isLiveTurn && isTail}
                         onRegenerate={isTail && isLiveTurn && onRegenerate ? onRegenerate : undefined}
                         onFork={
                           isTail && canFork && forkEntryId && onFork
