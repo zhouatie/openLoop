@@ -1357,6 +1357,14 @@ export class PiRpcSessionManager extends EventEmitter {
     return undefined;
   }
 
+  /** 按 pi 会话 id 取仍在运行的流水线会话：全局面板接管这类会话时复用同一个进程 */
+  public findLiveBySessionId(sessionId: string): PiRpcSessionInstance | undefined {
+    for (const session of this.sessions.values()) {
+      if (session.sessionId === sessionId && session.active) return session;
+    }
+    return undefined;
+  }
+
   /**
    * 将模型 / 思考强度变更同步到所有活跃会话
    * 并行下发，不重启进程，不阻塞设置保存
