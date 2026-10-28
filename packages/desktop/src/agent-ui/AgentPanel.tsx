@@ -14,6 +14,7 @@ import { WorkspaceDock, type DockRequest, type DockTab } from './WorkspaceDock';
 import { OpenFileContext } from './open-file';
 import { IconClose, IconFork, IconMinimize, IconPanelRight } from './icons';
 import { BrandLogo } from '../components/BrandLogo';
+import { useDirectoryPicker } from '../components/useDirectoryPicker';
 import { ApprovalCard, type AgentUiRequest } from './ApprovalCard';
 import { ShortcutSheet } from './ShortcutSheet';
 import { useShortcutBindings } from '../hooks/useShortcutBindings';
@@ -639,12 +640,16 @@ interface ProjectGroup {
   createdAt?: string;
   order?: number;
   pinned?: boolean;
+  /** 只读组：已删除工作区的会话落在这里 */
+  readonly?: boolean;
 }
 
 const COLLAPSED_KEY = 'openloop.agent.collapsedProjects';
 const PROJECTS_KEY = 'openloop.agent.projects';
 
 const TEMP_PROJECT_KEY = '__temp__';
+/** 已删除工作区的会话归入的只读组 */
+const UNGROUPED_KEY = '__ungrouped__';
 /** 运行指示的熄灭延时：躲开 pi 一轮之间 turn_end → 下一轮 busy 的短暂间隙 */
 const RUNNING_IDLE_GRACE_MS = 700;
 /**
@@ -727,6 +732,7 @@ export function GlobalAgentPanel({
   active = true,
 }: GlobalAgentPanelProps) {
   const initialSessionId = sessionRequest?.id || null;
+  const { pick: pickDirectory, dialog: directoryDialog } = useDirectoryPicker();
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [liveIds, setLiveIds] = useState<string[]>([]);
   const [busyIds, setBusyIds] = useState<string[]>([]);
@@ -1045,13 +1051,19 @@ export function GlobalAgentPanel({
   }, []);
 
   const handleAddProject = useCallback(async () => {
-    // 系统目录选择：Electron 走原生 IPC，Web 走 Core 服务系统调用
-    const picked = await api.selectDirectory({ defaultPath: cwd || undefined });
+    // 桌面端调用系统原生面板，浏览器调试退回应用内目录面板
+    const picked = await pickDirectory(cwd || undefined);
     if (!picked) return;
     if (import.meta.env?.DEV) console.log('[AgentPanel] 添加工作区:', picked);
+    // 同名目录曾被删除过就恢复工作区行（对齐 DSH：添加即重新建立工作区）
+    const projectKey = normalizeProjectCwd(picked);
+    if (projectMeta[projectKey]?.hidden) {
+      await api.setAgentProjectMeta(projectKey, { hidden: false }).catch(() => null);
+      await refreshProjectMeta();
+    }
     // 对齐 DSH：添加项目即在该项目里开一段新会话，右侧同时切到空白会话
     startNewSession(picked);
-  }, [cwd, startNewSession]);
+  }, [cwd, startNewSession, pickDirectory, projectMeta, refreshProjectMeta]);
 
   const handleToggleGroup = useCallback((key: string) => {
     setCollapsed((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
@@ -1154,8 +1166,15 @@ export function GlobalAgentPanel({
     };
 
     for (const projectCwd of extraProjects) ensure(projectCwd);
+    // 已删除的工作区：行从列表移除，它的会话落到末尾的「未分组」（对齐 DSH 的删除语义）
+    const orphaned: SessionListItem[] = [];
     for (const session of filteredSessions) {
-      const group = ensure(normalizeProjectCwd(session.cwd || ''));
+      const projectKey = normalizeProjectCwd(session.cwd || '');
+      if (projectMeta[projectKey]?.hidden) {
+        orphaned.push(session);
+        continue;
+      }
+      const group = ensure(projectKey);
       group.sessions.push(session);
       const time = Date.parse(session.modifiedAt) || 0;
       if (time > group.lastModified) group.lastModified = time;
@@ -1165,7 +1184,7 @@ export function GlobalAgentPanel({
       }
     }
 
-    return [...map.values()]
+    const sorted = [...map.values()]
       .filter((group) => !projectMeta[group.key]?.hidden)
       .map((group) => ({
         ...group,
@@ -1180,6 +1199,21 @@ export function GlobalAgentPanel({
         if (b.order !== undefined) return 1;
         return b.lastModified - a.lastModified;
       });
+
+    if (orphaned.length === 0) return sorted;
+    return [
+      ...sorted,
+      {
+        key: UNGROUPED_KEY,
+        label: '未分组',
+        cwd: '',
+        readonly: true,
+        lastModified: Math.max(0, ...orphaned.map((item) => Date.parse(item.modifiedAt) || 0)),
+        sessions: orphaned.sort(
+          (a, b) => (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0)
+        ),
+      },
+    ];
   }, [filteredSessions, extraProjects, projectMeta]);
 
   // 会话与工作区元数据操作
@@ -1372,8 +1406,9 @@ export function GlobalAgentPanel({
     [refreshProjectMeta]
   );
 
-  const hideProject = useCallback(
+  const deleteProject = useCallback(
     async (cwdKey: string) => {
+      // 对齐 DSH：只从工作区列表移除，文件夹与会话都保留，会话落到「未分组」
       await api.setAgentProjectMeta(cwdKey, { hidden: true }).catch(() => null);
       await refreshProjectMeta();
     },
@@ -1797,7 +1832,7 @@ export function GlobalAgentPanel({
           onPinSession={(id, pinned) => void pinSession(id, pinned)}
           onDeleteSession={(id) => void deleteSession(id)}
           onRenameProject={(key, title) => void renameProject(key, title)}
-          onHideProject={(key) => void hideProject(key)}
+          onDeleteProject={(key) => void deleteProject(key)}
           onPinProject={(key, pinned) => void pinProject(key, pinned)}
           onReorderProjects={(keys) => void reorderProjects(keys)}
           onSearchContent={(text) => api.searchAgentSessions(text, 20).then((data) => data.results)}
@@ -1890,6 +1925,8 @@ export function GlobalAgentPanel({
           emptyHint="会话直接跑在本机 pi 上，拥有读写文件与执行命令的能力。"
         />
       </div>
+
+      {directoryDialog}
     </div>
     </OpenFileContext.Provider>
   );

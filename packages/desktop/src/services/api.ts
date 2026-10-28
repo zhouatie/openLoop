@@ -1170,6 +1170,15 @@ export class DesktopApiService {
     return requestJson(`${BASE_URL}/api/agent/fs/list?path=${encodeURIComponent(path)}`);
   }
 
+  /** 在浏览面板里新建子目录 */
+  async createAgentFsDir(parent: string, name: string): Promise<{ path: string }> {
+    return requestJson(`${BASE_URL}/api/agent/fs/mkdir`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent, name }),
+    });
+  }
+
   async readAgentFsFile(path: string, base?: string): Promise<{
     path: string;
     content: string;

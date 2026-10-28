@@ -9,39 +9,13 @@ import {
   Search,
   Copy,
 } from 'lucide-react';
-import { api } from '../services/api';
 import { HighlightMatch } from './HighlightMatch';
+import { formatCompactPath, getWorkspaceDirName } from './workspace-path';
+import { useDirectoryPicker } from './useDirectoryPicker';
 
 export const STORAGE_KEY_LAST_WORKSPACE = 'openloop_last_used_workspace';
 export const STORAGE_KEY_RECENT_WORKSPACES = 'openloop_recent_workspaces';
 const MAX_RECENT_COUNT = 30;
-
-/**
- * 格式化精炼路径，例如将 /Users/username/My/project 显示为 ~/My/project
- */
-export function formatCompactPath(fullPath: string): string {
-  if (!fullPath) return '';
-  // 替换 macOS / Linux 用户主目录前缀
-  const macHomeMatch = fullPath.match(/^\/Users\/[^/]+(\/.*)$/);
-  if (macHomeMatch) {
-    return `~${macHomeMatch[1]}`;
-  }
-  const linuxHomeMatch = fullPath.match(/^\/home\/[^/]+(\/.*)$/);
-  if (linuxHomeMatch) {
-    return `~${linuxHomeMatch[1]}`;
-  }
-  return fullPath;
-}
-
-/**
- * 获取路径最后一级目录名作为项目名
- */
-export function getWorkspaceDirName(fullPath: string): string {
-  if (!fullPath) return '';
-  const trimmed = fullPath.replace(/[/\\]+$/, '');
-  const parts = trimmed.split(/[/\\]/);
-  return parts[parts.length - 1] || fullPath;
-}
 
 interface WorkspacePickerProps {
   value: string;
@@ -53,9 +27,10 @@ interface WorkspacePickerProps {
 export const WorkspacePicker: React.FC<WorkspacePickerProps> = ({
   value,
   onChange,
-  placeholder = '选择工程工作区 (点击下拉或右侧打开访达)...',
+  placeholder = '选择工程工作区 (点击下拉或右侧浏览目录)...',
   className = '',
 }) => {
+  const { pick, dialog } = useDirectoryPicker();
   const [isOpen, setIsOpen] = useState(false);
   const [isBrowsing, setIsBrowsing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -248,32 +223,29 @@ export const WorkspacePicker: React.FC<WorkspacePickerProps> = ({
     }
   };
 
-  // 唤起系统访达 / 文件管理器目录选择对话框
-  const handleBrowseNative = async (e?: React.MouseEvent) => {
+  // 唤起目录选择：桌面端走系统原生面板，浏览器调试走应用内目录面板
+  const handleBrowse = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (isBrowsing) return;
 
     setIsBrowsing(true);
     setIsOpen(false);
-    if (import.meta.env?.DEV) {
-      console.log('[WorkspacePicker] 准备唤起系统文件管理器 (访达) 选择目录...');
-    }
 
     try {
-      const chosen = await api.selectDirectory({ defaultPath: value || undefined });
+      const chosen = await pick(value || undefined);
       if (chosen) {
         onChange(chosen);
         recordRecentWorkspace(chosen);
         if (import.meta.env?.DEV) {
-          console.log('[WorkspacePicker] 访达选择成功并关联:', chosen);
+          console.log('[WorkspacePicker] 目录选择成功并关联:', chosen);
         }
       } else {
         if (import.meta.env?.DEV) {
-          console.log('[WorkspacePicker] 用户取消了访达目录选择');
+          console.log('[WorkspacePicker] 用户取消了目录选择');
         }
       }
     } catch (err) {
-      console.error('[WorkspacePicker] 唤起系统访达异常:', err);
+      console.error('[WorkspacePicker] 目录选择异常:', err);
     } finally {
       setIsBrowsing(false);
     }
@@ -362,21 +334,21 @@ export const WorkspacePicker: React.FC<WorkspacePickerProps> = ({
           {/* 分隔线 */}
           <div className="w-[1px] h-3.5 bg-[#e3e3e8] mx-0.5" />
 
-          {/* 打开访达原生文件管理器 */}
+          {/* 浏览目录：桌面端是系统面板，浏览器调试是应用内面板 */}
           <button
             type="button"
             disabled={isBrowsing}
-            onClick={handleBrowseNative}
+            onClick={handleBrowse}
             className="h-[22px] px-1.5 rounded-[4px] text-[#63636b] hover:text-[#4f46e5] hover:bg-[#eeedfd] flex items-center gap-1 text-[11px] font-medium transition-colors disabled:opacity-50"
-            title="打开系统访达选择目录..."
+            title="浏览并选择目录..."
           >
             <FolderOpen size={12.5} className="text-[#4f46e5]" />
-            <span className="text-[10.5px]">访达</span>
+            <span className="text-[10.5px]">浏览</span>
           </button>
         </div>
       </div>
 
-      {/* 下拉浮层：支持搜索、全路径即时巡视、键盘快捷操作与系统访达选择 */}
+      {/* 下拉浮层：支持搜索、全路径即时巡视、键盘快捷操作与目录浏览 */}
       {isOpen && (
         <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-white border border-[#e3e3e8] rounded-[8px] shadow-[0_12px_30px_rgba(20,22,30,0.12)] z-50 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
           {/* 顶部搜索框 */}
@@ -438,7 +410,7 @@ export const WorkspacePicker: React.FC<WorkspacePickerProps> = ({
               <div className="py-4 text-center text-[11px] text-[#85858d]">
                 {searchQuery.trim()
                   ? '未找到匹配的工程目录'
-                  : '暂无历史记录，点击下方从访达中选择'}
+                  : '暂无历史记录，点击下方浏览目录'}
               </div>
             ) : (
               filteredWorkspaces.map((wsPath, idx) => {
@@ -528,21 +500,23 @@ export const WorkspacePicker: React.FC<WorkspacePickerProps> = ({
             )}
           </div>
 
-          {/* 底部原生系统访达选择行 */}
+          {/* 底部目录浏览入口 */}
           <div className="pt-1 border-t border-[#ececf0] px-1 pb-1 bg-white">
             <div
-              onClick={handleBrowseNative}
+              onClick={handleBrowse}
               className="px-2 py-1.5 rounded-[5px] text-[11px] font-medium text-[#4f46e5] hover:bg-[#eeedfd] cursor-pointer flex items-center justify-between transition-colors"
             >
               <span className="flex items-center gap-1.5">
                 <FolderOpen size={12} />
-                <span>在系统访达中选择新工程目录...</span>
+                <span>浏览并选择新的工程目录...</span>
               </span>
               <span className="text-[10px] text-[#85858d]">浏览</span>
             </div>
           </div>
         </div>
       )}
+
+      {dialog}
     </div>
   );
 };

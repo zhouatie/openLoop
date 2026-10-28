@@ -35,7 +35,7 @@ import {
 import { agentSessionHost, GLOBAL_AGENT_PREFIX, type AgentPermissionPreset } from '../agent/agent-session-host';
 import { agentSessionMeta, moveSessionFileToTrash } from '../agent/session-meta';
 import { resolveSessionTitle } from '../agent/title-text';
-import { listDirectory, readTextFile, statFile } from '../agent/fs-browser';
+import { createDirectory, listDirectory, readTextFile, statFile } from '../agent/fs-browser';
 import { terminalHost } from '../agent/terminal-host';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
@@ -890,6 +890,16 @@ export class OpenLoopServer {
           return this.sendJson(res, 200, listDirectory(target), reqMeta);
         } catch (err: any) {
           return this.sendJson(res, 400, { error: err?.message || '无法读取目录' }, reqMeta);
+        }
+      }
+
+      if (pathname === '/api/agent/fs/mkdir' && method === 'POST') {
+        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+        try {
+          const created = createDirectory(String(body?.parent || ''), String(body?.name || ''));
+          return this.sendJson(res, 200, { path: created }, reqMeta);
+        } catch (err: any) {
+          return this.sendJson(res, 400, { error: err?.message || '无法新建目录' }, reqMeta);
         }
       }
 
