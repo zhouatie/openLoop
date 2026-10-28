@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TaskAttachment } from '@openloop/core/types';
 import { api } from '../services/api';
 import type { ComposerAttachmentItem } from './Composer';
@@ -21,8 +21,9 @@ let seq = 0;
 /**
  * 附件管线：只负责「选文件 → 上传 → 得到可用附件」。
  * 由挂载方决定是否启用、发送时是否带上，面板本身不感知上传策略。
+ * scope 变化（切换会话）即清空，上一段会话的图不会留到下一段。
  */
-export function useAttachments(): UseAttachmentsResult {
+export function useAttachments(scope?: string): UseAttachmentsResult {
   const [items, setItems] = useState<PendingAttachment[]>([]);
 
   const add = useCallback((files: File[]) => {
@@ -83,6 +84,16 @@ export function useAttachments(): UseAttachmentsResult {
       return [];
     });
   }, []);
+
+  const scopeRef = useRef(scope);
+  useEffect(() => {
+    if (scopeRef.current === scope) return;
+    scopeRef.current = scope;
+    if (import.meta.env?.DEV) {
+      console.log('[AgentUI:Attachments] 切换会话，清空待发附件:', scope);
+    }
+    clear();
+  }, [scope, clear]);
 
   // 引用稳定：否则每次渲染都会让挂载方的发送回调重建
   const ready = useMemo(

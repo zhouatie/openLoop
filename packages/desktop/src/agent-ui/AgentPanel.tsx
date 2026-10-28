@@ -451,7 +451,7 @@ export function TaskAgentPanel({
   const [commands, setCommands] = useState<ComposerCommand[]>([]);
   /** 回填输入框：seq 变化即生效 */
   const [draftFill, setDraftFill] = useState<{ text: string; seq: number }>();
-  const attachments = useAttachments();
+  const attachments = useAttachments(taskId);
 
   /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
   const openDock = useCallback((kind: DockTab, path?: string) => {
@@ -788,7 +788,7 @@ export function GlobalAgentPanel({
   const postSendTimer = useRef<number | null>(null);
   /** 历史快照对应的会话与修改时间：切换会话时旧的戳不能拿来比，否则会白读一次整段历史 */
   const historyStampRef = useRef<{ id: string; stamp: string }>({ id: '', stamp: '' });
-  const attachments = useAttachments();
+  const attachments = useAttachments(activeId || '');
 
   /**
    * 预热槽：pi 冷启动要十几秒（装载扩展、扫目录），选中会话就先把进程拉起来，
