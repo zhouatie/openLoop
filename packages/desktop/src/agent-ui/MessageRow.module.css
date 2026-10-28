@@ -61,6 +61,22 @@
   overflow-wrap: anywhere;
 }
 
+/* 本地回显：未被 Agent 采纳前用虚线边框与浅底，与已生效的气泡区分 */
+.userBubblePending {
+  background: transparent;
+  border: 0.5px dashed var(--dsw-alias-border-l2);
+}
+
+/* 回显状态：与操作条同高，进出时不会让下方内容跳动 */
+.pendingLabel {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-caption);
+}
+
 .attachments {
   display: flex;
   flex-wrap: wrap;

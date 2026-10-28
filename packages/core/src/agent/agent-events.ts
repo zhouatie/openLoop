@@ -1,4 +1,5 @@
 import type {
+  PendingUserInput,
   SessionChatMessage,
   SessionUsage,
   TaskSessionState,
@@ -19,6 +20,7 @@ export type AgentStreamEvent =
   | AgentMessageDeltaEvent
   | AgentMessagePatchEvent
   | AgentToolEvent
+  | AgentPendingEvent
   | AgentStatusEvent;
 
 export interface AgentSnapshotEvent {
@@ -55,6 +57,13 @@ export interface AgentToolEvent {
   taskId: string;
   messageId: string;
   tool: ToolExecutionRecord;
+}
+
+/** 本地回显层变更：已提交、等待 Agent 采纳的用户输入 */
+export interface AgentPendingEvent {
+  kind: 'pending';
+  taskId: string;
+  pendingInputs: PendingUserInput[];
 }
 
 export interface AgentStatusEvent {
@@ -213,6 +222,10 @@ export function applyAgentEvent(
 
     case 'status': {
       return { ...state, ...event.patch };
+    }
+
+    case 'pending': {
+      return { ...state, pendingInputs: event.pendingInputs };
     }
 
     default:

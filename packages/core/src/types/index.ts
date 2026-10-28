@@ -164,6 +164,19 @@ export interface SessionChatMessage {
   entryId?: string;
 }
 
+/**
+ * 已提交但尚未被 Agent 采纳的用户输入
+ * 只存在于本地回显层，不进会话流；Agent 回显同一条消息时由会话流接管。
+ */
+export interface PendingUserInput {
+  id: string;
+  content: string;
+  attachments?: TaskAttachment[];
+  /** turn=等待新轮开始，steering=等待插入当前轮 */
+  placement: 'turn' | 'steering';
+  createdAt: number;
+}
+
 export interface TaskSessionState {
   taskId: string;
   active: boolean;
@@ -176,6 +189,8 @@ export interface TaskSessionState {
   /** 上一轮从开始到结束的用时（毫秒） */
   lastTurnDurationMs?: number;
   messages: SessionChatMessage[];
+  /** 已提交、等待 Agent 采纳的用户输入（本地回显，不在 messages 中） */
+  pendingInputs?: PendingUserInput[];
   agentName?: string;
   model?: string;
   pendingModel?: string; // 待生效模型（运行时无法立即切换时暂存）

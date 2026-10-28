@@ -2518,6 +2518,7 @@ ${existingSubSummary}
         const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
         if (rpcSession) {
           rpcSession.messages = [];
+          rpcSession.clearPendingInputs();
         }
 
         this.broadcastTaskUpdate(task);

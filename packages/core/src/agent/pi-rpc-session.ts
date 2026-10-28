@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import os from 'os';
 import path from 'path';
 import {
+  PendingUserInput,
   SessionChatMessage,
   ToolExecutionRecord,
   TaskSessionState,
@@ -133,6 +134,8 @@ export class PiRpcSessionInstance extends EventEmitter {
   private onEventCallback?: (event: AgentStreamEvent) => void;
   private onFinishedCallback?: (error?: string) => void;
   private currentAssistantMessage: SessionChatMessage | null = null;
+  /** 本地回显层：已提交、等待 pi 采纳的用户输入 */
+  private pendingInputs: PendingUserInput[] = [];
   private initialPromptSent = false;
   private executionCompleted = false;
   private awaitCompletionMarker: boolean;
@@ -246,6 +249,7 @@ export class PiRpcSessionInstance extends EventEmitter {
       logger.info(`Pi RPC 进程退出，退出码: ${code}`, undefined, { taskId: this.taskId });
       this.active = false;
       this.isBusy = false;
+      this.clearPendingInputs();
       this.finishTurn();
       this.emitStatus({ active: false, isBusy: false, turnStartedAt: this.turnStartedAt });
       this.notifyUpdate(true);
@@ -275,6 +279,57 @@ export class PiRpcSessionInstance extends EventEmitter {
         });
       }
     }, 400);
+  }
+
+  /**
+   * 登记本地回显：气泡立即出现，但只属于回显层，不进会话流
+   * 会话流只由 pi 的 message_start 驱动，两边不会重复。
+   */
+  private queuePendingInput(
+    content: string,
+    attachments: TaskAttachment[] | undefined,
+    placement: PendingUserInput['placement']
+  ) {
+    if (!content.trim()) return;
+    logger.debug(`登记本地回显 (${placement}): "${content.slice(0, 40)}"`, undefined, { taskId: this.taskId });
+    this.pendingInputs = [
+      ...this.pendingInputs,
+      {
+        id: `pending_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        content,
+        attachments: attachments && attachments.length > 0 ? attachments : undefined,
+        placement,
+        createdAt: Date.now(),
+      },
+    ];
+    this.emitPending();
+  }
+
+  /**
+   * pi 采纳某条输入时取出对应的本地回显
+   * 回显文本可能追加【用户随附参考图片】说明，所以按前缀匹配。
+   */
+  private takePendingInput(content: string): PendingUserInput | null {
+    if (!content) return null;
+    const index = this.pendingInputs.findIndex(
+      (pending) => content === pending.content || content.startsWith(pending.content)
+    );
+    if (index < 0) return null;
+    const taken = this.pendingInputs[index];
+    this.pendingInputs = this.pendingInputs.filter((_, i) => i !== index);
+    logger.debug(`本地回显已被 Agent 采纳: "${content.slice(0, 40)}"`, undefined, { taskId: this.taskId });
+    return taken;
+  }
+
+  /** 清空本地回显层（采纳、中止或会话被清空时调用） */
+  public clearPendingInputs() {
+    if (this.pendingInputs.length === 0) return;
+    this.pendingInputs = [];
+    this.emitPending();
+  }
+
+  private emitPending() {
+    this.emitEvent({ kind: 'pending', taskId: this.taskId, pendingInputs: [...this.pendingInputs] });
   }
 
   /** 记录本轮开始时间；一次用户提交可能含多个 turn（工具调用），只在首个 turn 定时 */
@@ -389,31 +444,22 @@ export class PiRpcSessionInstance extends EventEmitter {
             ? msg.content.map((c: any) => c.text || '').join('')
             : String(msg.content || '');
 
-          // 避免重复推入相同的 user 消息
-          // 当通过 sendPrompt / steer 发送时，已在前置乐观推入 messages（并包含 attachments 结构化数据）
-          // Pi RPC 进程回调的 userText 可能会追加【用户随附参考图片】说明
-          const lastMsg = this.messages[this.messages.length - 1];
-          const isAlreadyTracked =
-            lastMsg &&
-            lastMsg.role === 'user' &&
-            (lastMsg.content === userText ||
-              (Boolean(lastMsg.content) && userText.startsWith(lastMsg.content)) ||
-              (Boolean(lastMsg.attachments && lastMsg.attachments.length > 0) &&
-                userText.includes('【用户随附参考图片】')));
+          // pi 采纳该输入：本地回显退出，会话流接管（单源，不会重复）
+          const taken = this.takePendingInput(userText);
 
-          if (!isAlreadyTracked && (!lastMsg || lastMsg.role !== 'user')) {
-            const userMessage: SessionChatMessage = {
-              id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-              role: 'user',
-              content: userText,
-              timestamp: Date.now(),
-              turn: this.turnSeq || undefined,
-              source: 'live',
-            };
-            this.messages.push(userMessage);
-            this.emitMessage(userMessage);
-            this.notifyUpdate(true);
-          }
+          const userMessage: SessionChatMessage = {
+            id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            role: 'user',
+            content: userText,
+            attachments: taken?.attachments,
+            timestamp: taken?.createdAt ?? Date.now(),
+            turn: this.turnSeq || undefined,
+            source: 'live',
+          };
+          this.messages.push(userMessage);
+          this.emitMessage(userMessage);
+          if (taken) this.emitPending();
+          this.notifyUpdate(true);
         } else if (msg.role === 'assistant') {
           const newAssistantMsg: SessionChatMessage = {
             id: `msg_a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -625,6 +671,8 @@ export class PiRpcSessionInstance extends EventEmitter {
 
       case 'agent_settled': {
         this.isBusy = false;
+        // 一轮结束后仍未送达的输入不会再进本轮，回显层清零；若 pi 稍后采纳，会话流仍会显示它
+        this.clearPendingInputs();
         this.finishTurn();
         if (this.currentAssistantMessage) {
           // 流式增量拼接的文本也可能携带完成标记，兜底判定一次
@@ -721,6 +769,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.sessionId = nextSessionId;
     // 分叉后当前上下文已被替换，清空本地消息，由前端重新加载历史
     this.messages = [];
+    this.clearPendingInputs();
     this.currentAssistantMessage = null;
     this.isBusy = false;
     this.isPaused = false;
@@ -740,18 +789,8 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.lastError = undefined;
     this.markTurnStart();
 
-    // 前置压入用户消息展示
-    const userMessage: SessionChatMessage = {
-      id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      role: 'user',
-      content: message,
-      attachments: attachments && attachments.length > 0 ? attachments : undefined,
-      timestamp: Date.now(),
-      turn: this.turnSeq + 1 || undefined,
-      source: 'live',
-    };
-    this.messages.push(userMessage);
-    this.emitMessage(userMessage);
+    // 先只上回显层：气泡立即出现，会话流等 pi 采纳后再接管
+    this.queuePendingInput(message, attachments, 'turn');
     this.emitStatus({ isBusy: true, isPaused: false, awaitingInput: false, turnStartedAt: this.turnStartedAt });
     this.notifyUpdate(true);
 
@@ -784,18 +823,8 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.isPaused = false;
     this.awaitingInput = false;
     this.lastError = undefined;
-    // 立即压入用户消息
-    const userMessage: SessionChatMessage = {
-      id: `msg_u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      role: 'user',
-      content: message,
-      attachments: attachments && attachments.length > 0 ? attachments : undefined,
-      timestamp: Date.now(),
-      turn: this.turnSeq || undefined,
-      source: 'live',
-    };
-    this.messages.push(userMessage);
-    this.emitMessage(userMessage);
+    // 先只上回显层：气泡立即出现，会话流等 pi 采纳后再接管
+    this.queuePendingInput(message, attachments, 'steering');
     this.emitStatus({ awaitingInput: false });
     this.notifyUpdate(true);
 
@@ -841,6 +870,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     try {
       await this.sendCommand({ type: 'abort' });
       this.isBusy = false;
+      this.clearPendingInputs();
       this.finishTurn();
       this.emitStatus({ isPaused: true, isBusy: false, turnStartedAt: this.turnStartedAt });
       this.notifyUpdate(true);
@@ -1050,6 +1080,7 @@ export class PiRpcSessionInstance extends EventEmitter {
       turnStartedAt: this.turnStartedAt,
       lastTurnDurationMs: this.lastTurnDurationMs,
       messages: [...this.messages],
+      pendingInputs: [...this.pendingInputs],
       agentName: this.agentName,
       model: this.model,
       pendingModel: this.pendingModel,
