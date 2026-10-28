@@ -1806,7 +1806,7 @@ export function GlobalAgentPanel({
             <>
               {trafficLightInset && <div className={styles.windowStrip} />}
               <div className={styles.brandRow}>
-                <BrandLogo size={18} className={styles.brandLogo} />
+                <BrandLogo size={20} className={styles.brandLogo} />
                 <span className={styles.brandName}>openLoop</span>
                 <span className={styles.brandTag}>智能体</span>
               </div>
