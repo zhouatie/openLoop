@@ -168,27 +168,122 @@
   height: 100%;
 }
 
-/* 预览 */
+/* 预览：头固定，正文自己滚动 */
 .preview {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
-  overflow: auto;
-  padding: 16px 18px 24px;
-  font-size: 13px;
 }
 
-.previewCode {
-  margin: 0;
-  font-family: var(--ds-font-family-code);
-  font-size: 12.5px;
-  line-height: 20px;
-  white-space: pre-wrap;
-  word-break: break-word;
+/* 一行头：目录淡出、文件名常驻，右侧是工具按钮 */
+.previewHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l3);
+}
+
+.previewPath {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 34px;
+  white-space: nowrap;
+}
+
+.previewDir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  text-overflow: ellipsis;
+}
+
+.previewName {
+  flex: 0 0 auto;
   color: var(--dsw-alias-label-primary);
 }
 
+.previewTool {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.previewTool:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* 文本预览：把聊天卡片变成满高的文档面板（取值对齐 DSH CodeBody） */
+.docCode.docCode:global(.md-code-block) {
+  --dsl-code-block-border-radius: 0;
+  --dsl-code-block-background: transparent;
+  position: static;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0;
+}
+
+.docCode.docCode:global(.md-code-block) > :global([data-code-block-content]) {
+  position: relative;
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.docCode.docCode:global(.md-code-block) :global(pre) {
+  box-sizing: border-box;
+  min-width: 100%;
+  padding: 8px 16px 24px;
+  overflow: visible;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.docCode.docCode:global(.md-code-block)[data-code-wrap='true'] :global(pre) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.previewMarkdown {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 16px 24px;
+  font-size: 13px;
+}
+
+.previewError,
+.previewLoading {
+  padding: 24px 16px;
+  font-size: 12.5px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .previewNote {
-  margin-top: 12px;
+  flex: none;
+  padding: 6px 12px;
+  border-top: 1px solid var(--dsw-alias-border-l3);
   font-size: 11px;
   color: var(--dsw-alias-label-caption);
 }
@@ -208,4 +303,5 @@
   max-height: 100%;
   border-radius: var(--dsw-radius-md);
   box-shadow: var(--dsw-elevation-soft);
+  cursor: zoom-in;
 }
