@@ -2462,7 +2462,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         onVisualAcceptance={setVisualAcceptanceTask}
                         onApprove={handleApprove}
                         onSetParentTask={(t) => setParentSelectTask(t)}
-                        onUnlinkSubtask={handleUnlinkSubtask}
                         onAddSubtask={handleAddSubtask}
                         onAddSubtasks={handleAddSubtasks}
                       />
