@@ -10,7 +10,7 @@ import {
   ComposerMentionItem,
   ComposerPermission,
 } from './Composer';
-import { WorkspaceDock, type DockTab, type DockTarget } from './WorkspaceDock';
+import { WorkspaceDock, type DockRequest, type DockTab } from './WorkspaceDock';
 import { OpenFileContext } from './open-file';
 import { IconClose, IconFork, IconMinimize, IconPanelRight } from './icons';
 import { BrandLogo } from '../components/BrandLogo';
@@ -421,18 +421,25 @@ export function TaskAgentPanel({
   cwd,
 }: TaskAgentPanelProps) {
   const [sending, setSending] = useState(false);
-  const [dockTab, setDockTab] = useState<DockTab | null>(null);
-  /** 从消息里点开的文件：交给工作台的预览页加载 */
-  const [dockFile, setDockFile] = useState<DockTarget | null>(null);
+  const [dockOpen, setDockOpen] = useState(false);
+  /** 工作台的页签请求：文件、终端，或某个文件的预览 */
+  const [dockRequest, setDockRequest] = useState<DockRequest | null>(null);
+  const dockSeq = useRef(0);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   const [commands, setCommands] = useState<ComposerCommand[]>([]);
   const attachments = useAttachments();
 
+  /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
+  const openDock = useCallback((kind: DockTab, path?: string) => {
+    setDockOpen(true);
+    setDockRequest({ kind, path, seq: ++dockSeq.current });
+  }, []);
+
   // 面板内快捷键：工作台开合与页签
   useShortcutBindings({
-    'dock.toggle': () => setDockTab((prev) => (prev ? null : 'files')),
-    'dock.files': () => setDockTab('files'),
-    'dock.terminal': () => setDockTab('terminal'),
+    'dock.toggle': () => setDockOpen((prev) => !prev),
+    'dock.files': () => openDock('files'),
+    'dock.terminal': () => openDock('terminal'),
   });
 
   const load = useCallback(() => api.getTaskSession(taskId).catch(() => null), [taskId]);
@@ -505,12 +512,14 @@ export function TaskAgentPanel({
     [sendMessage, attachments, sendExtra]
   );
 
-  /** 消息里的文件引用：打开右侧工作台的预览页 */
-  const openFile = useCallback((path: string) => {
-    if (import.meta.env?.DEV) console.log('[AgentPanel] 预览文件:', path);
-    setDockFile({ path, seq: Date.now() });
-    setDockTab('preview');
-  }, []);
+  /** 消息里的文件引用：作为预览页签在工作台里打开 */
+  const openFile = useCallback(
+    (path: string) => {
+      if (import.meta.env?.DEV) console.log('[AgentPanel] 预览文件:', path);
+      openDock('preview', path);
+    },
+    [openDock]
+  );
 
   return (
     <OpenFileContext.Provider value={openFile}>
@@ -538,9 +547,9 @@ export function TaskAgentPanel({
           {headerExtra}
           <button
             type="button"
-            className={`${styles.iconButton} ${dockTab ? styles.iconButtonActive : ''}`}
-            onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
-            title={dockTab ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
+            className={`${styles.iconButton} ${dockOpen ? styles.iconButtonActive : ''}`}
+            onClick={() => setDockOpen((prev) => !prev)}
+            title={dockOpen ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
             aria-label="工作台"
           >
             <IconPanelRight size={16} />
@@ -549,14 +558,8 @@ export function TaskAgentPanel({
       }
       banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : banner}
       dock={
-        dockTab ? (
-          <WorkspaceDock
-            cwd={cwd}
-            activeTab={dockTab}
-            onTabChange={setDockTab}
-            onClose={() => setDockTab(null)}
-            target={dockFile}
-          />
+        dockOpen ? (
+          <WorkspaceDock cwd={cwd} request={dockRequest} onClose={() => setDockOpen(false)} />
         ) : undefined
       }
       attachments={attachments.items}
@@ -722,9 +725,10 @@ export function GlobalAgentPanel({
   const [projectMeta, setProjectMeta] = useState<
     Record<string, { title?: string; hidden?: boolean; order?: number }>
   >({});
-  const [dockTab, setDockTab] = useState<DockTab | null>(null);
-  /** 从消息里点开的文件：交给工作台的预览页加载 */
-  const [dockFile, setDockFile] = useState<DockTarget | null>(null);
+  const [dockOpen, setDockOpen] = useState(false);
+  /** 工作台的页签请求：文件、终端，或某个文件的预览 */
+  const [dockRequest, setDockRequest] = useState<DockRequest | null>(null);
+  const dockSeq = useRef(0);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   /** 刚发过消息、文件还没落盘的会话：id -> 占位行信息 */
   const pendingRows = useRef<Record<string, { title: string; cwd: string }>>({});
@@ -733,6 +737,12 @@ export function GlobalAgentPanel({
   /** 历史快照对应的会话修改时间，用于发现外部写入 */
   const historyStampRef = useRef('');
   const attachments = useAttachments();
+
+  /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
+  const openDock = useCallback((kind: DockTab, path?: string) => {
+    setDockOpen(true);
+    setDockRequest({ kind, path, seq: ++dockSeq.current });
+  }, []);
 
   // 斜杠指令（提供方为 /api/agent/commands-and-skills）
   useEffect(() => {
@@ -1443,9 +1453,9 @@ export function GlobalAgentPanel({
         const target = sessions.find((item) => item.id === activeId);
         if (target) void archiveSession(target.id, !target.archived);
       },
-      'dock.toggle': () => setDockTab((prev) => (prev ? null : 'files')),
-      'dock.files': () => setDockTab('files'),
-      'dock.terminal': () => setDockTab('terminal'),
+      'dock.toggle': () => setDockOpen((prev) => !prev),
+      'dock.files': () => openDock('files'),
+      'dock.terminal': () => openDock('terminal'),
       'session.tree': () => void openTree(),
     },
     active,
@@ -1540,20 +1550,22 @@ export function GlobalAgentPanel({
     </>
   );
 
-  /** 消息里的文件引用：打开右侧工作台的预览页 */
-  const openFile = useCallback((path: string) => {
-    if (import.meta.env?.DEV) console.log('[AgentPanel] 预览文件:', path);
-    setDockFile({ path, seq: Date.now() });
-    setDockTab('preview');
-  }, []);
+  /** 消息里的文件引用：作为预览页签在工作台里打开 */
+  const openFile = useCallback(
+    (path: string) => {
+      if (import.meta.env?.DEV) console.log('[AgentPanel] 预览文件:', path);
+      openDock('preview', path);
+    },
+    [openDock]
+  );
 
   /** 工作台展开按钮：顶栏形态放顶栏，整页形态（无顶栏）放右上角 */
   const dockToggle = (
     <button
       type="button"
-      className={`${styles.iconButton} ${dockTab ? styles.iconButtonActive : ''}`}
-      onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
-      title={dockTab ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
+      className={`${styles.iconButton} ${dockOpen ? styles.iconButtonActive : ''}`}
+      onClick={() => setDockOpen((prev) => !prev)}
+      title={dockOpen ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
       aria-label="工作台"
     >
       <IconPanelRight size={16} />
@@ -1691,14 +1703,8 @@ export function GlobalAgentPanel({
           draftFill={draftFill}
           draftKey={activeId || ''}
           dock={
-            dockTab ? (
-              <WorkspaceDock
-                cwd={activeCwd}
-                activeTab={dockTab}
-                onTabChange={setDockTab}
-                onClose={() => setDockTab(null)}
-                target={dockFile}
-              />
+            dockOpen ? (
+              <WorkspaceDock cwd={activeCwd} request={dockRequest} onClose={() => setDockOpen(false)} />
             ) : undefined
           }
           banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : undefined}

@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -7,10 +7,37 @@ import { AgentMarkdown } from './Markdown';
 import { CodeBlock } from './dsh/CodeBlock';
 import { languageForPath } from './dsh/code-language';
 import { ImageLightbox } from './dsh/ImageLightbox';
-import { IconClose, IconFolderClose, IconFolderOpen, IconRefresh } from './icons';
+import { useDismissOnOutsidePointer } from './dsh/useDismissOnOutsidePointer';
+import {
+  IconCheck,
+  IconClose,
+  IconFolderClose,
+  IconFolderOpen,
+  IconPanelRight,
+  IconPlus,
+  IconRefresh,
+} from './icons';
 import styles from './WorkspaceDock.module.css';
 
 export type DockTab = 'files' | 'terminal' | 'preview';
+
+/** 上层发起的页签请求：同一个请求重复触发也要生效，所以带序号 */
+export interface DockRequest {
+  kind: DockTab;
+  /** 预览页签的文件路径 */
+  path?: string;
+  seq: number;
+}
+
+interface DockPane {
+  key: string;
+  kind: DockTab;
+  title: string;
+  /** 预览页签的文件路径 */
+  path?: string;
+  /** 重复打开同一个文件时递增，用来重新加载 */
+  seq: number;
+}
 
 interface FsEntry {
   name: string;
@@ -22,6 +49,60 @@ interface FsEntry {
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg)$/i;
 const MARKDOWN_EXT = /\.(md|mdx)$/i;
+
+/** 面板固定页签：文件与终端，预览页签由打开的文件生成 */
+const PINNED_PANES: DockPane[] = [
+  { key: 'files', kind: 'files', title: '文件', seq: 0 },
+  { key: 'terminal', kind: 'terminal', title: '终端', seq: 0 },
+];
+
+/** 「+」菜单里能重新打开的页签 */
+const ADDABLE_KINDS: Array<{ kind: DockTab; title: string }> = [
+  { kind: 'files', title: '文件' },
+  { kind: 'terminal', title: '终端' },
+];
+
+/** 面板宽度：拖动左缘调整，双击复位，按工作区无关的界面偏好持久化 */
+const DOCK_WIDTH_KEY = 'openloop.agent.dockWidth';
+const DOCK_MIN_WIDTH = 280;
+const DOCK_MAX_WIDTH = 760;
+const DOCK_DEFAULT_WIDTH = 360;
+
+function clampDockWidth(width: number): number {
+  const viewport = typeof window === 'undefined' ? DOCK_MAX_WIDTH : window.innerWidth * 0.7;
+  const max = Math.max(DOCK_MIN_WIDTH, Math.min(DOCK_MAX_WIDTH, Math.round(viewport)));
+  return Math.min(Math.max(Math.round(width), DOCK_MIN_WIDTH), max);
+}
+
+function readDockWidth(): number {
+  try {
+    const stored = Number(localStorage.getItem(DOCK_WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0 ? clampDockWidth(stored) : DOCK_DEFAULT_WIDTH;
+  } catch (_) {
+    return DOCK_DEFAULT_WIDTH;
+  }
+}
+
+function writeDockWidth(width: number): void {
+  try {
+    localStorage.setItem(DOCK_WIDTH_KEY, String(width));
+  } catch (_) {
+    /* 隐私模式下无法持久化，宽度只在本次会话生效 */
+  }
+}
+
+function baseName(path: string): string {
+  const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return path.slice(slash + 1) || path;
+}
+
+function previewKey(path: string): string {
+  return `preview:${path}`;
+}
+
+function pinnedPane(kind: DockTab): DockPane {
+  return PINNED_PANES.find((pane) => pane.kind === kind) || PINNED_PANES[0];
+}
 
 /** 文本预览的代码卡文案，与 Markdown 里的围栏代码块一致 */
 const PREVIEW_TOOLBAR_LABELS = {
@@ -37,6 +118,152 @@ function formatSize(size: number): string {
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/**
+ * 页签条：DSH 停靠面板的一行（28px 胶囊页签、页签之间的发丝槽、末尾的操作位）。
+ * 页签自己不带边框，激活项是填充的胶囊，关闭按钮压住标题尾部，悬停与激活时才出现。
+ */
+const TabStrip = memo(function TabStrip({
+  panes,
+  activeKey,
+  onSelect,
+  onClose,
+  onAdd,
+  addOpen,
+  onAddOpenChange,
+  onClosePanel,
+}: {
+  panes: DockPane[];
+  activeKey: string;
+  onSelect: (key: string) => void;
+  onClose: (key: string) => void;
+  onAdd: (kind: DockTab) => void;
+  addOpen: boolean;
+  onAddOpenChange: (open: boolean) => void;
+  onClosePanel: () => void;
+}) {
+  const addRef = useRef<HTMLDivElement | null>(null);
+  const chips = useRef(new Map<string, HTMLDivElement>());
+  useDismissOnOutsidePointer(addRef, addOpen, onAddOpenChange);
+
+  // 菜单开着时 Esc 只关菜单：外层面板靠 data-agent-transient 让位
+  useEffect(() => {
+    if (!addOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onAddOpenChange(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [addOpen, onAddOpenChange]);
+
+  /** 左右方向键在页签间移动焦点，Enter / 空格选中：与 DSH 的手动激活一致 */
+  const handleChipKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, key: string) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onSelect(key);
+      return;
+    }
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const index = panes.findIndex((pane) => pane.key === key);
+    const next = panes[(index + (event.key === 'ArrowRight' ? 1 : -1) + panes.length) % panes.length];
+    if (next) chips.current.get(next.key)?.focus();
+  };
+
+  return (
+    <div className={styles.strip} role="tablist" aria-label="工作台页签">
+      <div className={styles.stripTabs}>
+        {panes.map((pane, index) => {
+          const active = pane.key === activeKey;
+          return (
+            <Fragment key={pane.key}>
+              {index > 0 && <span className={styles.slot} aria-hidden="true" />}
+              <div
+                ref={(element) => {
+                  if (element) chips.current.set(pane.key, element);
+                  else chips.current.delete(pane.key);
+                }}
+                role="tab"
+                aria-selected={active}
+                tabIndex={active ? 0 : -1}
+                title={pane.path || pane.title}
+                className={`${styles.chip} ${active ? styles.chipActive : ''}`}
+                onClick={() => onSelect(pane.key)}
+                onKeyDown={(event) => handleChipKeyDown(event, pane.key)}
+                onAuxClick={(event) => {
+                  // 中键关闭：与点关闭按钮同一条路径，且不切换页签
+                  if (event.button !== 1) return;
+                  event.preventDefault();
+                  onClose(pane.key);
+                }}
+              >
+                <span className={styles.chipTitle}>{pane.title}</span>
+                <button
+                  type="button"
+                  className={styles.chipClose}
+                  aria-label={`关闭 ${pane.title}`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onClose(pane.key);
+                  }}
+                >
+                  <IconClose size={14} />
+                </button>
+              </div>
+            </Fragment>
+          );
+        })}
+      </div>
+
+      <div className={styles.stripFill} />
+
+      <div ref={addRef} className={styles.addWrap} data-agent-transient={addOpen ? '' : undefined}>
+        <button
+          type="button"
+          className={styles.stripButton}
+          aria-haspopup="menu"
+          aria-expanded={addOpen}
+          aria-label="打开页签"
+          title="打开页签"
+          onClick={() => onAddOpenChange(!addOpen)}
+        >
+          <IconPlus size={16} />
+        </button>
+        {addOpen && (
+          <div className={styles.addMenu} role="menu">
+            {ADDABLE_KINDS.map((item) => {
+              const open = panes.some((pane) => pane.key === item.kind);
+              return (
+                <button
+                  key={item.kind}
+                  type="button"
+                  role="menuitem"
+                  className={styles.addMenuItem}
+                  onClick={() => onAdd(item.kind)}
+                >
+                  <span className={styles.addMenuLabel}>{item.title}</span>
+                  {open && <IconCheck size={14} className={styles.addMenuCheck} />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        className={styles.stripButton}
+        aria-label="收起工作台"
+        title="收起工作台"
+        onClick={onClosePanel}
+      >
+        <IconPanelRight size={16} />
+      </button>
+    </div>
+  );
+});
 
 /** 文件树：按需展开目录 */
 const FileTree = memo(function FileTree({
@@ -234,19 +461,50 @@ const PreviewHeader = memo(function PreviewHeader({ path, onReload }: { path: st
 
 /** 文档预览：图片走原始字节，Markdown 走路渲染，其余交给 DSH 的 CodeBlock（高亮 + 行号 + 折行 + 复制） */
 const FilePreview = memo(function FilePreview({
-  target,
+  path,
+  seq: requestSeq,
   cwd,
-  onReload,
 }: {
-  target: PreviewState;
+  path: string;
+  seq: number;
   cwd?: string;
-  onReload: () => void;
 }) {
+  const [target, setTarget] = useState<PreviewState>(() => ({
+    path,
+    image: IMAGE_EXT.test(path),
+    loading: !IMAGE_EXT.test(path),
+    seq: 0,
+  }));
   const [zoomed, setZoomed] = useState(false);
+  const seq = useRef(0);
+
+  const load = useCallback(async () => {
+    const next = ++seq.current;
+    if (IMAGE_EXT.test(path)) {
+      setTarget({ path, image: true, seq: next });
+      return;
+    }
+    setTarget({ path, loading: true, seq: next });
+    try {
+      const file = await api.readAgentFsFile(path, cwd || '');
+      if (seq.current !== next) return;
+      setTarget({ path: file.path, content: file.content, truncated: file.truncated, seq: next });
+    } catch (err: any) {
+      if (seq.current !== next) return;
+      setTarget({ path, error: err?.message || '无法读取文件', seq: next });
+    }
+  }, [path, cwd]);
+
+  // 同一个文件重复打开时 requestSeq 变化，重新读一次
+  useEffect(() => {
+    void load();
+  }, [load, requestSeq]);
+
   const source = target.image ? api.agentFsRawUrl(target.path, cwd) : '';
+
   return (
     <div className={styles.preview}>
-      <PreviewHeader path={target.path} onReload={onReload} />
+      <PreviewHeader path={target.path} onReload={() => void load()} />
       {target.image ? (
         <div className={styles.imageWrap}>
           <img
@@ -284,111 +542,187 @@ const FilePreview = memo(function FilePreview({
   );
 });
 
-export interface DockTarget {
-  path: string;
-  /** 重复点同一个文件也要重新加载 */
-  seq: number;
-}
-
 export interface WorkspaceDockProps {
   cwd?: string;
-  activeTab: DockTab;
-  onTabChange: (tab: DockTab) => void;
+  /** 上层发起的页签请求：文件、终端，或某个文件的预览 */
+  request?: DockRequest | null;
   onClose: () => void;
-  /** 会话里点开的文件：切到预览页并加载该路径 */
-  target?: DockTarget | null;
 }
 
-/** 右侧工作区面板：文件 / 终端 / 文档预览 */
-export const WorkspaceDock = memo(function WorkspaceDock({
-  cwd,
-  activeTab,
-  onTabChange,
-  onClose,
-  target,
-}: WorkspaceDockProps) {
-  const [preview, setPreview] = useState<PreviewState | null>(null);
-  /** 终端首次打开后才挂载，之后切页签只隐藏不卸载：shell 与回滚不会丢 */
-  const [terminalMounted, setTerminalMounted] = useState(activeTab === 'terminal');
+/**
+ * 右侧工作台：文件 / 终端 / 预览。页签容器对齐 DSH 停靠面板 —— 一行胶囊页签、
+ * 每个页签可单独关闭、「+」重开固定页签，左缘可拖动改变宽度。
+ */
+export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose }: WorkspaceDockProps) {
   const root = cwd || '';
+  const [panes, setPanes] = useState<DockPane[]>(PINNED_PANES);
+  const [activeKey, setActiveKey] = useState<string>(PINNED_PANES[0].key);
+  const [width, setWidth] = useState(readDockWidth);
+  const [addOpen, setAddOpen] = useState(false);
+  /** 终端首次被看到后才挂载，之后只隐藏不卸载：shell 与回滚不会丢 */
+  const [terminalMounted, setTerminalMounted] = useState(false);
 
   useEffect(() => {
-    if (activeTab === 'terminal') setTerminalMounted(true);
-  }, [activeTab]);
+    if (activeKey === 'terminal') setTerminalMounted(true);
+  }, [activeKey]);
 
-  const seq = useRef(0);
+  const openPreview = useCallback((path: string) => {
+    if (import.meta.env?.DEV) console.log('[WorkspaceDock] 预览文件:', path);
+    const key = previewKey(path);
+    const seq = Date.now();
+    setPanes((prev) =>
+      prev.some((pane) => pane.key === key)
+        ? prev.map((pane) => (pane.key === key ? { ...pane, seq } : pane))
+        : [...prev, { key, kind: 'preview' as const, title: baseName(path), path, seq }]
+    );
+    setActiveKey(key);
+  }, []);
 
-  // 路径可能来自消息里的相对引用，统一交给后端按工作区解析
-  const loadPath = useCallback(
-    async (path: string) => {
-      const next = ++seq.current;
-      if (IMAGE_EXT.test(path)) {
-        setPreview({ path, image: true, seq: next });
+  // 上层请求：打开某个固定页签，或把某个文件作为新页签打开
+  useEffect(() => {
+    if (!request) return;
+    if (import.meta.env?.DEV) console.log('[WorkspaceDock] 页签请求:', request);
+    if (request.kind === 'preview') {
+      if (request.path) openPreview(request.path);
+      return;
+    }
+    setPanes((prev) =>
+      prev.some((pane) => pane.key === request.kind) ? prev : [...prev, pinnedPane(request.kind)]
+    );
+    setActiveKey(request.kind);
+  }, [request, openPreview]);
+
+  const closePane = useCallback(
+    (key: string) => {
+      const index = panes.findIndex((pane) => pane.key === key);
+      if (index < 0) return;
+      if (import.meta.env?.DEV) console.log('[WorkspaceDock] 关闭页签:', key);
+      const next = panes.filter((pane) => pane.key !== key);
+      // 页签全关掉就收起工作台，与 DSH 合并掉空面板一致
+      if (next.length === 0) {
+        onClose();
         return;
       }
-      setPreview({ path, loading: true, seq: next });
-      try {
-        const file = await api.readAgentFsFile(path, root);
-        setPreview({ path: file.path, content: file.content, truncated: file.truncated, seq: next });
-      } catch (err: any) {
-        setPreview({ path, error: err?.message || '无法读取文件', seq: next });
-      }
+      setPanes(next);
+      if (activeKey === key) setActiveKey(next[Math.min(index, next.length - 1)].key);
     },
-    [root]
+    [panes, activeKey, onClose]
   );
 
-  useEffect(() => {
-    if (target) void loadPath(target.path);
-  }, [target, loadPath]);
+  const addPane = useCallback((kind: DockTab) => {
+    setAddOpen(false);
+    setPanes((prev) => (prev.some((pane) => pane.key === kind) ? prev : [...prev, pinnedPane(kind)]));
+    setActiveKey(kind);
+  }, []);
 
-  const openFile = useCallback(
-    (entry: FsEntry) => {
-      onTabChange('preview');
-      void loadPath(entry.path);
+  /** 拖动左缘改宽度：窗口监听，指针离开面板也跟手 */
+  const startResize = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const handle = event.currentTarget;
+      const startX = event.clientX;
+      const startWidth = width;
+      // 与样式里的 60% 上限对齐：拖到会话列还有位置为止
+      const room = handle.parentElement?.parentElement?.clientWidth || window.innerWidth;
+      const limit = Math.max(DOCK_MIN_WIDTH, Math.min(DOCK_MAX_WIDTH, Math.round(room * 0.6)));
+      let latest = startWidth;
+      handle.setPointerCapture(event.pointerId);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      const onMove = (moveEvent: PointerEvent) => {
+        latest = Math.min(clampDockWidth(startWidth - (moveEvent.clientX - startX)), limit);
+        setWidth(latest);
+      };
+      const onEnd = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onEnd);
+        window.removeEventListener('pointercancel', onEnd);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        try {
+          handle.releasePointerCapture(event.pointerId);
+        } catch (_) {
+          /* 指针已释放时忽略 */
+        }
+        writeDockWidth(latest);
+        if (import.meta.env?.DEV) console.log('[WorkspaceDock] 面板宽度:', latest);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onEnd);
+      window.addEventListener('pointercancel', onEnd);
     },
-    [onTabChange, loadPath]
+    [width]
   );
 
-  const tabs = useMemo(
-    () => [
-      { key: 'files' as DockTab, label: '文件' },
-      { key: 'terminal' as DockTab, label: '终端' },
-      { key: 'preview' as DockTab, label: '预览' },
-    ],
-    []
+  const resetWidth = useCallback(() => {
+    setWidth(DOCK_DEFAULT_WIDTH);
+    writeDockWidth(DOCK_DEFAULT_WIDTH);
+  }, []);
+
+  const nudgeWidth = useCallback(
+    (delta: number) => {
+      const next = clampDockWidth(width + delta);
+      setWidth(next);
+      writeDockWidth(next);
+    },
+    [width]
   );
+
+  // 文件树的高亮跟着最近打开的那份预览，切到别的页签也不丢
+  let previewPath: string | undefined;
+  for (const pane of panes) {
+    if (pane.kind === 'preview') previewPath = pane.path;
+  }
 
   return (
-    <aside className={styles.dock}>
-      <div className={styles.tabs}>
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            className={`${styles.tab} ${activeTab === tab.key ? styles.tabActive : ''}`}
-            onClick={() => onTabChange(tab.key)}
-          >
-            {tab.label}
-          </button>
-        ))}
-        <button type="button" className={styles.close} onClick={onClose} title="收起面板">
-          <IconClose size={14} />
-        </button>
-      </div>
+    <aside className={styles.dock} style={{ width }} aria-label="工作台">
+      <div
+        className={styles.resize}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整工作台宽度"
+        tabIndex={0}
+        onPointerDown={startResize}
+        onDoubleClick={resetWidth}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            nudgeWidth(24);
+          } else if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            nudgeWidth(-24);
+          }
+        }}
+      />
+
+      <TabStrip
+        panes={panes}
+        activeKey={activeKey}
+        onSelect={setActiveKey}
+        onClose={closePane}
+        onAdd={addPane}
+        addOpen={addOpen}
+        onAddOpenChange={setAddOpen}
+        onClosePanel={onClose}
+      />
 
       <div className={styles.dockBody}>
-        {activeTab === 'files' && <FileTree root={root} activePath={preview?.path} onPick={openFile} />}
-        {terminalMounted && (
-          <div className={`${styles.pane} ${activeTab === 'terminal' ? '' : styles.paneHidden}`}>
-            <TerminalView cwd={root} />
+        {/* 页签内容常驻：切页签不重挂，终端 shell、文件预览与滚动位置都留着 */}
+        {panes.map((pane) => (
+          <div key={pane.key} className={styles.pane} hidden={pane.key !== activeKey}>
+            {pane.kind === 'files' &&
+              (root ? (
+                <FileTree root={root} activePath={previewPath} onPick={(entry) => openPreview(entry.path)} />
+              ) : (
+                <div className={styles.dockEmpty}>选一个工作区后，这里显示它的文件。</div>
+              ))}
+            {pane.kind === 'terminal' && terminalMounted && <TerminalView cwd={root} />}
+            {pane.kind === 'preview' && pane.path && (
+              <FilePreview path={pane.path} seq={pane.seq} cwd={root} />
+            )}
           </div>
-        )}
-        {activeTab === 'preview' &&
-          (preview ? (
-            <FilePreview target={preview} cwd={root} onReload={() => void loadPath(preview.path)} />
-          ) : (
-            <div className={styles.dockEmpty}>在「文件」中选择一个文件即可预览</div>
-          ))}
+        ))}
       </div>
     </aside>
   );
