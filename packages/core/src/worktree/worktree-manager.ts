@@ -633,18 +633,16 @@ export class WorktreeManager {
           }
         } catch {}
       }
-      // 2.3 尝试从分支创建 reflog 中提取初始创建 commit 作为基线
+      // 2.3 分支创建后未产生新提交时，reflog 唯一一条记录即为创建基线（多条记录严禁回溯，否则会退化为全历史对比）
       if (!baseCommit && branchName) {
         try {
-          const reflogOut = execSync(`git reflog show "${branchName}"`, { cwd: worktreeDir, encoding: 'utf-8' }).trim();
-          const lines = reflogOut.split('\n').filter(Boolean);
-          if (lines.length > 0) {
-            const lastLine = lines[lines.length - 1];
-            const match = lastLine.match(/^([a-f0-9]{7,40})\b/);
+          const reflogLines = execSync(`git reflog show "${branchName}"`, { cwd: worktreeDir, encoding: 'utf-8' })
+            .split('\n')
+            .filter(Boolean);
+          if (reflogLines.length === 1) {
+            const match = reflogLines[0].match(/^([a-f0-9]{7,40})\b/);
             if (match) {
-              const rootCommit = match[1];
-              execSync(`git rev-parse --verify "${rootCommit}^{commit}"`, { cwd: worktreeDir, stdio: 'ignore' });
-              baseCommit = rootCommit;
+              baseCommit = match[1];
             }
           }
         } catch {}
