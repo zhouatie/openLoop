@@ -118,7 +118,6 @@ export const Composer = React.memo(function Composer({
   const [isDragging, setIsDragging] = useState(false);
   const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   // 高度随内容增长，最多 8 行
   useEffect(() => {
@@ -133,13 +132,9 @@ export const Composer = React.memo(function Composer({
   const submit = useCallback(() => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
-    if (busy) {
-      // 生成中发送会作为追加消息排入本轮
-      setNotice('已追加到当前一轮');
-      window.setTimeout(() => setNotice(null), 2400);
-    }
+    // 生成中发送会作为追加消息排入本轮，由输入卡上方的排队条承接反馈
     onSend(trimmed);
-  }, [value, disabled, busy, onSend]);
+  }, [value, disabled, onSend]);
 
   /** @ 候选的请求序号：连续输入时只采纳最后一次的结果，避免旧结果盖掉新候选 */
   const mentionSeq = useRef(0);
@@ -362,7 +357,6 @@ export const Composer = React.memo(function Composer({
 
   return (
     <div className={styles.root}>
-      {notice && <div className={styles.notice}>{notice}</div>}
       {menu && menu.items.length > 0 && (
         <div
           className={`${styles.popover} ${menu.kind === 'mention' ? styles.popoverList : ''}`}

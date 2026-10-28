@@ -449,34 +449,6 @@
   }
 }
 
-/* 追加消息的短暂提示：浮在卡片上方，不挤压输入区 */
-.notice {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 4px 12px;
-  border-radius: var(--dsw-radius-sm);
-  background: var(--dsw-alias-tooltip-bg);
-  color: var(--dsw-alias-label-inverse-primary, #fff);
-  font-size: 12px;
-  line-height: 20px;
-  white-space: nowrap;
-  animation: noticeIn 120ms var(--ds-ease-in-out);
-  pointer-events: none;
-}
-
-@keyframes noticeIn {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 4px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
-
 /* 拖拽中的整卡提示层 */
 .dropOverlay {
   position: absolute;
