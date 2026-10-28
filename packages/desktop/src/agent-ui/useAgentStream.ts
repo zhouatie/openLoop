@@ -6,6 +6,11 @@ import { api } from '../services/api';
 /** pi 一轮结束到下一轮开始之间有几十毫秒的 isBusy:false 间隙，界面要跨过它，否则按钮与运行指示会闪 */
 const BUSY_IDLE_GRACE_MS = 700;
 
+/** 全局 Agent 会话的事件路由键前缀：同一条物理会话在别处继续对话时，事件带这个前缀 */
+const GLOBAL_AGENT_PREFIX = 'agent_';
+/** 外部同会话改动的快照间隔：一轮只需补一次，避免流式期间反复读盘 */
+const EXTERNAL_RELOAD_MIN_MS = 1500;
+
 /** 会话侧的写操作由调用方按场景注入（任务会话 / 全局会话走不同接口） */
 export interface AgentTransport {
   send: (
@@ -139,6 +144,8 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   const stateRef = useRef<TaskSessionState | null>(null);
   /** 实时事件序号：用于识别并丢弃过期的快照请求结果 */
   const stateStampRef = useRef(0);
+  /** 上一次因外部同会话改动而取快照的时间 */
+  const externalReloadAtRef = useRef(0);
   const historyRef = useRef<SessionChatMessage[] | undefined>(historyMessages);
   const frameRef = useRef<number | null>(null);
   const [, forceRender] = useReducer((value: number) => value + 1, 0);
@@ -229,8 +236,26 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
     stateRef.current = null;
     reload();
 
+    /** 事件是否来自同一条物理会话的另一个进程（例如全局 Agent 面板接着对话） */
+    const isExternalSameSession = (routeKey: string) => {
+      const ownSessionId = stateRef.current?.sessionId;
+      return Boolean(ownSessionId) && routeKey === `${GLOBAL_AGENT_PREFIX}${ownSessionId}`;
+    };
+
     const offSnapshot = api.on('agent:chat_update', (state: TaskSessionState) => {
-      if (disposed || !state || state.taskId !== streamKey) return;
+      if (disposed || !state) return;
+      if (state.taskId !== streamKey) {
+        // 同一份 pi 会话在别处被继续对话：只当刷新信号，等这一轮闲下来再重新取快照
+        if (!isExternalSameSession(state.taskId) || state.isBusy) return;
+        // 自己这场会话有常驻进程时，实时事件已经覆盖，不必再取快照
+        if (stateRef.current?.active) return;
+        const now = Date.now();
+        if (now - externalReloadAtRef.current < EXTERNAL_RELOAD_MIN_MS) return;
+        externalReloadAtRef.current = now;
+        if (import.meta.env?.DEV) console.log('[AgentStream] 同一会话在别处有新消息，刷新快照:', state.taskId);
+        void reload();
+        return;
+      }
       if (import.meta.env?.DEV) console.log('[AgentStream] 快照', state.taskId, 'isBusy=', state.isBusy);
       stateStampRef.current += 1;
       // 快照为权威状态：保留历史前缀，实时段整体替换
