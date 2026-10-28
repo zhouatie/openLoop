@@ -601,8 +601,11 @@ const PROJECTS_KEY = 'openloop.agent.projects';
 const TEMP_PROJECT_KEY = '__temp__';
 /** 运行指示的熄灭延时：躲开 pi 一轮之间 turn_end → 下一轮 busy 的短暂间隙 */
 const RUNNING_IDLE_GRACE_MS = 700;
-/** 轮询间隔（毫秒）：磁盘列表 / 实时存活 / 外部写入检测 */
-const LIST_POLL_MS = 15000;
+/**
+ * 轮询间隔（毫秒）：磁盘列表 / 实时存活 / 外部写入检测。
+ * 列表扫描要给几千个会话文件做 stat 再全量序列化，扫太勤会和切会话读历史抢调度服务。
+ */
+const LIST_POLL_MS = 60000;
 const LIVE_POLL_MS = 2000;
 const STAMP_POLL_MS = 5000;
 
@@ -734,8 +737,8 @@ export function GlobalAgentPanel({
   const pendingRows = useRef<Record<string, { title: string; cwd: string }>>({});
   /** 首条消息落盘后的补刷计时器 */
   const postSendTimer = useRef<number | null>(null);
-  /** 历史快照对应的会话修改时间，用于发现外部写入 */
-  const historyStampRef = useRef('');
+  /** 历史快照对应的会话与修改时间：切换会话时旧的戳不能拿来比，否则会白读一次整段历史 */
+  const historyStampRef = useRef<{ id: string; stamp: string }>({ id: '', stamp: '' });
   const attachments = useAttachments();
 
   /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
@@ -901,7 +904,7 @@ export function GlobalAgentPanel({
       if (seq !== selectSeq.current) return;
       setHistory(detail.messages || []);
       setCwd(detail.summary?.cwd || '');
-      historyStampRef.current = '';
+      historyStampRef.current = { id, stamp: '' };
     } catch (err) {
       if (seq !== selectSeq.current) return;
       if (import.meta.env?.DEV) console.warn('[AgentPanel] 读取历史会话失败:', err);
@@ -1185,14 +1188,15 @@ export function GlobalAgentPanel({
         const info = await api.statAgentFs(activePath);
         if (cancelled) return;
         const stamp = `${info.size}:${info.mtime}`;
-        if (!historyStampRef.current) {
-          historyStampRef.current = stamp;
+        // 换过会话（或还没记过这份文件）时只登记戳，不做重载
+        if (historyStampRef.current.id !== activeId || !historyStampRef.current.stamp) {
+          historyStampRef.current = { id: activeId, stamp };
           return;
         }
-        if (historyStampRef.current === stamp) return;
+        if (historyStampRef.current.stamp === stamp) return;
         // 写入还在进行时先等一轮，避免每 3 秒重载一次大文件
         if (Date.now() - info.mtime < 1500) return;
-        historyStampRef.current = stamp;
+        historyStampRef.current = { id: activeId, stamp };
         const detail = await api.getAgentSession(activeId);
         if (cancelled) return;
         setHistory(detail.messages || []);
