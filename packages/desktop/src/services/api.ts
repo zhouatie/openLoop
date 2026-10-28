@@ -1106,11 +1106,11 @@ export class DesktopApiService {
     });
   }
 
-  /** 从某条用户消息分叉出新会话 */
+  /** 从某条消息分叉出新会话（新会话保留到这条为止，标题带序号） */
   async forkAgentSession(
     sessionId: string,
     entryId: string
-  ): Promise<{ sessionId: string; cwd: string; cancelled?: boolean; text?: string }> {
+  ): Promise<{ sessionId: string; cwd: string; title?: string; cancelled?: boolean }> {
     return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/fork`, {
       method: 'POST',
       body: JSON.stringify({ entryId }),

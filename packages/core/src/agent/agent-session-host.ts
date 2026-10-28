@@ -5,6 +5,7 @@ import type { SessionTreeSnapshot, TaskAttachment, TaskSessionState } from '../t
 import type { AgentStreamEvent } from './agent-events';
 import { PiRpcSessionInstance } from './pi-rpc-session';
 import { piSessionIndex } from './session-index';
+import { agentSessionMeta } from './session-meta';
 import { readSessionTree } from './session-tree';
 
 const logger = createLogger('AgentSessionHost');
@@ -182,13 +183,13 @@ export class AgentSessionHost extends EventEmitter {
   }
 
   /**
-   * 从某条历史用户消息分叉：pi 会在子进程里切到新会话，
+   * 从某条消息分叉：pi 会在子进程里切到新会话，
    * 这里把同一个子进程重新登记到新 session id 下，并同步 taskId。
    */
   public async fork(
     sessionId: string,
     entryId: string
-  ): Promise<{ sessionId: string; cwd: string; cancelled?: boolean; text?: string }> {
+  ): Promise<{ sessionId: string; cwd: string; title?: string; cancelled?: boolean }> {
     if (!entryId) throw new Error('缺少分叉定位');
     if (!this.isLive(sessionId)) {
       await this.open(sessionId, {});
@@ -203,6 +204,7 @@ export class AgentSessionHost extends EventEmitter {
     if (result.cancelled) {
       return { sessionId: nextSessionId, cwd, cancelled: true };
     }
+    let title: string | undefined;
 
     if (nextSessionId !== sessionId) {
       this.sessions.delete(sessionId);
@@ -213,10 +215,35 @@ export class AgentSessionHost extends EventEmitter {
       if (settings) this.settingsBySession.set(nextSessionId, settings);
       // 事件按 taskId 过滤，改登记后要同步，否则新会话收不到本进程的事件
       session.taskId = `${GLOBAL_AGENT_PREFIX}${nextSessionId}`;
+      title = await this.renameForkedSession(sessionId, nextSessionId, cwd);
     }
-    this.emit('forked', { from: sessionId, sessionId: nextSessionId, cwd, text: result.text });
+    this.emit('forked', { from: sessionId, sessionId: nextSessionId, cwd });
     logger.info(`全局 Agent 会话分叉: ${sessionId} -> ${nextSessionId}`);
-    return { sessionId: nextSessionId, cwd, text: result.text };
+    return { sessionId: nextSessionId, cwd, title };
+  }
+
+  /**
+   * 分叉会话默认沿用源会话的标题，会话列会出现两行同名。
+   * 这里补一个序号（标题 (1)、(2)…），序号在同一个项目内递增。
+   * 标题存展示名：去掉 openLoop 自加的 "openLoop: " 前缀，与面板重命名一致。
+   */
+  private async renameForkedSession(sourceId: string, nextSessionId: string, cwd: string): Promise<string | undefined> {
+    const displayTitleOf = (id: string, sessionName?: string, firstUserMessage?: string): string =>
+      (agentSessionMeta.getSession(id).title || sessionName || firstUserMessage || '')
+        .replace(/^openLoop:\s*/i, '')
+        .trim();
+    const source = await piSessionIndex.find(sourceId).catch(() => undefined);
+    const base = displayTitleOf(sourceId, source?.sessionName, source?.firstUserMessage).replace(/ \(\d+\)$/, '');
+    if (!base) return undefined;
+    const siblings = await piSessionIndex.list({ cwd }).catch(() => []);
+    const taken = new Set(
+      siblings.map((item) => displayTitleOf(item.id, item.sessionName, item.firstUserMessage))
+    );
+    let index = 1;
+    while (taken.has(`${base} (${index})`)) index += 1;
+    const title = `${base} (${index})`;
+    agentSessionMeta.setSession(nextSessionId, { title });
+    return title;
   }
 
   /** 会话树：节点来自会话文件，叶子优先取进程内导航后的位置 */

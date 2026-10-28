@@ -146,8 +146,10 @@ export interface AgentPanelShellProps {
   draftFill?: { text: string; seq: number };
   /** 重新生成最后一轮回答 */
   onRegenerate?: () => void;
-  /** 从某一轮的用户消息分叉出新会话 */
+  /** 从某一轮回答分叉出新会话 */
   onFork?: (entryId: string) => void;
+  /** 正在创建分支的条目 id：该行分叉图标显示转圈 */
+  forkPendingEntryId?: string | null;
   /** 切换会话时用来隔离输入框草稿 */
   draftKey?: string;
   /** 面板当前可见时才监听面板快捷键 */
@@ -199,6 +201,7 @@ export function AgentPanelShell({
   draftFill,
   onRegenerate,
   onFork,
+  forkPendingEntryId,
   draftKey,
   shortcutsEnabled = true,
   shortcutPriority = 0,
@@ -382,6 +385,7 @@ export function AgentPanelShell({
                 contentWidth={contentWidth}
                 onRegenerate={onRegenerate}
                 onFork={onFork}
+                forkPendingEntryId={forkPendingEntryId}
               />
               {banner}
               {composer}
@@ -1333,9 +1337,32 @@ export function GlobalAgentPanel({
   );
 
   // 分叉：pi 在同一个子进程里切到新会话，前端跟着切过去
+  // 一次分叉要重建 pi 会话（几秒），期间重复点击会分叉出多个会话，这里锁住
+  const forkingRef = useRef(false);
+  /** 正在创建分支的那一行（图标换转圈），一次只允许一条 */
+  const [forkingEntryId, setForkingEntryId] = useState<string | null>(null);
+  /** 面板内的轻量提示条：分叉完成 / 失败时给一句反馈 */
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
+  const showNotice = useCallback((message: string) => {
+    setNotice(message);
+    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = window.setTimeout(() => {
+      noticeTimerRef.current = null;
+      setNotice(null);
+    }, 4000);
+  }, []);
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+    },
+    []
+  );
   const handleFork = useCallback(
     async (entryId: string) => {
-      if (!activeId) return;
+      if (!activeId || forkingRef.current) return;
+      forkingRef.current = true;
+      setForkingEntryId(entryId);
       try {
         const result = await api.forkAgentSession(activeId, entryId);
         if (result.cancelled) return;
@@ -1359,11 +1386,16 @@ export function GlobalAgentPanel({
           if (import.meta.env?.DEV) console.warn('[AgentPanel] 读取分叉会话历史失败:', err);
         }
         void refresh();
+        showNotice(result.title ? `已创建分支：${result.title}` : '已创建分支');
       } catch (err) {
         if (import.meta.env?.DEV) console.warn('[AgentPanel] 分叉失败:', err);
+        showNotice('分叉失败，请重试');
+      } finally {
+        forkingRef.current = false;
+        setForkingEntryId(null);
       }
     },
-    [activeId, refresh]
+    [activeId, refresh, showNotice]
   );
 
   // 会话树：pi 允许回到任意历史条目继续，被放弃的分支一条不删
@@ -1691,6 +1723,7 @@ export function GlobalAgentPanel({
               : undefined
           }
           onFork={handleFork}
+          forkPendingEntryId={forkingEntryId}
           tree={
             treeOpen ? (
               <SessionTreePanel
@@ -1711,7 +1744,15 @@ export function GlobalAgentPanel({
               <WorkspaceDock cwd={activeCwd} request={dockRequest} onClose={() => setDockOpen(false)} />
             ) : undefined
           }
-          banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : undefined}
+          banner={
+            uiRequest ? (
+              <ApprovalCard request={uiRequest} onRespond={respondUi} />
+            ) : notice ? (
+              <div className={styles.notice} role="status">
+                {notice}
+              </div>
+            ) : undefined
+          }
           emptyTitle={activeId ? '开始一段新的会话' : '选择左侧会话，或新建一段'}
           emptyHint="会话直接跑在本机 pi 上，拥有读写文件与执行命令的能力。"
         />
