@@ -64,9 +64,10 @@ const ADDABLE_KINDS: Array<{ kind: DockTab; title: string }> = [
 
 /** 面板宽度：拖动左缘调整，双击复位，按工作区无关的界面偏好持久化 */
 const DOCK_WIDTH_KEY = 'openloop.agent.dockWidth';
-const DOCK_MIN_WIDTH = 280;
+const DOCK_MIN_WIDTH = 300;
 const DOCK_MAX_WIDTH = 760;
-const DOCK_DEFAULT_WIDTH = 360;
+/** 首次打开宽度：对齐 DSH 右侧边栏的首开比例（帧宽的 45%） */
+const DOCK_DEFAULT_RATIO = 0.45;
 
 function clampDockWidth(width: number): number {
   const viewport = typeof window === 'undefined' ? DOCK_MAX_WIDTH : window.innerWidth * 0.7;
@@ -74,12 +75,17 @@ function clampDockWidth(width: number): number {
   return Math.min(Math.max(Math.round(width), DOCK_MIN_WIDTH), max);
 }
 
+function defaultDockWidth(): number {
+  const viewport = typeof window === 'undefined' ? DOCK_MAX_WIDTH : window.innerWidth;
+  return clampDockWidth(viewport * DOCK_DEFAULT_RATIO);
+}
+
 function readDockWidth(): number {
   try {
     const stored = Number(localStorage.getItem(DOCK_WIDTH_KEY));
-    return Number.isFinite(stored) && stored > 0 ? clampDockWidth(stored) : DOCK_DEFAULT_WIDTH;
+    return Number.isFinite(stored) && stored > 0 ? clampDockWidth(stored) : defaultDockWidth();
   } catch (_) {
-    return DOCK_DEFAULT_WIDTH;
+    return defaultDockWidth();
   }
 }
 
@@ -656,8 +662,9 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
   );
 
   const resetWidth = useCallback(() => {
-    setWidth(DOCK_DEFAULT_WIDTH);
-    writeDockWidth(DOCK_DEFAULT_WIDTH);
+    const next = defaultDockWidth();
+    setWidth(next);
+    writeDockWidth(next);
   }, []);
 
   const nudgeWidth = useCallback(
