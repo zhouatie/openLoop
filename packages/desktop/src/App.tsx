@@ -9,6 +9,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { ShortcutProvider } from './context/ShortcutContext';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { useTaskNotifications } from './hooks/useTaskNotifications';
+import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { ToastProvider } from './components/Toast';
 import { KanbanView } from './views/KanbanView';
 import { WorkflowListView } from './views/WorkflowListView';
@@ -79,6 +80,9 @@ export const AppContent: React.FC = () => {
     setAgentSessionRequest((prev) => ({ id: sessionId, seq: (prev?.seq ?? 0) + 1 }));
     setIsAgentOverlayOpen(true);
   }, []);
+
+  // Agent 一轮回复结束的全局通知：点击通知直达该会话
+  useAgentNotifications(handleOpenAgentSession);
 
   const handleToggleSidebar = useCallback(() => {
     setIsSidebarOpen((prev) => {

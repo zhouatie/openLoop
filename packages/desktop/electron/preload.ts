@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('system:restartCoreServer'),
   getCoreServerStatus: () =>
     ipcRenderer.invoke('system:getCoreServerStatus'),
-  notify: (payload: { title: string; body: string }) =>
+  notify: (payload: { title: string; body: string; sessionId?: string }) =>
     ipcRenderer.invoke('notification:show', payload),
   send: (channel: string, data: any) => ipcRenderer.send(channel, data),
   on: (channel: string, callback: (...args: any[]) => void) => {

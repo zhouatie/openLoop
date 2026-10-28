@@ -24,6 +24,7 @@ import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
 import { SessionTreePanel } from './SessionTreePanel';
 import { useAgentStream } from './useAgentStream';
+import { setViewingAgentSession, rememberAgentSessionTitles } from '../hooks/useAgentNotifications';
 import { QueuedInputs } from './QueuedInputs';
 import styles from './AgentPanel.module.css';
 
@@ -906,6 +907,8 @@ export function GlobalAgentPanel({
         archived: item.archived === true,
         pinned: item.pinned === true,
       }));
+      // 通知正文要显示会话名：随列表一起灌进缓存，不额外请求
+      rememberAgentSessionTitles(fromDisk);
       // 刚落盘还没被列表扫到的会话（进程仍活着或在跑）要保留，否则该行会先消失再出现
       setSessions((prev) => {
         const prevById = new Map(prev.map((item) => [item.id, item]));
@@ -1325,6 +1328,12 @@ export function GlobalAgentPanel({
     };
     // 只跟会话本身与运行态：列表每次轮询都会换数组，用 sessions 当依赖会让计时器被反复重建
   }, [active, activeId, activeRunning, activePath]);
+
+  // 上报「用户正在看的会话」：面板收起或切走后，该会话收尾时才需要弹通知
+  useEffect(() => {
+    setViewingAgentSession(active ? activeId : null);
+    return () => setViewingAgentSession(null);
+  }, [active, activeId]);
 
   // 运行指示跟随实时事件：一轮结束（agent_settled）就熄灭；会话命名变化即时换标题
   useEffect(() => {
