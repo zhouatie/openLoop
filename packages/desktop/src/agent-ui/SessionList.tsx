@@ -525,102 +525,101 @@ export const SessionList = memo(function SessionList({
     // 新会话占位行本身就是当前会话，不响应点击，也不提供文件级操作
     const draftRow = session.draft === true;
     return (
-                  <div
-                    key={session.id}
-                    className={`${styles.sessionRow} ${
-                      session.id === activeId ? styles.sessionSelected : ''
-                    } ${session.archived ? styles.sessionArchived : ''}`}
-                    onClick={() => {
-                      if (renamingSession || draftRow) return;
-                      onSelectSession(session.id);
-                    }}
-                    role="treeitem"
-                    aria-selected={session.id === activeId}
-                    tabIndex={0}
-                    onMouseEnter={(event) =>
-                      showCard(
-                        event.currentTarget,
-                        session.title || '未命名会话',
-                        session.cwd,
-                        createdLabel(session.createdAt)
-                      )
-                    }
-                    onMouseLeave={hideCard}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !renamingSession && !draftRow) onSelectSession(session.id);
-                    }}
-                  >
-                    {/* 状态槽固定 16px（对齐 DSH）：运行指示在槽内显隐，标题位置不随之左右跳 */}
-                    <span className={styles.statusSlot}>
-                      {session.running && <span className={styles.liveSpinner} aria-label="进行中" />}
-                    </span>
-                    {renamingSession ? (
-                      <input
-                        ref={renameInputRef}
-                        className={styles.renameInput}
-                        value={rename.value}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => setRename({ ...rename, value: event.target.value })}
-                        onBlur={commitRename}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            commitRename();
-                          }
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            setRename(null);
-                          }
-                        }}
-                      />
-                    ) : (
-                      <span className={styles.sessionTitle}>{session.title || '未命名会话'}</span>
-                    )}
-                    {session.pinned && (
-                      <span className={styles.pinMark} aria-label="已置顶">
-                        <IconPin size={13} />
-                      </span>
-                    )}
-                    {!draftRow && (
-                      <>
-                        <span className={styles.time}>{relativeTime(session.modifiedAt)}</span>
-                        <span className={styles.rowActions}>
-                          {onPinSession && (
-                            <button
-                              type="button"
-                              className={`${styles.rowIcon} ${session.pinned ? styles.rowIconActive : ''}`}
-                              aria-label={session.pinned ? '取消置顶' : '置顶会话'}
-                              title={session.pinned ? '取消置顶' : '置顶会话'}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onPinSession(session.id, !session.pinned);
-                              }}
-                            >
-                              <IconPin size={14} />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className={styles.rowIcon}
-                            aria-label="会话操作"
-                            onClick={(event) =>
-                              openMenu(event, {
-                                kind: 'session',
-                                cwd: session.cwd,
-                                sessionId: session.id,
-                                archived: session.archived,
-                                pinned: session.pinned,
-                              })
-                            }
-                          >
-                            <IconMore size={16} />
-                          </button>
-                        </span>
-                      </>
-                    )}
-                  </div>
-
+      <div
+        key={session.id}
+        className={`${styles.sessionRow} ${
+          session.id === activeId ? styles.sessionSelected : ''
+        } ${session.archived ? styles.sessionArchived : ''}`}
+        onClick={() => {
+          if (renamingSession || draftRow) return;
+          onSelectSession(session.id);
+        }}
+        role="treeitem"
+        aria-selected={session.id === activeId}
+        tabIndex={0}
+        onMouseEnter={(event) =>
+          showCard(
+            event.currentTarget,
+            session.title || '未命名会话',
+            session.cwd,
+            createdLabel(session.createdAt)
+          )
+        }
+        onMouseLeave={hideCard}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !renamingSession && !draftRow) onSelectSession(session.id);
+        }}
+      >
+        {/* 状态槽固定 16px（对齐 DSH）：运行指示在槽内显隐，标题位置不随之左右跳 */}
+        <span className={styles.statusSlot}>
+          {session.running && <span className={styles.liveSpinner} aria-label="进行中" />}
+        </span>
+        {renamingSession ? (
+          <input
+            ref={renameInputRef}
+            className={styles.renameInput}
+            value={rename.value}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => setRename({ ...rename, value: event.target.value })}
+            onBlur={commitRename}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                commitRename();
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                setRename(null);
+              }
+            }}
+          />
+        ) : (
+          <span className={styles.sessionTitle}>{session.title || '未命名会话'}</span>
+        )}
+        {session.pinned && (
+          <span className={styles.pinMark} aria-label="已置顶">
+            <IconPin size={13} />
+          </span>
+        )}
+        {!draftRow && (
+          <>
+            <span className={styles.time}>{relativeTime(session.modifiedAt)}</span>
+            <span className={styles.rowActions}>
+              {onPinSession && (
+                <button
+                  type="button"
+                  className={`${styles.rowIcon} ${session.pinned ? styles.rowIconActive : ''}`}
+                  aria-label={session.pinned ? '取消置顶' : '置顶会话'}
+                  title={session.pinned ? '取消置顶' : '置顶会话'}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onPinSession(session.id, !session.pinned);
+                  }}
+                >
+                  <IconPin size={14} />
+                </button>
+              )}
+              <button
+                type="button"
+                className={styles.rowIcon}
+                aria-label="会话操作"
+                onClick={(event) =>
+                  openMenu(event, {
+                    kind: 'session',
+                    cwd: session.cwd,
+                    sessionId: session.id,
+                    archived: session.archived,
+                    pinned: session.pinned,
+                  })
+                }
+              >
+                <IconMore size={16} />
+              </button>
+            </span>
+          </>
+        )}
+      </div>
     );
   };
 

@@ -147,6 +147,16 @@
 }
 
 /* 终端 */
+.pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.paneHidden {
+  display: none;
+}
+
 .terminalHost {
   flex: 1;
   min-height: 0;

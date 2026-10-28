@@ -97,6 +97,35 @@ function clip(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
+/** 从消息推导出的展示值（日期、定位轨预览）：按消息对象缓存，流式期间每帧都要用 */
+interface DerivedRow {
+  day: string;
+  /** 用户消息的正文预览（图片段已剥离） */
+  prompt: string;
+  /** 助手消息的正文预览 */
+  response: string;
+}
+
+const derivedCache = new WeakMap<SessionChatMessage, DerivedRow>();
+
+function derivedRow(message: SessionChatMessage): DerivedRow {
+  const cached = derivedCache.get(message);
+  if (cached) return cached;
+  const row: DerivedRow = {
+    day: dayLabel(message.timestamp),
+    prompt:
+      message.role === 'user'
+        ? clip(splitPromptImages(message.content).text || '图片', PREVIEW_PROMPT_CHARS)
+        : '',
+    response:
+      message.role === 'assistant' && message.content.trim().length > 0
+        ? clip(message.content, PREVIEW_RESPONSE_CHARS)
+        : '',
+  };
+  derivedCache.set(message, row);
+  return row;
+}
+
 /** 一轮渲染块：用户消息 + 按顺序平铺的思考/工具/回答 + 用量 */
 interface TurnBlock {
   kind: 'turn';
@@ -132,24 +161,25 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
   let current: TurnBlock | null = null;
 
   messages.forEach((message, index) => {
+    const derived = derivedRow(message);
+
     if (message.role === 'user') {
       const turn = (current?.turn ?? 0) + 1;
       current = {
         kind: 'turn',
         turn,
-        day: dayLabel(message.timestamp),
+        day: derived.day,
         user: index,
         steps: [],
         tail: null,
       };
       blocks.push(current);
-      const promptText = splitPromptImages(message.content).text;
-      railItems.push({ turn, prompt: clip(promptText || '图片', PREVIEW_PROMPT_CHARS), response: '' });
+      railItems.push({ turn, prompt: derived.prompt, response: '' });
       return;
     }
 
     if (message.role === 'system') {
-      blocks.push({ kind: 'row', turn: current?.turn ?? 0, day: dayLabel(message.timestamp), index });
+      blocks.push({ kind: 'row', turn: current?.turn ?? 0, day: derived.day, index });
       return;
     }
 
@@ -157,7 +187,7 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
       current = {
         kind: 'turn',
         turn: 0,
-        day: dayLabel(message.timestamp),
+        day: derived.day,
         user: null,
         steps: [],
         tail: null,
@@ -169,9 +199,9 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
     turn.steps.push(index);
     turn.tail = index;
 
-    if (message.content.trim().length > 0) {
+    if (derived.response) {
       const rail = railItems[railItems.length - 1];
-      if (rail) rail.response = clip(message.content, PREVIEW_RESPONSE_CHARS);
+      if (rail) rail.response = derived.response;
     }
     if (message.usage) turn.usage = message.usage;
     if (message.model) turn.model = message.model;
@@ -203,24 +233,39 @@ export const AgentChatView = React.memo(function AgentChatView({
 
   const { blocks, railItems } = useMemo(() => buildBlocks(messages), [messages]);
 
+  const railFrameRef = useRef<number | null>(null);
   const handleScroll = useCallback(() => {
     const node = scrollerRef.current;
     if (!node) return;
     const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
     const stick = distance <= STICK_THRESHOLD;
     stickRef.current = stick;
-    setShowJump(!stick);
+    setShowJump((prev) => (prev === !stick ? prev : !stick));
 
-    // 视口顶部第一个可见轮次即当前轮
-    const rows = node.querySelectorAll<HTMLElement>('[data-turn]');
-    const edge = node.scrollTop + 80;
-    let current = 0;
-    for (const row of rows) {
-      if (row.offsetTop <= edge) current = Number(row.dataset.turn) || current;
-      else break;
-    }
-    setActiveTurn((prev) => (prev === current ? prev : current));
+    // 定位轨要读布局（querySelectorAll + offsetTop）：一帧最多算一次，滚动事件再多也不卡
+    if (railFrameRef.current !== null) return;
+    railFrameRef.current = requestAnimationFrame(() => {
+      railFrameRef.current = null;
+      const scroller = scrollerRef.current;
+      if (!scroller) return;
+      // 视口顶部第一个可见轮次即当前轮
+      const rows = scroller.querySelectorAll<HTMLElement>('[data-turn]');
+      const edge = scroller.scrollTop + 80;
+      let current = 0;
+      for (const row of rows) {
+        if (row.offsetTop <= edge) current = Number(row.dataset.turn) || current;
+        else break;
+      }
+      setActiveTurn((prev) => (prev === current ? prev : current));
+    });
   }, []);
+
+  useEffect(
+    () => () => {
+      if (railFrameRef.current !== null) cancelAnimationFrame(railFrameRef.current);
+    },
+    []
+  );
 
   // 面板宽度不足时收起定位轨
   useEffect(() => {
