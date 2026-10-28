@@ -701,6 +701,8 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                   onChange={(e) => setSubDraft(e.target.value)}
                   onPaste={handleSubPaste}
                   onKeyDown={(e) => {
+                    // 拼音等输入法的回车只用于上屏候选词，不触发录入
+                    if (e.nativeEvent.isComposing) return;
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       void handleQuickAddSubtask();
