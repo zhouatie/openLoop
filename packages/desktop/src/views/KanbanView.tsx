@@ -3662,6 +3662,69 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                 </div>
                               </div>
 
+                              {/* 顶部快速追加与规划动作栏（置于列表上方，避免工序过多时需滚动查找） */}
+                              <div className="flex items-center justify-between gap-2 pb-0.5">
+                                <div className="flex items-center gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setManualSubtaskWorkflowId(curTask.workflowId);
+                                      setManualSubtaskTitle('');
+                                      setManualSubtaskDesc('');
+                                      setManualSubtaskAttachments([]);
+                                      setManualSubtaskDep('');
+                                      setManualSubtaskWorkspace(curTask.workspace || '');
+                                      setIsAddingManualSubtask(true);
+                                    }}
+                                    className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:text-[#4338ca] font-medium cursor-pointer"
+                                  >
+                                    <Plus size={11} />
+                                    <span>追加新工序</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setLinkExistingParentTask(curTask)}
+                                    className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:text-[#4338ca] font-medium cursor-pointer"
+                                    title="吸纳看板中现存的独立任务成为本容器的子工序"
+                                  >
+                                    <Link2 size={11} />
+                                    <span>关联已有任务</span>
+                                  </button>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  disabled={isPlanningAi}
+                                  onClick={async () => {
+                                    try {
+                                      setIsPlanningAi(true);
+                                      if (import.meta.env?.DEV) {
+                                        console.log('[KanbanView:Subtasks] 请求 AI 继续规划工序:', curTask.id);
+                                      }
+                                      const res = await api.planSubtasks(curTask.id);
+                                      if (res.plan?.subtasks && res.plan.subtasks.length > 0) {
+                                        setAiPlanPreview(
+                                          res.plan.subtasks.map((s: any) => ({
+                                            title: s.title,
+                                            workflowId: s.workflowId || curTask.workflowId,
+                                            dependencies: s.dependencies || [],
+                                          }))
+                                        );
+                                      }
+                                    } catch (err: any) {
+                                      toast.error(`规划失败: ${err.message}`);
+                                    } finally {
+                                      setIsPlanningAi(false);
+                                    }
+                                  }}
+                                  className="text-[10.5px] text-[#85858d] hover:text-[#1c1c21] flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                                >
+                                  <Sparkles size={10} />
+                                  <span>让 AI 继续规划后续工序</span>
+                                </button>
+                              </div>
+
                               {/* 子工序流转链路列表 */}
                               <div className="space-y-2">
                                 <div className="flex items-center justify-between px-0.5">
@@ -3805,69 +3868,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                     );
                                   })}
                                 </div>
-                              </div>
-
-                              {/* 底部快速追加与规划动作栏 */}
-                              <div className="flex items-center justify-between pt-1">
-                                <div className="flex items-center gap-3">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setManualSubtaskWorkflowId(curTask.workflowId);
-                                      setManualSubtaskTitle('');
-                                      setManualSubtaskDesc('');
-                                      setManualSubtaskAttachments([]);
-                                      setManualSubtaskDep('');
-                                      setManualSubtaskWorkspace(curTask.workspace || '');
-                                      setIsAddingManualSubtask(true);
-                                    }}
-                                    className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:text-[#4338ca] font-medium cursor-pointer"
-                                  >
-                                    <Plus size={11} />
-                                    <span>追加新工序</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => setLinkExistingParentTask(curTask)}
-                                    className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:text-[#4338ca] font-medium cursor-pointer"
-                                    title="吸纳看板中现存的独立任务成为本容器的子工序"
-                                  >
-                                    <Link2 size={11} />
-                                    <span>关联已有任务</span>
-                                  </button>
-                                </div>
-
-                                <button
-                                  type="button"
-                                  disabled={isPlanningAi}
-                                  onClick={async () => {
-                                    try {
-                                      setIsPlanningAi(true);
-                                      if (import.meta.env?.DEV) {
-                                        console.log('[KanbanView:Subtasks] 请求 AI 继续规划工序:', curTask.id);
-                                      }
-                                      const res = await api.planSubtasks(curTask.id);
-                                      if (res.plan?.subtasks && res.plan.subtasks.length > 0) {
-                                        setAiPlanPreview(
-                                          res.plan.subtasks.map((s: any) => ({
-                                            title: s.title,
-                                            workflowId: s.workflowId || curTask.workflowId,
-                                            dependencies: s.dependencies || [],
-                                          }))
-                                        );
-                                      }
-                                    } catch (err: any) {
-                                      toast.error(`规划失败: ${err.message}`);
-                                    } finally {
-                                      setIsPlanningAi(false);
-                                    }
-                                  }}
-                                  className="text-[10.5px] text-[#85858d] hover:text-[#1c1c21] flex items-center gap-1 cursor-pointer transition-colors"
-                                >
-                                  <Sparkles size={10} />
-                                  <span>让 AI 继续规划后续工序</span>
-                                </button>
                               </div>
                             </>
                           )}
