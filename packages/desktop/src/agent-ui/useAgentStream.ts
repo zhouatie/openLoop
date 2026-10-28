@@ -137,6 +137,8 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   const { streamKey, load, historyMessages, transport, enabled = true } = options;
 
   const stateRef = useRef<TaskSessionState | null>(null);
+  /** 实时事件序号：用于识别并丢弃过期的快照请求结果 */
+  const stateStampRef = useRef(0);
   const historyRef = useRef<SessionChatMessage[] | undefined>(historyMessages);
   const frameRef = useRef<number | null>(null);
   const [, forceRender] = useReducer((value: number) => value + 1, 0);
@@ -158,6 +160,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   const [steadyBusy, setSteadyBusy] = useState(false);
   const idleTimerRef = useRef<number | null>(null);
   const syncBusy = useCallback((busy: boolean) => {
+    if (import.meta.env?.DEV) console.log('[AgentStream] busy 同步:', busy);
     if (idleTimerRef.current !== null) {
       window.clearTimeout(idleTimerRef.current);
       idleTimerRef.current = null;
@@ -181,13 +184,15 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
 
   const reload = useCallback(async () => {
     if (!load) return;
+    // 快照请求在途期间若已有实时事件到达，说明快照比现状旧，直接丢弃，
+    // 否则旧的 isBusy 会把运行指示卡在「进行中」。
+    const stamp = stateStampRef.current;
     try {
       const next = await load();
-      if (next) {
-        stateRef.current = next;
-        syncBusy(Boolean(next.isBusy));
-        scheduleRender();
-      }
+      if (!next || stamp !== stateStampRef.current) return;
+      stateRef.current = next;
+      syncBusy(Boolean(next.isBusy));
+      scheduleRender();
     } catch (err) {
       if (import.meta.env?.DEV) {
         console.warn('[AgentStream] 加载会话快照失败:', err);
@@ -204,6 +209,8 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
 
     const offSnapshot = api.on('agent:chat_update', (state: TaskSessionState) => {
       if (disposed || !state || state.taskId !== streamKey) return;
+      if (import.meta.env?.DEV) console.log('[AgentStream] 快照', state.taskId, 'isBusy=', state.isBusy);
+      stateStampRef.current += 1;
       // 快照为权威状态：保留历史前缀，实时段整体替换
       stateRef.current = { ...state, messages: state.messages };
       syncBusy(Boolean(state.isBusy));
@@ -212,12 +219,15 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
 
     const offStream = api.on('agent:stream', (event) => {
       if (disposed || !event || event.taskId !== streamKey) return;
-      const next = applyAgentEvent(stateRef.current, event);
-      if (next !== stateRef.current) {
-        stateRef.current = next;
-        syncBusy(Boolean(next?.isBusy));
-        scheduleRender();
+      if (import.meta.env?.DEV && event.kind !== 'message_delta') {
+        console.log('[AgentStream] 增量', event.kind, (event as any).patch || '');
       }
+      const next = applyAgentEvent(stateRef.current, event);
+      if (next === stateRef.current) return;
+      stateStampRef.current += 1;
+      stateRef.current = next;
+      syncBusy(Boolean(next?.isBusy));
+      scheduleRender();
     });
 
     return () => {
