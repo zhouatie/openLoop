@@ -46,6 +46,8 @@ export const AppContent: React.FC = () => {
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isQuickRunModalOpen, setIsQuickRunModalOpen] = useState<boolean>(false);
   const [isAgentOverlayOpen, setIsAgentOverlayOpen] = useState<boolean>(false);
+  /** 外部页面请求在全局智能体里打开的会话（seq 递增即一次新请求） */
+  const [agentSessionRequest, setAgentSessionRequest] = useState<{ id: string; seq: number } | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
     try {
       // 权限向导依赖 Electron 主进程能力；浏览器预览（含靶机）无法检测与授权
@@ -70,6 +72,13 @@ export const AppContent: React.FC = () => {
     } catch {}
     return true;
   });
+
+  /** 外部页面请求打开某条智能体会话：打开浮层并切到该会话 */
+  const handleOpenAgentSession = useCallback((sessionId: string) => {
+    if (import.meta.env?.DEV) console.log('[App] 打开全局智能体会话:', sessionId);
+    setAgentSessionRequest((prev) => ({ id: sessionId, seq: (prev?.seq ?? 0) + 1 }));
+    setIsAgentOverlayOpen(true);
+  }, []);
 
   const handleToggleSidebar = useCallback(() => {
     setIsSidebarOpen((prev) => {
@@ -426,6 +435,7 @@ export const AppContent: React.FC = () => {
               onTaskUpdate={handleTaskUpdate}
               selectedWorkspaceFilter={selectedWorkspaceFilter}
               onWorkspaceFilterChange={handleWorkspaceFilterChange}
+              onOpenAgentSession={handleOpenAgentSession}
             />
           )}
 
@@ -531,6 +541,7 @@ export const AppContent: React.FC = () => {
         <GlobalAgentPanel
           mode="overlay"
           active={isAgentOverlayOpen}
+          sessionRequest={agentSessionRequest}
           onClose={() => setIsAgentOverlayOpen(false)}
         />
       </div>

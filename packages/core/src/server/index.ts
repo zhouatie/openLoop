@@ -1019,6 +1019,15 @@ export class OpenLoopServer {
             if (!message) {
               return this.sendJson(res, 400, { error: '缺少 message' }, reqMeta);
             }
+            // 流水线常驻会话持有同一份 pi 会话：消息直接转给它，否则两个进程会同时写同一个会话文件
+            const pipeline = PiRpcSessionManager.getInstance().findLiveBySessionId(sessionKey);
+            if (pipeline) {
+              await pipeline.sendUserMessage(
+                message,
+                Array.isArray(body?.attachments) ? body.attachments : undefined
+              );
+              return this.sendJson(res, 200, pipeline.getState(), reqMeta);
+            }
             const state = await agentSessionHost.chat(sessionKey, message, {
               cwd: body?.cwd,
               model: body?.model,

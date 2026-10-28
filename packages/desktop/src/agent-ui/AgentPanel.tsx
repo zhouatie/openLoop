@@ -584,7 +584,8 @@ export interface GlobalAgentPanelProps {
   /** page：整页（带会话列）；overlay：全屏浮层（带会话列 + 关闭）；drawer：抽屉（无会话列） */
   mode: 'page' | 'overlay' | 'drawer';
   onClose?: () => void;
-  initialSessionId?: string | null;
+  /** 外部请求打开某条会话：seq 递增即切换，同一条会话再次请求也会切回去 */
+  sessionRequest?: { id: string; seq: number } | null;
   /** 不可见时关闭面板级快捷键 */
   active?: boolean;
 }
@@ -687,9 +688,10 @@ function readJsonArray(key: string): string[] {
 export function GlobalAgentPanel({
   mode,
   onClose,
-  initialSessionId,
+  sessionRequest,
   active = true,
 }: GlobalAgentPanelProps) {
+  const initialSessionId = sessionRequest?.id || null;
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [liveIds, setLiveIds] = useState<string[]>([]);
   const [busyIds, setBusyIds] = useState<string[]>([]);
@@ -908,6 +910,9 @@ export function GlobalAgentPanel({
       if (seq !== selectSeq.current) return;
       setHistory(detail.messages || []);
       setCwd(detail.summary?.cwd || '');
+      // 打开会话即展开它所在的项目，侧栏能看到选中行
+      const projectKey = normalizeProjectCwd(detail.summary?.cwd || '');
+      setCollapsed((prev) => (prev.includes(projectKey) ? prev.filter((item) => item !== projectKey) : prev));
       historyStampRef.current = { id, stamp: '' };
     } catch (err) {
       if (seq !== selectSeq.current) return;
@@ -921,11 +926,14 @@ export function GlobalAgentPanel({
     }
   }, []);
 
+  // 外部请求（例如任务详情页打开会话）：seq 变化就切过去；面板内部切换不回写这里
+  const appliedRequestSeq = useRef(0);
   useEffect(() => {
-    if (initialSessionId) void selectSession(initialSessionId);
-    // 仅首帧按传入会话打开
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!sessionRequest || sessionRequest.seq === appliedRequestSeq.current) return;
+    appliedRequestSeq.current = sessionRequest.seq;
+    if (import.meta.env?.DEV) console.log('[AgentPanel] 外部请求打开会话:', sessionRequest.id);
+    void selectSession(sessionRequest.id);
+  }, [sessionRequest, selectSession]);
 
   const loadLiveState = useCallback(async () => {
     if (!activeId) return null;

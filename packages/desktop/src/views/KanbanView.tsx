@@ -125,6 +125,8 @@ interface KanbanViewProps {
   onTaskUpdate?: (task: Task) => void;
   selectedWorkspaceFilter?: string;
   onWorkspaceFilterChange?: (workspace: string) => void;
+  /** 打开某条智能体会话（全局智能体浮层） */
+  onOpenAgentSession: (sessionId: string) => void;
 }
 
 interface ColumnDef {
@@ -305,6 +307,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   onTaskUpdate,
   selectedWorkspaceFilter,
   onWorkspaceFilterChange,
+  onOpenAgentSession,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -350,16 +353,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
 
-  const handleResumeTerminal = async (taskId: string) => {
-    try {
-      await api.resumeTerminal(taskId);
-    } catch (err: any) {
-      if (import.meta.env?.DEV) {
-        console.error('[KanbanView] 拉起终端失败:', err);
-      }
-      toast.error(`拉起终端失败: ${err?.message || '未知错误'}`);
-    }
-  };
   // 任务详情工作台：宽度拖拽（双击复位）与 Agent 协作流常驻开关，均本地记忆
   const [detailWidth, setDetailWidth] = useState<number>(() => readDetailWidth());
   const [isAgentPaneOpen, setIsAgentPaneOpen] = useState<boolean>(() => readAgentPaneOpen());
@@ -892,6 +885,15 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         chatTextareaRef.current.style.height = 'auto';
       }
     }
+  };
+
+  // 任务会话就是同一条 pi 会话：交给上层在全局智能体里打开它
+  const handleOpenAgentSession = (sessionId: string) => {
+    if (!onOpenAgentSession) return;
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanView] 在全局智能体中打开会话:', sessionId);
+    }
+    onOpenAgentSession(sessionId);
   };
 
   // 暂停 / 恢复当前智能体会话
@@ -2534,6 +2536,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         >
           {(() => {
             const curTask = activeTask || selectedTask;
+            // 任务会话就是同一条 pi 会话：没有会话就不露出入口
+            const curTaskSessionId =
+              (sessionState?.taskId === curTask.id ? sessionState?.sessionId : undefined) ||
+              curTask.context?.sessionId ||
+              curTask.context?.piSessionId;
             const statusInfo = getTaskStatusInfo(curTask);
             const wfDef = wfMap.get(curTask.workflowId);
             const recordedNodeCount = Object.keys(curTask.nodeRuns || {}).length;
@@ -3884,14 +3891,16 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                   {isPausingSession ? '恢复中' : '继续'}
                                 </button>
                               )}
-                              <button
-                                type="button"
-                                onClick={() => handleResumeTerminal(curTask.id)}
-                                className="h-[22px] px-1.5 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[10.5px] text-[#85858d] hover:text-[#1c1c21]"
-                                title="在系统终端中接管此会话"
-                              >
-                                终端
-                              </button>
+                              {curTaskSessionId && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenAgentSession(curTaskSessionId)}
+                                  className="h-[22px] px-1.5 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[10.5px] text-[#85858d] hover:text-[#1c1c21]"
+                                  title="在全局智能体中打开该任务的会话"
+                                >
+                                  全局会话
+                                </button>
+                              )}
                             </>
                           }
                         />
