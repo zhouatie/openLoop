@@ -37,6 +37,12 @@ const STICK_THRESHOLD = 80;
 const RAIL_MIN_WIDTH = 720;
 const PREVIEW_PROMPT_CHARS = 80;
 const PREVIEW_RESPONSE_CHARS = 160;
+/**
+ * 首屏只挂最近这些消息行：会话切换时不必等整段历史都进 DOM。
+ * 更早的消息留在数据里，由顶部「更早的消息」按页挂回来。
+ */
+const INITIAL_ROWS = 40;
+const ROWS_PER_PAGE = 80;
 
 /** 默认空回显列表：避免每次渲染新建数组，让 memo 不失效 */
 const EMPTY_PENDING: PendingUserInput[] = [];
@@ -219,6 +225,23 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
   return { blocks, railItems };
 }
 
+/** 取窗口内的块：窗口永远是消息流的后缀，轮块只保留窗口内的步骤 */
+function sliceBlocks(blocks: Block[], fromIndex: number): Block[] {
+  if (fromIndex <= 0) return blocks;
+  const visible: Block[] = [];
+  for (const block of blocks) {
+    if (block.kind === 'row') {
+      if (block.index >= fromIndex) visible.push(block);
+      continue;
+    }
+    const user = block.user !== null && block.user >= fromIndex ? block.user : null;
+    const steps = block.steps.filter((index) => index >= fromIndex);
+    if (user === null && steps.length === 0) continue;
+    visible.push({ ...block, user, steps });
+  }
+  return visible;
+}
+
 export const AgentChatView = React.memo(function AgentChatView({
   messages,
   isBusy,
@@ -252,6 +275,16 @@ export const AgentChatView = React.memo(function AgentChatView({
   const shown = loading ? frozenRef.current : messages;
 
   const { blocks, railItems } = useMemo(() => buildBlocks(shown), [shown]);
+
+  /** 已向前展开的消息条数：切换会话时归零，回到「只看最新一屏」 */
+  const [revealCount, setRevealCount] = useState(0);
+  const [revealKey, setRevealKey] = useState(sessionKey);
+  if (revealKey !== sessionKey) {
+    setRevealKey(sessionKey);
+    if (revealCount !== 0) setRevealCount(0);
+  }
+  const fromIndex = Math.max(0, shown.length - INITIAL_ROWS - revealCount);
+  const visibleBlocks = useMemo(() => sliceBlocks(blocks, fromIndex), [blocks, fromIndex]);
 
   const railFrameRef = useRef<number | null>(null);
   const handleScroll = useCallback(() => {
@@ -380,14 +413,60 @@ export const AgentChatView = React.memo(function AgentChatView({
     return () => observer.disconnect();
   }, []);
 
-  const jumpToTurn = useCallback((turn: number) => {
+  /** 展开更早的消息：新内容插在上方，展开后把视口留在原处 */
+  const anchorRef = useRef<{ height: number; top: number } | null>(null);
+  const revealOlder = useCallback((count: number) => {
+    const node = scrollerRef.current;
+    anchorRef.current = node ? { height: node.scrollHeight, top: node.scrollTop } : null;
+    stickRef.current = false;
+    setRevealCount((prev) => prev + count);
+  }, []);
+
+  /** 定位轨点到的轮次可能还在窗口外：先展开，等渲染完再滚过去 */
+  const pendingTurnRef = useRef<number | null>(null);
+  const jumpToTurn = useCallback(
+    (turn: number) => {
+      const target = blocks.find((block) => block.turn === turn);
+      const first =
+        target === undefined
+          ? undefined
+          : target.kind === 'row'
+            ? target.index
+            : target.user ?? target.steps[0];
+      if (first !== undefined && first < fromIndex) {
+        pendingTurnRef.current = turn;
+        setRevealCount((prev) => prev + (fromIndex - first));
+        return;
+      }
+      const node = scrollerRef.current;
+      if (!node) return;
+      const row = node.querySelector<HTMLElement>(`[data-turn="${turn}"]`);
+      if (!row) return;
+      stickRef.current = false;
+      node.scrollTo({ top: row.offsetTop - 20, behavior: 'smooth' });
+    },
+    [blocks, fromIndex]
+  );
+
+  // 窗口变化后收尾：优先落到待定位的轮次，否则把视口留在展开前看到的内容上
+  useLayoutEffect(() => {
     const node = scrollerRef.current;
     if (!node) return;
-    const row = node.querySelector<HTMLElement>(`[data-turn="${turn}"]`);
-    if (!row) return;
-    stickRef.current = false;
-    node.scrollTo({ top: row.offsetTop - 20, behavior: 'smooth' });
-  }, []);
+    const turn = pendingTurnRef.current;
+    if (turn !== null) {
+      pendingTurnRef.current = null;
+      anchorRef.current = null;
+      const row = node.querySelector<HTMLElement>(`[data-turn="${turn}"]`);
+      if (!row) return;
+      stickRef.current = false;
+      node.scrollTo({ top: row.offsetTop - 20, behavior: 'smooth' });
+      return;
+    }
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    anchorRef.current = null;
+    node.scrollTop = anchor.top + (node.scrollHeight - anchor.height);
+  }, [fromIndex]);
 
   const contentStyle = useMemo(
     () => (contentWidth ? ({ '--agent-content-width': `${contentWidth}px` } as React.CSSProperties) : undefined),
@@ -404,7 +483,7 @@ export const AgentChatView = React.memo(function AgentChatView({
   );
 
   const isEmpty = shown.length === 0;
-  const lastTurn = blocks.length > 0 ? blocks[blocks.length - 1] : undefined;
+  const lastTurn = visibleBlocks.length > 0 ? visibleBlocks[visibleBlocks.length - 1] : undefined;
 
   // 本轮开始时间：优先用服务端记录的轮次起点，其次退回最后一条用户消息的时间
   const lastUserAt = useMemo(() => {
@@ -438,11 +517,20 @@ export const AgentChatView = React.memo(function AgentChatView({
           </div>
         ) : (
           <div ref={contentRef} className={styles.content} style={contentStyle}>
-            {blocks.map((block, blockIndex) => {
-              const previousDay = blockIndex > 0 ? blocks[blockIndex - 1].day : '';
+            {fromIndex > 0 && (
+              <button
+                type="button"
+                className={styles.more}
+                onClick={() => revealOlder(Math.min(ROWS_PER_PAGE, fromIndex))}
+              >
+                {`显示更早的 ${Math.min(ROWS_PER_PAGE, fromIndex)} 条消息`}
+              </button>
+            )}
+            {visibleBlocks.map((block, blockIndex) => {
+              const previousDay = blockIndex > 0 ? visibleBlocks[blockIndex - 1].day : '';
               const separator =
                 block.day && block.day !== previousDay ? (
-                  <div className={styles.daySeparator} key={`day-${block.day}-${blockIndex}`}>
+                  <div className={styles.daySeparator} key={`day-${block.day}`}>
                     <span className={styles.dayLine} />
                     <span className={styles.dayText}>{block.day}</span>
                     <span className={styles.dayLine} />
@@ -463,7 +551,7 @@ export const AgentChatView = React.memo(function AgentChatView({
               const isLiveTurn = block === lastTurn;
               const forkEntryId = forkEntryIdOf(block);
               return (
-                <React.Fragment key={`turn-${block.turn}-${blockIndex}`}>
+                <React.Fragment key={`turn-${block.turn}`}>
                 {separator}
                 <div className={styles.turn} data-turn={block.turn || undefined}>
                   {block.user !== null && (
