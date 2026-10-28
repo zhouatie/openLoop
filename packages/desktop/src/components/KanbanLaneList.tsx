@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
+import { Task, KanbanColumn, TaskAttachment, WorkflowDefinition } from '@openloop/core';
 import { KanbanCard } from './KanbanCard';
 import { ChevronDown } from 'lucide-react';
 
@@ -29,7 +29,14 @@ export interface KanbanLaneListProps {
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
   onSetParentTask?: (task: Task) => void;
   onUnlinkSubtask?: (parentId: string, subtaskId: string) => void;
-  onAddSubtask?: (parentId: string, params: { title: string; workflowId?: string }) => Promise<void>;
+  onAddSubtask?: (
+    parentId: string,
+    params: { title: string; workflowId?: string; attachments?: TaskAttachment[] }
+  ) => Promise<void>;
+  onAddSubtasks?: (
+    parentId: string,
+    items: Array<{ title: string; workflowId?: string; attachments?: TaskAttachment[] }>
+  ) => Promise<void>;
 }
 
 const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
@@ -56,6 +63,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
   onSetParentTask,
   onUnlinkSubtask,
   onAddSubtask,
+  onAddSubtasks,
 }) => {
   const [displayCount, setDisplayCount] = useState<number>(INITIAL_BATCH_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -121,6 +129,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
           onSetParent={onSetParentTask}
           onUnlinkSubtask={onUnlinkSubtask}
           onAddSubtask={onAddSubtask}
+          onAddSubtasks={onAddSubtasks}
         />
       ))}
 
