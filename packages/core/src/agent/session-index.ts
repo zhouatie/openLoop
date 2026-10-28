@@ -195,13 +195,58 @@ export class PiSessionIndex {
       if (!cached || entry.summary.modifiedAt > cached.modifiedAt) cached = entry.summary;
     }
     if (cached) return cached;
+    // 先用文件名后缀定位：为一条会话把全部会话文件解析一遍太贵
+    const byName = await this.findByName(idOrPath);
+    if (byName) return byName;
     const all = await this.list();
     return all.find((item) => item.id === idOrPath);
   }
 
+  /** 只按文件名后缀定位（pi 命名为 `<时间戳>_<id>.jsonl`），不解析正文 */
+  private async findByName(id: string): Promise<PiSessionSummary | undefined> {
+    let best: PiSessionSummary | undefined;
+    for (const file of await this.locateById(id)) {
+      const summary = await this.describeFile(file);
+      if (summary && (!best || summary.modifiedAt > best.modifiedAt)) best = summary;
+    }
+    return best;
+  }
+
+  /** 按文件名后缀找会话文件，只看目录名不解析内容 */
+  private async locateById(id: string): Promise<string[]> {
+    const suffix = `${id}.jsonl`;
+    const matched: string[] = [];
+    const collect = (dir: string, names: string[]) => {
+      for (const name of names) {
+        if (name === suffix || name.endsWith(`_${suffix}`)) matched.push(path.join(dir, name));
+      }
+    };
+    try {
+      const root = await fsp.readdir(this.rootDir, { withFileTypes: true });
+      collect(this.rootDir, root.filter((entry) => entry.isFile()).map((entry) => entry.name));
+      const dirs = root.filter((entry) => entry.isDirectory()).map((entry) => path.join(this.rootDir, entry.name));
+      const nested = await Promise.all(dirs.map((dir) => fsp.readdir(dir).catch(() => [] as string[])));
+      nested.forEach((names, index) => collect(dirs[index], names));
+    } catch (_) {
+      return [];
+    }
+    return matched;
+  }
+
   /** 读取单个会话的消息序列（活动分支） */
   public async read(idOrPath: string, options?: { limit?: number }): Promise<PiSessionDetail | undefined> {
-    const summary = await this.find(idOrPath);
+    return this.readDetail(await this.find(idOrPath), options);
+  }
+
+  /** 同上，但只按文件名定位：文件不存在时立刻返回，不扫描全部会话，适合高频快照读取 */
+  public async readByName(id: string, options?: { limit?: number }): Promise<PiSessionDetail | undefined> {
+    return this.readDetail(await this.findByName(id), options);
+  }
+
+  private async readDetail(
+    summary: PiSessionSummary | undefined,
+    options?: { limit?: number }
+  ): Promise<PiSessionDetail | undefined> {
     if (!summary) return undefined;
     const entries = await this.readEntries(summary.path);
     if (entries.length === 0) {

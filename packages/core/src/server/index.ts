@@ -2106,16 +2106,22 @@ export class OpenLoopServer {
           );
         }
 
-        // 无常驻 RPC 进程时，从持久化 context 中读取历史消息
+        // 无常驻 RPC 进程时，历史以磁盘会话文件为准：同一份 pi 会话可能在全局 Agent 面板里被继续对话，
+        // task.context.chatMessages 只是任务侧的副本，不会跟着更新
         // isBusy 只表示智能体会话本身在执行：无常驻会话时任务即便处于 running
         // （例如正在跑 CLI / Hook 节点），智能体也未启动
+        const diskSession = await piSessionIndex.readByName(sessionId).catch(() => null);
+        const persistedMessages =
+          diskSession && diskSession.messages.length > 0
+            ? diskSession.messages
+            : sanitizeChatMessages(task.context?.chatMessages || []);
         const historicalState: TaskSessionState = {
           taskId,
           active: false,
           isBusy: false,
           isPaused: false,
           awaitingInput: isCurrentAgentRunning ? !!task.context?.awaitingInput : false,
-          messages: sanitizeChatMessages(task.context?.chatMessages || []),
+          messages: persistedMessages,
           agentName: task.context?.agentName || 'OpenLoop Agent',
           model: task.context?.model || settings.defaultModel || undefined,
           sessionId,
