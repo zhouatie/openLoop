@@ -1301,7 +1301,6 @@ export function GlobalAgentPanel({
     if (platform) return platform === 'darwin';
     return /mac/i.test(navigator.userAgent);
   })();
-  const isLive = activeId ? liveIds.includes(activeId) : false;
   const title = activeSession?.title || (activeId ? '新会话' : '智能体开发');
   const activeCwd = cwd || activeSession?.cwd || '';
 
@@ -1435,7 +1434,8 @@ export function GlobalAgentPanel({
         <AgentPanelShell
           title={title}
           subtitle={
-            mode === 'drawer' ? undefined : `${shortenPath(activeCwd)}${isLive ? ' · 运行中' : ''}`
+            // 只在真正执行一轮时标注运行中：进程在线但空闲不算运行，避免与消息区的用时指示不一致
+            mode === 'drawer' ? undefined : `${shortenPath(activeCwd)}${isBusy ? ' · 运行中' : ''}`
           }
           messages={messages}
           isBusy={isBusy}

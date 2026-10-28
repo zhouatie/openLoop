@@ -580,6 +580,8 @@ export class PiRpcSessionInstance extends EventEmitter {
             this.emitMessagePatch(targetMsg.id, { errorMessage: errorText, stopReason: msg.stopReason || 'error' });
           }
         }
+        // 一轮结束即空闲：状态位必须同时落到快照，否则快照仍报忙碌，界面运行指示会赖着不消失
+        this.isBusy = false;
         this.emitStatus({ isBusy: false });
         this.notifyUpdate(true);
         break;
