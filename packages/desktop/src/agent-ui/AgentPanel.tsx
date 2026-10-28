@@ -614,14 +614,6 @@ function pollAllowed(): boolean {
   return typeof document === 'undefined' || document.visibilityState !== 'hidden';
 }
 
-/** pi 会话名可能是路径（任务会话用 workspace 命名），这类名字没有信息量，交回首条消息兜底 */
-function usableSessionTitle(title: string | undefined): string {
-  const raw = (title || '').replace(/^openLoop:\s*/i, '').trim();
-  if (!raw) return '';
-  if (/^(\/|~\/|[A-Za-z]:[\\/])/.test(raw)) return '';
-  return raw;
-}
-
 /** 临时目录、仓库子包与会话工作树都归入所属项目，避免侧栏被内部路径刷屏 */
 function normalizeProjectCwd(cwd: string): string {
   if (!cwd) return TEMP_PROJECT_KEY;
@@ -645,11 +637,8 @@ function normalizeProjectCwd(cwd: string): string {
   return root;
 }
 
-/** 首条消息若是本地路径，就没有可读标题，退回「会话 + 日期」 */
-function sessionTitleOf(firstUserMessage: string | undefined, modifiedAt: string): string {
-  const raw = (firstUserMessage || '').trim();
-  const looksLikePath = raw.startsWith('/') || raw.startsWith('~/') || /^[A-Za-z]:\\/.test(raw);
-  if (raw && !looksLikePath) return raw;
+/** 没有可用标题时退回「会话 + 日期」 */
+function dateLabel(modifiedAt: string): string {
   const time = Date.parse(modifiedAt);
   const stamp = Number.isFinite(time)
     ? new Date(time).toLocaleString('zh-CN', {
@@ -838,9 +827,8 @@ export function GlobalAgentPanel({
       busyRef.current = new Set(busyList);
       const fromDisk: SessionListItem[] = (list.sessions || []).map((item) => ({
         id: item.id,
-        // pi 会话名优先（TUI 侧由扩展 AI 生成）；openLoop 任务会话会带 "openLoop: " 前缀，展示时去掉
-        title:
-          usableSessionTitle(item.title) || sessionTitleOf(item.firstUserMessage, item.modifiedAt),
+        // 服务端已裁决好标题：重命名 > 会话名（任务标题 / 自动命名）> 首条消息兜底
+        title: item.title || dateLabel(item.modifiedAt),
         cwd: item.cwd || '',
         modifiedAt: item.modifiedAt,
         messageCount: item.messageCount,
@@ -1216,13 +1204,28 @@ export function GlobalAgentPanel({
     // 只跟会话本身与运行态：列表每次轮询都会换数组，用 sessions 当依赖会让计时器被反复重建
   }, [active, activeId, activeRunning, activePath]);
 
-  // 运行指示跟随实时事件：一轮结束（agent_settled）就熄灭
+  // 运行指示跟随实时事件：一轮结束（agent_settled）就熄灭；会话命名变化即时换标题
   useEffect(() => {
     if (!active) return;
     const off = api.on('agent:stream', (event: any) => {
       const taskId: string | undefined = event?.taskId;
       if (!taskId || !taskId.startsWith('agent_')) return;
       const sessionId = taskId.slice('agent_'.length);
+
+      if (event?.kind === 'title') {
+        const title = typeof event.title === 'string' ? event.title.trim() : '';
+        if (!title) return;
+        if (import.meta.env?.DEV) console.log('[AgentPanel] 会话已自动命名', sessionId, title);
+        const pending = pendingRows.current[sessionId];
+        if (pending) pending.title = title;
+        setSessions((prev) =>
+          prev.some((item) => item.id === sessionId)
+            ? prev.map((item) => (item.id === sessionId ? { ...item, title } : item))
+            : prev
+        );
+        return;
+      }
+
       const busy =
         event?.kind === 'status'
           ? event.patch?.isBusy
