@@ -338,37 +338,49 @@
   height: 34px;
 }
 
-/* 会话列品牌标识 */
+/* 会话列品牌标识：标识与字标沉在左侧，右侧只留一句被细线隔开的模式说明 */
 .brandRow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 46px;
-  margin: 0 2px 6px;
-  padding: 0 8px;
+  gap: 9px;
+  height: 48px;
+  margin: 0 2px 8px;
+  padding: 0 6px;
   box-sizing: border-box;
 }
 
 .brandLogo {
   flex: none;
   border-radius: 6px;
+  filter: drop-shadow(0 1px 1.5px rgb(16 18 30 / 0.16));
 }
 
 .brandName {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  line-height: 20px;
+  letter-spacing: -0.02em;
   color: var(--dsw-alias-label-primary);
 }
 
+/* 徽章不再用填充胶囊：去掉色块，靠细线分隔与字距成为安静的一行注脚 */
 .brandTag {
+  display: inline-flex;
+  align-items: center;
   margin-left: auto;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 10.5px;
+  padding-right: 2px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
   line-height: 16px;
+  letter-spacing: 0.04em;
+}
+
+.brandTag::before {
+  content: '';
+  width: 1px;
+  height: 11px;
+  margin-right: 9px;
+  background: var(--dsw-alias-border-l3);
 }
 
 /* 面板内提示条：分叉完成 / 失败时在输入卡上方给一句反馈 */

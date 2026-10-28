@@ -85,14 +85,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* 顶部：macOS 原生红黄绿窗口控制按钮已由系统绘制，这里只留出让位与 Logo */}
         {isOpen ? (
           <div className="h-[46px] pl-[72px] pr-3 flex items-center shrink-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <BrandLogo size={19} className="shrink-0" />
-              <span className="flex items-baseline gap-1.5 min-w-0">
-                <span className="font-semibold text-[13px] text-[#1c1c21] tracking-tight truncate">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <BrandLogo size={20} className="shrink-0 drop-shadow-[0_1px_1.5px_rgba(16,18,30,0.16)]" />
+              <span className="flex min-w-0 flex-col justify-center">
+                <span className="truncate font-semibold text-[15px] leading-[19px] text-[#1c1c21] tracking-[-0.02em]">
                   openLoop
                 </span>
                 <span
-                  className="shrink-0 text-[9.5px] font-mono text-[#a1a1aa]"
+                  className="mt-[3px] truncate font-mono text-[10px] leading-[12px] text-[#9a9aa3] tracking-[0.01em]"
                   title={`当前版本 v${APP_VERSION}`}
                 >
                   v{APP_VERSION}
