@@ -234,6 +234,10 @@ export interface SessionTreeNode {
   text: string;
   timestamp: number;
   toolName?: string;
+  /** 只有工具调用的一步：text 是参数预览，toolName 是工具名 */
+  step?: boolean;
+  /** 原始前一条条目（含不进树的工具结果）：导航到提问时按它定位 */
+  prevId?: string | null;
 }
 
 /** 单个会话的树快照：节点扁平存储，父子关系由 parentId 表达 */
