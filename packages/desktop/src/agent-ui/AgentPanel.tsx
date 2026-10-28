@@ -1049,11 +1049,9 @@ export function GlobalAgentPanel({
     const picked = await api.selectDirectory({ defaultPath: cwd || undefined });
     if (!picked) return;
     if (import.meta.env?.DEV) console.log('[AgentPanel] 添加工作区:', picked);
-    setExtraProjects((prev) => (prev.includes(picked) ? prev : [picked, ...prev]));
-    setCollapsed((prev) => prev.filter((key) => key !== picked));
-    // 选中即是切换：会话的后续消息都跑在这个目录里
-    setCwd(picked);
-  }, [cwd]);
+    // 对齐 DSH：添加项目即在该项目里开一段新会话，右侧同时切到空白会话
+    startNewSession(picked);
+  }, [cwd, startNewSession]);
 
   const handleToggleGroup = useCallback((key: string) => {
     setCollapsed((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
