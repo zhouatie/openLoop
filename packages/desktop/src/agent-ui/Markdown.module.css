@@ -151,3 +151,66 @@
   background: var(--dsw-alias-bg-layer-1);
   font-weight: 600;
 }
+
+/* 紧凑变体（DSH MarkdownText variant="compact"）：思考正文一档小字号 + 灰色，
+   段落与列表收紧到 4px，行内代码与链接继承周围文本 */
+.root.compact {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.root.compact p,
+.root.compact ul,
+.root.compact ol,
+.root.compact blockquote {
+  margin: 4px 0;
+}
+
+.root.compact li {
+  margin: 2px 0;
+}
+
+.root.compact li > p {
+  margin: 4px 0;
+}
+
+.root.compact :is(h1, h2, h3, h4, h5, h6) {
+  margin: 8px 0 4px;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+}
+
+.root.compact blockquote {
+  padding: 0 0 0 8px;
+}
+
+.root.compact hr {
+  margin: 8px 0;
+}
+
+.root.compact .link,
+.root.compact .fileLink {
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: underline dotted;
+}
+
+.root.compact .inlineCode {
+  font-size: 1em;
+  padding: 0 3px;
+}
+
+.root.compact .tableWrap {
+  margin: 4px 0;
+}
+
+.root.compact .table,
+.root.compact .table :is(th, td) {
+  font-size: inherit;
+}
+
+.root.compact .table :is(th, td) {
+  padding: 4px 8px;
+}

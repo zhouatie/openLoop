@@ -37,9 +37,12 @@ const FenceCodeBlock = memo(function FenceCodeBlock({ code, language }: { code: 
 export const AgentMarkdown = memo(function AgentMarkdown({
   content,
   streaming = false,
+  compact = false,
 }: {
   content: string;
   streaming?: boolean;
+  /** 紧凑排版：思考正文等次级内容（对应 DSH MarkdownText 的 compact 变体） */
+  compact?: boolean;
 }) {
   const openFile = useOpenFile();
 
@@ -92,7 +95,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({
 
   return (
     <StreamingContext.Provider value={streaming}>
-      <div className={styles.root}>
+      <div className={compact ? `${styles.root} ${styles.compact}` : styles.root}>
         <Markdown remarkPlugins={REMARK_PLUGINS} components={components}>
           {content}
         </Markdown>

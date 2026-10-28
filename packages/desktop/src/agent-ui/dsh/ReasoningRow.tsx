@@ -81,7 +81,7 @@ export const ReasoningRow = memo(function ReasoningRow({ text, running = false }
         collapsedContent={collapsedContent}
       >
         <div className={css.thinkBody}>
-          <AgentMarkdown content={text} />
+          <AgentMarkdown content={text} compact />
         </div>
       </DisclosureRow>
     </div>

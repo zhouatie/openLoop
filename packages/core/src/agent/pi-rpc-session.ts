@@ -144,6 +144,8 @@ export class PiRpcSessionInstance extends EventEmitter {
   public pendingModel?: string;
   public modelError?: string;
   public lastError?: string;
+  /** 会话工作目录，工具记录直接带上，供命令卡显示提示符 */
+  public cwd?: string;
   /** 本轮（一次用户提交）开始时间，运行中用于显示用时 */
   public turnStartedAt?: number;
   /** 上一轮从开始到结束的用时（毫秒） */
@@ -199,6 +201,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.onEventCallback = options.onEvent;
     this.onFinishedCallback = options.onFinished;
     this.awaitCompletionMarker = options.awaitCompletionMarker === true;
+    this.cwd = options.cwd;
 
     this.spawnRpcProcess(options);
   }
@@ -638,6 +641,7 @@ export class PiRpcSessionInstance extends EventEmitter {
             name: ev.toolName,
             status: 'running',
             kind: classifyToolKind(ev.toolName),
+            cwd: this.cwd,
           };
           this.currentAssistantMessage.tools.push(tool);
           this.emitTool(this.currentAssistantMessage.id, tool);
