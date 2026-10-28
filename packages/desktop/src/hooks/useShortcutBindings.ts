@@ -16,9 +16,24 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
 };
 
 /**
- * 按命令表监听快捷键；只有命令表里声明 allowInInput 的命令会在输入框聚焦时触发。
+ * 同时挂载的多个面板共用一张注册表：一次按键只交给优先级最高的面板。
+ * 例如全局浮层盖住任务详情页时，详情页的 Agent 不再响应 Super + T。
  */
-export function useShortcutBindings(handlers: ShortcutHandlers, enabled = true) {
+const surfaceLayers = new Map<number, number>();
+let surfaceSeq = 0;
+
+const hasHigherSurface = (priority: number) => {
+  for (const level of surfaceLayers.values()) {
+    if (level > priority) return true;
+  }
+  return false;
+};
+
+/**
+ * 按命令表监听快捷键；只有命令表里声明 allowInInput 的命令会在输入框聚焦时触发。
+ * 优先级更高的面板（如上层的智能体浮层）挂载时，优先级低的面板让位。
+ */
+export function useShortcutBindings(handlers: ShortcutHandlers, enabled = true, priority = 0) {
   const { matchShortcut } = useShortcuts();
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
@@ -27,7 +42,10 @@ export function useShortcutBindings(handlers: ShortcutHandlers, enabled = true) 
 
   useEffect(() => {
     if (!enabled) return;
+    const token = ++surfaceSeq;
+    surfaceLayers.set(token, priority);
     const onKeyDown = (event: KeyboardEvent) => {
+      if (hasHigherSurface(priority)) return;
       const editable = isEditableTarget(event.target);
       for (const [id, handler] of Object.entries(handlersRef.current)) {
         if (!handler) continue;
@@ -49,6 +67,9 @@ export function useShortcutBindings(handlers: ShortcutHandlers, enabled = true) 
     };
     // 捕获阶段注册：xterm 等控件会 stopPropagation，捕获阶段仍能接管带修饰键的组合
     window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [enabled]);
+    return () => {
+      surfaceLayers.delete(token);
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [enabled, priority]);
 }

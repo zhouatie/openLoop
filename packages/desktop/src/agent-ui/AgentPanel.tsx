@@ -136,6 +136,8 @@ export interface AgentPanelShellProps {
   draftKey?: string;
   /** 面板当前可见时才监听面板快捷键 */
   shortcutsEnabled?: boolean;
+  /** 面板层级优先级：上层浮层高于页内面板，默认 0 */
+  shortcutPriority?: number;
 }
 
 /** 三种挂载共用的会话外壳：顶栏 + 消息列 + 输入卡 */
@@ -176,6 +178,7 @@ export function AgentPanelShell({
   onFork,
   draftKey,
   shortcutsEnabled = true,
+  shortcutPriority = 0,
 }: AgentPanelShellProps) {
   const [draft, setDraft] = useState('');
   /** 每个会话各自的草稿，切换会话时不会串味 */
@@ -219,7 +222,8 @@ export function AgentPanelShell({
 
   useShortcutBindings(
     { 'shortcuts.sheet': () => setSheetOpen(true) },
-    shortcutsEnabled && !sheetOpen
+    shortcutsEnabled && !sheetOpen,
+    shortcutPriority
   );
 
   /**
@@ -1268,22 +1272,26 @@ export function GlobalAgentPanel({
   const [rail, setRail] = useState(false);
 
   // 面板导航快捷键：命令表在 constants/agentShortcuts.ts，可在设置页改键
-  useShortcutBindings({
-    'session.new': () => startNewSession(activeCwd),
-    'session.search': () => setSearchSignal((prev) => prev + 1),
-    'workspace.add': () => void handleAddProject(),
-    'session.rename': () => {
-      // 快捷键触发页内搜索/重命名入口时，交给列表行内编辑
-      setRenameSignal((value) => value + 1);
+  useShortcutBindings(
+    {
+      'session.new': () => startNewSession(activeCwd),
+      'session.search': () => setSearchSignal((prev) => prev + 1),
+      'workspace.add': () => void handleAddProject(),
+      'session.rename': () => {
+        // 快捷键触发页内搜索/重命名入口时，交给列表行内编辑
+        setRenameSignal((value) => value + 1);
+      },
+      'session.archive': () => {
+        const target = sessions.find((item) => item.id === activeId);
+        if (target) void archiveSession(target.id, !target.archived);
+      },
+      'dock.toggle': () => setDockTab((prev) => (prev ? null : 'files')),
+      'dock.files': () => setDockTab('files'),
+      'dock.terminal': () => setDockTab('terminal'),
     },
-    'session.archive': () => {
-      const target = sessions.find((item) => item.id === activeId);
-      if (target) void archiveSession(target.id, !target.archived);
-    },
-    'dock.toggle': () => setDockTab((prev) => (prev ? null : 'files')),
-    'dock.files': () => setDockTab('files'),
-    'dock.terminal': () => setDockTab('terminal'),
-  });
+    active,
+    1
+  );
   // 仅 Electron（macOS）需要为红黄绿窗口按钮让位；浏览器里不偏移
   const trafficLightInset = (() => {
     if (typeof window === 'undefined') return false;
@@ -1447,6 +1455,8 @@ export function GlobalAgentPanel({
           onMinimize={mode === 'overlay' ? onClose : undefined}
           composerDisabled={!activeId}
           headerless={mode === 'page'}
+          shortcutsEnabled={active}
+          shortcutPriority={1}
           hero={hero}
           attachments={attachments.items}
           onAddFiles={activeId ? attachments.add : undefined}
