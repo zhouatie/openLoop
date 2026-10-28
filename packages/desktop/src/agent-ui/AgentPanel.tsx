@@ -95,6 +95,8 @@ export interface AgentPanelShellProps {
   isBusy?: boolean;
   /** 会话标识：切换会话时消息区重新贴底 */
   sessionKey?: string;
+  /** 该会话的历史还在加载：消息区不切到空态，也不显示空会话首页 */
+  loading?: boolean;
   /** 本轮开始时间（毫秒），运行中用于显示用时 */
   turnStartedAt?: number;
   /** 上一轮用时（毫秒），结束后显示固定用时 */
@@ -154,6 +156,7 @@ export function AgentPanelShell({
   messages,
   isBusy,
   sessionKey,
+  loading,
   turnStartedAt,
   lastTurnDurationMs,
   awaitingInput,
@@ -285,7 +288,7 @@ export function AgentPanelShell({
 
   // 消息已发出但实时状态还没回来时也算运行中，否则新会话首轮开头没有运行指示
   const running = Boolean(isBusy || sending);
-  const isBlank = messages.length === 0 && !running;
+  const isBlank = messages.length === 0 && !running && !loading;
 
   return (
     <div
@@ -350,6 +353,7 @@ export function AgentPanelShell({
                 messages={messages}
                 isBusy={running}
                 sessionKey={sessionKey}
+                loading={loading}
                 turnStartedAt={turnStartedAt}
                 lastTurnDurationMs={lastTurnDurationMs}
                 emptyTitle={emptyTitle}
@@ -684,6 +688,10 @@ export function GlobalAgentPanel({
     return `agent_${id}`;
   });
   const [history, setHistory] = useState<SessionChatMessage[] | undefined>(undefined);
+  /** 当前选中的会话历史是否还在加载（切换会话时消息区据此保留上一段内容） */
+  const [historyLoading, setHistoryLoading] = useState<boolean>(Boolean(initialSessionId));
+  /** 切换序号：快速连点以最后一次点击为准，旧的响应直接丢弃 */
+  const selectSeq = useRef(0);
   const [cwd, setCwd] = useState<string>('');
   const [sending, setSending] = useState(false);
   const [commands, setCommands] = useState<ComposerCommand[]>([]);
@@ -847,21 +855,30 @@ export function GlobalAgentPanel({
   }, [extraProjects]);
 
   const selectSession = useCallback(async (id: string) => {
+    const seq = ++selectSeq.current;
     setActiveId(id);
     setStreamKey(`agent_${id}`);
     setHistory(undefined);
+    setHistoryLoading(true);
     // 上一个会话遗留的审批卡不能带到新会话
     setUiRequest(null);
     // 离开新会话就撤掉占位行
     setDraft((prev) => (prev?.id === id ? prev : null));
     try {
       const detail = await api.getAgentSession(id);
+      if (seq !== selectSeq.current) return;
       setHistory(detail.messages || []);
       setCwd(detail.summary?.cwd || '');
       historyStampRef.current = '';
     } catch (err) {
+      if (seq !== selectSeq.current) return;
       if (import.meta.env?.DEV) console.warn('[AgentPanel] 读取历史会话失败:', err);
       setHistory([]);
+    } finally {
+      if (seq === selectSeq.current) {
+        setHistoryLoading(false);
+        if (import.meta.env?.DEV) console.log('[AgentPanel] 会话历史就绪:', id);
+      }
     }
   }, []);
 
@@ -910,6 +927,7 @@ export function GlobalAgentPanel({
     setActiveId(id);
     setStreamKey(`agent_${id}`);
     setHistory([]);
+    setHistoryLoading(false);
     setCwd(safeCwd);
     setDraft({ id, cwd: safeCwd });
     if (projectCwd && projectCwd !== TEMP_PROJECT_KEY) {
@@ -1520,6 +1538,8 @@ export function GlobalAgentPanel({
           }
           messages={messages}
           isBusy={isBusy}
+          sessionKey={activeId || ''}
+          loading={historyLoading}
           turnStartedAt={state?.turnStartedAt}
           lastTurnDurationMs={state?.lastTurnDurationMs}
           awaitingInput={awaitingInput}
@@ -1555,7 +1575,6 @@ export function GlobalAgentPanel({
           }
           onFork={handleFork}
           draftKey={activeId || ''}
-          sessionKey={activeId || ''}
           dock={
             dockTab ? (
               <WorkspaceDock

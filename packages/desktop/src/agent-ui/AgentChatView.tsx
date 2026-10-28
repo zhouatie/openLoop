@@ -11,8 +11,10 @@ import styles from './AgentChatView.module.css';
 export interface AgentChatViewProps {
   messages: SessionChatMessage[];
   isBusy?: boolean;
-  /** 会话标识：切换会话时重置贴底状态，落回最新消息（DSH 打开会话即 followTail） */
+  /** 会话标识：切换会话时落回最新消息（DSH 打开会话即 followTail） */
   sessionKey?: string;
+  /** 该会话的历史还在加载：先保留上一段内容，等新内容就绪后一次性贴底替换 */
+  loading?: boolean;
   /** 本轮开始时间（毫秒），运行中用于显示用时 */
   turnStartedAt?: number;
   /** 上一轮用时（毫秒），结束后显示固定用时 */
@@ -216,6 +218,7 @@ export const AgentChatView = React.memo(function AgentChatView({
   messages,
   isBusy,
   sessionKey,
+  loading,
   turnStartedAt,
   lastTurnDurationMs,
   emptyTitle,
@@ -234,7 +237,15 @@ export const AgentChatView = React.memo(function AgentChatView({
   const [activeTurn, setActiveTurn] = useState<number>(0);
   const [railVisible, setRailVisible] = useState(false);
 
-  const { blocks, railItems } = useMemo(() => buildBlocks(messages), [messages]);
+  /**
+   * 切换会话时历史是异步加载的：加载期间继续显示上一段内容（冻结），新会话就绪后一次性替换。
+   * 既不留空白帧，也不会把半截新内容按旧的滚动位置先画出来。
+   */
+  const frozenRef = useRef(messages);
+  if (!loading) frozenRef.current = messages;
+  const shown = loading ? frozenRef.current : messages;
+
+  const { blocks, railItems } = useMemo(() => buildBlocks(shown), [shown]);
 
   const railFrameRef = useRef<number | null>(null);
   const handleScroll = useCallback(() => {
@@ -291,20 +302,21 @@ export const AgentChatView = React.memo(function AgentChatView({
   }, []);
 
   /**
-   * 切换会话时无条件回到尾部。上一条会话可能停在历史位置（贴底标记为 false），
-   * 而面板在运行态不会卸载，标记会带到新会话，最新消息就停在视口外。
+   * 会话就绪即落到最新消息。
+   * 历史是异步到达的，贴底必须在新内容进入 DOM 的这一帧、绘制前完成；
+   * 早于内容到达（上一段内容还在）或晚于绘制（先画顶部再跳尾部）都会闪一下。
    */
   const followedUserIdRef = useRef<string | null>(null);
-  const sessionKeyRef = useRef(sessionKey);
+  const landedKeyRef = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
-    if (sessionKeyRef.current === sessionKey) return;
-    sessionKeyRef.current = sessionKey;
+    if (loading || landedKeyRef.current === sessionKey) return;
+    landedKeyRef.current = sessionKey;
     followedUserIdRef.current = null;
-    if (import.meta.env.DEV) console.log('[AgentChatView] 切换会话，回到最新消息:', sessionKey);
+    if (import.meta.env.DEV) console.log('[AgentChatView] 会话就绪，落到最新消息:', sessionKey);
     scrollToBottom();
-  }, [sessionKey, scrollToBottom]);
+  }, [loading, sessionKey, shown, scrollToBottom]);
 
-  const lastMessage = messages[messages.length - 1];
+  const lastMessage = shown[shown.length - 1];
   const lastLength = lastMessage ? lastMessage.content.length + (lastMessage.thinking?.length || 0) : 0;
   const lastUserId = lastMessage?.role === 'user' ? lastMessage.id : null;
 
@@ -325,7 +337,7 @@ export const AgentChatView = React.memo(function AgentChatView({
     const node = scrollerRef.current;
     if (!node) return;
     node.scrollTop = node.scrollHeight;
-  }, [messages.length, lastLength]);
+  }, [shown.length, lastLength]);
 
   // 首次挂载时直接落到最新位置
   useEffect(() => {
@@ -368,21 +380,21 @@ export const AgentChatView = React.memo(function AgentChatView({
   const forkEntryIdOf = useCallback(
     (block: TurnBlock): string | undefined => {
       if (block.user === null) return undefined;
-      return messages[block.user]?.entryId;
+      return shown[block.user]?.entryId;
     },
-    [messages]
+    [shown]
   );
 
-  const isEmpty = messages.length === 0;
+  const isEmpty = shown.length === 0;
   const lastTurn = blocks.length > 0 ? blocks[blocks.length - 1] : undefined;
 
   // 本轮开始时间：优先用服务端记录的轮次起点，其次退回最后一条用户消息的时间
   const lastUserAt = useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index].role === 'user' && messages[index].timestamp > 0) return messages[index].timestamp;
+    for (let index = shown.length - 1; index >= 0; index -= 1) {
+      if (shown[index].role === 'user' && shown[index].timestamp > 0) return shown[index].timestamp;
     }
     return undefined;
-  }, [messages]);
+  }, [shown]);
   const runningStartedAt = turnStartedAt ?? lastUserAt ?? mountAtRef.current;
   /** 已结束且本轮出过回答时显示固定用时；用户消息刚发出但未出结果时不显示旧读数 */
   const showDuration =
@@ -399,7 +411,7 @@ export const AgentChatView = React.memo(function AgentChatView({
         className={`${styles.scroller} ${isEmpty && isBusy ? styles.awaitingFirst : ''}`}
         onScroll={handleScroll}
       >
-        {isEmpty && !isBusy ? (
+        {isEmpty && !isBusy && !loading ? (
           <div className={styles.empty}>
             <div className={styles.emptyTitle}>{emptyTitle || '开始一段新的会话'}</div>
             <div className={styles.emptyHint}>
@@ -424,7 +436,7 @@ export const AgentChatView = React.memo(function AgentChatView({
                   <React.Fragment key={`row-${block.index}`}>
                     {separator}
                     <div data-turn={block.turn || undefined}>
-                      <MessageRow message={messages[block.index]} />
+                      <MessageRow message={shown[block.index]} />
                     </div>
                   </React.Fragment>
                 );
@@ -437,14 +449,14 @@ export const AgentChatView = React.memo(function AgentChatView({
                 {separator}
                 <div className={styles.turn} data-turn={block.turn || undefined}>
                   {block.user !== null && (
-                    <MessageRow message={messages[block.user]} />
+                    <MessageRow message={shown[block.user]} />
                   )}
                   {block.steps.map((index) => {
                     const isTail = index === block.tail;
                     return (
                       <MessageRow
                         key={`m-${index}`}
-                        message={messages[index]}
+                        message={shown[index]}
                         compact={!isTail}
                         onRegenerate={isTail && isLiveTurn && onRegenerate ? onRegenerate : undefined}
                         onFork={isTail && forkEntryId && onFork ? () => onFork(forkEntryId) : undefined}
@@ -455,13 +467,13 @@ export const AgentChatView = React.memo(function AgentChatView({
                 </React.Fragment>
               );
             })}
-            {/* 状态行固定在流转尾部：与最后一块是会话轮还是系统行无关 */}
-            {isBusy ? (
+            {/* 状态行固定在流转尾部，与最后一块是会话轮还是系统行无关；切换会话加载期间不追加到上一段内容下 */}
+            {loading ? null : isBusy ? (
               <RunningStatus startedAt={runningStartedAt} />
             ) : showDuration && lastTurnDurationMs !== undefined ? (
               <TurnDuration durationMs={lastTurnDurationMs} />
             ) : null}
-            {isBusy && <div className={styles.busyTail} aria-hidden />}
+            {isBusy && !loading && <div className={styles.busyTail} aria-hidden />}
           </div>
         )}
       </div>
