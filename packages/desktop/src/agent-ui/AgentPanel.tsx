@@ -14,6 +14,7 @@ import { WorkspaceDock, type DockRequest, type DockTab } from './WorkspaceDock';
 import { OpenFileContext } from './open-file';
 import { IconClose, IconFork, IconMinimize, IconPanelRight } from './icons';
 import { BrandLogo } from '../components/BrandLogo';
+import { toast } from '../components/Toast';
 import { useDirectoryPicker } from '../components/useDirectoryPicker';
 import { ApprovalCard, type AgentUiRequest } from './ApprovalCard';
 import { ShortcutSheet } from './ShortcutSheet';
@@ -548,6 +549,7 @@ export function TaskAgentPanel({
         attachments.clear();
       } catch (err) {
         if (import.meta.env?.DEV) console.warn('[AgentPanel] 发送任务会话消息失败:', err);
+        toast.error(`消息发送失败: ${(err as Error)?.message || 'Agent 会话不可用'}`);
       } finally {
         setSending(false);
       }
@@ -1091,6 +1093,7 @@ export function GlobalAgentPanel({
         void applyLiveState();
       } catch (err) {
         if (import.meta.env?.DEV) console.warn('[AgentPanel] 发送全局会话消息失败:', err);
+        toast.error(`消息发送失败: ${(err as Error)?.message || 'Agent 会话不可用'}`);
       } finally {
         setSending(false);
         void refresh();
