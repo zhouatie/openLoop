@@ -159,12 +159,14 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
    */
   const [steadyBusy, setSteadyBusy] = useState(false);
   const idleTimerRef = useRef<number | null>(null);
+  const clearIdleTimer = useCallback(() => {
+    if (idleTimerRef.current === null) return;
+    window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = null;
+  }, []);
   const syncBusy = useCallback((busy: boolean) => {
     if (import.meta.env?.DEV) console.log('[AgentStream] busy 同步:', busy);
-    if (idleTimerRef.current !== null) {
-      window.clearTimeout(idleTimerRef.current);
-      idleTimerRef.current = null;
-    }
+    clearIdleTimer();
     if (busy) {
       setSteadyBusy(true);
       return;
@@ -173,7 +175,18 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
       idleTimerRef.current = null;
       setSteadyBusy(false);
     }, BUSY_IDLE_GRACE_MS);
-  }, []);
+  }, [clearIdleTimer]);
+
+  /**
+   * 切换会话：运行态属于产生它的那条会话。已完成的会话没有实时状态，
+   * 靠快照熄灭不了，只能在切换的当帧就地熄灭，否则运行指示会一直停在上一条会话上。
+   */
+  const [busyKey, setBusyKey] = useState(streamKey);
+  if (busyKey !== streamKey) {
+    setBusyKey(streamKey);
+    setSteadyBusy(false);
+    clearIdleTimer();
+  }
 
   useEffect(
     () => () => {
@@ -189,7 +202,16 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
     const stamp = stateStampRef.current;
     try {
       const next = await load();
-      if (!next || stamp !== stateStampRef.current) return;
+      if (stamp !== stateStampRef.current) return;
+      if (!next) {
+        // 没有实时状态 = 进程已结束（已完成的历史会话）：运行指示必须立刻熄灭，不等宽限期
+        if (import.meta.env?.DEV) console.log('[AgentStream] 会话无实时状态，运行指示熄灭');
+        stateRef.current = null;
+        clearIdleTimer();
+        setSteadyBusy(false);
+        scheduleRender();
+        return;
+      }
       stateRef.current = next;
       syncBusy(Boolean(next.isBusy));
       scheduleRender();
@@ -198,7 +220,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
         console.warn('[AgentStream] 加载会话快照失败:', err);
       }
     }
-  }, [load, scheduleRender, syncBusy]);
+  }, [load, scheduleRender, syncBusy, clearIdleTimer]);
 
   useEffect(() => {
     if (!enabled || !streamKey) return;
