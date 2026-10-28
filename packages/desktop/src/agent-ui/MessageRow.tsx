@@ -105,15 +105,17 @@ const UserMessageRow = memo(function UserMessageRow({
 }) {
   const { text, images: promptImages } = useMemo(() => splitPromptImages(message.content), [message.content]);
   const attachments = message.attachments || [];
-  const images = useMemo(
-    () => [
-      ...attachments
-        .filter((item) => Boolean(item.url))
-        .map((item) => ({ key: item.id || item.url, url: imageSrc(item.url), name: item.name })),
-      ...promptImages.map((item) => ({ key: item.path, url: imageSrc(item.path), name: item.name })),
-    ],
-    [message.attachments, promptImages]
-  );
+  const images = useMemo(() => {
+    const attached = attachments.filter((item) => Boolean(item.url));
+    const attachedPaths = new Set(attached.map((item) => item.path));
+    return [
+      ...attached.map((item) => ({ key: item.id || item.url, url: imageSrc(item.url), name: item.name })),
+      // 正文里的图片块只补附件缺失的：两者同时命中就是同一张图被渲染两次
+      ...promptImages
+        .filter((item) => !attachedPaths.has(item.path))
+        .map((item) => ({ key: item.path, url: imageSrc(item.path), name: item.name })),
+    ];
+  }, [message.attachments, promptImages]);
   const files = attachments.filter((item) => !item.url && !isImagePath(item.path));
 
   return (
@@ -126,7 +128,8 @@ const UserMessageRow = memo(function UserMessageRow({
               <ImageThumb
                 key={item.key}
                 image={{ url: item.url, name: item.name }}
-                size={images.length > 1 ? 96 : 220}
+                size={64}
+                square
               />
             ))}
           </div>
