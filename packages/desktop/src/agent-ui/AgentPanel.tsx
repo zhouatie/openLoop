@@ -93,6 +93,8 @@ export interface AgentPanelShellProps {
   subtitle?: string;
   messages: SessionChatMessage[];
   isBusy?: boolean;
+  /** 会话标识：切换会话时消息区重新贴底 */
+  sessionKey?: string;
   /** 本轮开始时间（毫秒），运行中用于显示用时 */
   turnStartedAt?: number;
   /** 上一轮用时（毫秒），结束后显示固定用时 */
@@ -151,6 +153,7 @@ export function AgentPanelShell({
   subtitle,
   messages,
   isBusy,
+  sessionKey,
   turnStartedAt,
   lastTurnDurationMs,
   awaitingInput,
@@ -346,6 +349,7 @@ export function AgentPanelShell({
               <AgentChatView
                 messages={messages}
                 isBusy={running}
+                sessionKey={sessionKey}
                 turnStartedAt={turnStartedAt}
                 lastTurnDurationMs={lastTurnDurationMs}
                 emptyTitle={emptyTitle}
@@ -489,6 +493,7 @@ export function TaskAgentPanel({
       title={taskTitle || 'Agent 协作流'}
       subtitle={mode === 'inline' ? '与任务同屏协作' : undefined}
       draftKey={`task_${taskId}`}
+      sessionKey={`task_${taskId}`}
       messages={messages}
       isBusy={isBusy}
       turnStartedAt={state?.turnStartedAt}
@@ -1551,6 +1556,7 @@ export function GlobalAgentPanel({
           }
           onFork={handleFork}
           draftKey={activeId || ''}
+          sessionKey={activeId || ''}
           dock={
             dockTab ? (
               <WorkspaceDock
