@@ -499,7 +499,7 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
   return {
     id: (hasSessionHeader && header?.id) || idFromFileName(filePath),
     path: filePath,
-    cwd: (hasSessionHeader && header?.cwd) || deriveCwdFromFolder(filePath),
+    cwd: canonicalCwd((hasSessionHeader && header?.cwd) || deriveCwdFromFolder(filePath)),
     createdAt: (hasSessionHeader && header?.timestamp) || stat.birthtime.toISOString(),
     modifiedAt: stat.mtime.toISOString(),
     messageCount,
@@ -548,6 +548,20 @@ function decodeEncodedPath(encoded: string, base: string): string {
 }
 
 const folderCwdCache = new Map<string, string>();
+
+/**
+ * 会话工作目录可能是软链（raven 归档目录就指向 active 目录），
+ * 不取真实路径会让同一目录在侧栏拆成两个工作区。
+ */
+function canonicalCwd(cwd: string): string {
+  if (!cwd) return cwd;
+  try {
+    return fs.realpathSync.native(cwd);
+  } catch (_) {
+    // 目录已不存在（归档/还原后）保留原路径
+    return cwd;
+  }
+}
 
 /** pi 用 `--<路径，/ 换成 ->--` 命名项目目录；缺会话头的文件只能靠目录名反推工作目录 */
 function deriveCwdFromFolder(filePath: string): string {
