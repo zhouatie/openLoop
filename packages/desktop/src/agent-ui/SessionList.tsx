@@ -44,6 +44,7 @@ export interface SessionGroupItem {
   cwd: string;
   sessions: SessionListItem[];
   createdAt?: string;
+  pinned?: boolean;
 }
 
 /** 全文搜索命中的会话 */
@@ -76,6 +77,7 @@ export interface SessionListProps {
   /** 工作区元数据操作 */
   onRenameProject?: (key: string, title: string) => void;
   onHideProject?: (key: string) => void;
+  onPinProject?: (key: string, pinned: boolean) => void;
   /** 工作区拖拽排序：返回新的键顺序 */
   onReorderProjects?: (keys: string[]) => void;
   /** 顶部品牌插槽 */
@@ -127,6 +129,8 @@ interface HoverCardState {
 interface MenuState {
   kind: 'project' | 'session' | 'workspace';
   cwd: string;
+  /** 项目键：临时工作区的键与 cwd 不同 */
+  key?: string;
   sessionId?: string;
   archived?: boolean;
   pinned?: boolean;
@@ -187,6 +191,7 @@ export const SessionList = memo(function SessionList({
   onDeleteSession,
   onRenameProject,
   onHideProject,
+  onPinProject,
   onReorderProjects,
   brandSlot,
   searchSignal,
@@ -233,14 +238,16 @@ export const SessionList = memo(function SessionList({
     setExpandedGroups((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
   };
 
-  /** 组排序：手动 = 沿用上层给出的顺序（工作区拖拽排序 / order 元数据），最近更新 = 按组内最新会话 */
+  /** 组排序：置顶优先，手动 = 沿用上层给出的顺序（工作区拖拽排序 / order 元数据），最近更新 = 按组内最新会话 */
   const orderedGroups = useMemo(() => {
     const list = [...groups];
-    if (orderBy === 'manual') return list;
-    const timeOf = (group: SessionGroupItem) =>
-      Math.max(0, ...group.sessions.map((item) => Date.parse(item.modifiedAt) || 0));
-    list.sort((a, b) => timeOf(b) - timeOf(a));
-    return list;
+    if (orderBy === 'updated') {
+      const timeOf = (group: SessionGroupItem) =>
+        Math.max(0, ...group.sessions.map((item) => Date.parse(item.modifiedAt) || 0));
+      list.sort((a, b) => timeOf(b) - timeOf(a));
+    }
+    const pinned = list.filter((group) => group.pinned);
+    return pinned.length > 0 ? [...pinned, ...list.filter((group) => !group.pinned)] : list;
   }, [groups, orderBy]);
 
   /** 会话排序：置顶优先，其次按当前排序方式（手动 = 沿用上层顺序） */
@@ -518,6 +525,15 @@ export const SessionList = memo(function SessionList({
       setSearchOpen(false);
     }
   };
+
+  /** 当前菜单指向的项目（项目菜单里重命名 / 置顶 / 隐藏共用） */
+  const menuProject = useMemo(
+    () =>
+      menu?.kind === 'project'
+        ? orderedGroups.find((item) => item.key === (menu.key || menu.cwd))
+        : undefined,
+    [menu, orderedGroups]
+  );
 
   /** 会话行：工作区树与单列表共用同一份交互（选中、悬停卡、置顶、菜单、行内重命名） */
   const renderSessionRow = (session: SessionListItem) => {
@@ -941,12 +957,33 @@ export const SessionList = memo(function SessionList({
                 ) : (
                   <span className={styles.projectTitle}>{group.label}</span>
                 )}
+                {group.pinned && (
+                  <span className={styles.pinMark} aria-label="已置顶">
+                    <IconPin size={13} />
+                  </span>
+                )}
                 <span className={styles.rowActions}>
+                  {onPinProject && (
+                    <button
+                      type="button"
+                      className={`${styles.rowIcon} ${group.pinned ? styles.rowIconActive : ''}`}
+                      aria-label={group.pinned ? '取消置顶' : '置顶工作区'}
+                      title={group.pinned ? '取消置顶' : '置顶工作区'}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onPinProject(group.key, !group.pinned);
+                      }}
+                    >
+                      <IconPin size={14} />
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={styles.rowIcon}
                     aria-label="更多操作"
-                    onClick={(event) => openMenu(event, { kind: 'project', cwd: group.cwd })}
+                    onClick={(event) =>
+                      openMenu(event, { kind: 'project', cwd: group.cwd, key: group.key })
+                    }
                   >
                     <IconMore size={16} />
                   </button>
@@ -1063,11 +1100,23 @@ export const SessionList = memo(function SessionList({
                   type="button"
                   className={styles.menuItem}
                   onClick={() => {
-                    const group = orderedGroups.find((item) => item.key === menu.cwd);
-                    startRename('project', menu.cwd, group?.label || '');
+                    const group = orderedGroups.find((item) => item.key === menuProject?.key);
+                    startRename('project', menuProject?.key || menu.cwd, group?.label || '');
                   }}
                 >
                   重命名工作区
+                </button>
+              )}
+              {onPinProject && menuProject && (
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    onPinProject(menuProject.key, !menuProject.pinned);
+                    setMenu(null);
+                  }}
+                >
+                  {menuProject.pinned ? '取消置顶' : '置顶工作区'}
                 </button>
               )}
               {onHideProject && (
@@ -1075,7 +1124,7 @@ export const SessionList = memo(function SessionList({
                   type="button"
                   className={styles.menuItem}
                   onClick={() => {
-                    onHideProject(menu.cwd);
+                    onHideProject(menuProject?.key || menu.cwd);
                     setMenu(null);
                   }}
                 >
