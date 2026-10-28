@@ -300,8 +300,8 @@ export class AgentSessionHost extends EventEmitter {
     if (!node) throw new Error('该条目不在当前会话中');
 
     await session.navigateTo(entryId);
-    // pi 的规则：选中用户消息时叶子落在它的父节点，正文交回输入框；其余条目直接落在自身
-    const nextLeaf = node.kind === 'user' ? node.parentId : node.id;
+    // pi 的规则：选中用户消息时叶子落在它的前一条，正文交回输入框；其余条目直接落在自身
+    const nextLeaf = node.kind === 'user' ? node.prevId ?? node.parentId : node.id;
     session.leafEntryId = nextLeaf;
 
     const detail = await piSessionIndex

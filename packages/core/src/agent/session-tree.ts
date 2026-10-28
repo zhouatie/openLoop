@@ -6,8 +6,12 @@ const logger = createLogger('PiSessionTree');
 
 /** 单行预览上限：树只用于定位，正文由消息区展示 */
 const PREVIEW_CHARS = 120;
+/** 工具参数预览上限：够看清在哪个文件上做了什么 */
+const ARG_PREVIEW_CHARS = 72;
 /** 超过该长度的行（截图 base64 等）走正则取定位字段，不做整行 JSON 解析 */
 const LARGE_LINE_BYTES = 64 * 1024;
+/** 参数预览只扫前这么多字符：写文件类的参数可能带整段正文 */
+const ARG_SCAN_CHARS = 4096;
 /** 缓存会话数上限：树只在打开面板时读取 */
 const MAX_CACHED_SESSIONS = 24;
 
@@ -16,13 +20,15 @@ interface TreeCache {
   offset: number;
   nodes: SessionTreeNode[];
   byId: Map<string, SessionTreeNode>;
+  /** 全部条目的父指针（含不进树的工具结果）：还原叶子链时用 */
+  parents: Map<string, string | null>;
 }
 
 const caches = new Map<string, TreeCache>();
 
-function clip(text: string): string {
+function clip(text: string, limit = PREVIEW_CHARS): string {
   const flat = text.replace(/\s+/g, ' ').trim();
-  return flat.length > PREVIEW_CHARS ? `${flat.slice(0, PREVIEW_CHARS)}…` : flat;
+  return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
 }
 
 function textOfContent(content: any): string {
@@ -39,103 +45,148 @@ function timestampOf(value: any): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** pi 条目 → 树节点；不参与分支定位的条目（模型切换、用量、标签）直接跳过 */
-function nodeOfEntry(entry: any): SessionTreeNode | null {
-  if (!entry?.id || !entry.type) return null;
-  const parentId = typeof entry.parentId === 'string' ? entry.parentId : null;
+/** 参数里最有定位价值的字段：命令、路径、查询词 */
+const ARG_KEYS = ['command', 'path', 'file_path', 'filePath', 'pattern', 'query'];
 
+function readable(text: string): string {
+  // 参数可能是转义过的文本（\\n、\\"）：还原成一行可读预览
+  return clip(text.replace(/\\[nrt]/g, ' ').replace(/\\(.)/g, '$1'), ARG_PREVIEW_CHARS);
+}
+
+/** 工具参数里最有定位价值的一句：命令、路径或查询词 */
+function previewOfArgs(raw: unknown): string {
+  if (raw && typeof raw === 'object') {
+    const record = raw as Record<string, unknown>;
+    for (const key of ARG_KEYS) {
+      const value = record[key];
+      if (typeof value === 'string' && value.trim()) return readable(value);
+    }
+    return '';
+  }
+  const text = typeof raw === 'string' ? raw : '';
+  if (!text) return '';
+  const head = text.slice(0, ARG_SCAN_CHARS);
+  const match = /["'](?:command|file_path|filePath|path|pattern|query)["']\s*:\s*["']((?:[^"'\\]|\\.){1,400})/.exec(
+    head
+  );
+  return readable(match ? match[1] : head);
+}
+
+type Base = Pick<SessionTreeNode, 'id' | 'parentId' | 'timestamp' | 'prevId'>;
+
+/** pi 条目 → 树节点；不参与分支定位的条目（模型切换、用量、工具结果）返回 null */
+function nodeOfEntry(entry: any, base: Base): SessionTreeNode | null {
   if (entry.type === 'compaction' || entry.type === 'branch_summary') {
     return {
-      id: entry.id,
-      parentId,
+      ...base,
       kind: 'system',
       text: clip(entry.summary || (entry.type === 'compaction' ? '上下文已压缩' : '分支摘要')),
-      timestamp: timestampOf(entry.timestamp),
     };
   }
 
   if (entry.type === 'custom_message') {
-    return {
-      id: entry.id,
-      parentId,
-      kind: 'system',
-      text: clip(textOfContent(entry.content)) || '[消息]',
-      timestamp: timestampOf(entry.timestamp),
-    };
+    return { ...base, kind: 'system', text: clip(textOfContent(entry.content)) || '[消息]' };
   }
 
   if (entry.type !== 'message') return null;
   const message = entry.message || {};
-  const timestamp = timestampOf(message.timestamp ?? entry.timestamp);
 
   if (message.role === 'user') {
-    return {
-      id: entry.id,
-      parentId,
-      kind: 'user',
-      text: clip(textOfContent(message.content)) || '[图片或附件]',
-      timestamp,
-    };
+    return { ...base, kind: 'user', text: clip(textOfContent(message.content)) || '[图片或附件]' };
   }
 
   if (message.role === 'assistant') {
     const text = clip(textOfContent(message.content));
-    return {
-      id: entry.id,
-      parentId,
-      kind: 'assistant',
-      text: text || (message.stopReason === 'aborted' ? '已中止' : '[工具调用]'),
-      timestamp,
-    };
+    if (text) return { ...base, kind: 'assistant', text };
+    const calls: any[] = Array.isArray(message.content)
+      ? message.content.filter((block: any) => block?.type === 'toolCall')
+      : [];
+    if (calls.length > 0) {
+      const names = calls.map((call) => call.name || 'tool');
+      return {
+        ...base,
+        kind: 'assistant',
+        step: true,
+        toolName: names.length > 1 ? `${names[0]} ×${names.length}` : names[0],
+        text: previewOfArgs(calls[0].arguments),
+      };
+    }
+    return { ...base, kind: 'assistant', text: message.stopReason === 'aborted' ? '已中止' : '[思考]' };
   }
 
-  if (message.role === 'toolResult' || message.role === 'bashExecution') {
-    return {
-      id: entry.id,
-      parentId,
-      kind: 'tool',
-      text: '',
-      toolName: message.toolName || (message.role === 'bashExecution' ? 'bash' : 'tool'),
-      timestamp,
-    };
-  }
-
+  // 工具结果只是上一步的产物，不提供分支定位点，进树只会把墙刷满
   return null;
 }
 
 /** 超长行的定位字段抽取：只做正则，代价与行长无关 */
-function nodeOfLargeLine(line: string): SessionTreeNode | null {
-  const id = /"id":"([^"\\]+)"/.exec(line)?.[1];
-  if (!id) return null;
-  const parentRaw = /"parentId":(null|"([^"\\]+)")/.exec(line);
+function nodeOfLargeLine(line: string, base: Base): SessionTreeNode | null {
   const type = /"type":"([^"\\]+)"/.exec(line)?.[1];
   const role = /"role":"([^"\\]+)"/.exec(line)?.[1];
-  const timestamp = /"timestamp":"([^"]+)"/.exec(line)?.[1];
-  const toolName = /"toolName":"([^"\\]+)"/.exec(line)?.[1];
   if (type !== 'message' && type !== 'custom_message') return null;
-  const kind: SessionTreeNode['kind'] =
-    role === 'user' ? 'user' : role === 'assistant' ? 'assistant' : 'tool';
+  if (type === 'message' && role !== 'user' && role !== 'assistant') return null;
+  const toolName = /"toolName":"([^"\\]+)"/.exec(line)?.[1];
   return {
-    id,
-    parentId: parentRaw && parentRaw[1] !== 'null' ? parentRaw[2] : null,
-    kind,
+    ...base,
+    kind: role === 'user' ? 'user' : 'assistant',
     text: '[长内容已省略]',
     toolName,
-    timestamp: timestampOf(timestamp),
   };
 }
 
-/** 单行 → 节点；残缺行与无关条目返回 null */
-function nodeOfLine(line: string): SessionTreeNode | null {
+interface ParsedLine {
+  id: string;
+  parentId: string | null;
+  /** null 表示这行进了父指针、但不进树 */
+  node: SessionTreeNode | null;
+}
+
+/** 单行 → 解析结果；残缺行与无关条目返回 null */
+function parseLine(line: string): ParsedLine | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
-  if (trimmed.length > LARGE_LINE_BYTES) return nodeOfLargeLine(trimmed);
+  let entry: any;
+  if (trimmed.length > LARGE_LINE_BYTES) {
+    const id = /"id":"([^"\\]+)"/.exec(trimmed)?.[1];
+    if (!id) return null;
+    // 只取 parentId 的值部分：整行 JSON 解析太贵
+    const parentId = /"parentId":(?:null|"([^"\\]+)")/.exec(trimmed)?.[1] ?? null;
+    const base: Base = {
+      id,
+      parentId,
+      prevId: parentId,
+      timestamp: timestampOf(/"timestamp":"([^"]+)"/.exec(trimmed)?.[1]),
+    };
+    return { id, parentId, node: nodeOfLargeLine(trimmed, base) };
+  }
   try {
-    return nodeOfEntry(JSON.parse(trimmed));
+    entry = JSON.parse(trimmed);
   } catch (_) {
     // 流式写入中的半行
     return null;
   }
+  if (!entry?.id || !entry.type) return null;
+  const parentId = typeof entry.parentId === 'string' ? entry.parentId : null;
+  const base: Base = {
+    id: entry.id,
+    parentId,
+    prevId: parentId,
+    timestamp: timestampOf(entry.message?.timestamp ?? entry.timestamp),
+  };
+  return { id: entry.id, parentId, node: nodeOfEntry(entry, base) };
+}
+
+/** 父指针穿过多条被跳过的条目，落到最近的进树祖先 */
+function resolveParent(cache: TreeCache, parentId: string | null): string | null {
+  let cursor = parentId;
+  const seen = new Set<string>();
+  while (cursor && !cache.byId.has(cursor)) {
+    if (seen.has(cursor)) return null;
+    seen.add(cursor);
+    const next = cache.parents.get(cursor);
+    if (next === undefined) return null;
+    cursor = next;
+  }
+  return cursor;
 }
 
 /**
@@ -150,12 +201,12 @@ async function loadCache(sessionPath: string): Promise<TreeCache> {
   try {
     size = (await fsp.stat(sessionPath)).size;
   } catch (_) {
-    return cache || { offset: 0, nodes: [], byId: new Map() };
+    return cache || { offset: 0, nodes: [], byId: new Map(), parents: new Map() };
   }
 
   // 文件被重写（版本迁移）或截断：丢弃缓存重来
   if (!cache || size < cache.offset) {
-    cache = { offset: 0, nodes: [], byId: new Map() };
+    cache = { offset: 0, nodes: [], byId: new Map(), parents: new Map() };
     caches.set(sessionPath, cache);
     while (caches.size > MAX_CACHED_SESSIONS) {
       const oldest = caches.keys().next().value;
@@ -180,13 +231,16 @@ async function loadCache(sessionPath: string): Promise<TreeCache> {
   const end = buffer.lastIndexOf(0x0a);
   if (end < 0) return cache;
   for (const line of buffer.subarray(0, end).toString('utf8').split('\n')) {
-    const node = nodeOfLine(line);
-    if (!node) continue;
-    const previous = cache.byId.get(node.id);
-    if (previous) Object.assign(previous, node);
+    const parsed = parseLine(line);
+    if (!parsed) continue;
+    cache.parents.set(parsed.id, parsed.parentId);
+    if (!parsed.node) continue;
+    parsed.node.parentId = resolveParent(cache, parsed.parentId);
+    const previous = cache.byId.get(parsed.node.id);
+    if (previous) Object.assign(previous, parsed.node);
     else {
-      cache.nodes.push(node);
-      cache.byId.set(node.id, node);
+      cache.nodes.push(parsed.node);
+      cache.byId.set(parsed.node.id, parsed.node);
     }
   }
   cache.offset += end + 1;
@@ -194,16 +248,14 @@ async function loadCache(sessionPath: string): Promise<TreeCache> {
 }
 
 /** leaf 到根的节点 id（根在前） */
-function activeChain(byId: Map<string, SessionTreeNode>, leafId: string | null): string[] {
+function activeChain(parents: Map<string, string | null>, leafId: string | null): string[] {
   const chain: string[] = [];
   let cursor = leafId;
   const seen = new Set<string>();
   while (cursor && !seen.has(cursor)) {
-    const node = byId.get(cursor);
-    if (!node) break;
     seen.add(cursor);
-    chain.push(node.id);
-    cursor = node.parentId;
+    chain.push(cursor);
+    cursor = parents.get(cursor) ?? null;
   }
   return chain.reverse();
 }
@@ -211,7 +263,7 @@ function activeChain(byId: Map<string, SessionTreeNode>, leafId: string | null):
 /**
  * 读取会话树
  *
- * @param leafId 显式叶子（进程内导航后的位置）。缺省时取文件最后一条，与 pi 重启后的语义一致；
+ * @param leafId 显式叶子（进程内导航后的位置）。缺省时取最后一条可定位条目，与 pi 重启后的语义一致；
  *               传 null 表示已回退到会话起点。
  */
 export async function readSessionTree(
@@ -224,7 +276,7 @@ export async function readSessionTree(
     const leaf = leafId === undefined ? tip : leafId;
     return {
       nodes: cache.nodes,
-      activeIds: activeChain(cache.byId, leaf),
+      activeIds: activeChain(cache.parents, leaf),
       leafId: leaf,
     };
   } catch (err: any) {
