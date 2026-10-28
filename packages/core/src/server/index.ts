@@ -788,7 +788,9 @@ export class OpenLoopServer {
       if (agentSessionMatch && method === 'GET') {
         const sessionKey = decodeURIComponent(agentSessionMatch[1]);
         const limit = Number(parsedUrl.searchParams.get('limit') || 0);
-        const detail = await piSessionIndex.read(sessionKey, { limit });
+        // 进程内刚导航过：盘上文件还停在被放弃的分支，按进程里的叶子读才是当前分支
+        const leafId = agentSessionHost.getLeafEntryId(sessionKey);
+        const detail = await piSessionIndex.read(sessionKey, { limit, leafId });
         if (!detail) {
           return this.sendJson(res, 404, { error: 'Session Not Found' }, reqMeta);
         }
@@ -981,18 +983,29 @@ export class OpenLoopServer {
 
       // 全局 Agent 会话控制：打开 / 发消息 / 暂停 / 继续 / 停止
       const agentActionMatch = pathname.match(
-        /^\/api\/agent\/sessions\/(.+)\/(chat|open|pause|resume|stop|model|permission|regenerate|fork)$/
+        /^\/api\/agent\/sessions\/(.+)\/(chat|open|pause|resume|stop|model|permission|regenerate|fork|tree|navigate)$/
       );
       if (agentActionMatch) {
         const sessionKey = decodeURIComponent(agentActionMatch[1]);
         const action = agentActionMatch[2];
-        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
-
-        if (method !== 'POST') {
+        // 读树是幂等的：只许 GET，其余动作一律 POST
+        const readOnly = action === 'tree';
+        if (method !== (readOnly ? 'GET' : 'POST')) {
           return this.sendJson(res, 405, { error: 'Method Not Allowed' }, reqMeta);
         }
+        const body = readOnly ? {} : await this.parseJsonBody(req).catch(() => ({}) as any);
 
         try {
+          if (action === 'tree') {
+            return this.sendJson(res, 200, await agentSessionHost.getTree(sessionKey), reqMeta);
+          }
+          if (action === 'navigate') {
+            const entryId = typeof body?.entryId === 'string' ? body.entryId.trim() : '';
+            if (!entryId) {
+              return this.sendJson(res, 400, { error: '缺少 entryId' }, reqMeta);
+            }
+            return this.sendJson(res, 200, await agentSessionHost.navigate(sessionKey, entryId), reqMeta);
+          }
           if (action === 'open') {
             const result = await agentSessionHost.open(sessionKey, {
               cwd: body?.cwd,
