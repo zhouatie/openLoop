@@ -207,6 +207,12 @@
   padding-bottom: 6px;
 }
 
+/* 列表纵向 flex 且高度受限：不给子项 flex: none 时，行会被压缩到文字高度（DSH 行高恒定） */
+.list > *,
+.groupBody > * {
+  flex: none;
+}
+
 .group {
   display: flex;
   flex-direction: column;
@@ -692,6 +698,12 @@
 
 .sectionTitleButton:hover {
   color: var(--dsw-alias-state-business-primary);
+}
+
+/* 单列表模式的区头是纯标签（对齐 DSH 的「会话」），仍保留工作区筛选入口 */
+.sectionTitleFlat,
+.sectionTitleFlat:hover {
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .sectionChevron {

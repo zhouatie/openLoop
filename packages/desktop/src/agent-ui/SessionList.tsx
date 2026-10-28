@@ -159,16 +159,19 @@ function createdLabel(iso?: string): string {
   )}:${pad(date.getMinutes())}`;
 }
 
+/** 行内相对时间：紧凑写法（对齐 DSH 的「5分钟 / 13天 / 6个月」） */
 function relativeTime(iso: string): string {
   const time = Date.parse(iso);
   if (!Number.isFinite(time)) return '';
-  const diff = Date.now() - time;
+  const diff = Math.max(0, Date.now() - time);
   const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
   if (diff < minute) return '刚刚';
-  if (diff < 60 * minute) return `${Math.floor(diff / minute)} 分钟前`;
-  if (diff < 24 * 60 * minute) return `${Math.floor(diff / (60 * minute))} 小时前`;
-  if (diff < 30 * 24 * 60 * minute) return `${Math.floor(diff / (24 * 60 * minute))} 天前`;
-  return `${Math.floor(diff / (30 * 24 * 60 * minute))} 个月前`;
+  if (diff < hour) return `${Math.floor(diff / minute)}分钟`;
+  if (diff < day) return `${Math.floor(diff / hour)}小时`;
+  if (diff < 30 * day) return `${Math.floor(diff / day)}天`;
+  return `${Math.floor(diff / (30 * day))}个月`;
 }
 
 /** 项目列：新会话入口、工作区分组、组内会话与「展开其余 N 个会话」 */
@@ -738,7 +741,9 @@ export const SessionList = memo(function SessionList({
           <>
             <button
               type="button"
-              className={styles.sectionTitleButton}
+              className={`${styles.sectionTitleButton} ${
+                groupBy === 'flat' ? styles.sectionTitleFlat : ''
+              }`}
               onClick={(event) => {
                 event.stopPropagation();
                 const rect = event.currentTarget.getBoundingClientRect();
@@ -746,10 +751,15 @@ export const SessionList = memo(function SessionList({
               }}
               title="切换工作区"
             >
-              {projectFilter
-                ? orderedGroups.find((group) => group.key === projectFilter)?.label || '工作区'
-                : '工作区'}
-              <IconTriangleRight size={12} className={styles.sectionChevron} />
+              {/* 单列表模式没有工作区层级，区头按 DSH 显示「会话」纯标签 */}
+              {groupBy === 'flat'
+                ? '会话'
+                : projectFilter
+                  ? orderedGroups.find((group) => group.key === projectFilter)?.label || '工作区'
+                  : '工作区'}
+              {groupBy !== 'flat' && (
+                <IconTriangleRight size={12} className={styles.sectionChevron} />
+              )}
             </button>
             <span className={styles.sectionActions}>
               {onToggleRail && (
