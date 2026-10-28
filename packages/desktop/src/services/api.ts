@@ -1047,7 +1047,7 @@ export class DesktopApiService {
 
   async setAgentProjectMeta(
     cwd: string,
-    patch: { title?: string; hidden?: boolean; order?: number }
+    patch: { title?: string; hidden?: boolean; pinned?: boolean; order?: number }
   ): Promise<{ cwd: string; meta: any }> {
     return requestJson(`${BASE_URL}/api/agent/projects`, {
       method: 'PUT',

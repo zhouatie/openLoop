@@ -597,6 +597,7 @@ interface ProjectGroup {
   lastModified: number;
   createdAt?: string;
   order?: number;
+  pinned?: boolean;
 }
 
 const COLLAPSED_KEY = 'openloop.agent.collapsedProjects';
@@ -730,7 +731,7 @@ export function GlobalAgentPanel({
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([]);
   const [permission, setPermission] = useState<ComposerPermission>('full');
   const [projectMeta, setProjectMeta] = useState<
-    Record<string, { title?: string; hidden?: boolean; order?: number }>
+    Record<string, { title?: string; hidden?: boolean; pinned?: boolean; order?: number }>
   >({});
   const [dockOpen, setDockOpen] = useState(false);
   /** 工作台的页签请求：文件、终端，或某个文件的预览 */
@@ -1076,6 +1077,7 @@ export function GlobalAgentPanel({
         sessions: [],
         lastModified: 0,
         order: typeof meta.order === 'number' ? meta.order : undefined,
+        pinned: meta.pinned === true,
       };
       map.set(key, group);
       return group;
@@ -1288,6 +1290,14 @@ export function GlobalAgentPanel({
   const hideProject = useCallback(
     async (cwdKey: string) => {
       await api.setAgentProjectMeta(cwdKey, { hidden: true }).catch(() => null);
+      await refreshProjectMeta();
+    },
+    [refreshProjectMeta]
+  );
+
+  const pinProject = useCallback(
+    async (cwdKey: string, pinned: boolean) => {
+      await api.setAgentProjectMeta(cwdKey, { pinned }).catch(() => null);
       await refreshProjectMeta();
     },
     [refreshProjectMeta]
@@ -1668,6 +1678,7 @@ export function GlobalAgentPanel({
           onDeleteSession={(id) => void deleteSession(id)}
           onRenameProject={(key, title) => void renameProject(key, title)}
           onHideProject={(key) => void hideProject(key)}
+          onPinProject={(key, pinned) => void pinProject(key, pinned)}
           onReorderProjects={(keys) => void reorderProjects(keys)}
           onSearchContent={(text) => api.searchAgentSessions(text, 20).then((data) => data.results)}
           renameSignal={renameSignal}

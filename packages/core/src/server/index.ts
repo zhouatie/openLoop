@@ -850,7 +850,7 @@ export class OpenLoopServer {
         return this.sendJson(res, 200, { success: true, purged: true, target: moved.target }, reqMeta);
       }
 
-      // 工作区元数据：重命名 / 隐藏 / 排序
+      // 工作区元数据：重命名 / 隐藏 / 置顶 / 排序
       if (pathname === '/api/agent/projects') {
         if (method === 'GET') {
           return this.sendJson(res, 200, { projects: agentSessionMeta.listProjects() }, reqMeta);
@@ -862,6 +862,7 @@ export class OpenLoopServer {
           const meta = agentSessionMeta.setProject(target, {
             title: typeof body?.title === 'string' ? body.title : undefined,
             hidden: typeof body?.hidden === 'boolean' ? body.hidden : undefined,
+            pinned: typeof body?.pinned === 'boolean' ? body.pinned : undefined,
             order: typeof body?.order === 'number' ? body.order : undefined,
           });
           return this.sendJson(res, 200, { cwd: target, meta }, reqMeta);

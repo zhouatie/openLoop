@@ -13,10 +13,12 @@ export interface AgentSessionMeta {
   updatedAt?: number;
 }
 
-/** 工作区（项目）的可编辑元数据：标题覆盖、隐藏、排序权重 */
+/** 工作区（项目）的可编辑元数据：标题覆盖、隐藏、置顶、排序权重 */
 export interface AgentProjectMeta {
   title?: string;
   hidden?: boolean;
+  /** 置顶：项目列中排在前面 */
+  pinned?: boolean;
   order?: number;
   updatedAt?: number;
 }
