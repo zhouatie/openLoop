@@ -5,6 +5,7 @@ import { IconCode, IconCommand, IconGlobe, IconSearch, IconThink } from './icons
 import { ImageThumb, LIGHTBOX_LABELS } from './ImageLightbox';
 import { ImageLightbox } from './dsh/ImageLightbox';
 import { imageSrc, isImagePath } from './local-image';
+import { useOpenFile } from './open-file';
 import { DisclosureRow } from './dsh/DisclosureRow';
 import { TextShimmer } from './dsh/TextShimmer';
 import styles from './ToolCard.module.css';
@@ -160,27 +161,35 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
   const images = tool.imageUrls || [];
   const isRunning = tool.status === 'running';
   const failed = tool.status === 'error';
-  // 工具行里的图片路径（如 读取 /tmp/shot.png）：点击直接预览原图
+  const openFile = useOpenFile();
+  // 文件类工具行（读取 / 写入）：点路径在右侧工作台预览；图片路径仍然弹灯箱
+  const targetPath = useMemo(() => {
+    if (kind !== 'read' && kind !== 'write') return undefined;
+    const target = pickString(tool.input, ['path', 'file', 'filePath', 'file_path', 'target']);
+    return target && !isImagePath(target) ? target : undefined;
+  }, [kind, tool.input]);
   const imagePath = useMemo(() => {
     const target = pickString(tool.input, ['path', 'file', 'filePath', 'file_path', 'target']);
     return isImagePath(target) ? target! : undefined;
   }, [tool.input]);
+  const linkPath = targetPath && openFile ? targetPath : imagePath;
 
   const title = KIND_LABEL[kind] || KIND_LABEL.other;
 
-  // 折叠态摘要：分隔点 + 摘要 + 耗时；图片路径可点击预览
+  // 折叠态摘要：分隔点 + 摘要 + 耗时；文件路径可点击预览
   const collapsed = useMemo(
     () => (
       <>
         <span className={styles.separator} data-shimmer-decoration aria-hidden />
-        {imagePath ? (
+        {linkPath ? (
           <button
             type="button"
             className={`${styles.summary} ${styles.fileLink}`}
-            title={imagePath}
+            title={linkPath}
             onClick={(event) => {
               event.stopPropagation();
-              setPreview(imageSrc(imagePath));
+              if (targetPath && openFile) openFile(targetPath);
+              else setPreview(imageSrc(linkPath));
             }}
             onKeyDown={(event) => event.stopPropagation()}
           >
@@ -196,7 +205,7 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
         )}
       </>
     ),
-    [failed, imagePath, summary, tool.durationMs]
+    [failed, linkPath, targetPath, openFile, summary, tool.durationMs]
   );
 
   const canExpand = Boolean(diffHunks) || hasOutput || images.length > 0 || Boolean(tool.input);

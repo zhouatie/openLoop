@@ -878,8 +878,10 @@ export class OpenLoopServer {
 
       if (pathname === '/api/agent/fs/read' && method === 'GET') {
         const target = parsedUrl.searchParams.get('path') || '';
+        // base：会话工作区，用来解析消息里的相对路径
+        const base = parsedUrl.searchParams.get('base') || undefined;
         try {
-          return this.sendJson(res, 200, readTextFile(target), reqMeta);
+          return this.sendJson(res, 200, readTextFile(target, base), reqMeta);
         } catch (err: any) {
           return this.sendJson(res, 400, { error: err?.message || '无法读取文件' }, reqMeta);
         }
@@ -888,7 +890,7 @@ export class OpenLoopServer {
       if (pathname === '/api/agent/fs/stat' && method === 'GET') {
         const target = parsedUrl.searchParams.get('path') || '';
         try {
-          const info = statFile(target);
+          const info = statFile(target, parsedUrl.searchParams.get('base') || undefined);
           return this.sendJson(res, 200, info, reqMeta);
         } catch (err: any) {
           return this.sendJson(res, 404, { error: err?.message || '文件不存在' }, reqMeta);
@@ -898,7 +900,7 @@ export class OpenLoopServer {
       if (pathname === '/api/agent/fs/raw' && method === 'GET') {
         const target = parsedUrl.searchParams.get('path') || '';
         try {
-          const info = statFile(target);
+          const info = statFile(target, parsedUrl.searchParams.get('base') || undefined);
           res.writeHead(200, {
             'Content-Type': info.mime,
             'Content-Length': String(info.size),

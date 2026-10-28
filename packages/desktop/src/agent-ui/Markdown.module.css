@@ -84,6 +84,21 @@
   text-decoration: underline;
 }
 
+/* 本地文件链接：按钮形态但保持链接观感（DSH 的 fileLink） */
+.fileLink {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dsw-alias-link);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fileLink:hover {
+  text-decoration: underline;
+}
+
 .inlineCode {
   padding: 1px 5px;
   border-radius: var(--dsw-radius-xs);
