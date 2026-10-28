@@ -972,6 +972,7 @@ export const SessionList = memo(function SessionList({
                       className={styles.sessionRow}
                       onClick={() => onNewInGroup(group.cwd)}
                     >
+                      <span className={styles.statusSlot} />
                       <span className={styles.sessionTitle}>新会话</span>
                     </button>
                   )}
