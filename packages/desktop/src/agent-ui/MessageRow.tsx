@@ -17,6 +17,8 @@ export interface MessageRowProps {
   compact?: boolean;
   /** 本地回显：尚未被 Agent 采纳，用略低不透明度表示未送达 */
   pending?: boolean;
+  /** 该轮还在运行：操作条等轮次结束后再出现（与 DSH 一致） */
+  running?: boolean;
   /** 重新生成该轮回答（后端支持时由挂载方注入） */
   onRegenerate?: () => void;
   /** 从该轮回答分叉出新会话（新会话保留到这条为止） */
@@ -31,6 +33,7 @@ export const MessageRow = memo(function MessageRow({
   message,
   compact,
   pending,
+  running,
   onRegenerate,
   onFork,
   forkUnavailable,
@@ -76,13 +79,12 @@ export const MessageRow = memo(function MessageRow({
 
       {hasError && <div className={styles.error}>{message.errorMessage}</div>}
 
-      {!compact && (message.content.trim().length > 0 || onFork || forkUnavailable) && (
+      {!compact && !running && (message.content.trim().length > 0 || onFork || forkUnavailable) && (
         <MessageActions
           text={message.content}
           timestamp={message.timestamp}
           usage={message.usage}
           model={message.model}
-          streaming={message.isStreaming}
           onFork={onFork}
           forkUnavailable={forkUnavailable}
           forkPending={forkPending}
