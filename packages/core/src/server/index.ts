@@ -2772,8 +2772,9 @@ ${existingSubSummary}
       if (taskDiffMatch && method === 'GET') {
         const taskId = taskDiffMatch[1];
         const task = this.store.getTask(taskId);
-        const targetDir = task?.context?.worktree?.worktreeDir || task?.workspace;
-        if (!task || !targetDir) {
+        // 仅统计任务专属 Worktree 的改动；未创建隔离工作区时共享宿主仓库的改动与该任务无归属关系
+        const targetDir = task?.context?.worktree?.worktreeDir;
+        if (!task || !targetDir || !fs.existsSync(targetDir)) {
           return this.sendJson(
             res,
             200,
