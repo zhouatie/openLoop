@@ -4,7 +4,10 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { api } from '../services/api';
 import { AgentMarkdown } from './Markdown';
-import { IconChevronDown, IconClose, IconFolderClose, IconFolderOpen, IconTriangleRight } from './icons';
+import { CodeBlock } from './dsh/CodeBlock';
+import { languageForPath } from './dsh/code-language';
+import { ImageLightbox } from './dsh/ImageLightbox';
+import { IconClose, IconFolderClose, IconFolderOpen, IconRefresh } from './icons';
 import styles from './WorkspaceDock.module.css';
 
 export type DockTab = 'files' | 'terminal' | 'preview';
@@ -19,6 +22,15 @@ interface FsEntry {
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg)$/i;
 const MARKDOWN_EXT = /\.(md|mdx)$/i;
+
+/** 文本预览的代码卡文案，与 Markdown 里的围栏代码块一致 */
+const PREVIEW_TOOLBAR_LABELS = {
+  codeLabel: '文本',
+  wrapLabel: '关闭自动折行',
+  unwrapLabel: '按面板宽度自动折行',
+};
+
+const PREVIEW_LABELS = { dialog: '图片预览', close: '关闭' };
 
 function formatSize(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -199,27 +211,75 @@ interface PreviewState {
   error?: string;
   truncated?: boolean;
   image?: boolean;
+  loading?: boolean;
+  /** 每次加载递增：图片靠它重新取字节 */
+  seq: number;
 }
 
-/** 文档预览：图片走原始字节，Markdown 走渲染，其余按代码展示 */
-const FilePreview = memo(function FilePreview({ target, cwd }: { target: PreviewState | null; cwd?: string }) {
-  if (!target) return <div className={styles.dockEmpty}>在「文件」中选择一个文件即可预览</div>;
-  if (target.image) {
-    return (
-      <div className={styles.imageWrap}>
-        <img className={styles.image} src={api.agentFsRawUrl(target.path, cwd)} alt={target.path} />
-      </div>
-    );
-  }
-  if (target.error) return <div className={styles.dockEmpty}>{target.error}</div>;
+/** 预览头：目录淡出、文件名常驻，末尾是重新加载（对齐 DSH 文档预览的一行头） */
+const PreviewHeader = memo(function PreviewHeader({ path, onReload }: { path: string; onReload: () => void }) {
+  const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return (
+    <div className={styles.previewHeader}>
+      <span className={styles.previewPath} title={path}>
+        {slash > 0 && <span className={styles.previewDir}>{path.slice(0, slash + 1)}</span>}
+        <span className={styles.previewName}>{path.slice(slash + 1)}</span>
+      </span>
+      <button type="button" className={styles.previewTool} onClick={onReload} title="重新加载" aria-label="重新加载">
+        <IconRefresh size={14} />
+      </button>
+    </div>
+  );
+});
+
+/** 文档预览：图片走原始字节，Markdown 走路渲染，其余交给 DSH 的 CodeBlock（高亮 + 行号 + 折行 + 复制） */
+const FilePreview = memo(function FilePreview({
+  target,
+  cwd,
+  onReload,
+}: {
+  target: PreviewState;
+  cwd?: string;
+  onReload: () => void;
+}) {
+  const [zoomed, setZoomed] = useState(false);
+  const source = target.image ? api.agentFsRawUrl(target.path, cwd) : '';
   return (
     <div className={styles.preview}>
-      {MARKDOWN_EXT.test(target.path) ? (
-        <AgentMarkdown content={target.content || ''} />
+      <PreviewHeader path={target.path} onReload={onReload} />
+      {target.image ? (
+        <div className={styles.imageWrap}>
+          <img
+            key={target.seq}
+            className={styles.image}
+            src={source}
+            alt={target.path}
+            onClick={() => setZoomed(true)}
+          />
+        </div>
+      ) : target.error ? (
+        <div className={styles.previewError}>{target.error}</div>
+      ) : target.loading ? (
+        <div className={styles.previewLoading}>读取中…</div>
+      ) : MARKDOWN_EXT.test(target.path) ? (
+        <div className={styles.previewMarkdown}>
+          <AgentMarkdown content={target.content || ''} />
+        </div>
       ) : (
-        <pre className={styles.previewCode}>{target.content || ''}</pre>
+        <CodeBlock
+          className={styles.docCode}
+          code={target.content || ''}
+          lang={languageForPath(target.path)}
+          lineNumbers
+          copyLabel="复制"
+          copiedLabel="已复制"
+          toolbarLabels={PREVIEW_TOOLBAR_LABELS}
+        />
       )}
       {target.truncated && <div className={styles.previewNote}>文件较大，仅显示前 512 KB</div>}
+      {zoomed && target.image && (
+        <ImageLightbox src={source} alt={target.path} labels={PREVIEW_LABELS} onClose={() => setZoomed(false)} />
+      )}
     </div>
   );
 });
@@ -256,19 +316,22 @@ export const WorkspaceDock = memo(function WorkspaceDock({
     if (activeTab === 'terminal') setTerminalMounted(true);
   }, [activeTab]);
 
+  const seq = useRef(0);
+
   // 路径可能来自消息里的相对引用，统一交给后端按工作区解析
   const loadPath = useCallback(
     async (path: string) => {
+      const next = ++seq.current;
       if (IMAGE_EXT.test(path)) {
-        setPreview({ path, image: true });
+        setPreview({ path, image: true, seq: next });
         return;
       }
-      setPreview({ path });
+      setPreview({ path, loading: true, seq: next });
       try {
         const file = await api.readAgentFsFile(path, root);
-        setPreview({ path: file.path, content: file.content, truncated: file.truncated });
+        setPreview({ path: file.path, content: file.content, truncated: file.truncated, seq: next });
       } catch (err: any) {
-        setPreview({ path, error: err?.message || '无法读取文件' });
+        setPreview({ path, error: err?.message || '无法读取文件', seq: next });
       }
     },
     [root]
@@ -320,7 +383,12 @@ export const WorkspaceDock = memo(function WorkspaceDock({
             <TerminalView cwd={root} />
           </div>
         )}
-        {activeTab === 'preview' && <FilePreview target={preview} cwd={root} />}
+        {activeTab === 'preview' &&
+          (preview ? (
+            <FilePreview target={preview} cwd={root} onReload={() => void loadPath(preview.path)} />
+          ) : (
+            <div className={styles.dockEmpty}>在「文件」中选择一个文件即可预览</div>
+          ))}
       </div>
     </aside>
   );
