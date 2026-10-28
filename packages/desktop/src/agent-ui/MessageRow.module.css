@@ -86,7 +86,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 10px;
+  margin-top: 16px;
   height: 22px;
   font-size: 11.5px;
   color: var(--dsw-alias-label-caption);
@@ -161,8 +161,15 @@
   }
 }
 
+/* 正文段（叙述/回答）：与相邻过程行拉开 12px，与自身工具行 12px —— DSH flow gap */
 .content {
   position: relative;
+  margin: 12px 0 6px;
+}
+
+/* 思考行：与上一条过程行保持 6px，工具行同理 */
+.assistantRow > [data-variant='think'] {
+  margin-top: 6px;
 }
 
 .caret {
@@ -190,7 +197,12 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 6px;
+}
+
+/* 正文后紧跟本消息的工具行：读作同一段块，间距与正文段一致 */
+.content + .tools {
+  margin-top: 12px;
 }
 
 .error {
@@ -206,10 +218,6 @@
 /* 过程折叠内的紧凑行：去掉顶部留白 */
 .compact {
   margin: 0;
-}
-
-.compact .content {
-  font-size: 13px;
 }
 
 .copiedMark {
