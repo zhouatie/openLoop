@@ -34,7 +34,6 @@ import {
   User,
   Inbox,
   Plus,
-  Lightbulb,
   FolderGit2,
   FolderOpen,
   Folder,
@@ -92,6 +91,7 @@ import { TaskQaInstructionsCard } from '../components/qa/TaskQaInstructionsCard'
 import { TaskDescriptionCard } from '../components/TaskDescriptionCard';
 import { KanbanLaneList } from '../components/KanbanLaneList';
 import { SelectParentTaskModal } from '../components/SelectParentTaskModal';
+import { InboxQuickAdd } from '../components/InboxQuickAdd';
 import { LinkExistingTasksModal } from '../components/LinkExistingTasksModal';
 import { toast } from '../components/Toast';
 import { resolveNodeMeta, resolveQaTestNodeId } from '../utils/nodeMeta';
@@ -449,8 +449,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   // Inbox 列快速添加想法状态
   const [isQuickAddingIdea, setIsQuickAddingIdea] = useState(false);
-  const [quickIdeaTitle, setQuickIdeaTitle] = useState('');
-  const [isSubmittingQuickIdea, setIsSubmittingQuickIdea] = useState(false);
   const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
 
   // 任务详情工作台：左侧档案视图（懒加载 + 常驻缓存）与右侧 Agent 协作流同屏
@@ -1385,45 +1383,18 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
 
-  const handleQuickAddIdea = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!quickIdeaTitle.trim() || isSubmittingQuickIdea) return;
-    const defaultWfId = workflows[0]?.id || '';
-    const targetWorkspace =
-      activeWorkspaceFilter !== 'all' && activeWorkspaceFilter !== 'none'
-        ? activeWorkspaceFilter
-        : undefined;
-
-    setIsSubmittingQuickIdea(true);
+  // Inbox 快捕回包就地合并：新建任务或子工序都不重拉整块看板
+  const handleIdeaCreated = ({ task, subtask, parent }: { task?: Task; subtask?: Task; parent?: Task }) => {
     if (import.meta.env?.DEV) {
-      console.log('[KanbanView] 快捷录入 Inbox 想法任务:', {
-        title: quickIdeaTitle.trim(),
-        workflowId: defaultWfId,
-        kanbanColumn: 'inbox',
-        workspace: targetWorkspace || '未指定',
+      console.log('[KanbanView:InboxQuickAdd] 快捕回包合并:', {
+        task: task?.id,
+        subtask: subtask?.id,
+        parent: parent?.id,
       });
     }
-    try {
-      await api.createTask({
-        title: quickIdeaTitle.trim(),
-        workflowId: defaultWfId,
-        description: '来自 Inbox 快捷想法收集',
-        kanbanColumn: 'inbox',
-        autoRun: false,
-        workspace: targetWorkspace,
-      });
-      setQuickIdeaTitle('');
-      setIsQuickAddingIdea(false);
-      toast.success('想法已记录至 Inbox');
-      onRefresh();
-    } catch (err: any) {
-      if (import.meta.env?.DEV) {
-        console.error('[KanbanView] 快捷录入想法失败:', err);
-      }
-      toast.error(`创建想法失败: ${err?.message || '未知错误'}`);
-    } finally {
-      setIsSubmittingQuickIdea(false);
-    }
+    if (task) onTaskUpdate?.(task);
+    if (subtask) onTaskUpdate?.(subtask);
+    if (parent) onTaskUpdate?.(parent);
   };
 
   const handleConfirmDelete = async () => {
@@ -1482,7 +1453,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   };
 
   // 任务组卡片内直接追加工序：接口回包就地合并，避免整块看板重拉
-  const handleAddSubtask = async (parentId: string, params: { title: string; workflowId?: string }) => {
+  const handleAddSubtask = async (
+    parentId: string,
+    params: { title: string; workflowId?: string; attachments?: TaskAttachment[] }
+  ) => {
     try {
       if (import.meta.env?.DEV) {
         console.log('[KanbanView:SubtaskQuickAdd] 追加工序:', { parentId, ...params });
@@ -1496,6 +1470,31 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         console.error('[KanbanView:SubtaskQuickAdd] 追加工序失败:', err);
       }
       toast.error(`添加工序失败: ${err?.message || '未知错误'}`);
+      throw err;
+    }
+  };
+
+  // 多行批量追加：一次请求提交多条工序，回包同样就地合并
+  const handleAddSubtasks = async (
+    parentId: string,
+    items: Array<{ title: string; workflowId?: string; attachments?: TaskAttachment[] }>
+  ) => {
+    try {
+      if (import.meta.env?.DEV) {
+        console.log('[KanbanView:SubtaskBatchAdd] 批量追加工序:', { parentId, count: items.length, items });
+      }
+      const res = await api.batchAddSubTasks(parentId, { subtasks: items });
+      for (const subtask of res.subtasks) {
+        onTaskUpdate?.(subtask);
+      }
+      onTaskUpdate?.(res.parent);
+      setSelectedTask((prev) => (prev && prev.id === parentId ? res.parent : prev));
+      toast.success(`已批量追加 ${res.subtasks.length} 条工序`);
+    } catch (err: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView:SubtaskBatchAdd] 批量追加工序失败:', err);
+      }
+      toast.error(`批量添加工序失败: ${err?.message || '未知错误'}`);
       throw err;
     }
   };
@@ -2406,58 +2405,24 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
                   {/* 泳道卡片列表：独立纵向滚动，撑满泳道全高 */}
                   <div className="flex-1 min-h-0 p-2.5 overflow-y-auto space-y-2">
-                    {/* Inbox 专属轻量快捷添加输入面板 */}
+                    {/* Inbox 一行快捕：默认存为独立想法，也可一键挂为某任务组的子工序 */}
                     {col.key === 'inbox' && isQuickAddingIdea && (
-                      <form
-                        onSubmit={handleQuickAddIdea}
-                        className="bg-white border border-[#6366f1]/40 rounded-[8px] p-2.5 shadow-[0_4px_12px_rgba(99,102,241,0.08)] space-y-2 animate-in fade-in zoom-in-95 duration-100"
-                      >
-                        <div className="flex items-center justify-between text-[11px] font-medium text-[#6366f1]">
-                          <span className="flex items-center gap-1.5">
-                            <Lightbulb size={12} />
-                            <span>随手记想法</span>
-                            {activeWorkspaceFilter !== 'all' && activeWorkspaceFilter !== 'none' && (
-                              <span className="text-[9.5px] font-normal text-[#85858d] bg-[#f4f4f6] px-1 py-[0.5px] rounded border border-[#ececf0] truncate max-w-[120px]">
-                                {getDirectoryName(activeWorkspaceFilter)}
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-[10px] text-[#85858d]">暂缓执行</span>
-                        </div>
-                        <input
-                          type="text"
-                          autoFocus
-                          placeholder={
-                            activeWorkspaceFilter !== 'all' && activeWorkspaceFilter !== 'none'
-                              ? `输入突发奇想，按 Enter 存入 ${getDirectoryName(activeWorkspaceFilter)}...`
-                              : '输入突发奇想，按 Enter 存入...'
-                          }
-                          value={quickIdeaTitle}
-                          onChange={(e) => setQuickIdeaTitle(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              setIsQuickAddingIdea(false);
-                            }
-                          }}
-                          className="w-full h-[28px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none focus:bg-white focus:border-[#6366f1] focus:ring-1 focus:ring-[#6366f1]/20 transition-all"
-                        />
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setIsQuickAddingIdea(false)}
-                            className="h-[22px] px-2 rounded-[4px] text-[10.5px] text-[#85858d] hover:bg-[#f1f1f4]"
-                          >
-                            取消
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={!quickIdeaTitle.trim() || isSubmittingQuickIdea}
-                            className="h-[22px] px-2.5 rounded-[4px] bg-[#6366f1] hover:bg-[#4f46e5] text-white text-[10.5px] font-medium disabled:opacity-40 transition-colors shadow-sm"
-                          >
-                            {isSubmittingQuickIdea ? '保存中...' : '存入 Inbox'}
-                          </button>
-                        </div>
-                      </form>
+                      <InboxQuickAdd
+                        tasks={tasks}
+                        defaultWorkflowId={workflows[0]?.id || ''}
+                        targetWorkspace={
+                          activeWorkspaceFilter !== 'all' && activeWorkspaceFilter !== 'none'
+                            ? activeWorkspaceFilter
+                            : undefined
+                        }
+                        workspaceLabel={
+                          activeWorkspaceFilter !== 'all' && activeWorkspaceFilter !== 'none'
+                            ? getDirectoryName(activeWorkspaceFilter)
+                            : undefined
+                        }
+                        onClose={() => setIsQuickAddingIdea(false)}
+                        onCreated={handleIdeaCreated}
+                      />
                     )}
 
                     {colTasks.length === 0 && (!isQuickAddingIdea || col.key !== 'inbox') ? (
@@ -2497,6 +2462,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         onSetParentTask={(t) => setParentSelectTask(t)}
                         onUnlinkSubtask={handleUnlinkSubtask}
                         onAddSubtask={handleAddSubtask}
+                        onAddSubtasks={handleAddSubtasks}
                       />
                     )}
                   </div>

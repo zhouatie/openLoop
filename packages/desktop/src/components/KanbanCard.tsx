@@ -37,8 +37,9 @@ import {
   Workflow,
   UserCheck,
 } from 'lucide-react';
-import { Task, KanbanColumn, WorkflowDefinition } from '@openloop/core';
+import { Task, KanbanColumn, TaskAttachment, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
+import { toast } from './Toast';
 import { openInDefaultBrowser } from '../utils/openExternalBrowser';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
@@ -189,7 +190,14 @@ export interface KanbanCardProps {
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
   onSetParent?: (task: Task) => void;
   onUnlinkSubtask?: (parentId: string, subtaskId: string) => void;
-  onAddSubtask?: (parentId: string, params: { title: string; workflowId?: string }) => Promise<void>;
+  onAddSubtask?: (
+    parentId: string,
+    params: { title: string; workflowId?: string; attachments?: TaskAttachment[] }
+  ) => Promise<void>;
+  onAddSubtasks?: (
+    parentId: string,
+    items: Array<{ title: string; workflowId?: string; attachments?: TaskAttachment[] }>
+  ) => Promise<void>;
 }
 
 const KanbanCardComponent: React.FC<KanbanCardProps> = ({
@@ -216,16 +224,19 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   onSetParent,
   onUnlinkSubtask,
   onAddSubtask,
+  onAddSubtasks,
 }) => {
   const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped' | 'starting'>('checking');
   // 空任务组默认展开，让「添加子工序」入口一眼可见
   const [isExpanded, setIsExpanded] = useState<boolean>(() => task.kind === 'group' && !(task.subTaskIds || []).length);
   const [idCopied, setIdCopied] = useState<boolean>(false);
-  const [isQuickAdding, setIsQuickAdding] = useState<boolean>(false);
   const [subDraft, setSubDraft] = useState<string>('');
   const [subWorkflowId, setSubWorkflowId] = useState<string>('');
+  const [subAttachments, setSubAttachments] = useState<TaskAttachment[]>([]);
+  const [subUploadingCount, setSubUploadingCount] = useState<number>(0);
   const [isSubtaskSubmitting, setIsSubtaskSubmitting] = useState<boolean>(false);
-  const subInputRef = useRef<HTMLInputElement>(null);
+  const subInputRef = useRef<HTMLTextAreaElement>(null);
+  const focusComposerRef = useRef<boolean>(false);
 
   const shortTaskId = useMemo(() => formatShortTaskId(task.id), [task.id]);
 
@@ -249,39 +260,90 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
     return task.subTaskIds.map((id) => taskMap.get(id)).filter(Boolean) as Task[];
   }, [isGroup, task.subTaskIds, allTasks]);
 
+  // 输入条随内容自增高度（上限 3 行），避免长文本把卡片撑高
   useEffect(() => {
-    if (isQuickAdding) subInputRef.current?.focus();
-  }, [isQuickAdding]);
+    const el = subInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 56)}px`;
+  }, [subDraft, isExpanded]);
 
-  const openQuickAdd = () => {
+  useEffect(() => {
+    if (!isExpanded || !focusComposerRef.current) return;
+    focusComposerRef.current = false;
+    subInputRef.current?.focus();
+  }, [isExpanded]);
+
+  // 展开并聚焦输入条：一步直达，不再需要「先点 + 再输入」
+  const focusComposer = () => {
+    if (isExpanded) {
+      subInputRef.current?.focus();
+      return;
+    }
+    focusComposerRef.current = true;
     setIsExpanded(true);
-    setIsQuickAdding(true);
   };
 
-  const closeQuickAdd = () => {
-    setIsQuickAdding(false);
-    setSubDraft('');
-  };
-
-  // 回车即提交并保留输入焦点，支持连续追加工序；失败时保留草稿便于重试
-  const handleQuickAddSubtask = async (e: React.FormEvent) => {
+  // 粘贴截图即上传，附件随工序一起落库
+  const handleSubPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData?.items || [])
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => !!f);
+    if (files.length === 0) return;
     e.preventDefault();
-    const title = subDraft.trim();
-    if (!title || !onAddSubtask || isSubtaskSubmitting) return;
+    setSubUploadingCount((n) => n + files.length);
+    for (const file of files) {
+      try {
+        const attachment = await api.uploadAttachment(file);
+        setSubAttachments((prev) => [...prev, attachment]);
+      } catch (err: any) {
+        if (import.meta.env?.DEV) {
+          console.error('[KanbanCard] 工序截图上传失败:', err);
+        }
+        toast.error(`截图上传失败: ${err?.message || '未知错误'}`);
+      } finally {
+        setSubUploadingCount((n) => n - 1);
+      }
+    }
+  };
+
+  // 回车提交并保留焦点支持连续录入；多行文本（含粘贴）自动拆条，一次批量提交
+  const handleQuickAddSubtask = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!onAddSubtask || isSubtaskSubmitting || subUploadingCount > 0) return;
+    const workflowId = subWorkflowId || task.workflowId;
+    const hasAttachments = subAttachments.length > 0;
+    const text = subDraft.trim();
+    const titles = hasAttachments
+      ? [text.replace(/\s*\n\s*/g, ' ').trim()]
+      : text.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (titles.length === 0) return;
+
     setIsSubtaskSubmitting(true);
     if (import.meta.env?.DEV) {
-      console.log('[KanbanCard] 任务组内直接追加工序:', {
+      console.log('[KanbanCard] 任务组内追加工序:', {
         parentId: task.id,
-        title,
-        workflowId: subWorkflowId || task.workflowId,
+        titles,
+        workflowId,
+        attachments: subAttachments.length,
       });
     }
     try {
-      await onAddSubtask(task.id, { title, workflowId: subWorkflowId || task.workflowId });
+      if (titles.length > 1 && onAddSubtasks) {
+        await onAddSubtasks(task.id, titles.map((title) => ({ title, workflowId })));
+      } else {
+        await onAddSubtask(task.id, {
+          title: titles[0],
+          workflowId,
+          attachments: hasAttachments ? subAttachments : undefined,
+        });
+      }
       setSubDraft('');
+      setSubAttachments([]);
       subInputRef.current?.focus();
     } catch {
-      // 错误提示统一由上层 toast 呈现
+      // 错误提示统一由上层 toast 呈现，草稿保留便于重试
     } finally {
       setIsSubtaskSubmitting(false);
     }
@@ -612,11 +674,11 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (import.meta.env?.DEV) console.log('[KanbanCard] 打开任务组快捷追加工序:', task.id);
-                    openQuickAdd();
+                    if (import.meta.env?.DEV) console.log('[KanbanCard] 定位到任务组工序输入条:', task.id);
+                    focusComposer();
                   }}
                   className="w-5 h-5 rounded-[4px] text-[#85858d] hover:text-[#4f46e5] hover:bg-[#eeedfd] flex items-center justify-center transition-colors"
-                  title="直接添加子工序"
+                  title="添加子工序"
                 >
                   <Plus size={11} strokeWidth={2.4} />
                 </button>
@@ -627,77 +689,99 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
             </div>
           </div>
 
-          {isExpanded && (
-            <div className="p-1.5 space-y-1 border-t border-[#ececf0] bg-[#fafafc]">
-              {/* 就地快捷追加工序：回车连续录入，Esc 收起 */}
-              {isQuickAdding && canAddSubtask ? (
-                <form
-                  onSubmit={handleQuickAddSubtask}
-                  onClick={(e) => e.stopPropagation()}
-                  className="px-1.5 py-1 rounded-[5px] bg-white border border-[#c7c3f8] shadow-[0_0_0_2px_rgba(79,70,229,0.05)] focus-within:border-[#4f46e5] transition-colors space-y-1"
-                >
-                  <div className="flex items-center gap-1">
-                    <Plus size={10} strokeWidth={2.6} className="text-[#4f46e5] shrink-0" />
-                    <input
-                      ref={subInputRef}
-                      value={subDraft}
-                      onChange={(e) => setSubDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') {
-                          e.preventDefault();
-                          closeQuickAdd();
-                        }
-                      }}
-                      readOnly={isSubtaskSubmitting}
-                      placeholder="输入工序标题"
-                      className="flex-1 min-w-0 h-4 bg-transparent text-[11px] text-[#1c1c21] placeholder:text-[#a1a1aa] outline-none read-only:opacity-60"
-                    />
-                    {isSubtaskSubmitting ? (
-                      <Loader2 size={10} className="animate-spin text-[#4f46e5] shrink-0" />
-                    ) : (
+          {/* 工序输入条：常驻在滚动列表之上，工序再多也不必滚动 */}
+          {isExpanded && canAddSubtask && (
+            <div onClick={(e) => e.stopPropagation()} className="px-1.5 pt-1.5 pb-1 border-t border-[#ececf0] bg-white">
+              <div className="flex items-start gap-1 rounded-[5px] border border-[#ececf0] bg-[#fafafc] px-1.5 py-1 focus-within:border-[#4f46e5] focus-within:bg-white transition-colors">
+                <Plus size={10} strokeWidth={2.6} className="mt-[2.5px] shrink-0 text-[#4f46e5]" />
+                <textarea
+                  ref={subInputRef}
+                  rows={1}
+                  value={subDraft}
+                  onChange={(e) => setSubDraft(e.target.value)}
+                  onPaste={handleSubPaste}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void handleQuickAddSubtask();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setSubDraft('');
+                      setSubAttachments([]);
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  readOnly={isSubtaskSubmitting}
+                  placeholder="添加工序，回车录入，可粘贴截图"
+                  className="flex-1 min-w-0 resize-none overflow-y-auto bg-transparent text-[11px] leading-[15px] text-[#1c1c21] placeholder:text-[#a1a1aa] outline-none read-only:opacity-60"
+                />
+                {isSubtaskSubmitting || subUploadingCount > 0 ? (
+                  <Loader2 size={10} className="mt-[2.5px] shrink-0 animate-spin text-[#4f46e5]" />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleQuickAddSubtask()}
+                    disabled={(!subDraft.trim() && subAttachments.length === 0) || isSubtaskSubmitting}
+                    className="mt-[1px] shrink-0 h-[15px] px-1.5 rounded-[3px] bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[9.5px] font-medium transition-colors disabled:opacity-30"
+                    title="添加工序 (Enter)"
+                  >
+                    添加
+                  </button>
+                )}
+              </div>
+
+              {/* 粘贴的截图：即时上传并随工序一起落库 */}
+              {(subAttachments.length > 0 || subUploadingCount > 0) && (
+                <div className="flex items-center gap-1 flex-wrap mt-1">
+                  {subAttachments.map((att) => (
+                    <div key={att.id} className="relative group/att">
+                      <img
+                        src={api.getAttachmentUrl(att.url)}
+                        alt={att.name}
+                        className="w-6 h-6 rounded-[3px] object-cover border border-[#ececf0]"
+                      />
                       <button
                         type="button"
-                        onClick={closeQuickAdd}
-                        className="w-4 h-4 rounded-[3px] text-[#a1a1aa] hover:text-[#1c1c21] hover:bg-[#f1f1f4] flex items-center justify-center shrink-0 transition-colors"
-                        title="关闭 (Esc)"
+                        onClick={() => setSubAttachments((prev) => prev.filter((a) => a.id !== att.id))}
+                        className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[#1c1c21] text-white items-center justify-center hidden group-hover/att:flex"
+                        title="移除截图"
                       >
-                        <X size={9.5} />
+                        <X size={7} />
                       </button>
-                    )}
-                  </div>
-                  {workflows.length > 0 && (
-                    <div className="flex items-center gap-1 pl-0.5 min-w-0">
-                      <Workflow size={9.5} className="shrink-0 text-[#a1a1aa]" />
-                      <select
-                        value={subWorkflowId || task.workflowId}
-                        onChange={(e) => setSubWorkflowId(e.target.value)}
-                        disabled={isSubtaskSubmitting}
-                        className="flex-1 min-w-0 h-[16px] bg-transparent text-[9.5px] font-medium text-[#63636b] outline-none cursor-pointer truncate hover:text-[#4f46e5] disabled:opacity-60"
-                        title="选择该工序的执行流水线"
-                      >
-                        {workflows.map((wf) => (
-                          <option key={wf.id} value={wf.id}>
-                            {wf.name}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="shrink-0 text-[9px] text-[#b9b9c2]">↵ 回车添加</span>
+                    </div>
+                  ))}
+                  {subUploadingCount > 0 && (
+                    <div className="w-6 h-6 rounded-[3px] border border-dashed border-[#c7c3f8] bg-[#f4f4f6] flex items-center justify-center">
+                      <Loader2 size={9} className="animate-spin text-[#4f46e5]" />
                     </div>
                   )}
-                </form>
-              ) : canAddSubtask ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openQuickAdd();
-                  }}
-                  className="w-full flex items-center gap-1 px-1.5 py-1 rounded-[5px] border border-dashed border-[#dcdce2] text-[10.5px] text-[#85858d] hover:text-[#4f46e5] hover:border-[#c7c3f8] hover:bg-white transition-colors"
-                >
-                  <Plus size={10} strokeWidth={2.4} />
-                  <span>添加子工序</span>
-                </button>
-              ) : null}
+                </div>
+              )}
+
+              {workflows.length > 0 && (
+                <div className="flex items-center gap-1 mt-1 min-w-0">
+                  <Workflow size={9.5} className="shrink-0 text-[#a1a1aa]" />
+                  <select
+                    value={subWorkflowId || task.workflowId}
+                    onChange={(e) => setSubWorkflowId(e.target.value)}
+                    disabled={isSubtaskSubmitting}
+                    className="flex-1 min-w-0 h-[16px] bg-transparent text-[9.5px] font-medium text-[#63636b] outline-none cursor-pointer truncate hover:text-[#4f46e5] disabled:opacity-60"
+                    title="选择该工序的执行流水线"
+                  >
+                    {workflows.map((wf) => (
+                      <option key={wf.id} value={wf.id}>
+                        {wf.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="shrink-0 text-[9px] text-[#b9b9c2]">↵ 添加 · ⇧↵ 换行</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isExpanded && displaySubtasks.length > 0 && (
+            <div className="p-1.5 space-y-1 border-t border-[#ececf0] bg-[#fafafc] max-h-[200px] overflow-y-auto">
 
               {displaySubtasks.map(({ st, orderNo }) => {
                 let statusBadge = (
