@@ -332,6 +332,12 @@
   flex-direction: column;
 }
 
+/* macOS 红黄绿窗口按钮独占一行（对齐 DSH 的 topStrip），品牌行让到它下面 */
+.windowStrip {
+  flex: none;
+  height: 34px;
+}
+
 /* 会话列品牌标识 */
 .brandRow {
   display: flex;
