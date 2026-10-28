@@ -1467,15 +1467,14 @@ export function GlobalAgentPanel({
       {mode !== 'drawer' && (
         <SessionList
           brandSlot={
-            <div
-              className={styles.brandRow}
-              // macOS 桌面端左上角被红黄绿窗口按钮占用，留出同样的让位
-              style={trafficLightInset ? { paddingLeft: 72 } : undefined}
-            >
-              <BrandLogo size={18} className={styles.brandLogo} />
-              <span className={styles.brandName}>openLoop</span>
-              <span className={styles.brandTag}>智能体</span>
-            </div>
+            <>
+              {trafficLightInset && <div className={styles.windowStrip} />}
+              <div className={styles.brandRow}>
+                <BrandLogo size={18} className={styles.brandLogo} />
+                <span className={styles.brandName}>openLoop</span>
+                <span className={styles.brandTag}>智能体</span>
+              </div>
+            </>
           }
           groups={groups}
           activeId={activeId}
