@@ -97,7 +97,9 @@ export class AgentSessionHost extends EventEmitter {
 
     const session = new PiRpcSessionInstance({
       taskId,
-      taskTitle: summary?.firstUserMessage || '',
+      // 不拿首条消息当会话名：续接会话的标题由 pi 会话名（自动命名）决定，
+      // 这里再传一个会让每轮续接都把标题钉成原始的提示词
+      taskTitle: '',
       sessionId,
       cwd,
       model,

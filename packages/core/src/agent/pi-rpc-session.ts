@@ -42,6 +42,11 @@ const PI_SNAPSHOT_INTERVAL_MS = 120;
 const TREE_EXTENSION_PATH = path.join(__dirname, 'extensions', 'openloop-tree.js');
 /** 内部命令名：与 extension 里 registerCommand 的名字一致 */
 const TREE_COMMAND = 'openloop-tree';
+/**
+ * 会话自动命名桥：兜底标题即时落，模型提炼在会话内后台跑，不额外起进程。
+ * 编译产物与本文件同目录树，跟着 dist 一起分发。
+ */
+const TITLE_EXTENSION_PATH = path.join(__dirname, 'extensions', 'openloop-title.js');
 
 /** 工具入参摘要：只保留可展示的原始字段，供工具卡直接渲染 */
 function summarizeToolInput(args: any): Record<string, any> | undefined {
@@ -210,6 +215,10 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.treeBridgeReady = fs.existsSync(TREE_EXTENSION_PATH);
     if (this.treeBridgeReady) {
       args.push('--extension', TREE_EXTENSION_PATH);
+    }
+    // 会话自动命名桥：缺失时只是没有自动命名，不影响对话
+    if (fs.existsSync(TITLE_EXTENSION_PATH)) {
+      args.push('--extension', TITLE_EXTENSION_PATH);
     }
 
     const cwd = options.cwd || os.tmpdir();
@@ -460,6 +469,17 @@ export class PiRpcSessionInstance extends EventEmitter {
         this.emitStatus({ isBusy: true, active: this.active, turnStartedAt: this.turnStartedAt });
         this.notifyUpdate(true);
         break;
+
+      // 会话名变化（自动命名 / 任务标题 / 用户重命名）：把新标题推给界面即时替换
+      case 'session_info_changed': {
+        const title = typeof record.name === 'string' ? record.name.trim() : '';
+        if (!title) break;
+        if (process.env.NODE_ENV !== 'production') {
+          this.emitLog('system', `[会话命名] ${title}`);
+        }
+        this.emitEvent({ kind: 'title', taskId: this.taskId, title });
+        break;
+      }
 
       case 'turn_start':
         this.isBusy = true;

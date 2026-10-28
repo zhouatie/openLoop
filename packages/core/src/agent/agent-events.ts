@@ -21,7 +21,15 @@ export type AgentStreamEvent =
   | AgentMessagePatchEvent
   | AgentToolEvent
   | AgentPendingEvent
+  | AgentTitleEvent
   | AgentStatusEvent;
+
+/** 会话名变化：任务标题、自动命名或用户重命名的结果，供侧栏即时换标题 */
+export interface AgentTitleEvent {
+  kind: 'title';
+  taskId: string;
+  title: string;
+}
 
 export interface AgentSnapshotEvent {
   kind: 'snapshot';

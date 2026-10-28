@@ -28,6 +28,7 @@ import { sanitizeChatMessages } from '../agent/agent-format';
 import { piSessionIndex } from '../agent/session-index';
 import { agentSessionHost, GLOBAL_AGENT_PREFIX, type AgentPermissionPreset } from '../agent/agent-session-host';
 import { agentSessionMeta, moveSessionFileToTrash } from '../agent/session-meta';
+import { resolveSessionTitle } from '../agent/title-text';
 import { listDirectory, readTextFile, statFile } from '../agent/fs-browser';
 import { terminalHost } from '../agent/terminal-host';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
@@ -751,8 +752,12 @@ export class OpenLoopServer {
             const project = projectMeta[session.cwd] || {};
             return {
               ...session,
-              // 标题优先级：面板手动重命名 > pi 自己的会话名 > 渲染层用首条消息兜底
-              title: meta.title || session.sessionName,
+              // 标题优先级：面板手动重命名 > pi 会话名（任务标题 / 自动命名）> 首条消息兜底
+              title: resolveSessionTitle({
+                metaTitle: meta.title,
+                sessionName: session.sessionName,
+                firstUserMessage: session.firstUserMessage,
+              }),
               archived: meta.archived === true,
               deleted: meta.deleted === true,
               pinned: meta.pinned === true,
