@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SessionChatMessage, SessionUsage } from '@openloop/core/types';
 import { MessageRow } from './MessageRow';
 import { TurnRail, type TurnRailItem } from './TurnRail';
@@ -289,6 +289,19 @@ export const AgentChatView = React.memo(function AgentChatView({
 
   const lastMessage = messages[messages.length - 1];
   const lastLength = lastMessage ? lastMessage.content.length + (lastMessage.thinking?.length || 0) : 0;
+  const lastUserId = lastMessage?.role === 'user' ? lastMessage.id : null;
+
+  /**
+   * 自己刚发出的消息必须立刻可见（DSH 的 ownInput → followTail）。
+   * 用户此前在翻历史、或输入卡变高把视口顶离底部时，贴底标记会是 false，
+   * 新消息就会停在输入卡后面看不见；这里在绘制前无条件贴底。
+   */
+  const followedUserIdRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!lastUserId || lastUserId === followedUserIdRef.current) return;
+    followedUserIdRef.current = lastUserId;
+    scrollToBottom();
+  }, [lastUserId, scrollToBottom]);
 
   // 新消息或流式增量到达时，仅在用户贴底时保持滚动
   useEffect(() => {
