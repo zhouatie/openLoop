@@ -993,19 +993,29 @@ export function GlobalAgentPanel({
   const keyword = query.trim().toLowerCase();
   /** 列表数据源：当前新会话先以占位行出现，等文件落盘后换成真实会话行 */
   const listedSessions = useMemo(() => {
-    if (!draft || draft.id !== activeId || keyword) return sessions;
-    if (sessions.some((item) => item.id === draft.id)) return sessions;
-    const nowIso = new Date().toISOString();
-    const row: SessionListItem = {
-      id: draft.id,
-      title: '新会话',
-      cwd: draft.cwd,
-      modifiedAt: nowIso,
-      createdAt: nowIso,
-      messageCount: 0,
-      draft: true,
-    };
-    return [row, ...sessions];
+    let rows = sessions;
+    if (draft && draft.id === activeId && !keyword && !sessions.some((item) => item.id === draft.id)) {
+      const nowIso = new Date().toISOString();
+      const row: SessionListItem = {
+        id: draft.id,
+        title: '新会话',
+        cwd: draft.cwd,
+        modifiedAt: nowIso,
+        createdAt: nowIso,
+        messageCount: 0,
+        draft: true,
+      };
+      rows = [row, ...sessions];
+    }
+    // 同一会话可能因工作区改名或搬移留下新旧两份文件（id 相同）：行 key 必须唯一，否则会重复出行且多行同时高亮
+    const seen = new Set<string>();
+    const unique: SessionListItem[] = [];
+    for (const item of rows) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      unique.push(item);
+    }
+    return unique;
   }, [sessions, draft, activeId, keyword]);
 
   const filteredSessions = useMemo(() => {

@@ -188,9 +188,13 @@ export class PiSessionIndex {
       return this.describeFile(idOrPath);
     }
     // 先查已解析的缓存：切会话不该重扫整个目录，会话列表打开后这里几乎总是命中
+    // 同一会话可能有新旧目录两份文件副本，取最新的那份
+    let cached: PiSessionSummary | undefined;
     for (const entry of this.cache.values()) {
-      if (entry.summary.id === idOrPath) return entry.summary;
+      if (entry.summary.id !== idOrPath) continue;
+      if (!cached || entry.summary.modifiedAt > cached.modifiedAt) cached = entry.summary;
     }
+    if (cached) return cached;
     const all = await this.list();
     return all.find((item) => item.id === idOrPath);
   }
@@ -327,7 +331,13 @@ export class PiSessionIndex {
     }
 
     summaries.sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1));
-    return summaries;
+
+    // 工作区改名或搬移后，同一会话会在新旧目录各留一份文件（id 相同）：只保留最新的那份
+    const byId = new Map<string, PiSessionSummary>();
+    for (const summary of summaries) {
+      if (!byId.has(summary.id)) byId.set(summary.id, summary);
+    }
+    return [...byId.values()];
   }
 
   private async describeFile(filePath: string): Promise<PiSessionSummary | undefined> {
