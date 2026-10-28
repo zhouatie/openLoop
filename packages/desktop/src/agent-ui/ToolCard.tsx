@@ -8,6 +8,7 @@ import { imageSrc, isImagePath } from './local-image';
 import { useOpenFile } from './open-file';
 import { DisclosureRow } from './dsh/DisclosureRow';
 import { TextShimmer } from './dsh/TextShimmer';
+import { TerminalBlock } from './dsh/TerminalBlock';
 import styles from './ToolCard.module.css';
 
 /** 工具行图标：与 DSH 的 flow row 一致，16px 盒子里 14px 图形 */
@@ -20,7 +21,7 @@ function kindIcon(kind: string) {
 }
 
 const KIND_LABEL: Record<string, string> = {
-  execute: '命令',
+  execute: '运行命令',
   read: '读取',
   write: '写入',
   search: '检索',
@@ -90,6 +91,13 @@ function renderResult(result: any): string {
   if (result === undefined || result === null) return '';
   if (typeof result === 'string') return result;
   if (typeof result === 'object') {
+    // pi 的实时结果是内容块数组（[{type:'text', text}]），历史回放已拍平成字符串
+    const blocks = Array.isArray(result.content) ? result.content : [];
+    const text = blocks
+      .map((block: any) => (typeof block?.text === 'string' ? block.text : ''))
+      .filter(Boolean)
+      .join('\n');
+    if (text) return text;
     const withContent = result.content ?? result.output ?? result.text;
     if (typeof withContent === 'string') return withContent;
     try {
@@ -108,6 +116,19 @@ function pickStringOf(source: any, keys: string[]): string | undefined {
     if (typeof value === 'string') return value;
   }
   return undefined;
+}
+
+/**
+ * 命令的退出码：pi 只在失败时把退出码写进正文（`Command exited with code N`），
+ * 结构化字段存在时优先取结构化字段。取不到就当作未知，命令卡不显示胶囊。
+ */
+function exitCodeOf(tool: ToolExecutionRecord, output: string): number | null | undefined {
+  if (tool.status === 'running') return undefined;
+  const structured = tool.result?.structuredContent ?? tool.result?.details;
+  const code = structured?.exit_code ?? structured?.exitCode;
+  if (typeof code === 'number') return code;
+  const matched = /Command exited with code (\d+)/.exec(output);
+  return matched ? Number(matched[1]) : undefined;
 }
 
 /**
@@ -158,6 +179,10 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
     () => (kind === 'write' ? diffHunksOfInput(tool) : null),
     [kind, tool.input]
   );
+  // 命令类工具：展开后是 DSH 的终端卡（提示行 + 输出），不再铺原始入参 JSON
+  const command = useMemo(() => pickString(tool.input, ['command', 'cmd', 'script']), [tool.input]);
+  const exitCode = useMemo(() => (command ? exitCodeOf(tool, output) : undefined), [command, tool.status, tool.result, output]);
+  const exitLabel = exitCode !== undefined && exitCode !== null && exitCode !== 0 ? `退出码 ${exitCode}` : undefined;
   const images = tool.imageUrls || [];
   const isRunning = tool.status === 'running';
   const failed = tool.status === 'error';
@@ -173,6 +198,23 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
     return isImagePath(target) ? target! : undefined;
   }, [tool.input]);
   const linkPath = targetPath && openFile ? targetPath : imagePath;
+
+  // 输出图片在两类展开体里都要出现，抽出来只写一次
+  const imagesSection =
+    images.length > 0 ? (
+      <div className={styles.section}>
+        <div className={styles.sectionLabel}>输出图片</div>
+        <div className={styles.images}>
+          {images.map((url, index) => (
+            <ImageThumb
+              key={`${index}-${url.slice(-12)}`}
+              image={{ url, name: `输出图片 ${index + 1}` }}
+              size={120}
+            />
+          ))}
+        </div>
+      </div>
+    ) : null;
 
   const title = KIND_LABEL[kind] || KIND_LABEL.other;
 
@@ -200,12 +242,18 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
             <TextShimmer>{summary}</TextShimmer>
           </span>
         )}
+        {exitLabel && (
+          <span className={styles.exitBadge}>
+            <span className={styles.exitDot} aria-hidden />
+            {exitLabel}
+          </span>
+        )}
         {tool.durationMs !== undefined && (
           <span className={styles.duration}>{formatDuration(tool.durationMs)}</span>
         )}
       </>
     ),
-    [failed, linkPath, targetPath, openFile, summary, tool.durationMs]
+    [failed, linkPath, targetPath, openFile, summary, exitLabel, tool.durationMs]
   );
 
   const canExpand = Boolean(diffHunks) || hasOutput || images.length > 0 || Boolean(tool.input);
@@ -225,37 +273,38 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
         collapsedContent={collapsed}
         titleClassName={styles.title}
       >
-        <div className={styles.body}>
-          {diffHunks && <DiffBlock diffs={diffHunks} labels={DIFF_LABELS} />}
-          {!diffHunks && tool.input && Object.keys(tool.input).length > 0 && (
-            <div className={styles.section}>
-              <div className={styles.sectionLabel}>入参</div>
-              <pre className={styles.pre}>{JSON.stringify(tool.input, null, 2)}</pre>
-            </div>
-          )}
-          {images.length > 0 && (
-            <div className={styles.section}>
-              <div className={styles.sectionLabel}>输出图片</div>
-              <div className={styles.images}>
-                {images.map((url, index) => (
-                  <ImageThumb
-                    key={`${index}-${url.slice(-12)}`}
-                    image={{ url, name: `输出图片 ${index + 1}` }}
-                    size={120}
-                  />
-                ))}
+        {command ? (
+          <div className={styles.body}>
+            <TerminalBlock
+              className={styles.terminal}
+              command={command}
+              cwd={tool.cwd}
+              output={output}
+              exitCode={exitCode}
+              running={isRunning}
+            />
+            {imagesSection}
+          </div>
+        ) : (
+          <div className={styles.body}>
+            {diffHunks && <DiffBlock diffs={diffHunks} labels={DIFF_LABELS} />}
+            {!diffHunks && tool.input && Object.keys(tool.input).length > 0 && (
+              <div className={styles.section}>
+                <div className={styles.sectionLabel}>入参</div>
+                <pre className={styles.pre}>{JSON.stringify(tool.input, null, 2)}</pre>
               </div>
-            </div>
-          )}
-          {hasOutput && (
-            <div className={styles.section}>
-              <div className={styles.sectionLabel}>{failed ? '错误输出' : '输出'}</div>
-              <pre className={`${styles.pre} ${failed ? styles.preError : ''}`}>{output}</pre>
-            </div>
-          )}
-          {!hasOutput && !isRunning && <div className={styles.empty}>本次调用没有输出</div>}
-          {isRunning && <div className={styles.empty}>执行中…</div>}
-        </div>
+            )}
+            {imagesSection}
+            {hasOutput && (
+              <div className={styles.section}>
+                <div className={styles.sectionLabel}>{failed ? '错误输出' : '输出'}</div>
+                <pre className={`${styles.pre} ${failed ? styles.preError : ''}`}>{output}</pre>
+              </div>
+            )}
+            {!hasOutput && !isRunning && <div className={styles.empty}>本次调用没有输出</div>}
+            {isRunning && <div className={styles.empty}>执行中…</div>}
+          </div>
+        )}
       </DisclosureRow>
       {preview && (
         <ImageLightbox

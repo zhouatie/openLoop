@@ -127,6 +127,8 @@ export interface ToolExecutionRecord {
   kind?: ToolKind;
   /** 工具返回的图片（data URL），例如截图类工具 */
   imageUrls?: string[];
+  /** 调用发生时的工作目录，命令卡用它做提示符前缀 */
+  cwd?: string;
 }
 
 /** 单条消息的模型用量，用于输入框上方统计胶囊 */

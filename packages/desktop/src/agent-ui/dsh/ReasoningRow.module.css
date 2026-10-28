@@ -68,10 +68,7 @@
 }
 
 .thinkBody {
-  /* 缩进对齐标题起点：leading 16px + gap 6px */
+  /* 缩进对齐标题起点：leading 16px + gap 6px；字号与颜色由 compact Markdown 提供 */
   padding: 4px 0 4px 22px;
   min-width: 0;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-tertiary);
 }

@@ -265,7 +265,7 @@ export class PiSessionIndex {
     }
 
     const branch = selectActiveBranch(entries, options?.leafId);
-    const { messages, model, totalUsage, leafEntryId } = mapEntriesToMessages(branch, summary.id);
+    const { messages, model, totalUsage, leafEntryId } = mapEntriesToMessages(branch, summary.id, summary.cwd);
     const limited = options?.limit && options.limit > 0 ? messages.slice(-options.limit) : messages;
     return { summary, messages: limited, leafEntryId, model, totalUsage };
   }
@@ -686,7 +686,7 @@ function selectActiveBranch(entries: any[], leafId?: string | null): any[] {
   return chain.filter((entry) => entry && entry.type !== 'session');
 }
 
-function mapEntriesToMessages(branch: any[], sessionId: string) {
+function mapEntriesToMessages(branch: any[], sessionId: string, cwd?: string) {
   const messages: SessionChatMessage[] = [];
   const toolIndex = new Map<string, { message: SessionChatMessage; tool: ToolExecutionRecord }>();
   const usageTotal = { totalTokens: 0, cost: 0 };
@@ -764,6 +764,7 @@ function mapEntriesToMessages(branch: any[], sessionId: string) {
               input: block.arguments,
               kind: classifyToolKind(block.name),
               status: 'running',
+              cwd,
             });
           }
         }

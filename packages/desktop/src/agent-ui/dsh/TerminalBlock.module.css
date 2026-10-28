@@ -1,0 +1,235 @@
+/* 取自 deepseek-harness packages/client/ui-primitives/src/TerminalBlock.module.css（MIT）：
+   卡片表面、提示行、状态胶囊、复制按钮与头尾折叠输出，颜色全部走本仓令牌。 */
+
+.block {
+  --dsl-terminal-radius: var(--dsw-radius-lg);
+  --dsl-terminal-line-height: 22px;
+  --dsl-terminal-font: var(--dsw-font-markdown-code-block);
+  /* 卡片自身左侧留出的运行态圆点槽位 */
+  --dsl-terminal-gutter: 30px;
+
+  position: relative;
+  margin: 16px 0;
+  padding-left: var(--dsl-terminal-gutter);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-markdown-code-block);
+  border-radius: var(--dsl-terminal-radius);
+  overflow: hidden;
+}
+
+/* 状态胶囊与复制按钮顶对齐第一行命令 */
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-left: calc(-1 * var(--dsl-terminal-gutter));
+  padding: 9px 14px 9px var(--dsl-terminal-gutter);
+  border-top-left-radius: var(--dsl-terminal-radius);
+  border-top-right-radius: var(--dsl-terminal-radius);
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.header::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--dsw-radius-sm);
+}
+
+.header::-webkit-scrollbar-track {
+  margin: 6px;
+}
+
+/* 命令与输出之间的整宽细线；只有提示行时不画 */
+.block[data-body] .header {
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.prompt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  font: var(--dsl-terminal-font);
+}
+
+.promptLine {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  line-height: var(--dsl-terminal-line-height);
+}
+
+/* 圆点落在卡片自己的左槽位里，不参与命令排版 */
+.runState {
+  position: absolute;
+  left: calc(-1 * var(--dsl-terminal-gutter) + 8px);
+  top: calc(var(--dsl-terminal-line-height) / 2);
+  transform: translateY(-50%);
+  display: inline-flex;
+}
+
+/* 圆点本身 aria-hidden，这里承载文字状态 */
+.runStateLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.dot {
+  position: relative;
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: none;
+}
+
+.dot::after {
+  content: '';
+  position: absolute;
+  inset: 20%;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dot[data-state='done'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.dot[data-state='error'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* 运行中：静环打底 + 呼吸弧线，整圈缓慢旋转 */
+.spinner {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.spinnerMotion {
+  transform-origin: center;
+  animation: terminal-spin 1.5s linear infinite;
+}
+
+.spinnerTrack,
+.spinnerArc {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.spinnerTrack {
+  opacity: 0.25;
+}
+
+.spinnerArc {
+  stroke-dasharray: 12 150;
+  animation: terminal-dash 1.5s ease-in-out infinite;
+}
+
+@keyframes terminal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes terminal-dash {
+  0% {
+    stroke-dasharray: 12 150;
+    stroke-dashoffset: 0;
+  }
+
+  50% {
+    stroke-dasharray: 24 150;
+    stroke-dashoffset: -6;
+  }
+
+  100% {
+    stroke-dasharray: 12 150;
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinnerMotion,
+  .spinnerArc {
+    animation: none;
+  }
+}
+
+.cwd {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.command {
+  min-width: 0;
+  /* 宿主可把 whitespace 换成 pre-wrap 让长命令折行，与 DSH 的命令卡一致 */
+  white-space: var(--dsl-terminal-command-whitespace, pre);
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-primary);
+}
+
+.status {
+  flex: none;
+  position: sticky;
+  top: 0;
+  height: var(--dsl-terminal-line-height);
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: var(--dsl-terminal-line-height);
+}
+
+.copyButton {
+  flex: none;
+  position: sticky;
+  top: 0;
+  background-color: var(--dsw-alias-markdown-code-block);
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: var(--dsl-terminal-line-height);
+}
+
+/* 纵向滚动放在输出区：提示行保持固定 */
+.output {
+  max-height: var(--dsl-terminal-output-max-height, none);
+  padding: 12px 14px 12px 0;
+  font: var(--dsl-terminal-font);
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.output::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--dsw-radius-sm);
+}
+
+.output::-webkit-scrollbar-track {
+  margin: 6px;
+}
+
+.line {
+  min-height: var(--dsl-terminal-line-height);
+  white-space: pre;
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  padding: 12px 14px 12px 0;
+  font: var(--dsl-terminal-font);
+  color: var(--dsw-alias-label-tertiary);
+}

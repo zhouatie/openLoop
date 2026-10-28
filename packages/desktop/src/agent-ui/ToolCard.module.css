@@ -116,3 +116,38 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* 命令卡：DSH bash 行展开后的终端卡；左边距由 .body 提供，这里只收上下留白。
+   `.root .terminal` 提高权重，压过 TerminalBlock 自带的字号与行高默认值。 */
+.root .terminal {
+  /* DSH 命令卡用代码字号的 small 档（该项目默认 11px），这里固定同值以保证观感一致 */
+  --dsl-terminal-font: 11px / 18px var(--ds-font-family-code);
+  --dsl-terminal-line-height: 18px;
+  --dsl-terminal-output-max-height: 224px;
+  --dsl-terminal-command-whitespace: pre-wrap;
+  margin: 4px 0;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+}
+
+/* 折叠行的退出码胶囊：与 DSH 的 ExitCodeBadge 一致，失败时贴在摘要后面 */
+.exitBadge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.exitDot {
+  flex: none;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-error-primary);
+}
