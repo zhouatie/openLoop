@@ -23,7 +23,7 @@ interface Window {
       port: string;
       pid?: number;
     }>;
-    notify?: (payload: { title: string; body: string }) => Promise<boolean>;
+    notify?: (payload: { title: string; body: string; sessionId?: string }) => Promise<boolean>;
     send: (channel: string, data: any) => void;
     on: (channel: string, callback: (...args: any[]) => void) => () => void;
   };

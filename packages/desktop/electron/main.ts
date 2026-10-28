@@ -589,8 +589,8 @@ ipcMain.handle('system:checkSystemStatus', async () => {
   };
 });
 
-// 注册系统级 IPC：桌面通知（任务进入待验收 / 执行失败等需要人工介入的状态时提醒）
-ipcMain.handle('notification:show', (_event, payload: { title: string; body: string }) => {
+// 注册系统级 IPC：桌面通知（任务待验收 / 执行失败、Agent 一轮回复结束等需要人工介入的时机）
+ipcMain.handle('notification:show', (_event, payload: { title: string; body: string; sessionId?: string }) => {
   if (!payload?.title || !Notification.isSupported()) return false;
   if (!app.isPackaged) {
     console.log('[Desktop Main] Showing desktop notification:', payload);
@@ -606,6 +606,10 @@ ipcMain.handle('notification:show', (_event, payload: { title: string; body: str
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
+    // 通知属于某条会话时，把会话标识交回渲染进程就地切换
+    if (payload.sessionId) {
+      mainWindow.webContents.send('notification:activate', { sessionId: payload.sessionId });
+    }
   });
   notification.show();
   return true;
