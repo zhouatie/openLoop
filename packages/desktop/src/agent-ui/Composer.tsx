@@ -129,12 +129,30 @@ export const Composer = React.memo(function Composer({
     node.style.height = `${Math.min(node.scrollHeight, maxHeight)}px`;
   }, [value]);
 
+  /** 发送后焦点留在输入框：发送期间输入框会短暂禁用，解禁后再补回焦点 */
+  const restoreFocusRef = useRef(false);
+  const focusInput = useCallback(() => textareaRef.current?.focus(), []);
+
+  useEffect(() => {
+    if (disabled || !restoreFocusRef.current) return;
+    // 焦点已被别处拿走时不抢回
+    const active = document.activeElement;
+    if (active && active !== document.body) {
+      restoreFocusRef.current = false;
+      return;
+    }
+    focusInput();
+  }, [disabled, focusInput]);
+
   const submit = useCallback(() => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
     // 生成中发送会作为追加消息排入本轮，由输入卡上方的排队条承接反馈
     onSend(trimmed);
-  }, [value, disabled, onSend]);
+    // 发送会让输入框短暂禁用：下一帧取回焦点，仍禁用则等解禁后补回
+    restoreFocusRef.current = true;
+    window.requestAnimationFrame(focusInput);
+  }, [value, disabled, onSend, focusInput]);
 
   /** @ 候选的请求序号：连续输入时只采纳最后一次的结果，避免旧结果盖掉新候选 */
   const mentionSeq = useRef(0);
@@ -517,6 +535,9 @@ export const Composer = React.memo(function Composer({
             syncSuggestions(event.target.value);
           }}
           onKeyDown={handleKeyDown}
+          onFocus={() => {
+            restoreFocusRef.current = false;
+          }}
           onPaste={handlePaste}
           placeholder={placeholder || '描述你想要构建的内容，/ 调用指令，@ 引用文件'}
           rows={1}
@@ -581,6 +602,8 @@ export const Composer = React.memo(function Composer({
             <button
               type="button"
               className={styles.primary}
+              // 按下不抢焦点，发送后输入框仍可直接继续输入
+              onMouseDown={(event) => event.preventDefault()}
               onClick={busy && onStop ? onStop : submit}
               disabled={busy ? false : !canSend}
               title={busy ? '中止本轮' : '发送'}
