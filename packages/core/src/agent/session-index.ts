@@ -233,19 +233,30 @@ export class PiSessionIndex {
     return matched;
   }
 
+  /** 按文件名寻找到的会话文件路径，树 / 导航等需要定位文件的场景使用 */
+  public async pathOf(id: string): Promise<string | undefined> {
+    return (await this.findByName(id))?.path;
+  }
+
   /** 读取单个会话的消息序列（活动分支） */
-  public async read(idOrPath: string, options?: { limit?: number }): Promise<PiSessionDetail | undefined> {
+  public async read(
+    idOrPath: string,
+    options?: { limit?: number; leafId?: string | null }
+  ): Promise<PiSessionDetail | undefined> {
     return this.readDetail(await this.find(idOrPath), options);
   }
 
   /** 同上，但只按文件名定位：文件不存在时立刻返回，不扫描全部会话，适合高频快照读取 */
-  public async readByName(id: string, options?: { limit?: number }): Promise<PiSessionDetail | undefined> {
+  public async readByName(
+    id: string,
+    options?: { limit?: number; leafId?: string | null }
+  ): Promise<PiSessionDetail | undefined> {
     return this.readDetail(await this.findByName(id), options);
   }
 
   private async readDetail(
     summary: PiSessionSummary | undefined,
-    options?: { limit?: number }
+    options?: { limit?: number; leafId?: string | null }
   ): Promise<PiSessionDetail | undefined> {
     if (!summary) return undefined;
     const entries = await this.readEntries(summary.path);
@@ -253,7 +264,7 @@ export class PiSessionIndex {
       return { summary, messages: [] };
     }
 
-    const branch = selectActiveBranch(entries);
+    const branch = selectActiveBranch(entries, options?.leafId);
     const { messages, model, totalUsage, leafEntryId } = mapEntriesToMessages(branch, summary.id);
     const limited = options?.limit && options.limit > 0 ? messages.slice(-options.limit) : messages;
     return { summary, messages: limited, leafEntryId, model, totalUsage };
@@ -635,20 +646,27 @@ function deriveFolderTitle(filePath: string): string {
 }
 
 /**
- * 取活动分支：pi 的会话是树，最后一条条目的祖先链就是当前展示的分支
+ * 取活动分支：pi 的会话是树，从 leaf 回溯到根的祖先链就是当前展示的分支
+ *
+ * @param leafId 显式叶子（进程内导航后的位置）；缺省取文件最后一条，null 表示会话起点
  */
-function selectActiveBranch(entries: any[]): any[] {
+function selectActiveBranch(entries: any[], leafId?: string | null): any[] {
   const byId = new Map<string, any>();
   for (const entry of entries) {
     if (entry?.id) byId.set(entry.id, entry);
   }
-  // v3 树结构：从最后一条有 parentId 的条目回溯
+
   let leaf: any | undefined;
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i];
-    if (entry && typeof entry.parentId !== 'undefined' && entry.type !== 'session') {
-      leaf = entry;
-      break;
+  if (leafId === null) return [];
+  if (leafId !== undefined) leaf = byId.get(leafId);
+  if (!leaf) {
+    // v3 树结构：从最后一条有 parentId 的条目回溯
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i];
+      if (entry && typeof entry.parentId !== 'undefined' && entry.type !== 'session') {
+        leaf = entry;
+        break;
+      }
     }
   }
   if (!leaf || !leaf.id) {

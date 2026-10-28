@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {
@@ -33,6 +34,14 @@ export const PIPELINE_DONE_MARKER = '[OPENLOOP_DONE]';
  * 流式期间增量事件逐包推送，快照只负责对账，不需要跟每个 token 同步。
  */
 const PI_SNAPSHOT_INTERVAL_MS = 120;
+
+/**
+ * 会话树导航桥：pi 的 RPC 协议没有暴露 navigateTree，只能通过扩展命令触发
+ * 编译产物与本文件同目录树，跟着 dist 一起分发。
+ */
+const TREE_EXTENSION_PATH = path.join(__dirname, 'extensions', 'openloop-tree.js');
+/** 内部命令名：与 extension 里 registerCommand 的名字一致 */
+const TREE_COMMAND = 'openloop-tree';
 
 /** 工具入参摘要：只保留可展示的原始字段，供工具卡直接渲染 */
 function summarizeToolInput(args: any): Record<string, any> | undefined {
@@ -120,6 +129,12 @@ export class PiRpcSessionInstance extends EventEmitter {
   public turnStartedAt?: number;
   /** 上一轮从开始到结束的用时（毫秒） */
   public lastTurnDurationMs?: number;
+  /**
+   * 进程内导航后的叶子条目：pi 切换分支只改内存里的指针，不写文件，
+   * 因此必须由 openLoop 记住，否则读盘会读到被放弃的分支。
+   * undefined=跟文件末尾一致（pi 重启后的语义），null=已回退到会话起点。
+   */
+  public leafEntryId?: string | null;
 
   private modelPattern?: string;
   private pendingThinking?: string;
@@ -147,6 +162,8 @@ export class PiRpcSessionInstance extends EventEmitter {
   private snapshotPending = false;
   /** 增量事件计数，仅供开发环境采样日志 */
   private eventSeq = 0;
+  /** 会话树导航桥最近一次报错，供 navigateTo 判定成败 */
+  private treeBridgeError?: string;
 
   constructor(options: PiRpcSessionOptions) {
     super();
@@ -186,6 +203,10 @@ export class PiRpcSessionInstance extends EventEmitter {
     }
     if (options.disableTools) {
       args.push('--no-tools');
+    }
+    // 会话树导航桥：只在脚本存在时装载，缺失时降级为「只能看树、不能跳转」
+    if (fs.existsSync(TREE_EXTENSION_PATH)) {
+      args.push('--extension', TREE_EXTENSION_PATH);
     }
 
     const cwd = options.cwd || os.tmpdir();
@@ -385,6 +406,16 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   private handleRpcRecord(record: any) {
+    // 0. 扩展报错：会话树导航桥的失败要能被上层感知，不能静默
+    if (record.type === 'extension_error') {
+      const source = String(record.extensionPath || '');
+      if (source.includes(TREE_COMMAND)) {
+        this.treeBridgeError = String(record.error || '会话树导航失败');
+        this.emitLog('stderr', `[会话树] ${this.treeBridgeError}`);
+        return;
+      }
+    }
+
     // 0. 扩展 UI 请求（确认 / 选择 / 输入）
     if (record.type === 'extension_ui_request') {
       const method = String(record.method || '');
@@ -440,6 +471,8 @@ export class PiRpcSessionInstance extends EventEmitter {
         if (!msg) break;
 
         if (msg.role === 'user') {
+          // 新消息会以当前叶子为父追写，叶子回到文件末尾，跟踪值失效
+          this.leafEntryId = undefined;
           const userText = Array.isArray(msg.content)
             ? msg.content.map((c: any) => c.text || '').join('')
             : String(msg.content || '');
@@ -746,6 +779,27 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /**
+   * 在同一个会话文件内切换叶子（pi 的 /tree 语义）
+   * 走扩展命令，不产生模型调用，代价是一次进程内指针移动。
+   */
+  public async navigateTo(entryId: string): Promise<void> {
+    if (!this.active) throw new Error('会话未启动，无法切换分支');
+    this.treeBridgeError = undefined;
+    try {
+      await this.sendCommand({ type: 'prompt', message: `/${TREE_COMMAND} nav ${entryId}` });
+    } finally {
+      if (this.treeBridgeError) throw new Error(this.treeBridgeError);
+    }
+  }
+
+  /** 用指定分支的消息替换实时消息列表（导航后由上层按新分支重建） */
+  public replaceMessages(messages: SessionChatMessage[]) {
+    this.messages = messages;
+    this.currentAssistantMessage = null;
+    this.notifyUpdate(true);
+  }
+
+  /**
    * 从历史用户消息分叉出新会话（pi fork 会切换子进程的活动会话）
    */
   public async fork(entryId: string): Promise<{
@@ -769,6 +823,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.sessionId = nextSessionId;
     // 分叉后当前上下文已被替换，清空本地消息，由前端重新加载历史
     this.messages = [];
+    this.leafEntryId = undefined;
     this.clearPendingInputs();
     this.currentAssistantMessage = null;
     this.isBusy = false;

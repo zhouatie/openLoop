@@ -218,6 +218,29 @@ export interface RuntimeSettingsApplySummary {
   failed: number;
 }
 
+/**
+ * 会话树节点：只保留定位与单行预览所需字段
+ * 正文、工具输出、图片一律不进节点，树体积与会话文件大小解耦。
+ */
+export interface SessionTreeNode {
+  id: string;
+  parentId: string | null;
+  kind: 'user' | 'assistant' | 'tool' | 'system';
+  /** 单行预览，已截断 */
+  text: string;
+  timestamp: number;
+  toolName?: string;
+}
+
+/** 单个会话的树快照：节点扁平存储，父子关系由 parentId 表达 */
+export interface SessionTreeSnapshot {
+  nodes: SessionTreeNode[];
+  /** 当前活动分支（leaf 到根）的节点 id 集合，按根到叶顺序 */
+  activeIds: string[];
+  /** 当前叶子：null 表示已回退到会话起点 */
+  leafId: string | null;
+}
+
 export interface WorkflowSessionState {
   workflowId: string;
   active: boolean;

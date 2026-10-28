@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PendingUserInput, SessionChatMessage } from '@openloop/core/types';
+import type { PendingUserInput, SessionChatMessage, SessionTreeNode, SessionTreeSnapshot } from '@openloop/core/types';
 import { api } from '../services/api';
 import type { TaskAttachment } from '@openloop/core/types';
 import { AgentChatView } from './AgentChatView';
@@ -12,7 +12,7 @@ import {
 } from './Composer';
 import { WorkspaceDock, type DockTab, type DockTarget } from './WorkspaceDock';
 import { OpenFileContext } from './open-file';
-import { IconClose, IconMinimize, IconPanelRight } from './icons';
+import { IconClose, IconFork, IconMinimize, IconPanelRight } from './icons';
 import { BrandLogo } from '../components/BrandLogo';
 import { ApprovalCard, type AgentUiRequest } from './ApprovalCard';
 import { ShortcutSheet } from './ShortcutSheet';
@@ -21,6 +21,7 @@ import { IconCheck, IconChevronDown, IconFolderClose, IconFolderOpen, IconPlus }
 import { useDismissOnOutsidePointer } from './dsh/useDismissOnOutsidePointer.ts';
 import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
+import { SessionTreePanel } from './SessionTreePanel';
 import { useAgentStream } from './useAgentStream';
 import styles from './AgentPanel.module.css';
 
@@ -139,6 +140,10 @@ export interface AgentPanelShellProps {
   cornerExtra?: React.ReactNode;
   /** 右侧工作区面板（文件 / 终端 / 预览） */
   dock?: React.ReactNode;
+  /** 覆盖在消息区上的会话树面板 */
+  tree?: React.ReactNode;
+  /** 回填输入框：seq 变化即生效，避免同样文本重复跳转失效 */
+  draftFill?: { text: string; seq: number };
   /** 重新生成最后一轮回答 */
   onRegenerate?: () => void;
   /** 从某一轮的用户消息分叉出新会话 */
@@ -190,6 +195,8 @@ export function AgentPanelShell({
   models,
   onModelSelect,
   dock,
+  tree,
+  draftFill,
   onRegenerate,
   onFork,
   draftKey,
@@ -214,6 +221,15 @@ export function AgentPanelShell({
   const [sheetOpen, setSheetOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const lastEscRef = useRef(0);
+
+  // 会话树里选中一条提问：正文回到输入框，改完再发就是从那个点开新分支
+  const fillSeqRef = useRef(draftFill?.seq);
+  useEffect(() => {
+    if (!draftFill || draftFill.seq === fillSeqRef.current) return;
+    fillSeqRef.current = draftFill.seq;
+    if (import.meta.env?.DEV) console.log('[AgentPanel] 回填输入框:', draftFill.text.slice(0, 40));
+    setDraft(draftFill.text);
+  }, [draftFill]);
 
   const handleSend = useCallback(
     (message: string) => {
@@ -337,6 +353,7 @@ export function AgentPanelShell({
       )}
 
       {sheetOpen && <ShortcutSheet onClose={() => setSheetOpen(false)} />}
+      {tree}
 
       <div className={styles.mainRow}>
         <div className={styles.mainCol}>
@@ -917,7 +934,7 @@ export function GlobalAgentPanel({
     [activeId, cwd, permission]
   );
 
-  const { messages, pendingInputs, isBusy, awaitingInput, sendMessage, stop, state } = useAgentStream({
+  const { messages, pendingInputs, isBusy, awaitingInput, sendMessage, stop, state, reload } = useAgentStream({
     streamKey,
     load: loadLiveState,
     historyMessages: history,
@@ -1335,6 +1352,53 @@ export function GlobalAgentPanel({
     [activeId, refresh]
   );
 
+  // 会话树：pi 允许回到任意历史条目继续，被放弃的分支一条不删
+  const [treeOpen, setTreeOpen] = useState(false);
+  const [tree, setTree] = useState<SessionTreeSnapshot | null>(null);
+  const [treeLoading, setTreeLoading] = useState(false);
+  const [draftFill, setDraftFill] = useState<{ text: string; seq: number }>();
+
+  const openTree = useCallback(async () => {
+    if (!activeId) return;
+    setTreeOpen(true);
+    setTreeLoading(true);
+    try {
+      const snapshot = await api.getAgentSessionTree(activeId);
+      if (import.meta.env?.DEV) {
+        console.log('[AgentPanel] 会话树:', { nodes: snapshot.nodes.length, leaf: snapshot.leafId });
+      }
+      setTree(snapshot);
+    } catch (err) {
+      if (import.meta.env?.DEV) console.warn('[AgentPanel] 读取会话树失败:', err);
+      setTree(null);
+    } finally {
+      setTreeLoading(false);
+    }
+  }, [activeId]);
+
+  const handleTreeSelect = useCallback(
+    async (node: SessionTreeNode) => {
+      if (!activeId) return;
+      try {
+        const result = await api.navigateAgentSessionTree(activeId, node.id);
+        if (import.meta.env?.DEV) {
+          console.log('[AgentPanel] 会话树跳转:', { entry: node.id, leaf: result.leafEntryId });
+        }
+        // 选中提问：正文回到输入框，改完再发就是从那个点长出新分支
+        if (node.kind === 'user' && node.text) setDraftFill({ text: node.text, seq: Date.now() });
+        setTreeOpen(false);
+        setTree(null);
+        // 历史前缀也要换成新分支，否则会跟着旧分支重新拼回来
+        const detail = await api.getAgentSession(activeId);
+        setHistory(detail.messages || []);
+        void reload();
+      } catch (err) {
+        if (import.meta.env?.DEV) console.warn('[AgentPanel] 会话树跳转失败:', err);
+      }
+    },
+    [activeId, reload]
+  );
+
   // @ 候选：当前工作区文件 + 最近会话
   const requestMentions = useCallback(
     async (query: string): Promise<ComposerMentionItem[]> => {
@@ -1382,6 +1446,7 @@ export function GlobalAgentPanel({
       'dock.toggle': () => setDockTab((prev) => (prev ? null : 'files')),
       'dock.files': () => setDockTab('files'),
       'dock.terminal': () => setDockTab('terminal'),
+      'session.tree': () => void openTree(),
     },
     active,
     1
@@ -1495,6 +1560,26 @@ export function GlobalAgentPanel({
     </button>
   );
 
+  /** 会话树入口：与分叉同一套语义，只是不离开当前会话 */
+  const treeToggle = (
+    <button
+      type="button"
+      className={`${styles.iconButton} ${treeOpen ? styles.iconButtonActive : ''}`}
+      onClick={() => (treeOpen ? setTreeOpen(false) : void openTree())}
+      disabled={!activeId}
+      title="会话树：回到任意历史节点继续，历史不丢"
+      aria-label="会话树"
+    >
+      <IconFork size={16} />
+    </button>
+  );
+  const cornerToggles = (
+    <>
+      {treeToggle}
+      {dockToggle}
+    </>
+  );
+
   return (
     <OpenFileContext.Provider value={openFile}>
     <div
@@ -1580,8 +1665,8 @@ export function GlobalAgentPanel({
           attachments={attachments.items}
           onAddFiles={activeId ? attachments.add : undefined}
           onRemoveAttachment={attachments.remove}
-          headerExtra={dockToggle}
-          cornerExtra={mode === 'page' ? dockToggle : undefined}
+          headerExtra={cornerToggles}
+          cornerExtra={mode === 'page' ? cornerToggles : undefined}
           onRegenerate={
             activeId
               ? () => {
@@ -1590,6 +1675,20 @@ export function GlobalAgentPanel({
               : undefined
           }
           onFork={handleFork}
+          tree={
+            treeOpen ? (
+              <SessionTreePanel
+                nodes={tree?.nodes || []}
+                activeIds={tree?.activeIds || []}
+                leafId={tree?.leafId ?? null}
+                loading={treeLoading}
+                busy={isBusy}
+                onClose={() => setTreeOpen(false)}
+                onSelect={(node) => void handleTreeSelect(node)}
+              />
+            ) : undefined
+          }
+          draftFill={draftFill}
           draftKey={activeId || ''}
           dock={
             dockTab ? (
