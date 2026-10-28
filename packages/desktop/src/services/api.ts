@@ -832,6 +832,15 @@ export class DesktopApiService {
     return requestJson<OpenLoopSettings>(`${BASE_URL}/api/settings`);
   }
 
+  /** 会话进程可装载的 pi 扩展：已启用名单 + 本机已安装清单 */
+  async getPiExtensions(): Promise<{
+    enabled: string[];
+    defaults: string[];
+    installed: Array<{ name: string; version?: string; description?: string }>;
+  }> {
+    return requestJson(`${BASE_URL}/api/settings/pi-extensions`);
+  }
+
   async updateSettings(
     settings: Partial<OpenLoopSettings>
   ): Promise<OpenLoopSettings & { runtime?: RuntimeSettingsApplySummary }> {

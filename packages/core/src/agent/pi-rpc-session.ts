@@ -16,6 +16,7 @@ import {
 } from '../types';
 import { createLogger } from '../logger';
 import { compactToolResult } from './agent-format';
+import { buildPiExtensionArgs } from './pi-extensions';
 import {
   AgentStatusEvent,
   AgentStreamEvent,
@@ -32,8 +33,10 @@ export const PIPELINE_DONE_MARKER = '[OPENLOOP_DONE]';
 /**
  * 全量快照限频间隔
  * 流式期间增量事件逐包推送，快照只负责对账，不需要跟每个 token 同步。
+ * 快照自带全量 messages（工具结果的完整文本只在这里下发），长会话单包可达数百 KB，
+ * 所以间隔按「对账够用」取值，不跟着 token 走。
  */
-const PI_SNAPSHOT_INTERVAL_MS = 120;
+const PI_SNAPSHOT_INTERVAL_MS = 250;
 
 /**
  * 会话树导航桥：pi 的 RPC 协议没有暴露 navigateTree，只能通过扩展命令触发
@@ -222,6 +225,9 @@ export class PiRpcSessionInstance extends EventEmitter {
     if (options.disableTools) {
       args.push('--no-tools');
     }
+    // 扩展装载策略：关掉自动发现，只装设置页选中的包（默认白名单），
+    // 否则每个进程都要加载全部全局扩展，实测启动从 0.35s 涨到 3.2s 以上
+    args.push(...buildPiExtensionArgs());
     // 会话树桥：只在脚本存在时装载，缺失时导航与分叉直接报错，不改发模型请求
     this.treeBridgeReady = fs.existsSync(TREE_EXTENSION_PATH);
     if (this.treeBridgeReady) {
@@ -303,26 +309,23 @@ export class PiRpcSessionInstance extends EventEmitter {
       }
     });
 
-    // 进程建立后，发送初始 Prompt
+    // 进程建立后立即发送初始 Prompt：stdin 是管道，pi 启动后自行读取已写入的命令，
+    // 无需等待进程就绪，否则每个节点的启动时间白等一段固定时长。
     if (options.autoStart === false) {
       return;
     }
-    setTimeout(() => {
-      if (this.active && !this.initialPromptSent) {
-        this.initialPromptSent = true;
-        this.sendPrompt(options.initialPrompt, options.initialAttachments).catch((err) => {
-          const errMsg = err?.message || '发送初始 Prompt 失败';
-          logger.error(`发送初始 Prompt 失败: ${errMsg}`, undefined, { taskId: this.taskId });
-          this.emitLog('stderr', `[Agent 报错] ${errMsg}`);
-          this.lastError = errMsg;
-          if (this.onFinishedCallback && !this.executionCompleted) {
-            this.executionCompleted = true;
-            this.awaitingInput = false;
-            this.onFinishedCallback(errMsg);
-          }
-        });
+    this.initialPromptSent = true;
+    this.sendPrompt(options.initialPrompt, options.initialAttachments).catch((err) => {
+      const errMsg = err?.message || '发送初始 Prompt 失败';
+      logger.error(`发送初始 Prompt 失败: ${errMsg}`, undefined, { taskId: this.taskId });
+      this.emitLog('stderr', `[Agent 报错] ${errMsg}`);
+      this.lastError = errMsg;
+      if (this.onFinishedCallback && !this.executionCompleted) {
+        this.executionCompleted = true;
+        this.awaitingInput = false;
+        this.onFinishedCallback(errMsg);
       }
-    }, 400);
+    });
   }
 
   /**
