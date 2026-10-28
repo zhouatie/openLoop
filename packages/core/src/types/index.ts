@@ -171,6 +171,10 @@ export interface TaskSessionState {
   isPaused: boolean;
   /** 本轮已结束但 Agent 未声明完成，正在等待用户回复 */
   awaitingInput?: boolean;
+  /** 本轮（一次用户提交）开始时间，运行中用于显示用时 */
+  turnStartedAt?: number;
+  /** 上一轮从开始到结束的用时（毫秒） */
+  lastTurnDurationMs?: number;
   messages: SessionChatMessage[];
   agentName?: string;
   model?: string;

@@ -73,6 +73,8 @@ export interface AgentStatusEvent {
       | 'lastError'
       | 'agentName'
       | 'sessionId'
+      | 'turnStartedAt'
+      | 'lastTurnDurationMs'
     >
   >;
 }

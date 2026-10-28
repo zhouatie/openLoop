@@ -81,12 +81,41 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
     });
   }, []);
 
+  /**
+   * busy 稳定化：置位立刻生效，熄灭延迟 BUSY_IDLE_GRACE_MS，跨过一轮之间的间隙。
+   * 由事件驱动而不是靠渲染副作用，避免某次渲染被合并后运行指示一直不熄灭。
+   */
+  const [steadyBusy, setSteadyBusy] = useState(false);
+  const idleTimerRef = useRef<number | null>(null);
+  const syncBusy = useCallback((busy: boolean) => {
+    if (idleTimerRef.current !== null) {
+      window.clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+    if (busy) {
+      setSteadyBusy(true);
+      return;
+    }
+    idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null;
+      setSteadyBusy(false);
+    }, BUSY_IDLE_GRACE_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
+    },
+    []
+  );
+
   const reload = useCallback(async () => {
     if (!load) return;
     try {
       const next = await load();
       if (next) {
         stateRef.current = next;
+        syncBusy(Boolean(next.isBusy));
         scheduleRender();
       }
     } catch (err) {
@@ -94,7 +123,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
         console.warn('[AgentStream] 加载会话快照失败:', err);
       }
     }
-  }, [load, scheduleRender]);
+  }, [load, scheduleRender, syncBusy]);
 
   useEffect(() => {
     if (!enabled || !streamKey) return;
@@ -107,6 +136,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
       if (disposed || !state || state.taskId !== streamKey) return;
       // 快照为权威状态：保留历史前缀，实时段整体替换
       stateRef.current = { ...state, messages: state.messages };
+      syncBusy(Boolean(state.isBusy));
       scheduleRender();
     });
 
@@ -115,6 +145,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
       const next = applyAgentEvent(stateRef.current, event);
       if (next !== stateRef.current) {
         stateRef.current = next;
+        syncBusy(Boolean(next?.isBusy));
         scheduleRender();
       }
     });
@@ -128,7 +159,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
         frameRef.current = null;
       }
     };
-  }, [streamKey, enabled, reload, scheduleRender]);
+  }, [streamKey, enabled, reload, scheduleRender, syncBusy]);
 
   const sendMessage = useCallback(
     async (message: string, attachments?: TaskAttachment[], extra?: Record<string, unknown>) => {
@@ -149,18 +180,6 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   const stop = useCallback(async () => {
     await transport?.stop?.();
   }, [transport]);
-
-  // busy 稳定化：置位立刻生效，熄灭延迟 BUSY_IDLE_GRACE_MS，跨过一轮之间的间隙
-  const rawBusy = Boolean(stateRef.current?.isBusy);
-  const [steadyBusy, setSteadyBusy] = useState(rawBusy);
-  useEffect(() => {
-    if (rawBusy) {
-      setSteadyBusy(true);
-      return;
-    }
-    const timer = window.setTimeout(() => setSteadyBusy(false), BUSY_IDLE_GRACE_MS);
-    return () => window.clearTimeout(timer);
-  }, [rawBusy]);
 
   const state = stateRef.current;
   const messages = useMemo(

@@ -92,6 +92,10 @@ export interface AgentPanelShellProps {
   subtitle?: string;
   messages: SessionChatMessage[];
   isBusy?: boolean;
+  /** 本轮开始时间（毫秒），运行中用于显示用时 */
+  turnStartedAt?: number;
+  /** 上一轮用时（毫秒），结束后显示固定用时 */
+  lastTurnDurationMs?: number;
   awaitingInput?: boolean;
   model?: string;
   thinking?: string;
@@ -146,6 +150,8 @@ export function AgentPanelShell({
   subtitle,
   messages,
   isBusy,
+  turnStartedAt,
+  lastTurnDurationMs,
   awaitingInput,
   model,
   thinking,
@@ -274,7 +280,9 @@ export function AgentPanelShell({
     />
   );
 
-  const isBlank = messages.length === 0;
+  // 消息已发出但实时状态还没回来时也算运行中，否则新会话首轮开头没有运行指示
+  const running = Boolean(isBusy || sending);
+  const isBlank = messages.length === 0 && !running;
 
   return (
     <div
@@ -336,7 +344,9 @@ export function AgentPanelShell({
             <>
               <AgentChatView
                 messages={messages}
-                isBusy={isBusy}
+                isBusy={running}
+                turnStartedAt={turnStartedAt}
+                lastTurnDurationMs={lastTurnDurationMs}
                 emptyTitle={emptyTitle}
                 emptyHint={emptyHint}
                 contentWidth={contentWidth}
@@ -472,6 +482,8 @@ export function TaskAgentPanel({
       draftKey={`task_${taskId}`}
       messages={messages}
       isBusy={isBusy}
+      turnStartedAt={state?.turnStartedAt}
+      lastTurnDurationMs={state?.lastTurnDurationMs}
       awaitingInput={awaitingInput}
       model={state?.model || model}
       contentWidth={920}
@@ -1439,6 +1451,8 @@ export function GlobalAgentPanel({
           }
           messages={messages}
           isBusy={isBusy}
+          turnStartedAt={state?.turnStartedAt}
+          lastTurnDurationMs={state?.lastTurnDurationMs}
           awaitingInput={awaitingInput}
           model={state?.model}
           commands={commands}
