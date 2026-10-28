@@ -98,6 +98,23 @@ function resultImageUrls(result: any): string[] {
   return urls;
 }
 
+/**
+ * 解析可用的启动目录
+ *
+ * 工作区可能已被回收（沙箱 worktree 清理、目录改名），cwd 不存在时 spawn 直接报 ENOENT，
+ * 会话从此发不出任何消息。这里补建空目录：pi 按 cwd 路径定位会话文件，路径不变，
+ * 历史照常续接；实在建不了才退到 home，至少保住对话能力。
+ */
+function resolveSpawnCwd(dir: string): { cwd: string; recreated: boolean } {
+  if (fs.existsSync(dir)) return { cwd: dir, recreated: false };
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    return { cwd: dir, recreated: true };
+  } catch {
+    return { cwd: os.homedir(), recreated: false };
+  }
+}
+
 export interface PiRpcSessionOptions {
   taskId: string;
   taskTitle: string;
@@ -241,7 +258,8 @@ export class PiRpcSessionInstance extends EventEmitter {
       args.push('--extension', TITLE_EXTENSION_PATH);
     }
 
-    const cwd = options.cwd || os.tmpdir();
+    const requestedCwd = options.cwd || os.tmpdir();
+    const { cwd, recreated } = resolveSpawnCwd(requestedCwd);
     const nodeBinDir = path.dirname(process.execPath);
     const extraPath = [
       nodeBinDir,
@@ -259,6 +277,11 @@ export class PiRpcSessionInstance extends EventEmitter {
       taskId: this.taskId,
     });
     this.emitLog('system', `[Pi RPC] 建立长连接 Agent 会话 (Session: ${this.sessionId})`);
+    if (recreated) {
+      this.emitLog('system', `[工作目录] ${requestedCwd} 已不存在，已重建空目录，历史消息照常保留`);
+    } else if (cwd !== requestedCwd) {
+      this.emitLog('system', `[工作目录] ${requestedCwd} 不可用，本次会话改用 ${cwd}`);
+    }
 
     const isUnix = process.platform !== 'win32';
     this.child = spawn('pi', args, {
@@ -290,6 +313,8 @@ export class PiRpcSessionInstance extends EventEmitter {
       logger.error(`Pi RPC 进程启动失败: ${err.message}`, undefined, { taskId: this.taskId });
       this.emitLog('stderr', `[Pi RPC 异常] ${err.message}`);
       this.active = false;
+      // 让界面能显示失败原因，而不是只留一条终端日志
+      this.lastError = err.message;
       this.emitStatus({ active: false });
       this.notifyUpdate(true);
       if (this.onFinishedCallback && !this.executionCompleted) {
