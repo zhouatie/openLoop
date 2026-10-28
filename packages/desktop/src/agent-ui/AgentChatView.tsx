@@ -27,8 +27,10 @@ export interface AgentChatViewProps {
   contentWidth?: number;
   /** 重新生成最后一轮回答 */
   onRegenerate?: () => void;
-  /** 从某一轮的用户消息分叉出新会话 */
+  /** 从某一轮回答分叉出新会话（新会话保留到这条为止） */
   onFork?: (entryId: string) => void;
+  /** 正在创建分支的条目 id：该行的分叉图标显示转圈 */
+  forkPendingEntryId?: string | null;
 }
 
 /** 距底部多少像素内仍视为「贴底」，超过则停止自动滚动 */
@@ -254,6 +256,7 @@ export const AgentChatView = React.memo(function AgentChatView({
   contentWidth,
   onRegenerate,
   onFork,
+  forkPendingEntryId = null,
   pendingInputs = EMPTY_PENDING,
 }: AgentChatViewProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -473,15 +476,6 @@ export const AgentChatView = React.memo(function AgentChatView({
     [contentWidth]
   );
 
-  // 分叉锚点是该轮用户消息的 pi 条目 id
-  const forkEntryIdOf = useCallback(
-    (block: TurnBlock): string | undefined => {
-      if (block.user === null) return undefined;
-      return shown[block.user]?.entryId;
-    },
-    [shown]
-  );
-
   const isEmpty = shown.length === 0;
   const lastTurn = visibleBlocks.length > 0 ? visibleBlocks[visibleBlocks.length - 1] : undefined;
 
@@ -549,7 +543,6 @@ export const AgentChatView = React.memo(function AgentChatView({
               }
 
               const isLiveTurn = block === lastTurn;
-              const forkEntryId = forkEntryIdOf(block);
               return (
                 <React.Fragment key={`turn-${block.turn}`}>
                 {separator}
@@ -559,13 +552,23 @@ export const AgentChatView = React.memo(function AgentChatView({
                   )}
                   {block.steps.map((index) => {
                     const isTail = index === block.tail;
+                    // 分叉锚点是这条回答本身：新会话保留到这条为止，源会话不动。
+                    // 运行中或该行还没有落盘条目时不隐藏按钮，只置灰并说明原因（与 DSH 一致）。
+                    const forkEntryId = isTail ? shown[index]?.entryId : undefined;
+                    const canFork = Boolean(forkEntryId) && !isBusy && Boolean(onFork);
                     return (
                       <MessageRow
                         key={`m-${index}`}
                         message={shown[index]}
                         compact={!isTail}
                         onRegenerate={isTail && isLiveTurn && onRegenerate ? onRegenerate : undefined}
-                        onFork={isTail && forkEntryId && onFork ? () => onFork(forkEntryId) : undefined}
+                        onFork={
+                          isTail && canFork && forkEntryId && onFork
+                            ? () => onFork(forkEntryId)
+                            : undefined
+                        }
+                        forkUnavailable={isTail && Boolean(onFork) && !canFork}
+                        forkPending={isTail && Boolean(forkEntryId) && forkPendingEntryId === forkEntryId}
                       />
                     );
                   })}

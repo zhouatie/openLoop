@@ -162,8 +162,10 @@ export class PiRpcSessionInstance extends EventEmitter {
   private snapshotPending = false;
   /** 增量事件计数，仅供开发环境采样日志 */
   private eventSeq = 0;
-  /** 会话树导航桥最近一次报错，供 navigateTo 判定成败 */
+  /** 会话树桥最近一次报错，供 navigateTo / fork 判定成败 */
   private treeBridgeError?: string;
+  /** 桥是否已随子进程装载：没装载时斜杠命令会被当成普通提问发给模型 */
+  private treeBridgeReady = false;
 
   constructor(options: PiRpcSessionOptions) {
     super();
@@ -204,8 +206,9 @@ export class PiRpcSessionInstance extends EventEmitter {
     if (options.disableTools) {
       args.push('--no-tools');
     }
-    // 会话树导航桥：只在脚本存在时装载，缺失时降级为「只能看树、不能跳转」
-    if (fs.existsSync(TREE_EXTENSION_PATH)) {
+    // 会话树桥：只在脚本存在时装载，缺失时导航与分叉直接报错，不改发模型请求
+    this.treeBridgeReady = fs.existsSync(TREE_EXTENSION_PATH);
+    if (this.treeBridgeReady) {
       args.push('--extension', TREE_EXTENSION_PATH);
     }
 
@@ -784,9 +787,15 @@ export class PiRpcSessionInstance extends EventEmitter {
    */
   public async navigateTo(entryId: string): Promise<void> {
     if (!this.active) throw new Error('会话未启动，无法切换分支');
+    await this.runTreeBridge('nav', entryId);
+  }
+
+  /** 走扩展桥执行一次会话树操作：pi 没有对应 RPC 命令，只能靠内部斜杠命令触发 */
+  private async runTreeBridge(action: 'nav' | 'fork', entryId: string): Promise<void> {
+    if (!this.treeBridgeReady) throw new Error('会话树桥未装载，无法导航或分叉');
     this.treeBridgeError = undefined;
     try {
-      await this.sendCommand({ type: 'prompt', message: `/${TREE_COMMAND} nav ${entryId}` });
+      await this.sendCommand({ type: 'prompt', message: `/${TREE_COMMAND} ${action} ${entryId}` });
     } finally {
       if (this.treeBridgeError) throw new Error(this.treeBridgeError);
     }
@@ -800,25 +809,26 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /**
-   * 从历史用户消息分叉出新会话（pi fork 会切换子进程的活动会话）
+   * 从某条消息分叉出新会话：新会话以该条目为末尾（含这条回答），源会话一个字节都不动。
+   * pi 只会切换子进程的活动会话，所以这里跟着换掉本地 session id。
    */
   public async fork(entryId: string): Promise<{
     cancelled?: boolean;
-    text?: string;
     sessionId: string;
   }> {
     if (!this.active) throw new Error('会话未启动，无法分叉');
-    // sendCommand 直接返回 response.data，失败会以 reject 抛出
-    const data = (await this.sendCommand({ type: 'fork', entryId })) || {};
+    await this.runTreeBridge('fork', entryId);
     let nextSessionId = this.sessionId;
-    if (!data.cancelled) {
-      try {
-        const state = await this.sendCommand({ type: 'get_state' });
-        const sid = state?.sessionId;
-        if (typeof sid === 'string' && sid) nextSessionId = sid;
-      } catch (err: any) {
-        this.onLog?.('system', `分叉后读取状态失败: ${err?.message || err}`);
-      }
+    try {
+      const state = await this.sendCommand({ type: 'get_state' });
+      const sid = state?.sessionId;
+      if (typeof sid === 'string' && sid) nextSessionId = sid;
+    } catch (err: any) {
+      this.onLog?.('system', `分叉后读取状态失败: ${err?.message || err}`);
+    }
+    // 会话没换：pi 侧取消了这次分叉，保持原样
+    if (nextSessionId === this.sessionId) {
+      return { cancelled: true, sessionId: nextSessionId };
     }
     this.sessionId = nextSessionId;
     // 分叉后当前上下文已被替换，清空本地消息，由前端重新加载历史
@@ -830,7 +840,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.isPaused = false;
     this.awaitingInput = false;
     logger.info(`会话分叉: ${entryId} -> ${nextSessionId}`, undefined, { taskId: this.taskId });
-    return { cancelled: Boolean(data.cancelled), text: data.text, sessionId: nextSessionId };
+    return { cancelled: false, sessionId: nextSessionId };
   }
 
   /**

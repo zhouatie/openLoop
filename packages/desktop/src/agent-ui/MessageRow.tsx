@@ -20,8 +20,12 @@ export interface MessageRowProps {
   pendingLabel?: string;
   /** 重新生成该轮回答（后端支持时由挂载方注入） */
   onRegenerate?: () => void;
-  /** 从该轮用户消息分叉出新会话 */
+  /** 从该轮回答分叉出新会话（新会话保留到这条为止） */
   onFork?: () => void;
+  /** 分叉入口可见但当前不可用：轮次运行中，或这条还没有落盘条目 */
+  forkUnavailable?: boolean;
+  /** 正在为这条消息创建分支 */
+  forkPending?: boolean;
 }
 
 export const MessageRow = memo(function MessageRow({
@@ -30,6 +34,8 @@ export const MessageRow = memo(function MessageRow({
   pendingLabel,
   onRegenerate,
   onFork,
+  forkUnavailable,
+  forkPending,
 }: MessageRowProps) {
   if (message.role === 'system') {
     return (
@@ -71,7 +77,7 @@ export const MessageRow = memo(function MessageRow({
 
       {hasError && <div className={styles.error}>{message.errorMessage}</div>}
 
-      {!compact && (message.content.trim().length > 0 || onFork) && (
+      {!compact && (message.content.trim().length > 0 || onFork || forkUnavailable) && (
         <MessageActions
           text={message.content}
           timestamp={message.timestamp}
@@ -79,6 +85,8 @@ export const MessageRow = memo(function MessageRow({
           model={message.model}
           streaming={message.isStreaming}
           onFork={onFork}
+          forkUnavailable={forkUnavailable}
+          forkPending={forkPending}
           onRegenerate={onRegenerate}
         />
       )}

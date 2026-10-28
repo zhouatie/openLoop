@@ -370,3 +370,35 @@
   font-size: 10.5px;
   line-height: 16px;
 }
+
+/* 面板内提示条：分叉完成 / 失败时在输入卡上方给一句反馈 */
+.notice {
+  align-self: center;
+  max-width: min(560px, 100%);
+  margin: 0 auto 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: noticeIn 0.16s ease-out;
+}
+
+@keyframes noticeIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notice {
+    animation: none;
+  }
+}
