@@ -10,7 +10,8 @@ import {
   ComposerMentionItem,
   ComposerPermission,
 } from './Composer';
-import { WorkspaceDock, type DockTab } from './WorkspaceDock';
+import { WorkspaceDock, type DockTab, type DockTarget } from './WorkspaceDock';
+import { OpenFileContext } from './open-file';
 import { IconClose, IconMinimize, IconPanelRight } from './icons';
 import { BrandLogo } from '../components/BrandLogo';
 import { ApprovalCard, type AgentUiRequest } from './ApprovalCard';
@@ -113,8 +114,6 @@ export interface AgentPanelShellProps {
   children?: React.ReactNode;
   /** 输入卡上方的内容区（放行确认、提示条等由上层决定是否注入） */
   banner?: React.ReactNode;
-  /** 输入卡左下角的扩展按钮 */
-  composerActions?: React.ReactNode;
   attachments?: ComposerAttachmentItem[];
   onAddFiles?: (files: File[]) => void;
   onRemoveAttachment?: (id: string) => void;
@@ -130,6 +129,8 @@ export interface AgentPanelShellProps {
   onPermissionSelect?: (preset: ComposerPermission) => void;
   models?: Array<{ id: string; label: string }>;
   onModelSelect?: (model: string) => void;
+  /** 无顶栏形态的右上角位置（工作台展开按钮） */
+  cornerExtra?: React.ReactNode;
   /** 右侧工作区面板（文件 / 终端 / 预览） */
   dock?: React.ReactNode;
   /** 重新生成最后一轮回答 */
@@ -167,7 +168,7 @@ export function AgentPanelShell({
   onMinimize,
   children,
   banner,
-  composerActions,
+  cornerExtra,
   attachments,
   onAddFiles,
   onRemoveAttachment,
@@ -270,7 +271,6 @@ export function AgentPanelShell({
       attachments={attachments}
       onAddFiles={onAddFiles}
       onRemoveAttachment={onRemoveAttachment}
-      actions={composerActions}
       commands={commands}
       onRequestMentions={onRequestMentions}
       permission={permission}
@@ -331,6 +331,7 @@ export function AgentPanelShell({
 
       <div className={styles.mainRow}>
         <div className={styles.mainCol}>
+          {cornerExtra && <div className={styles.corner}>{cornerExtra}</div>}
           <div className={styles.body}>{children}</div>
 
           {isBlank ? (
@@ -374,7 +375,6 @@ export interface TaskAgentPanelProps {
   sendExtra?: () => Record<string, unknown>;
   headerExtra?: React.ReactNode;
   banner?: React.ReactNode;
-  composerActions?: React.ReactNode;
   /** 任务工作区，用于文件 / 终端 / 预览面板 */
   cwd?: string;
 }
@@ -389,11 +389,12 @@ export function TaskAgentPanel({
   sendExtra,
   headerExtra,
   banner,
-  composerActions,
   cwd,
 }: TaskAgentPanelProps) {
   const [sending, setSending] = useState(false);
   const [dockTab, setDockTab] = useState<DockTab | null>(null);
+  /** 从消息里点开的文件：交给工作台的预览页加载 */
+  const [dockFile, setDockFile] = useState<DockTarget | null>(null);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   const [commands, setCommands] = useState<ComposerCommand[]>([]);
   const attachments = useAttachments();
@@ -475,7 +476,15 @@ export function TaskAgentPanel({
     [sendMessage, attachments, sendExtra]
   );
 
+  /** 消息里的文件引用：打开右侧工作台的预览页 */
+  const openFile = useCallback((path: string) => {
+    if (import.meta.env?.DEV) console.log('[AgentPanel] 预览文件:', path);
+    setDockFile({ path, seq: Date.now() });
+    setDockTab('preview');
+  }, []);
+
   return (
+    <OpenFileContext.Provider value={openFile}>
     <AgentPanelShell
       title={taskTitle || 'Agent 协作流'}
       subtitle={mode === 'inline' ? '与任务同屏协作' : undefined}
@@ -508,7 +517,6 @@ export function TaskAgentPanel({
         </>
       }
       banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : banner}
-      composerActions={composerActions}
       dock={
         dockTab ? (
           <WorkspaceDock
@@ -516,6 +524,7 @@ export function TaskAgentPanel({
             activeTab={dockTab}
             onTabChange={setDockTab}
             onClose={() => setDockTab(null)}
+            target={dockFile}
           />
         ) : undefined
       }
@@ -529,6 +538,7 @@ export function TaskAgentPanel({
         void api.regenerateTaskSession(taskId).catch(() => null);
       }}
     />
+    </OpenFileContext.Provider>
   );
 }
 
@@ -669,6 +679,8 @@ export function GlobalAgentPanel({
     Record<string, { title?: string; hidden?: boolean; order?: number }>
   >({});
   const [dockTab, setDockTab] = useState<DockTab | null>(null);
+  /** 从消息里点开的文件：交给工作台的预览页加载 */
+  const [dockFile, setDockFile] = useState<DockTarget | null>(null);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   /** 刚发过消息、文件还没落盘的会话：id -> 占位行信息 */
   const pendingRows = useRef<Record<string, { title: string; cwd: string }>>({});
@@ -1394,7 +1406,28 @@ export function GlobalAgentPanel({
     </>
   );
 
+  /** 消息里的文件引用：打开右侧工作台的预览页 */
+  const openFile = useCallback((path: string) => {
+    if (import.meta.env?.DEV) console.log('[AgentPanel] 预览文件:', path);
+    setDockFile({ path, seq: Date.now() });
+    setDockTab('preview');
+  }, []);
+
+  /** 工作台展开按钮：顶栏形态放顶栏，整页形态（无顶栏）放右上角 */
+  const dockToggle = (
+    <button
+      type="button"
+      className={`${styles.iconButton} ${dockTab ? styles.iconButtonActive : ''}`}
+      onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
+      title={dockTab ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
+      aria-label="工作台"
+    >
+      <IconPanelRight size={16} />
+    </button>
+  );
+
   return (
+    <OpenFileContext.Provider value={openFile}>
     <div
       className={`agent-scope ${styles.panel} ${
         mode === 'drawer' ? styles.panelDrawer : styles.panelPage
@@ -1475,19 +1508,8 @@ export function GlobalAgentPanel({
           attachments={attachments.items}
           onAddFiles={activeId ? attachments.add : undefined}
           onRemoveAttachment={attachments.remove}
-          headerExtra={
-            <>
-              <button
-                type="button"
-                className={`${styles.iconButton} ${dockTab ? styles.iconButtonActive : ''}`}
-                onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
-                title={dockTab ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
-                aria-label="工作台"
-              >
-                <IconPanelRight size={16} />
-              </button>
-            </>
-          }
+          headerExtra={dockToggle}
+          cornerExtra={mode === 'page' ? dockToggle : undefined}
           onRegenerate={
             activeId
               ? () => {
@@ -1504,27 +1526,16 @@ export function GlobalAgentPanel({
                 activeTab={dockTab}
                 onTabChange={setDockTab}
                 onClose={() => setDockTab(null)}
+                target={dockFile}
               />
             ) : undefined
           }
           banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : undefined}
-          composerActions={
-            mode !== 'drawer' ? (
-              <button
-                type="button"
-                className={`${styles.dockToggle} ${dockTab ? styles.dockToggleActive : ''}`}
-                onClick={() => setDockTab((prev) => (prev ? null : 'files'))}
-                title={dockTab ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
-                aria-label="工作台"
-              >
-                <IconPanelRight size={16} />
-              </button>
-            ) : undefined
-          }
           emptyTitle={activeId ? '开始一段新的会话' : '选择左侧会话，或新建一段'}
           emptyHint="会话直接跑在本机 pi 上，拥有读写文件与执行命令的能力。"
         />
       </div>
     </div>
+    </OpenFileContext.Provider>
   );
 }

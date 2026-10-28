@@ -59,8 +59,6 @@ export interface ComposerProps {
   attachments?: ComposerAttachmentItem[];
   onAddFiles?: (files: File[]) => void;
   onRemoveAttachment?: (id: string) => void;
-  /** 输入卡左下角的扩展按钮（技能、目录、预设等由上层注入） */
-  actions?: React.ReactNode;
   /** 斜杠指令候选（来自 /api/agent/commands-and-skills） */
   commands?: ComposerCommand[];
   /** @ 候选：文件 / 目录 / 会话 */
@@ -105,7 +103,6 @@ export const Composer = React.memo(function Composer({
   attachments,
   onAddFiles,
   onRemoveAttachment,
-  actions,
   commands,
   onRequestMentions,
   permission,
@@ -533,7 +530,6 @@ export const Composer = React.memo(function Composer({
                 </button>
               </>
             )}
-            {actions}
             {onPermissionSelect && (
               <button
                 type="button"

@@ -82,6 +82,12 @@ export function backendUrl(pathname: string): string {
 
 const isDev = import.meta.env?.DEV;
 
+/** 文件预览查询串：base 是会话工作区，用来解析相对路径 */
+function fsQuery(path: string, base?: string): string {
+  const query = `path=${encodeURIComponent(path)}`;
+  return base ? `${query}&base=${encodeURIComponent(base)}` : query;
+}
+
 async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
   const method = options?.method || 'GET';
   try {
@@ -1111,7 +1117,6 @@ export class DesktopApiService {
   }
 
   // ---- 文件浏览 / 预览 ----
-
   async listAgentFs(path: string): Promise<{
     path: string;
     parent: string | null;
@@ -1120,13 +1125,13 @@ export class DesktopApiService {
     return requestJson(`${BASE_URL}/api/agent/fs/list?path=${encodeURIComponent(path)}`);
   }
 
-  async readAgentFsFile(path: string): Promise<{
+  async readAgentFsFile(path: string, base?: string): Promise<{
     path: string;
     content: string;
     size: number;
     truncated: boolean;
   }> {
-    return requestJson(`${BASE_URL}/api/agent/fs/read?path=${encodeURIComponent(path)}`);
+    return requestJson(`${BASE_URL}/api/agent/fs/read?${fsQuery(path, base)}`);
   }
 
   /** 只取文件 stat：用来判断会话文件是否被外部写入 */
@@ -1139,8 +1144,8 @@ export class DesktopApiService {
     return requestJson(`${BASE_URL}/api/agent/fs/stat?path=${encodeURIComponent(path)}`);
   }
 
-  agentFsRawUrl(path: string): string {
-    return `${BASE_URL}/api/agent/fs/raw?path=${encodeURIComponent(path)}`;
+  agentFsRawUrl(path: string, base?: string): string {
+    return `${BASE_URL}/api/agent/fs/raw?${fsQuery(path, base)}`;
   }
 
   // ---- 终端 ----
