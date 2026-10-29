@@ -7,6 +7,7 @@ import {
   Composer,
   ComposerAttachmentItem,
   ComposerCommand,
+  ComposerIconButton,
   ComposerMentionItem,
   ComposerPermission,
 } from './Composer';
@@ -150,6 +151,8 @@ export interface AgentPanelShellProps {
   dock?: React.ReactNode;
   /** 覆盖在消息区上的会话树面板 */
   tree?: React.ReactNode;
+  /** 输入卡内的附加操作（会话树入口等），排在发送按钮之前 */
+  composerExtra?: React.ReactNode;
   /** 回填输入框：seq 变化即生效，避免同样文本重复跳转失效 */
   draftFill?: { text: string; seq: number };
   /** 重新生成最后一轮回答 */
@@ -208,6 +211,7 @@ export function AgentPanelShell({
   onModelSelect,
   dock,
   tree,
+  composerExtra,
   draftFill,
   onRegenerate,
   onFork,
@@ -315,6 +319,7 @@ export function AgentPanelShell({
       onPermissionSelect={onPermissionSelect}
       models={models}
       onModelSelect={onModelSelect}
+      toolsExtra={composerExtra}
     />
   );
 
@@ -1787,22 +1792,15 @@ export function GlobalAgentPanel({
 
   /** 会话树入口：与分叉同一套语义，只是不离开当前会话 */
   const treeToggle = (
-    <button
-      type="button"
-      className={`${styles.iconButton} ${treeOpen ? styles.iconButtonActive : ''}`}
+    <ComposerIconButton
+      active={treeOpen}
       onClick={() => (treeOpen ? setTreeOpen(false) : void openTree())}
       disabled={!activeId}
       title="会话树：回到任意历史节点继续，历史不丢"
       aria-label="会话树"
     >
       <IconFork size={16} />
-    </button>
-  );
-  const cornerToggles = (
-    <>
-      {treeToggle}
-      {dockToggle}
-    </>
+    </ComposerIconButton>
   );
 
   return (
@@ -1893,8 +1891,9 @@ export function GlobalAgentPanel({
           attachments={attachments.items}
           onAddFiles={activeId ? attachments.add : undefined}
           onRemoveAttachment={attachments.remove}
-          headerExtra={cornerToggles}
-          cornerExtra={mode === 'page' ? cornerToggles : undefined}
+          headerExtra={dockToggle}
+          cornerExtra={mode === 'page' ? dockToggle : undefined}
+          composerExtra={treeToggle}
           onRegenerate={
             activeId
               ? () => {

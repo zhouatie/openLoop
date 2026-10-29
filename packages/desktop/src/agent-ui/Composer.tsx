@@ -69,6 +69,23 @@ export interface ComposerProps {
   /** 模型候选 */
   models?: Array<{ id: string; label: string }>;
   onModelSelect?: (model: string) => void;
+  /** 输入卡左侧控件行的附加操作（会话树入口等） */
+  toolsExtra?: React.ReactNode;
+}
+
+/** 输入卡内的图标操作：与输入卡同一套圆角与悬停态 */
+export function ComposerIconButton({
+  active,
+  className,
+  ...rest
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
+  return (
+    <button
+      type="button"
+      className={`${styles.iconAction} ${active ? styles.iconActionActive : ''} ${className || ''}`}
+      {...rest}
+    />
+  );
 }
 
 interface MenuState {
@@ -111,6 +128,7 @@ export const Composer = React.memo(function Composer({
   onPermissionSelect,
   models,
   onModelSelect,
+  toolsExtra,
 }: ComposerProps) {
   const { matchShortcut } = useShortcuts();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -569,6 +587,7 @@ export const Composer = React.memo(function Composer({
                 </button>
               </>
             )}
+            {toolsExtra}
             {onPermissionSelect && (
               <button
                 type="button"
