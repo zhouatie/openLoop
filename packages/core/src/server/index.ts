@@ -960,15 +960,27 @@ export class OpenLoopServer {
         }
       }
 
-      // 终端：一个终端一个 shell 子进程，输出经 WS 推送
+      // 终端：一个终端一个 PTY 进程，输出经 WS 推送
       if (pathname === '/api/agent/terminal' && method === 'POST') {
         const body = await this.parseJsonBody(req).catch(() => ({}) as any);
-        const session = terminalHost.open(typeof body?.cwd === 'string' ? body.cwd : undefined);
+        const session = terminalHost.open(
+          typeof body?.cwd === 'string' ? body.cwd : undefined,
+          typeof body?.cols === 'number' ? body.cols : undefined,
+          typeof body?.rows === 'number' ? body.rows : undefined
+        );
         return this.sendJson(res, 200, { ...session, replay: terminalHost.replay(session.id) }, reqMeta);
       }
 
       if (pathname === '/api/agent/terminal' && method === 'GET') {
         return this.sendJson(res, 200, { terminals: terminalHost.list() }, reqMeta);
+      }
+
+      const terminalResizeMatch = pathname.match(/^\/api\/agent\/terminal\/([^/]+)\/resize$/);
+      if (terminalResizeMatch && method === 'POST') {
+        const terminalId = decodeURIComponent(terminalResizeMatch[1]);
+        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+        const ok = terminalHost.resize(terminalId, body?.cols, body?.rows);
+        return this.sendJson(res, 200, { success: ok }, reqMeta);
       }
 
       const terminalInputMatch = pathname.match(/^\/api\/agent\/terminal\/([^/]+)\/input$/);

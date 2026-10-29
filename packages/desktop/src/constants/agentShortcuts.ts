@@ -96,6 +96,13 @@ export const SHORTCUT_COMMANDS: ShortcutCommand[] = [
     defaultBinding: 'super+p',
   },
   {
+    id: 'dock.terminal',
+    label: '工作台：终端',
+    description: '打开工作台的终端面板',
+    group: 'panel',
+    defaultBinding: 'super+t',
+  },
+  {
     id: 'session.tree',
     label: '会话树',
     description: '查看会话分支，回到任意历史节点继续',
