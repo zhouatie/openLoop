@@ -6,6 +6,7 @@ import { CreateTaskModal } from './components/CreateTaskModal';
 import { QuickRunWorkflowModal } from './components/QuickRunWorkflowModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { CommandPalette } from './components/CommandPalette';
+import { AppSplashScreen } from './components/AppSplashScreen';
 import { ShortcutProvider } from './context/ShortcutContext';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { useTaskNotifications } from './hooks/useTaskNotifications';
@@ -63,6 +64,8 @@ export const AppContent: React.FC = () => {
   const [selectedRunTaskId, setSelectedRunTaskId] = useState<string | null>(null);
   const [filterWorkflowId, setFilterWorkflowId] = useState<string | null>(null);
   const [isDaemonConnected, setIsDaemonConnected] = useState<boolean>(api.getConnectionStatus());
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
+  const [isSplashComplete, setIsSplashComplete] = useState<boolean>(false);
   const [sidebarOrder, setSidebarOrder] = useState<string[]>(() => getStoredSidebarOrder());
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
     try {
@@ -145,7 +148,7 @@ export const AppContent: React.FC = () => {
         setIsCommandPaletteOpen(false);
       }
     },
-  }, !isAgentOverlayOpen);
+  }, !isAgentOverlayOpen && isSplashComplete);
 
   const handleWorkspaceFilterChange = (workspace: string) => {
     setSelectedWorkspaceFilter(workspace);
@@ -221,7 +224,19 @@ export const AppContent: React.FC = () => {
   };
 
   useEffect(() => {
-    refreshData();
+    let isMounted = true;
+    if (import.meta.env?.DEV) {
+      console.log('[App] 应用启动，开始预加载看板与系统数据...');
+    }
+
+    refreshData().finally(() => {
+      if (isMounted) {
+        if (import.meta.env?.DEV) {
+          console.log('[App] 初始数据预加载完成');
+        }
+        setIsInitialLoading(false);
+      }
+    });
 
     const unsubConn = api.onConnectionChange((status: boolean) => {
       setIsDaemonConnected(status);
@@ -387,6 +402,14 @@ export const AppContent: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f4f4f6] text-[#1c1c21]">
+      {/* 应用开启 Logo 启动动效浮层 */}
+      {!isSplashComplete && (
+        <AppSplashScreen
+          isLoading={isInitialLoading}
+          onComplete={() => setIsSplashComplete(true)}
+        />
+      )}
+
       {/* 侧边栏 */}
       <Sidebar
         plugins={plugins}

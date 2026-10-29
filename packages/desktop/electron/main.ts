@@ -449,7 +449,7 @@ async function createWindow() {
     height: 880,
     minWidth: 1024,
     minHeight: 700,
-    backgroundColor: '#0b0f17',
+    backgroundColor: '#f4f4f6',
     titleBarStyle: 'hiddenInset',
     // 红黄绿按钮与侧边栏顶部 Logo 行垂直居中对齐
     trafficLightPosition: { x: 12, y: 17 },
