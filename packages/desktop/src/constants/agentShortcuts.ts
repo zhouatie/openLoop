@@ -86,6 +86,7 @@ export const SHORTCUT_COMMANDS: ShortcutCommand[] = [
     description: '展开或收起右侧工作台',
     group: 'panel',
     defaultBinding: 'super+alt+b',
+    allowInInput: true,
   },
   {
     id: 'dock.files',
