@@ -25,6 +25,8 @@ export interface SessionListItem {
   title: string;
   cwd: string;
   modifiedAt: string;
+  /** 毫秒时间戳缓存，避免在排序中反复 Date.parse */
+  modifiedMs?: number;
   messageCount: number;
   live?: boolean;
   /** 正在跑一轮回复，用于运行指示 */
@@ -99,6 +101,8 @@ export interface SessionListProps {
 }
 
 const SESSION_VISIBLE_COUNT = 5;
+/** 工作区分组单次展开步长，防止一次性挂载过多 DOM 阻塞主线程 */
+const GROUP_WATERMARK_STEP = 30;
 /** 悬浮卡停留时长：对齐 DSH HoverCard 的 openDelayMs={800} */
 const HOVER_CARD_DELAY_MS = 800;
 const HOME_PATTERN = /^\/Users\/[^/]+/;
@@ -163,8 +167,8 @@ function createdLabel(iso?: string): string {
 }
 
 /** 行内相对时间：紧凑写法（对齐 DSH 的「5分钟 / 13天 / 6个月」） */
-function relativeTime(iso: string): string {
-  const time = Date.parse(iso);
+function relativeTime(iso: string, ms?: number): string {
+  const time = ms !== undefined ? ms : Date.parse(iso);
   if (!Number.isFinite(time)) return '';
   const diff = Math.max(0, Date.now() - time);
   const minute = 60 * 1000;
@@ -176,6 +180,140 @@ function relativeTime(iso: string): string {
   if (diff < 30 * day) return `${Math.floor(diff / day)}天`;
   return `${Math.floor(diff / (30 * day))}个月`;
 }
+
+interface SessionRowItemProps {
+  session: SessionListItem;
+  isActive: boolean;
+  renaming: boolean;
+  renameValue: string;
+  renameInputRef: React.RefObject<HTMLInputElement | null>;
+  onRenameChange: (val: string) => void;
+  onRenameCommit: () => void;
+  onRenameCancel: () => void;
+  onSelectSession: (id: string) => void;
+  onPinSession?: (id: string, pinned: boolean) => void;
+  onOpenMenu: (
+    event: React.MouseEvent,
+    item: { kind: 'session'; cwd: string; sessionId: string; archived?: boolean; pinned?: boolean }
+  ) => void;
+  onShowCard: (target: HTMLElement, title: string, cwd: string, time: string) => void;
+  onHideCard: () => void;
+}
+
+const SessionRowItem = memo(function SessionRowItem({
+  session,
+  isActive,
+  renaming,
+  renameValue,
+  renameInputRef,
+  onRenameChange,
+  onRenameCommit,
+  onRenameCancel,
+  onSelectSession,
+  onPinSession,
+  onOpenMenu,
+  onShowCard,
+  onHideCard,
+}: SessionRowItemProps) {
+  const draftRow = session.draft === true;
+  return (
+    <div
+      key={session.id}
+      className={`${styles.sessionRow} ${isActive ? styles.sessionSelected : ''} ${
+        session.archived ? styles.sessionArchived : ''
+      }`}
+      onClick={() => {
+        if (renaming || draftRow) return;
+        onSelectSession(session.id);
+      }}
+      role="treeitem"
+      aria-selected={isActive}
+      tabIndex={0}
+      onMouseEnter={(event) =>
+        onShowCard(
+          event.currentTarget,
+          session.title || '未命名会话',
+          session.cwd,
+          createdLabel(session.createdAt)
+        )
+      }
+      onMouseLeave={onHideCard}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && !renaming && !draftRow) onSelectSession(session.id);
+      }}
+    >
+      {/* 状态槽固定 16px（对齐 DSH）：运行指示在槽内显隐，标题位置不随之左右跳 */}
+      <span className={styles.statusSlot}>
+        {session.running && <span className={styles.liveSpinner} aria-label="进行中" />}
+      </span>
+      {renaming ? (
+        <input
+          ref={renameInputRef}
+          className={styles.renameInput}
+          value={renameValue}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => onRenameChange(event.target.value)}
+          onBlur={onRenameCommit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              onRenameCommit();
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              onRenameCancel();
+            }
+          }}
+        />
+      ) : (
+        <span className={styles.sessionTitle}>{session.title || '未命名会话'}</span>
+      )}
+      {session.pinned && (
+        <span className={styles.pinMark} aria-label="已置顶">
+          <IconPin size={13} />
+        </span>
+      )}
+      {!draftRow && (
+        <>
+          <span className={styles.time}>{relativeTime(session.modifiedAt, session.modifiedMs)}</span>
+          <span className={styles.rowActions}>
+            {onPinSession && (
+              <button
+                type="button"
+                className={`${styles.rowIcon} ${session.pinned ? styles.rowIconActive : ''}`}
+                aria-label={session.pinned ? '取消置顶' : '置顶会话'}
+                title={session.pinned ? '取消置顶' : '置顶会话'}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onPinSession(session.id, !session.pinned);
+                }}
+              >
+                <IconPin size={14} />
+              </button>
+            )}
+            <button
+              type="button"
+              className={styles.rowIcon}
+              aria-label="会话操作"
+              onClick={(event) =>
+                onOpenMenu(event, {
+                  kind: 'session',
+                  cwd: session.cwd,
+                  sessionId: session.id,
+                  archived: session.archived,
+                  pinned: session.pinned,
+                })
+              }
+            >
+              <IconMore size={16} />
+            </button>
+          </span>
+        </>
+      )}
+    </div>
+  );
+});
 
 /** 项目列：新会话入口、工作区分组、组内会话与「展开其余 N 个会话」 */
 export const SessionList = memo(function SessionList({
@@ -240,6 +378,7 @@ export const SessionList = memo(function SessionList({
     setSearchOpen(true);
   }, [searchSignal]);
 
+  const [expandedWatermarks, setExpandedWatermarks] = useState<Record<string, number>>({});
   const toggleGroupSessions = (key: string) => {
     setExpandedGroups((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
   };
@@ -249,7 +388,12 @@ export const SessionList = memo(function SessionList({
     const list = [...groups];
     if (orderBy === 'updated') {
       const timeOf = (group: SessionGroupItem) =>
-        Math.max(0, ...group.sessions.map((item) => Date.parse(item.modifiedAt) || 0));
+        Math.max(
+          0,
+          ...group.sessions.map((item) =>
+            item.modifiedMs !== undefined ? item.modifiedMs : (Date.parse(item.modifiedAt) || 0)
+          )
+        );
       list.sort((a, b) => timeOf(b) - timeOf(a));
     }
     const pinned = list.filter((group) => group.pinned);
@@ -263,9 +407,11 @@ export const SessionList = memo(function SessionList({
     (list: SessionListItem[]) => {
       const sorted =
         orderBy === 'updated'
-          ? [...list].sort(
-              (a, b) => (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0)
-            )
+          ? [...list].sort((a, b) => {
+              const bTime = b.modifiedMs !== undefined ? b.modifiedMs : (Date.parse(b.modifiedAt) || 0);
+              const aTime = a.modifiedMs !== undefined ? a.modifiedMs : (Date.parse(a.modifiedAt) || 0);
+              return bTime - aTime;
+            })
           : [...list];
       const pinned = sorted.filter((item) => item.pinned);
       return pinned.length > 0 ? [...pinned, ...sorted.filter((item) => !item.pinned)] : sorted;
@@ -338,7 +484,11 @@ export const SessionList = memo(function SessionList({
       }
     }
     return hits
-      .sort((a, b) => (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0))
+      .sort((a, b) => {
+        const bTime = b.modifiedMs !== undefined ? b.modifiedMs : (Date.parse(b.modifiedAt) || 0);
+        const aTime = a.modifiedMs !== undefined ? a.modifiedMs : (Date.parse(a.modifiedAt) || 0);
+        return bTime - aTime;
+      })
       .slice(0, 20);
   }, [searching, orderedGroups, query]);
 
@@ -557,109 +707,7 @@ export const SessionList = memo(function SessionList({
     [menu, orderedGroups]
   );
 
-  /** 会话行：工作区树与单列表共用同一份交互（选中、悬停卡、置顶、菜单、行内重命名） */
-  const renderSessionRow = (session: SessionListItem) => {
-    const renamingSession = rename?.kind === 'session' && rename.key === session.id;
-    // 新会话占位行本身就是当前会话，不响应点击，也不提供文件级操作
-    const draftRow = session.draft === true;
-    return (
-      <div
-        key={session.id}
-        className={`${styles.sessionRow} ${
-          session.id === activeId ? styles.sessionSelected : ''
-        } ${session.archived ? styles.sessionArchived : ''}`}
-        onClick={() => {
-          if (renamingSession || draftRow) return;
-          onSelectSession(session.id);
-        }}
-        role="treeitem"
-        aria-selected={session.id === activeId}
-        tabIndex={0}
-        onMouseEnter={(event) =>
-          showCard(
-            event.currentTarget,
-            session.title || '未命名会话',
-            session.cwd,
-            createdLabel(session.createdAt)
-          )
-        }
-        onMouseLeave={hideCard}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !renamingSession && !draftRow) onSelectSession(session.id);
-        }}
-      >
-        {/* 状态槽固定 16px（对齐 DSH）：运行指示在槽内显隐，标题位置不随之左右跳 */}
-        <span className={styles.statusSlot}>
-          {session.running && <span className={styles.liveSpinner} aria-label="进行中" />}
-        </span>
-        {renamingSession ? (
-          <input
-            ref={renameInputRef}
-            className={styles.renameInput}
-            value={rename.value}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => setRename({ ...rename, value: event.target.value })}
-            onBlur={commitRename}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                commitRename();
-              }
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                event.stopPropagation();
-                setRename(null);
-              }
-            }}
-          />
-        ) : (
-          <span className={styles.sessionTitle}>{session.title || '未命名会话'}</span>
-        )}
-        {session.pinned && (
-          <span className={styles.pinMark} aria-label="已置顶">
-            <IconPin size={13} />
-          </span>
-        )}
-        {!draftRow && (
-          <>
-            <span className={styles.time}>{relativeTime(session.modifiedAt)}</span>
-            <span className={styles.rowActions}>
-              {onPinSession && (
-                <button
-                  type="button"
-                  className={`${styles.rowIcon} ${session.pinned ? styles.rowIconActive : ''}`}
-                  aria-label={session.pinned ? '取消置顶' : '置顶会话'}
-                  title={session.pinned ? '取消置顶' : '置顶会话'}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onPinSession(session.id, !session.pinned);
-                  }}
-                >
-                  <IconPin size={14} />
-                </button>
-              )}
-              <button
-                type="button"
-                className={styles.rowIcon}
-                aria-label="会话操作"
-                onClick={(event) =>
-                  openMenu(event, {
-                    kind: 'session',
-                    cwd: session.cwd,
-                    sessionId: session.id,
-                    archived: session.archived,
-                    pinned: session.pinned,
-                  })
-                }
-              >
-                <IconMore size={16} />
-              </button>
-            </span>
-          </>
-        )}
-      </div>
-    );
-  };
+
 
   // 折叠成图标轨道
   if (rail) {
@@ -888,7 +936,24 @@ export const SessionList = memo(function SessionList({
                 {archivedFilter === 'only' ? '暂无已归档会话' : '暂无会话'}
               </div>
             ) : (
-              flatSessions.slice(0, flatLimit).map((session) => renderSessionRow(session))
+              flatSessions.slice(0, flatLimit).map((session) => (
+                <SessionRowItem
+                  key={session.id}
+                  session={session}
+                  isActive={session.id === activeId}
+                  renaming={rename?.kind === 'session' && rename.key === session.id}
+                  renameValue={rename?.key === session.id ? rename.value : ''}
+                  renameInputRef={renameInputRef}
+                  onRenameChange={(value) => setRename((prev) => (prev ? { ...prev, value } : null))}
+                  onRenameCommit={commitRename}
+                  onRenameCancel={() => setRename(null)}
+                  onSelectSession={onSelectSession}
+                  onPinSession={onPinSession}
+                  onOpenMenu={openMenu}
+                  onShowCard={showCard}
+                  onHideCard={hideCard}
+                />
+              ))
             )}
             {flatSessions.length > flatLimit && (
               <button
@@ -906,9 +971,12 @@ export const SessionList = memo(function SessionList({
           const isCollapsed = !searching && collapsed.includes(group.key);
           const isExpanded = searching || expandedGroups.includes(group.key);
           const sortedSessions = sortSessions(group.sessions);
-          const visibleSessions = isExpanded
+          const watermark = expandedWatermarks[group.key] || SESSION_VISIBLE_COUNT;
+          const visibleSessions = searching
             ? sortedSessions
-            : sortedSessions.slice(0, SESSION_VISIBLE_COUNT);
+            : isExpanded
+              ? sortedSessions.slice(0, watermark)
+              : sortedSessions.slice(0, SESSION_VISIBLE_COUNT);
           const hiddenCount = sortedSessions.length - visibleSessions.length;
           const renamingProject = rename?.kind === 'project' && rename.key === group.key;
 
@@ -1045,13 +1113,47 @@ export const SessionList = memo(function SessionList({
                     </button>
                   )}
 
-                  {visibleSessions.map((session) => renderSessionRow(session))}
+                  {visibleSessions.map((session) => (
+                    <SessionRowItem
+                      key={session.id}
+                      session={session}
+                      isActive={session.id === activeId}
+                      renaming={rename?.kind === 'session' && rename.key === session.id}
+                      renameValue={rename?.key === session.id ? rename.value : ''}
+                      renameInputRef={renameInputRef}
+                      onRenameChange={(value) => setRename((prev) => (prev ? { ...prev, value } : null))}
+                      onRenameCommit={commitRename}
+                      onRenameCancel={() => setRename(null)}
+                      onSelectSession={onSelectSession}
+                      onPinSession={onPinSession}
+                      onOpenMenu={openMenu}
+                      onShowCard={showCard}
+                      onHideCard={hideCard}
+                    />
+                  ))}
 
                   {(hiddenCount > 0 || (isExpanded && sortedSessions.length > SESSION_VISIBLE_COUNT)) && (
                     <button
                       type="button"
                       className={styles.overflowButton}
-                      onClick={() => toggleGroupSessions(group.key)}
+                      onClick={() => {
+                        if (hiddenCount > 0) {
+                          setExpandedGroups((prev) =>
+                            prev.includes(group.key) ? prev : [...prev, group.key]
+                          );
+                          setExpandedWatermarks((prev) => ({
+                            ...prev,
+                            [group.key]: (prev[group.key] || SESSION_VISIBLE_COUNT) + GROUP_WATERMARK_STEP,
+                          }));
+                        } else {
+                          toggleGroupSessions(group.key);
+                          setExpandedWatermarks((prev) => {
+                            const next = { ...prev };
+                            delete next[group.key];
+                            return next;
+                          });
+                        }
+                      }}
                     >
                       {hiddenCount > 0 ? `展开其余 ${hiddenCount} 个会话` : '收起会话'}
                     </button>

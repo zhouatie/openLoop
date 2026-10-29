@@ -3,6 +3,7 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import zlib from 'zlib';
 import { spawn, exec } from 'child_process';
 import util from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -593,13 +594,28 @@ export class OpenLoopServer {
       }
     }
 
-    res.writeHead(status, {
+    const json = JSON.stringify(data);
+    const headers: Record<string, string | number> = {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': '*',
-    });
-    res.end(JSON.stringify(data));
+    };
+
+    const req = res.req;
+    const acceptEncoding = (req?.headers?.['accept-encoding'] || '') as string;
+    if (json.length > 1024 && acceptEncoding.includes('gzip')) {
+      const compressed = zlib.gzipSync(Buffer.from(json, 'utf-8'));
+      headers['Content-Encoding'] = 'gzip';
+      headers['Content-Length'] = compressed.length;
+      res.writeHead(status, headers);
+      res.end(compressed);
+      return;
+    }
+
+    headers['Content-Length'] = Buffer.byteLength(json);
+    res.writeHead(status, headers);
+    res.end(json);
   }
 
   /** 本地图片预览：只放行图片扩展名的绝对路径，用于会话里提到的截图 */
