@@ -1,104 +1,83 @@
 #!/usr/bin/env python3
+"""把 build/icon.svg（openLoop 猫头鹰图标）导出为桌面端图标资源。
+
+产物：
+- build/icon.png           1024×1024 主图标（electron-builder 引用）
+- build/icons/icon.icns    macOS 图标包
+
+SVG 是唯一图形来源。优先使用 rsvg-convert 渲染；没有则回退到 macOS 的 qlmanage。
+"""
+
 import os
-import subprocess
 import shutil
-from PIL import Image, ImageDraw, ImageFilter
+import subprocess
+import sys
+import tempfile
 
-SIZE = 1024
-TILE_INSET = 88
-TILE_SIZE = SIZE - TILE_INSET * 2
-RADIUS = round(TILE_SIZE * 0.225)
+from PIL import Image
 
-os.makedirs('build/icons', exist_ok=True)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SVG_PATH = os.path.join(ROOT, 'build', 'icon.svg')
+CANVAS = 1024
+ICONSET_SIZES = [16, 32, 64, 128, 256, 512]
 
-# 1. 创建符合 macOS 现代图标标准的底板
-tile = Image.new('RGBA', (TILE_SIZE, TILE_SIZE), (0, 0, 0, 0))
-draw = ImageDraw.Draw(tile)
 
-# 渐变背景：深邃微冷钛黑 (#18181b -> #09090b)
-for y in range(TILE_SIZE):
-    ratio = y / (TILE_SIZE - 1)
-    r = int(24 + (9 - 24) * ratio)
-    g = int(24 + (9 - 24) * ratio)
-    b = int(27 + (11 - 27) * ratio)
-    draw.line([(0, y), (TILE_SIZE, y)], fill=(r, g, b, 255))
+def render_svg(svg_path: str, size: int, out_path: str) -> None:
+    """把 SVG 渲染为指定边长的 PNG。"""
+    if shutil.which('rsvg-convert'):
+        subprocess.run(
+            ['rsvg-convert', '-w', str(size), '-h', str(size), '-o', out_path, svg_path],
+            check=True,
+        )
+        return
 
-# 绘制 openLoop 几何象征图形 (双闭环流动连接 / 编排循环)
-cx, cy = TILE_SIZE // 2, TILE_SIZE // 2
+    if shutil.which('qlmanage'):
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            subprocess.run(
+                ['qlmanage', '-t', '-s', str(size), '-o', tmp_dir, svg_path],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            produced = os.path.join(tmp_dir, os.path.basename(svg_path) + '.png')
+            shutil.copyfile(produced, out_path)
+        finally:
+            shutil.rmtree(tmp_dir)
+        return
 
-# 外圈微柔和光晕
-glow = Image.new('RGBA', (TILE_SIZE, TILE_SIZE), (0, 0, 0, 0))
-glow_draw = ImageDraw.Draw(glow)
-glow_draw.ellipse([cx - 210, cy - 210, cx + 210, cy + 210], fill=(79, 70, 229, 60))
-glow = glow.filter(ImageFilter.GaussianBlur(radius=50))
-tile.alpha_composite(glow)
+    sys.exit('[icon] 缺少 SVG 渲染工具：请安装 librsvg (rsvg-convert) 或在 macOS 上运行')
 
-# 绘制内环与闭环多边形节点 (编排连接感)
-shape_layer = Image.new('RGBA', (TILE_SIZE, TILE_SIZE), (0, 0, 0, 0))
-sdraw = ImageDraw.Draw(shape_layer)
 
-# 循环闭环轮廓 (Loop Track)
-line_width = 44
-loop_color = (244, 244, 246, 245)
-accent_color = (99, 102, 241, 255) # Indigo-500
+def main() -> None:
+    os.makedirs(os.path.join(ROOT, 'build', 'icons'), exist_ok=True)
+    master_path = os.path.join(ROOT, 'build', 'icon.master.png')
 
-# 绘制左圆环与右圆环组成的无限循环 (Infinity / Open Loop)
-r_ring = 140
-left_center = (cx - 100, cy)
-right_center = (cx + 100, cy)
+    render_svg(SVG_PATH, CANVAS, master_path)
+    canvas = Image.open(master_path).convert('RGBA')
+    if canvas.size != (CANVAS, CANVAS):
+        canvas = canvas.resize((CANVAS, CANVAS), Image.LANCZOS)
+    os.remove(master_path)
 
-sdraw.ellipse([left_center[0] - r_ring, left_center[1] - r_ring,
-               left_center[0] + r_ring, left_center[1] + r_ring],
-              outline=(228, 228, 231, 230), width=line_width)
+    canvas.save(os.path.join(ROOT, 'build', 'icon.png'), optimize=True)
+    print('[icon] wrote build/icon.png')
 
-sdraw.ellipse([right_center[0] - r_ring, right_center[1] - r_ring,
-               right_center[0] + r_ring, right_center[1] + r_ring],
-              outline=(99, 102, 241, 240), width=line_width)
+    iconset_dir = os.path.join(ROOT, 'build', 'icons', 'icon.iconset')
+    if os.path.exists(iconset_dir):
+        shutil.rmtree(iconset_dir)
+    os.makedirs(iconset_dir, exist_ok=True)
 
-# 核心节点光点 (Node points)
-pts = [
-    (cx - 240, cy),
-    (cx, cy),
-    (cx + 240, cy),
-    (cx - 100, cy - 140),
-    (cx + 100, cy + 140)
-]
-for px, py in pts:
-    sdraw.ellipse([px - 22, py - 22, px + 22, py + 22], fill=(255, 255, 255, 255))
-    sdraw.ellipse([px - 14, py - 14, px + 14, py + 14], fill=(79, 70, 229, 255))
+    for s in ICONSET_SIZES:
+        canvas.resize((s, s), Image.LANCZOS).save(f'{iconset_dir}/icon_{s}x{s}.png')
+        canvas.resize((s * 2, s * 2), Image.LANCZOS).save(f'{iconset_dir}/icon_{s}x{s}@2x.png')
 
-tile.alpha_composite(shape_layer)
-
-# 2. 制作圆角遮罩 (macOS Squircle mask)
-mask = Image.new('L', (TILE_SIZE, TILE_SIZE), 0)
-mask_draw = ImageDraw.Draw(mask)
-mask_draw.rounded_rectangle([(0, 0), (TILE_SIZE - 1, TILE_SIZE - 1)], radius=RADIUS, fill=255)
-
-# 微弱边缘内高光
-border_overlay = Image.new('RGBA', (TILE_SIZE, TILE_SIZE), (0, 0, 0, 0))
-bdraw = ImageDraw.Draw(border_overlay)
-bdraw.rounded_rectangle([(1, 1), (TILE_SIZE - 2, TILE_SIZE - 2)], radius=RADIUS, outline=(255, 255, 255, 35), width=2)
-tile.alpha_composite(border_overlay)
-
-# 3. 合成至 1024x1024 画布
-canvas = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
-canvas.paste(tile, (TILE_INSET, TILE_INSET), mask)
-canvas.save('build/icon.png', optimize=True)
-print('[icon] wrote build/icon.png')
-
-# 4. 生成标准 macOS .icns 文件
-iconset_dir = 'build/icons/icon.iconset'
-if os.path.exists(iconset_dir):
+    subprocess.run(
+        ['iconutil', '-c', 'icns', iconset_dir, '-o', os.path.join(ROOT, 'build', 'icons', 'icon.icns')],
+        check=True,
+    )
     shutil.rmtree(iconset_dir)
-os.makedirs(iconset_dir, exist_ok=True)
+    print('[icon] wrote build/icons/icon.icns')
 
-sizes = [16, 32, 64, 128, 256, 512]
-for s in sizes:
-    r = canvas.resize((s, s), Image.LANCZOS)
-    r.save(f'{iconset_dir}/icon_{s}x{s}.png')
-    r2 = canvas.resize((s * 2, s * 2), Image.LANCZOS)
-    r2.save(f'{iconset_dir}/icon_{s}x{s}@2x.png')
 
-subprocess.run(['iconutil', '-c', 'icns', iconset_dir, '-o', 'build/icons/icon.icns'], check=True)
-shutil.rmtree(iconset_dir)
-print('[icon] wrote build/icons/icon.icns')
+if __name__ == '__main__':
+    main()

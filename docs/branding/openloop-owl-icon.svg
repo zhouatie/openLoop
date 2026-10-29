@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <title>openLoop owl app icon (light surface)</title>
+  <defs>
+    <linearGradient id="ol-surface" x1="226" y1="138" x2="798" y2="888" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fbfbfc"/>
+      <stop offset="0.55" stop-color="#f4f4f6"/>
+      <stop offset="1" stop-color="#ececef"/>
+    </linearGradient>
+  </defs>
+  <rect x="84" y="84" width="856" height="856" rx="214" fill="url(#ol-surface)"/>
+  <rect x="84.5" y="84.5" width="855" height="855" rx="213.5" stroke="#e3e3e8"/>
+  <g transform="translate(166 186) scale(5.4)">
+    <path d="M29 17 L36 46 L50 38 Z" fill="#1c1c21"/>
+    <path d="M99 17 L92 46 L78 38 Z" fill="#1c1c21"/>
+    <path fill-rule="evenodd" fill="#1c1c21" d="
+      M107 76 A43 43 0 1 0 21 76 A43 43 0 1 0 107 76 Z
+      M64 70 A17 17 0 1 1 30 70 A17 17 0 1 1 64 70 Z
+      M98 70 A17 17 0 1 1 64 70 A17 17 0 1 1 98 70 Z"/>
+    <circle cx="46.5" cy="72.5" r="7.6" fill="#1c1c21"/>
+    <circle cx="81.5" cy="72.5" r="7.6" fill="#1c1c21"/>
+    <path d="M64 96 L57.5 82.5 L70.5 82.5 Z" fill="#4f46e5"/>
+  </g>
+</svg>

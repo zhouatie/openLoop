@@ -1708,6 +1708,9 @@ export function GlobalAgentPanel({
 
   const hero = (
     <>
+      <div className={styles.heroMark}>
+        <BrandLogo size={64} />
+      </div>
       <div className={styles.headline}>开始一段新的会话</div>
       <div className={styles.chipRow}>
         <div

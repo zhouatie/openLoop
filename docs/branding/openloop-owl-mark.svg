@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <title>openLoop owl mark</title>
+  <!-- ear tufts -->
+  <path d="M29 17 L36 46 L50 38 Z" fill="#1c1c21"/>
+  <path d="M99 17 L92 46 L78 38 Z" fill="#1c1c21"/>
+  <!-- head with knocked-out eye holes -->
+  <path fill-rule="evenodd" fill="#1c1c21" d="
+    M107 76 A43 43 0 1 0 21 76 A43 43 0 1 0 107 76 Z
+    M64 70 A17 17 0 1 1 30 70 A17 17 0 1 1 64 70 Z
+    M98 70 A17 17 0 1 1 64 70 A17 17 0 1 1 98 70 Z"/>
+  <!-- pupils -->
+  <circle cx="46.5" cy="72.5" r="7.6" fill="#1c1c21"/>
+  <circle cx="81.5" cy="72.5" r="7.6" fill="#1c1c21"/>
+  <!-- beak -->
+  <path d="M64 96 L57.5 82.5 L70.5 82.5 Z" fill="#4f46e5"/>
+</svg>

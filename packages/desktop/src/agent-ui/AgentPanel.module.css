@@ -170,6 +170,13 @@
   max-width: min(100%, 952px);
 }
 
+/* 开场标识：只在无会话的 hero 出现一次，与标题之间留出一整行呼吸距离 */
+.heroMark {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
 .headline {
   display: flex;
   align-items: center;
