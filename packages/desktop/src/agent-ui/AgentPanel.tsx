@@ -147,7 +147,7 @@ export interface AgentPanelShellProps {
   onModelSelect?: (model: string) => void;
   /** 无顶栏形态的右上角位置（工作台展开按钮） */
   cornerExtra?: React.ReactNode;
-  /** 右侧工作区面板（文件 / 终端 / 预览） */
+  /** 右侧工作区面板（文件 / 预览） */
   dock?: React.ReactNode;
   /** 覆盖在消息区上的会话树面板 */
   tree?: React.ReactNode;
@@ -433,7 +433,7 @@ export interface TaskAgentPanelProps {
   sendExtra?: () => Record<string, unknown>;
   headerExtra?: React.ReactNode;
   banner?: React.ReactNode;
-  /** 任务工作区，用于文件 / 终端 / 预览面板 */
+  /** 任务工作区，用于文件 / 预览面板 */
   cwd?: string;
 }
 
@@ -451,7 +451,7 @@ export function TaskAgentPanel({
 }: TaskAgentPanelProps) {
   const [sending, setSending] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
-  /** 工作台的页签请求：文件、终端，或某个文件的预览 */
+  /** 工作台的页签请求：文件，或某个文件的预览 */
   const [dockRequest, setDockRequest] = useState<DockRequest | null>(null);
   const dockSeq = useRef(0);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
@@ -470,7 +470,6 @@ export function TaskAgentPanel({
   useShortcutBindings({
     'dock.toggle': () => setDockOpen((prev) => !prev),
     'dock.files': () => openDock('files'),
-    'dock.terminal': () => openDock('terminal'),
   });
 
   const load = useCallback(() => api.getTaskSession(taskId).catch(() => null), [taskId]);
@@ -602,7 +601,7 @@ export function TaskAgentPanel({
             type="button"
             className={`${styles.iconButton} ${dockOpen ? styles.iconButtonActive : ''}`}
             onClick={() => setDockOpen((prev) => !prev)}
-            title={dockOpen ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
+            title={dockOpen ? '收起工作台' : '打开工作台：文件 / 预览'}
             aria-label="工作台"
           >
             <IconPanelRight size={16} />
@@ -786,7 +785,7 @@ export function GlobalAgentPanel({
     Record<string, { title?: string; hidden?: boolean; pinned?: boolean; order?: number }>
   >({});
   const [dockOpen, setDockOpen] = useState(false);
-  /** 工作台的页签请求：文件、终端，或某个文件的预览 */
+  /** 工作台的页签请求：文件，或某个文件的预览 */
   const [dockRequest, setDockRequest] = useState<DockRequest | null>(null);
   const dockSeq = useRef(0);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
@@ -1637,7 +1636,6 @@ export function GlobalAgentPanel({
       },
       'dock.toggle': () => setDockOpen((prev) => !prev),
       'dock.files': () => openDock('files'),
-      'dock.terminal': () => openDock('terminal'),
       'session.tree': () => void openTree(),
     },
     active,
@@ -1786,7 +1784,7 @@ export function GlobalAgentPanel({
       type="button"
       className={`${styles.iconButton} ${dockOpen ? styles.iconButtonActive : ''}`}
       onClick={() => setDockOpen((prev) => !prev)}
-      title={dockOpen ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
+      title={dockOpen ? '收起工作台' : '打开工作台：文件 / 预览'}
       aria-label="工作台"
     >
       <IconPanelRight size={16} />

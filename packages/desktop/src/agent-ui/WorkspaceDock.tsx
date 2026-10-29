@@ -1,7 +1,4 @@
 import React, { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import '@xterm/xterm/css/xterm.css';
 import { api } from '../services/api';
 import { AgentMarkdown } from './Markdown';
 import { CodeBlock } from './dsh/CodeBlock';
@@ -19,7 +16,7 @@ import {
 } from './icons';
 import styles from './WorkspaceDock.module.css';
 
-export type DockTab = 'files' | 'terminal' | 'preview';
+export type DockTab = 'files' | 'preview';
 
 /** 上层发起的页签请求：同一个请求重复触发也要生效，所以带序号 */
 export interface DockRequest {
@@ -50,17 +47,11 @@ interface FsEntry {
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg)$/i;
 const MARKDOWN_EXT = /\.(md|mdx)$/i;
 
-/** 面板固定页签：文件与终端，预览页签由打开的文件生成 */
-const PINNED_PANES: DockPane[] = [
-  { key: 'files', kind: 'files', title: '文件', seq: 0 },
-  { key: 'terminal', kind: 'terminal', title: '终端', seq: 0 },
-];
+/** 面板固定页签：文件，预览页签由打开的文件生成 */
+const PINNED_PANES: DockPane[] = [{ key: 'files', kind: 'files', title: '文件', seq: 0 }];
 
 /** 「+」菜单里能重新打开的页签 */
-const ADDABLE_KINDS: Array<{ kind: DockTab; title: string }> = [
-  { kind: 'files', title: '文件' },
-  { kind: 'terminal', title: '终端' },
-];
+const ADDABLE_KINDS: Array<{ kind: DockTab; title: string }> = [{ kind: 'files', title: '文件' }];
 
 /** 面板宽度：拖动左缘调整，双击复位，按工作区无关的界面偏好持久化 */
 const DOCK_WIDTH_KEY = 'openloop.agent.dockWidth';
@@ -351,93 +342,6 @@ const FileTree = memo(function FileTree({
   return <div className={styles.tree}>{root ? renderDir(root, 0) : null}</div>;
 });
 
-/** 终端：xterm + 后端 shell 子进程 */
-const TerminalView = memo(function TerminalView({ cwd }: { cwd?: string }) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-
-    const term = new Terminal({
-      fontSize: 12,
-      lineHeight: 1.4,
-      fontFamily:
-        'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-      cursorBlink: true,
-      convertEol: true,
-      theme: {
-        background: '#ffffff',
-        foreground: '#24292f',
-        cursor: '#4176e6',
-        selectionBackground: 'rgba(65, 118, 230, 0.18)',
-      },
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(host);
-    let disposed = false;
-    let terminalId: string | null = null;
-
-    const timer = window.setTimeout(() => {
-      try {
-        fit.fit();
-      } catch (_) {
-        /* 容器尚未布局时忽略 */
-      }
-    }, 0);
-
-    const unsubscribe = api.on('agent:terminal', (payload: any) => {
-      if (!payload || payload.id !== terminalId) return;
-      if (payload.exited) {
-        term.write('\r\n\x1b[90m[进程已退出]\x1b[0m\r\n');
-        return;
-      }
-      if (typeof payload.data === 'string') term.write(payload.data);
-    });
-
-    api
-      .openTerminal(cwd)
-      .then(({ id, replay }) => {
-        if (disposed) {
-          void api.closeTerminal(id);
-          return;
-        }
-        terminalId = id;
-        if (replay) term.write(replay);
-        term.write(`\r\n\x1b[90mopenLoop 终端 · ${cwd || '~'}\x1b[0m\r\n`);
-      })
-      .catch((err) => {
-        term.write(`\r\n\x1b[31m无法启动终端: ${String(err?.message || err)}\x1b[0m\r\n`);
-      });
-
-    const dataSub = term.onData((data) => {
-      if (terminalId) void api.writeTerminal(terminalId, data);
-    });
-
-    const observer = new ResizeObserver(() => {
-      try {
-        fit.fit();
-      } catch (_) {
-        /* 忽略布局瞬间的尺寸异常 */
-      }
-    });
-    observer.observe(host);
-
-    return () => {
-      disposed = true;
-      window.clearTimeout(timer);
-      observer.disconnect();
-      dataSub.dispose();
-      unsubscribe();
-      if (terminalId) void api.closeTerminal(terminalId);
-      term.dispose();
-    };
-  }, [cwd]);
-
-  return <div ref={hostRef} className={styles.terminalHost} />;
-});
-
 interface PreviewState {
   path: string;
   content?: string;
@@ -550,13 +454,13 @@ const FilePreview = memo(function FilePreview({
 
 export interface WorkspaceDockProps {
   cwd?: string;
-  /** 上层发起的页签请求：文件、终端，或某个文件的预览 */
+  /** 上层发起的页签请求：文件，或某个文件的预览 */
   request?: DockRequest | null;
   onClose: () => void;
 }
 
 /**
- * 右侧工作台：文件 / 终端 / 预览。页签容器对齐 DSH 停靠面板 —— 一行胶囊页签、
+ * 右侧工作台：文件 / 预览。页签容器对齐 DSH 停靠面板 —— 一行胶囊页签、
  * 每个页签可单独关闭、「+」重开固定页签，左缘可拖动改变宽度。
  */
 export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose }: WorkspaceDockProps) {
@@ -565,12 +469,6 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
   const [activeKey, setActiveKey] = useState<string>(PINNED_PANES[0].key);
   const [width, setWidth] = useState(readDockWidth);
   const [addOpen, setAddOpen] = useState(false);
-  /** 终端首次被看到后才挂载，之后只隐藏不卸载：shell 与回滚不会丢 */
-  const [terminalMounted, setTerminalMounted] = useState(false);
-
-  useEffect(() => {
-    if (activeKey === 'terminal') setTerminalMounted(true);
-  }, [activeKey]);
 
   const openPreview = useCallback((path: string) => {
     if (import.meta.env?.DEV) console.log('[WorkspaceDock] 预览文件:', path);
@@ -584,7 +482,7 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
     setActiveKey(key);
   }, []);
 
-  // 上层请求：打开某个固定页签，或把某个文件作为新页签打开
+  // 上层请求：打开文件页签，或把某个文件作为预览页签打开
   useEffect(() => {
     if (!request) return;
     if (import.meta.env?.DEV) console.log('[WorkspaceDock] 页签请求:', request);
@@ -715,7 +613,7 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
       />
 
       <div className={styles.dockBody}>
-        {/* 页签内容常驻：切页签不重挂，终端 shell、文件预览与滚动位置都留着 */}
+        {/* 页签内容常驻：切页签不重挂，文件预览与滚动位置都留着 */}
         {panes.map((pane) => (
           <div key={pane.key} className={styles.pane} hidden={pane.key !== activeKey}>
             {pane.kind === 'files' &&
@@ -724,7 +622,6 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
               ) : (
                 <div className={styles.dockEmpty}>选一个工作区后，这里显示它的文件。</div>
               ))}
-            {pane.kind === 'terminal' && terminalMounted && <TerminalView cwd={root} />}
             {pane.kind === 'preview' && pane.path && (
               <FilePreview path={pane.path} seq={pane.seq} cwd={root} />
             )}

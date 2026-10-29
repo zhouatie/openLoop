@@ -360,18 +360,6 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 终端 */
-.terminalHost {
-  flex: 1;
-  min-height: 0;
-  padding: 8px 6px 6px 10px;
-  overflow: hidden;
-}
-
-.terminalHost :global(.xterm) {
-  height: 100%;
-}
-
 /* 预览：头固定，正文自己滚动 */
 .preview {
   display: flex;
