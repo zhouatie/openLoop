@@ -49,26 +49,6 @@ const ROWS_PER_PAGE = 80;
 /** 默认空回显列表：避免每次渲染新建数组，让 memo 不失效 */
 const EMPTY_PENDING: PendingUserInput[] = [];
 
-const pad2 = (value: number) => String(value).padStart(2, '0');
-
-/** 日期分隔标签：今天 / 昨天 / 2026 年 10 月 26 日 */
-function dayLabel(timestamp: number): string {
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
-  const date = new Date(timestamp);
-  const today = new Date();
-  const startOf = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
-  const days = Math.round((startOf(today) - startOf(date)) / 86400000);
-  if (days === 0) return '今天';
-  if (days === 1) return '昨天';
-  return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`;
-}
-
-function clockLabel(timestamp: number): string {
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
-  const date = new Date(timestamp);
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-}
-
 /** 用时读数：满 60 秒仍按秒展示，与运行行保持同一种量纲 */
 function elapsedLabel(startedAt: number, now: number): string {
   const seconds = Math.max(1, Math.round((now - startedAt) / 1000));
@@ -114,9 +94,8 @@ function clip(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
-/** 从消息推导出的展示值（日期、定位轨预览）：按消息对象缓存，流式期间每帧都要用 */
+/** 从消息推导出的展示值（定位轨预览）：按消息对象缓存，流式期间每帧都要用 */
 interface DerivedRow {
-  day: string;
   /** 用户消息的正文预览（图片段已剥离） */
   prompt: string;
   /** 助手消息的正文预览 */
@@ -129,7 +108,6 @@ function derivedRow(message: SessionChatMessage): DerivedRow {
   const cached = derivedCache.get(message);
   if (cached) return cached;
   const row: DerivedRow = {
-    day: dayLabel(message.timestamp),
     prompt:
       message.role === 'user'
         ? clip(splitPromptImages(message.content).text || '图片', PREVIEW_PROMPT_CHARS)
@@ -147,7 +125,6 @@ function derivedRow(message: SessionChatMessage): DerivedRow {
 interface TurnBlock {
   kind: 'turn';
   turn: number;
-  day: string;
   user: number | null;
   /** 该轮全部助手消息，按出现顺序平铺渲染（不折叠） */
   steps: number[];
@@ -160,7 +137,6 @@ interface TurnBlock {
 interface RowBlock {
   kind: 'row';
   turn: number;
-  day: string;
   index: number;
 }
 
@@ -185,7 +161,6 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
       current = {
         kind: 'turn',
         turn,
-        day: derived.day,
         user: index,
         steps: [],
         tail: null,
@@ -196,7 +171,7 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
     }
 
     if (message.role === 'system') {
-      blocks.push({ kind: 'row', turn: current?.turn ?? 0, day: derived.day, index });
+      blocks.push({ kind: 'row', turn: current?.turn ?? 0, index });
       return;
     }
 
@@ -204,7 +179,6 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
       current = {
         kind: 'turn',
         turn: 0,
-        day: derived.day,
         user: null,
         steps: [],
         tail: null,
@@ -520,21 +494,10 @@ export const AgentChatView = React.memo(function AgentChatView({
                 {`显示更早的 ${Math.min(ROWS_PER_PAGE, fromIndex)} 条消息`}
               </button>
             )}
-            {visibleBlocks.map((block, blockIndex) => {
-              const previousDay = blockIndex > 0 ? visibleBlocks[blockIndex - 1].day : '';
-              const separator =
-                block.day && block.day !== previousDay ? (
-                  <div className={styles.daySeparator} key={`day-${block.day}`}>
-                    <span className={styles.dayLine} />
-                    <span className={styles.dayText}>{block.day}</span>
-                    <span className={styles.dayLine} />
-                  </div>
-                ) : null;
-
+            {visibleBlocks.map((block) => {
               if (block.kind === 'row') {
                 return (
                   <React.Fragment key={`row-${block.index}`}>
-                    {separator}
                     <div data-turn={block.turn || undefined}>
                       <MessageRow message={shown[block.index]} />
                     </div>
@@ -545,7 +508,6 @@ export const AgentChatView = React.memo(function AgentChatView({
               const isLiveTurn = block === lastTurn;
               return (
                 <React.Fragment key={`turn-${block.turn}`}>
-                {separator}
                 <div className={styles.turn} data-turn={block.turn || undefined}>
                   {block.user !== null && (
                     <MessageRow message={shown[block.user]} />
