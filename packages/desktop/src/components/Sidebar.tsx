@@ -84,11 +84,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex flex-col min-h-0 flex-1">
         {/* 顶部：macOS 原生红黄绿窗口控制按钮已由系统绘制，这里只留出让位与 Logo */}
         {isOpen ? (
-          <div className="h-[46px] pl-[72px] pr-3 flex items-center shrink-0">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <BrandLogo size={20} className="shrink-0 drop-shadow-[0_1px_1.5px_rgba(16,18,30,0.16)]" />
+          <div className="h-[52px] pl-[72px] pr-3 flex items-center shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <BrandLogo size={26} className="shrink-0 drop-shadow-[0_1px_1.5px_rgba(16,18,30,0.16)]" />
               <span className="flex min-w-0 flex-col justify-center">
-                <span className="truncate font-semibold text-[15px] leading-[19px] text-[#1c1c21] tracking-[-0.02em]">
+                <span className="truncate font-semibold text-[17px] leading-[21px] text-[#1c1c21] tracking-[-0.03em]">
                   openLoop
                 </span>
                 <span
@@ -101,7 +101,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
         ) : (
-          <div className="h-[46px] shrink-0" />
+          <div className="h-[52px] shrink-0" />
         )}
 
         {/* 拍平的单一导航菜单列表 */}
