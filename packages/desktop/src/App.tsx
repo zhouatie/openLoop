@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { LogTerminalDrawer, LogScope } from './components/LogTerminalDrawer';
@@ -46,7 +46,16 @@ export const AppContent: React.FC = () => {
   });
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isQuickRunModalOpen, setIsQuickRunModalOpen] = useState<boolean>(false);
-  const [isAgentOverlayOpen, setIsAgentOverlayOpen] = useState<boolean>(false);
+  const [isAgentOverlayOpen, setIsAgentOverlayOpen] = useState<boolean>(() => {
+    try {
+      const cached = localStorage.getItem('openloop_auto_open_global_agent');
+      if (cached !== null) {
+        return cached === 'true';
+      }
+    } catch {}
+    return false;
+  });
+  const userInteractedAgentOverlayRef = useRef<boolean>(false);
   /** 外部页面请求在全局智能体里打开的会话（seq 递增即一次新请求） */
   const [agentSessionRequest, setAgentSessionRequest] = useState<{ id: string; seq: number } | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
@@ -77,6 +86,7 @@ export const AppContent: React.FC = () => {
   /** 外部页面请求打开某条智能体会话：打开浮层并切到该会话 */
   const handleOpenAgentSession = useCallback((sessionId: string) => {
     if (import.meta.env?.DEV) console.log('[App] 打开全局智能体会话:', sessionId);
+    userInteractedAgentOverlayRef.current = true;
     setAgentSessionRequest((prev) => ({ id: sessionId, seq: (prev?.seq ?? 0) + 1 }));
     setIsAgentOverlayOpen(true);
   }, []);
@@ -113,6 +123,7 @@ export const AppContent: React.FC = () => {
       setActivePluginId('qa-automation');
     },
     onToggleAgent: () => {
+      userInteractedAgentOverlayRef.current = true;
       setIsAgentOverlayOpen((prev) => {
         if (import.meta.env?.DEV) {
           console.log('[App] 切换全局智能体浮层:', { next: !prev });
@@ -262,6 +273,34 @@ export const AppContent: React.FC = () => {
       unsubLog();
     };
   }, [isLogsOpen]);
+
+  // 应用打开时从服务端同步自启配置，若设置开启且用户尚未手动干预则展开全局智能体
+  useEffect(() => {
+    let isMounted = true;
+    api.getSettings()
+      .then((settings) => {
+        if (!isMounted) return;
+        if (typeof settings?.autoOpenGlobalAgent === 'boolean') {
+          try {
+            localStorage.setItem('openloop_auto_open_global_agent', String(settings.autoOpenGlobalAgent));
+          } catch {}
+          if (import.meta.env?.DEV) {
+            console.log('[App] 从服务端同步应用启动默认开启全局 Agent 设置:', settings.autoOpenGlobalAgent);
+          }
+          if (settings.autoOpenGlobalAgent && !userInteractedAgentOverlayRef.current) {
+            setIsAgentOverlayOpen(true);
+          }
+        }
+      })
+      .catch((err) => {
+        if (import.meta.env?.DEV) {
+          console.warn('[App] 获取应用自启设置失败:', err);
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useTaskNotifications(tasks);
 
@@ -414,6 +453,7 @@ export const AppContent: React.FC = () => {
           onOpenCreateTask={() => setIsCreateTaskModalOpen(true)}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onOpenAgent={() => {
+            userInteractedAgentOverlayRef.current = true;
             setIsAgentOverlayOpen((prev) => {
               if (import.meta.env?.DEV) {
                 console.log('[App] 切换全局智能体浮层:', { next: !prev });
@@ -546,7 +586,10 @@ export const AppContent: React.FC = () => {
           mode="overlay"
           active={isAgentOverlayOpen}
           sessionRequest={agentSessionRequest}
-          onClose={() => setIsAgentOverlayOpen(false)}
+          onClose={() => {
+            userInteractedAgentOverlayRef.current = true;
+            setIsAgentOverlayOpen(false);
+          }}
         />
       </div>
 
@@ -605,6 +648,7 @@ export const AppContent: React.FC = () => {
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
         onOpenAgent={() => {
+          userInteractedAgentOverlayRef.current = true;
           setIsAgentOverlayOpen(true);
         }}
         onNavigate={(id) => {

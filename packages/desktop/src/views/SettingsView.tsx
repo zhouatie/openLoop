@@ -323,6 +323,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [thinking, setThinking] = useState<ThinkingLevel>('high');
   const [defaultCwd, setDefaultCwd] = useState('');
   const [autoSnapshot, setAutoSnapshot] = useState(true);
+  const [autoOpenGlobalAgent, setAutoOpenGlobalAgent] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('openloop_auto_open_global_agent') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   // 自动化测试多模态模型配置（仅移动端 Android / iOS 视觉推理需要）
   const [qaModelBaseUrl, setQaModelBaseUrl] = useState('');
@@ -495,6 +502,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         if (settings.reasoningLevel) setThinking(settings.reasoningLevel);
         setDefaultCwd(settings.defaultCwd || '');
         if (settings.autoSnapshot !== undefined) setAutoSnapshot(settings.autoSnapshot);
+        if (settings.autoOpenGlobalAgent !== undefined) {
+          setAutoOpenGlobalAgent(Boolean(settings.autoOpenGlobalAgent));
+          try {
+            localStorage.setItem('openloop_auto_open_global_agent', String(Boolean(settings.autoOpenGlobalAgent)));
+          } catch {}
+        }
         if (settings.storageRetention) {
           setStorageRetention(settings.storageRetention);
         }
@@ -608,6 +621,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       reasoningLevel: thinking,
       defaultCwd,
       autoSnapshot,
+      autoOpenGlobalAgent,
       ...override,
     };
     try {
@@ -685,6 +699,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         reasoningLevel: thinking,
         defaultCwd,
         autoSnapshot,
+        autoOpenGlobalAgent,
         shortcutSuperKey: superKey,
         prompts,
       };
@@ -1128,7 +1143,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
 
               {/* 编辑前快照 */}
-              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
+              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium text-[#1c1c21]">编辑前代码快照备份</div>
                   <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
@@ -1159,6 +1174,59 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     }}
                     className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer active:scale-95 ${
                       autoSnapshot
+                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.08)]'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    开启
+                  </button>
+                </div>
+              </div>
+
+              {/* 应用启动默认开启全局智能体 */}
+              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium text-[#1c1c21]">启动时默认开启全局智能体</div>
+                  <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                    应用打开时自动展开全局智能体浮层，无需手动按快捷键唤起
+                  </div>
+                </div>
+
+                <div className="inline-flex p-[2px] rounded-[7px] bg-[#e6e6eb] shrink-0 self-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (import.meta.env?.DEV) {
+                        console.log('[Settings] 切换启动时默认开启全局智能体: false');
+                      }
+                      setAutoOpenGlobalAgent(false);
+                      try {
+                        localStorage.setItem('openloop_auto_open_global_agent', 'false');
+                      } catch {}
+                      handleSave({ autoOpenGlobalAgent: false });
+                    }}
+                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer active:scale-95 ${
+                      !autoOpenGlobalAgent
+                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.08)]'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    关闭
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (import.meta.env?.DEV) {
+                        console.log('[Settings] 切换启动时默认开启全局智能体: true');
+                      }
+                      setAutoOpenGlobalAgent(true);
+                      try {
+                        localStorage.setItem('openloop_auto_open_global_agent', 'true');
+                      } catch {}
+                      handleSave({ autoOpenGlobalAgent: true });
+                    }}
+                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer active:scale-95 ${
+                      autoOpenGlobalAgent
                         ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.08)]'
                         : 'text-[#63636b] hover:text-[#1c1c21]'
                     }`}

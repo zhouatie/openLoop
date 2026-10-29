@@ -1105,6 +1105,7 @@ export class SqliteStore {
       defaultModel: '',
       reasoningLevel: 'high',
       defaultCwd: '',
+      autoOpenGlobalAgent: false,
       prompts: { ...DEFAULT_PROMPT_TEMPLATES },
     };
     for (const r of rows) {

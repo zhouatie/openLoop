@@ -457,6 +457,8 @@ export interface OpenLoopSettings {
   reasoningLevel?: ThinkingLevel;
   defaultCwd?: string;
   autoSnapshot?: boolean;
+  /** 应用启动时是否默认开启全局智能体浮层 */
+  autoOpenGlobalAgent?: boolean;
   shortcutSuperKey?: ShortcutSuperKey;
   prompts?: AgentPromptTemplates;
   storageRetention?: StorageRetentionSettings;
