@@ -125,11 +125,6 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.iconButtonActive {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-state-business-primary);
-}
-
 .closeButton {
   width: 26px;
   height: 26px;
@@ -323,12 +318,19 @@
   display: flex;
 }
 
-/* 无顶栏形态：工作台展开按钮留在右上角（DSH 的侧栏展开位） */
+/* 工作台展开位：收起时按钮停在会话列右上角，与工作台页签条的收起按钮同一格（10px 上沿、6px 右缘），
+   开合切换时按钮不跳位置，鼠标不用来回找 */
 .corner {
   position: absolute;
-  top: 8px;
-  right: 10px;
+  top: 10px;
+  right: 6px;
   z-index: 2;
+}
+
+/* 页签条末端的收起按钮是 28px：展开位同尺寸同右缘，两个方向共用一套手感 */
+.cornerButton {
+  width: 28px;
+  height: 28px;
 }
 
 .mainCol {
