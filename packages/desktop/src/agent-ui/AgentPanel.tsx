@@ -149,7 +149,7 @@ export interface AgentPanelShellProps {
   onModelSelect?: (model: string) => void;
   /** 无顶栏形态的右上角位置（工作台展开按钮） */
   cornerExtra?: React.ReactNode;
-  /** 右侧工作区面板（文件 / 预览） */
+  /** 右侧工作区面板（文件 / 终端 / 预览） */
   dock?: React.ReactNode;
   /** 覆盖在消息区上的会话树面板 */
   tree?: React.ReactNode;
@@ -437,7 +437,7 @@ export interface TaskAgentPanelProps {
   sendExtra?: () => Record<string, unknown>;
   headerExtra?: React.ReactNode;
   banner?: React.ReactNode;
-  /** 任务工作区，用于文件 / 预览面板 */
+  /** 任务工作区，用于文件 / 终端 / 预览面板 */
   cwd?: string;
 }
 
@@ -469,6 +469,7 @@ export function TaskAgentPanel({
   useShortcutBindings({
     'dock.toggle': () => dock.toggle(),
     'dock.files': () => openDock('files'),
+    'dock.terminal': () => openDock('terminal'),
   });
 
   const load = useCallback(() => api.getTaskSession(taskId).catch(() => null), [taskId]);
@@ -612,7 +613,7 @@ export function TaskAgentPanel({
             type="button"
             className={`${styles.iconButton} ${dock.open ? styles.iconButtonActive : ''}`}
             onClick={dock.toggle}
-            title={dock.open ? '收起工作台' : '打开工作台：文件 / 预览'}
+            title={dock.open ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
             aria-label="工作台"
           >
             <IconPanelRight size={16} />
@@ -1649,6 +1650,7 @@ export function GlobalAgentPanel({
       },
       'dock.toggle': () => dock.toggle(),
       'dock.files': () => openDock('files'),
+      'dock.terminal': () => openDock('terminal'),
       'session.tree': () => void openTree(),
     },
     active,
@@ -1808,7 +1810,7 @@ export function GlobalAgentPanel({
       type="button"
       className={`${styles.iconButton} ${dock.open ? styles.iconButtonActive : ''}`}
       onClick={dock.toggle}
-      title={dock.open ? '收起工作台' : '打开工作台：文件 / 预览'}
+      title={dock.open ? '收起工作台' : '打开工作台：文件 / 终端 / 预览'}
       aria-label="工作台"
     >
       <IconPanelRight size={16} />

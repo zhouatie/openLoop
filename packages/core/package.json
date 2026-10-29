@@ -13,6 +13,7 @@
     "@midscene/android": "^1.16.0",
     "@midscene/ios": "^1.16.0",
     "better-sqlite3": "^13.0.3",
+    "node-pty": "1.2.0-beta.15",
     "ws": "^8.18.0"
   },
   "devDependencies": {

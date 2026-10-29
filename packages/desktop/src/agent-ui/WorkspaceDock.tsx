@@ -1,4 +1,4 @@
-import React, { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Fragment, Suspense, lazy, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { AgentMarkdown } from './Markdown';
 import { DiffPane } from './DiffPane';
@@ -17,7 +17,10 @@ import {
 } from './icons';
 import styles from './WorkspaceDock.module.css';
 
-export type DockTab = 'files' | 'preview' | 'diff';
+/** 终端页签首次被选中才加载 xterm：不进首屏包 */
+const TerminalPane = lazy(() => import('./dsh/TerminalPane').then((module) => ({ default: module.TerminalPane })));
+
+export type DockTab = 'files' | 'terminal' | 'preview' | 'diff';
 
 /** 上层发起的页签请求：同一个请求重复触发也要生效，所以带序号 */
 export interface DockRequest {
@@ -52,11 +55,17 @@ interface FsEntry {
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg)$/i;
 const MARKDOWN_EXT = /\.(md|mdx)$/i;
 
-/** 面板固定页签：文件，预览页签由打开的文件生成 */
-const PINNED_PANES: DockPane[] = [{ key: 'files', kind: 'files', title: '文件', seq: 0 }];
+/** 面板固定页签：文件与终端，预览页签由打开的文件生成 */
+const PINNED_PANES: DockPane[] = [
+  { key: 'files', kind: 'files', title: '文件', seq: 0 },
+  { key: 'terminal', kind: 'terminal', title: '终端', seq: 0 },
+];
 
 /** 「+」菜单里能重新打开的页签 */
-const ADDABLE_KINDS: Array<{ kind: DockTab; title: string }> = [{ kind: 'files', title: '文件' }];
+const ADDABLE_KINDS: Array<{ kind: DockTab; title: string }> = [
+  { kind: 'files', title: '文件' },
+  { kind: 'terminal', title: '终端' },
+];
 
 /** 面板宽度：拖动左缘调整，双击复位，按工作区无关的界面偏好持久化 */
 const DOCK_WIDTH_KEY = 'openloop.agent.dockWidth';
@@ -551,7 +560,7 @@ export interface WorkspaceDockProps {
   /** 本会话的页签与激活项，由上层按会话持有 */
   panes: DockPane[];
   activeKey: string;
-  /** 上层发起的页签请求：文件，或某个文件的预览 */
+  /** 上层发起的页签请求：文件、终端，或某个文件的预览 */
   request?: DockRequest | null;
   /** 展开状态：面板常驻，靠盒宽过渡滑入滑出 */
   open: boolean;
@@ -561,7 +570,7 @@ export interface WorkspaceDockProps {
 }
 
 /**
- * 右侧工作台：文件 / 预览。页签容器对齐 DSH 停靠面板 —— 一行胶囊页签、
+ * 右侧工作台：文件 / 终端 / 预览。页签容器对齐 DSH 停靠面板 —— 一行胶囊页签、
  * 每个页签可单独关闭、「+」重开固定页签，左缘可拖动改变宽度。
  * 页签本身归上层按会话保存，这里只负责画和报手势。
  */
@@ -580,11 +589,20 @@ export const WorkspaceDock = memo(function WorkspaceDock({
   const asideRef = useRef<HTMLElement>(null);
   /** 面板常驻：收起时内容还留着，滑出动画才有东西可滑；首次打开前不挂内容，避免空跑一次目录请求 */
   const [everOpened, setEverOpened] = useState(open);
+  /** 终端首次被看到后才挂载：没点过终端页签就不提前起 shell 进程 */
+  const [terminalMounted, setTerminalMounted] = useState(false);
 
   useEffect(() => {
     if (open) setEverOpened(true);
     if (import.meta.env?.DEV) console.log('[WorkspaceDock] 开合:', open ? '展开' : '收起');
   }, [open]);
+
+  useEffect(() => {
+    if (activeKey === 'terminal' && !terminalMounted) {
+      setTerminalMounted(true);
+      if (import.meta.env?.DEV) console.log('[WorkspaceDock] 首次挂载终端');
+    }
+  }, [activeKey, terminalMounted]);
 
   /** 面板最多占主行的 60%：窗口变窄时把持久化的大宽度收回，给会话列留位置 */
   useEffect(() => {
@@ -785,7 +803,7 @@ export const WorkspaceDock = memo(function WorkspaceDock({
           />
 
           <div className={styles.dockBody}>
-            {/* 页签内容常驻：切页签不重挂，文件预览与滚动位置都留着 */}
+            {/* 页签内容常驻：切页签不重挂，终端 shell、文件预览与滚动位置都留着 */}
             {panes.map((pane) => (
               <div key={pane.key} className={styles.pane} hidden={pane.key !== activeKey}>
                 {pane.kind === 'files' &&
@@ -794,6 +812,11 @@ export const WorkspaceDock = memo(function WorkspaceDock({
                   ) : (
                     <div className={styles.dockEmpty}>选一个工作区后，这里显示它的文件。</div>
                   ))}
+                {pane.kind === 'terminal' && terminalMounted && (
+                  <Suspense fallback={null}>
+                    <TerminalPane cwd={root} active={pane.key === activeKey} />
+                  </Suspense>
+                )}
                 {pane.kind === 'preview' && pane.path && (
                   <FilePreview path={pane.path} seq={pane.seq} cwd={root} />
                 )}

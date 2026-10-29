@@ -1,0 +1,95 @@
+/* 终端页签：屏幕铺满，状态条贴在底部（对齐 DSH 的 sidebar 终端） */
+.root {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.screen {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px 6px 4px 10px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+}
+
+.screen :global(.xterm) {
+  height: 100%;
+}
+
+.screen :global(.xterm-viewport) {
+  background: var(--dsw-alias-bg-base);
+}
+
+/* 状态条：只在启动中、已退出、失败时出现，不占常驻空间 */
+.status {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-l2);
+}
+
+.action {
+  padding: 2px 8px;
+  font: inherit;
+  color: var(--dsw-alias-label-primary);
+  background: transparent;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-sm, 6px);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+/* 光标颜色随所在格子底色变，不能写进 xterm 的共享调色板 */
+.screen :global(.xterm-cursor) {
+  opacity: 1;
+}
+
+.screen :global(.xterm .xterm-rows .xterm-cursor.xterm-cursor-block) {
+  background-color: var(--terminal-cursor);
+  color: var(--terminal-cursor-accent);
+}
+
+.screen :global(.xterm .xterm-rows .xterm-cursor.xterm-cursor-block:not(.xterm-cursor-blink)) {
+  background-color: var(--terminal-cursor) !important;
+  color: var(--terminal-cursor-accent) !important;
+}
+
+.screen :global(.xterm .xterm-rows .xterm-cursor.xterm-cursor-outline) {
+  outline-color: var(--terminal-cursor);
+}
+
+.screen :global(.xterm .xterm-rows .xterm-cursor.xterm-cursor-bar) {
+  box-shadow: 1px 0 0 var(--terminal-cursor) inset;
+}
+
+.screen :global(.xterm .xterm-rows .xterm-cursor.xterm-cursor-underline) {
+  border-bottom-color: var(--terminal-cursor);
+}
+
+.screen :global(.xterm .xterm-rows.xterm-focus .xterm-cursor.xterm-cursor-block.xterm-cursor-blink) {
+  animation: terminal-cursor-blink 1s step-end infinite;
+}
+
+@keyframes terminal-cursor-blink {
+  0% {
+    background-color: var(--terminal-cursor);
+    color: var(--terminal-cursor-accent);
+  }
+  50% {
+    background-color: var(--terminal-cursor-cell-background);
+    color: var(--terminal-cursor-cell-foreground);
+  }
+}

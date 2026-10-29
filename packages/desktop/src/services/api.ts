@@ -1212,6 +1212,43 @@ export class DesktopApiService {
     return `${BASE_URL}/api/agent/fs/raw?${fsQuery(path, base)}`;
   }
 
+  // ---- 终端 ----
+
+  /** 打开一个 PTY 终端：首次挂载时把格子尺寸一起带上，避免先出 80x24 再重排 */
+  async openTerminal(cwd?: string, cols?: number, rows?: number): Promise<{
+    id: string;
+    cwd: string;
+    replay: string;
+  }> {
+    if (import.meta.env?.DEV) console.log('[UI:API] 打开终端', { cwd, cols, rows });
+    return requestJson(`${BASE_URL}/api/agent/terminal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd, cols, rows }),
+    });
+  }
+
+  async writeTerminal(id: string, data: string): Promise<{ success: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/terminal/${encodeURIComponent(id)}/input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data }),
+    });
+  }
+
+  /** 同步 PTY 窗口大小：面板拖宽或窗口缩放后调用 */
+  async resizeTerminal(id: string, cols: number, rows: number): Promise<{ success: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/terminal/${encodeURIComponent(id)}/resize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cols, rows }),
+    });
+  }
+
+  async closeTerminal(id: string): Promise<{ success: boolean }> {
+    return requestJson(`${BASE_URL}/api/agent/terminal/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
   async clearTaskSession(taskId: string): Promise<{ success: boolean }> {
     if (import.meta.env?.DEV) {
       console.log(`[UI:API] 请求清空任务 [${taskId}] 的 Agent 会话消息`);
