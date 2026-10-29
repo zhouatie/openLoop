@@ -48,10 +48,18 @@ interface PendingRow extends TreeRow {
 
 const pad2 = (value: number) => String(value).padStart(2, '0');
 
+/** 当天只显示时刻，其余补上日期；跨年再带上年份 */
 function timeLabel(timestamp: number): string {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
   const date = new Date(timestamp);
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  const now = new Date();
+  const sameYear = date.getFullYear() === now.getFullYear();
+  const sameDay =
+    sameYear && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  if (sameDay) return clock;
+  const day = `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+  return `${sameYear ? day : `${date.getFullYear()}-${day}`} ${clock}`;
 }
 
 /** 当前分支所在的那一支排最前：与 pi 的 /tree 一致，当前对话永远第一眼可见 */
