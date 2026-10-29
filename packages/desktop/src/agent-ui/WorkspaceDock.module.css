@@ -9,6 +9,8 @@
   max-width: 60%;
   border-left: 0.5px solid var(--dsw-alias-border-l3);
   background: var(--dsw-alias-bg-base);
+  /* body 全局关闭了选中，预览正文要单独放开，支持划词复制 */
+  user-select: text;
 }
 
 /* 左缘拖拽：本体是 8px 命中区，悬停时在发丝线上浮出一根 1px 抓手 */
