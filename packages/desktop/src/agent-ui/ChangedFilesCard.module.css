@@ -63,7 +63,7 @@ button.header:focus-visible {
   border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: 10px;
   background: color-mix(in srgb, var(--dsw-static-neutral-00) 50%, transparent);
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-static-deepseek-500);
 }
 
 :global(.agent-scope[data-ds-dark-theme]) .tile {

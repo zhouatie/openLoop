@@ -1,13 +1,35 @@
 import { createContext, useContext } from 'react';
 
+/** 一次改动的定位：服务端的 changeId 加展示用路径 */
+export interface ChangeTarget {
+  changeId: string;
+  path: string;
+}
+
+/** 会话里打开本地文件的入口：普通文件引用走预览，改动卡的行走 diff 页签 */
+export interface OpenFileApi {
+  /** 在右侧工作台预览该文件 */
+  openFile: (path: string) => void;
+  /** 在右侧工作台打开这次改动的 diff；未提供时改动卡退回预览 */
+  openDiff?: (target: ChangeTarget) => void;
+}
+
 /**
- * 会话里点开本地文件时的入口：由面板挂载方提供，用来把右侧工作台切到该文件的预览。
+ * 由面板挂载方提供。
  * 未提供时（例如预览面板不可用）文件引用保持不可点。
  */
-export const OpenFileContext = createContext<((path: string) => void) | undefined>(undefined);
+export const OpenFileContext = createContext<OpenFileApi | undefined>(undefined);
+
+export function useOpenFileApi(): OpenFileApi | undefined {
+  return useContext(OpenFileContext);
+}
 
 export function useOpenFile(): ((path: string) => void) | undefined {
-  return useContext(OpenFileContext);
+  return useContext(OpenFileContext)?.openFile;
+}
+
+export function useOpenDiff(): ((target: ChangeTarget) => void) | undefined {
+  return useContext(OpenFileContext)?.openDiff;
 }
 
 /** 本地文件链接：去掉 #L12 之类的锚点，排除协议与站内相对地址 */

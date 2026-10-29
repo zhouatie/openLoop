@@ -54,6 +54,12 @@ import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 import { AutomationScheduler } from '../automation/automation-scheduler';
 import { WorkflowRecommender } from '../engine/workflow-recommender';
 import { SubtaskPlanner } from '../agent/subtask-planner';
+import {
+  configureTurnChanges,
+  forgetSessionChanges,
+  readChangeDiff,
+  sweepTurnChanges,
+} from '../agent/turn-changes';
 
 const serverLogger = createLogger('Server');
 
@@ -259,6 +265,9 @@ export class OpenLoopServer {
       serverLogger.info(`[PiExtensions] 会话进程装载扩展: ${getEnabledPiExtensions().join(', ') || '(仅 openLoop 桥接)'}`);
       // 把 Midscene 调试产物收拢到数据目录，避免污染工作目录并可被存储清理回收
       configureQaRuntimePaths(this.store.getDataDir());
+      // 轮内改动捕获：内容落在 <数据目录>/changes，启动时清掉上次进程残留的会话目录
+      configureTurnChanges(this.store.getDataDir());
+      sweepTurnChanges();
 
       this.httpServer.listen(this.port, this.host, () => {
         serverLogger.info(`[openLoop Core] 服务就绪，监听地址: http://${this.host}:${this.port}`);
@@ -854,6 +863,8 @@ export class OpenLoopServer {
           return this.sendJson(res, 404, { error: 'Session Not Found' }, reqMeta);
         }
         agentSessionHost.stop(sessionKey);
+        // 会话删掉后改动捕获也没人看：目录与记录一起清
+        forgetSessionChanges(sessionKey);
         const moved = moveSessionFileToTrash(summary.path);
         if (!moved.ok) {
           return this.sendJson(res, 500, { error: moved.error || '删除失败' }, reqMeta);
@@ -912,6 +923,15 @@ export class OpenLoopServer {
         } catch (err: any) {
           return this.sendJson(res, 400, { error: err?.message || '无法读取文件' }, reqMeta);
         }
+      }
+
+      // 轮内改动的两侧原文：工作台 diff 页签按 changeId 取
+      if (pathname === '/api/agent/changes/diff' && method === 'GET') {
+        const changeId = parsedUrl.searchParams.get('changeId') || '';
+        const diff = changeId ? readChangeDiff(changeId) : undefined;
+        serverLogger.debug(`[改动对比] changeId=${changeId} ${diff ? diff.kind : 'missing'}`);
+        if (!diff) return this.sendJson(res, 404, { error: '改动内容已过期' }, reqMeta);
+        return this.sendJson(res, 200, diff, reqMeta);
       }
 
       if (pathname === '/api/agent/fs/stat' && method === 'GET') {

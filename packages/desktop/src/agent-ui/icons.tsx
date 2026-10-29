@@ -335,8 +335,52 @@ export const IconSliders = createIcon('IconSliders', 16, () => (
   </>
 ));
 
-/** 单列表分组（DSH flat-list-outline） */
-export const IconFlatList = createIcon('IconFlatList', 16, () => (
+/* DSH FileTypeIcon 的 code 字形（28 栅格填充文件，MIT） */
+const FILE_CODE_BODY =
+  'M8.48924 28H19.5108C21.6479 28 22.7165 28 23.5594 27.6509C24.6833 27.1853 25.5762 26.2924 26.0417 25.1685C26.3909 24.3256 26.3909 23.257 26.3909 21.1199V8.79443C26.3909 8.32877 26.3909 8.09593 26.3471 7.87507C26.2887 7.58058 26.173 7.30042 26.0067 7.05048C25.882 6.86303 25.7177 6.69799 25.3893 6.36792L20.0611 1.01354C19.7304 0.681235 19.5651 0.515081 19.3769 0.38885C19.126 0.220541 18.8443 0.103463 18.5481 0.0443412C18.3259 0 18.0915 0 17.6226 0H8.48924C6.35209 0 5.28351 0 4.4406 0.349145C3.31672 0.814671 2.4238 1.70759 1.95828 2.83147C1.60913 3.67438 1.60913 4.74296 1.60913 6.88011V21.1199C1.60913 23.257 1.60913 24.3256 1.95828 25.1685C2.4238 26.2924 3.31672 27.1853 4.4406 27.6509C5.28351 28 6.35209 28 8.48924 28Z';
+const FILE_CODE_FOLD =
+  'M26.3909 7.37445L19.0525 0V3.77445C19.0525 4.89271 19.0525 5.45184 19.2352 5.89289C19.4788 6.48096 19.946 6.94818 20.5341 7.19176C20.9751 7.37445 21.5342 7.37445 22.6525 7.37445H26.3909Z';
+
+/** 代码文件：DSH FileTypeIcon kind="code"，颜色随 currentColor */
+export const IconFileCode = React.memo(function IconFileCode({ size = 20, className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 28 28"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d={FILE_CODE_BODY} fill="currentColor" />
+      <path d={FILE_CODE_FOLD} fill="var(--dsw-static-neutral-00)" fillOpacity="0.7" />
+      <g color="var(--dsw-static-neutral-00)">
+        <path
+          d="M10.0053 13.126L7.0236 16.3788C6.96052 16.4476 6.96052 16.5532 7.0236 16.622L10.0053 19.8748"
+          stroke="currentColor"
+          strokeWidth="1.35"
+        />
+        <path
+          d="M17.9941 13.126L20.9759 16.3788C21.039 16.4476 21.039 16.5532 20.9759 16.622L17.9941 19.8748"
+          stroke="currentColor"
+          strokeWidth="1.35"
+        />
+        <path d="M15.2652 12.957L12.7344 20.0433" stroke="currentColor" strokeWidth="1.35" />
+      </g>
+    </svg>
+  );
+});
+
+/** 分栏对比（DSH compare-split-outline） */
+export const IconCompareSplit = createIcon('IconCompareSplit', 14, () => (
+  <>
+    <rect x="1.9" y="2.3" width="12.2" height="11.4" rx="1.8" stroke="currentColor" />
+    <path d="M8 2.3v11.4" stroke="currentColor" />
+  </>
+));
+
+/** 单列表分组（DSH flat-list-outline） */export const IconFlatList = createIcon('IconFlatList', 16, () => (
   <>
     <path d="M6 3.5h7.5M6 8h7.5M6 12.5h7.5" stroke="currentColor" />
     <path d="M2.6 3.5h.01M2.6 8h.01M2.6 12.5h.01" stroke="currentColor" />

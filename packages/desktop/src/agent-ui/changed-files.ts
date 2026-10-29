@@ -6,6 +6,8 @@ export interface ChangedFile {
   path: string;
   added: number;
   deleted: number;
+  /** 服务端的改动标识：取得到时点行打开 diff 页签 */
+  changeId?: string;
 }
 
 /** 一轮的改动汇总：卡片直接渲染 */
@@ -88,5 +90,5 @@ function computeChange(tool: ToolExecutionRecord): ChangedFile | null {
     added += lineCount(hunk.newText);
     deleted += lineCount(hunk.oldText);
   }
-  return added === 0 && deleted === 0 ? null : { path, added, deleted };
+  return added === 0 && deleted === 0 ? null : { path, added, deleted, changeId: tool.changeId };
 }

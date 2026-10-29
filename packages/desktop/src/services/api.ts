@@ -1198,6 +1198,16 @@ export class DesktopApiService {
     return requestJson(`${BASE_URL}/api/agent/fs/stat?path=${encodeURIComponent(path)}`);
   }
 
+  /** 轮内改动的两侧原文：工作台 diff 页签用 changeId 取 */
+  async getAgentChangeDiff(changeId: string): Promise<{
+    path: string;
+    kind: 'text' | 'binary' | 'oversized';
+    before: string | null;
+    after: string | null;
+  }> {
+    return requestJson(`${BASE_URL}/api/agent/changes/diff?changeId=${encodeURIComponent(changeId)}`);
+  }
+
   agentFsRawUrl(path: string, base?: string): string {
     return `${BASE_URL}/api/agent/fs/raw?${fsQuery(path, base)}`;
   }

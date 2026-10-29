@@ -1,9 +1,9 @@
 /* 轮末改动卡：取自 deepseek-harness ui-deliverables 的 ChangedFiles（MIT）。
-   只保留标题、文件列表与折叠；review tab 与悬浮对比预览不在本移植范围。 */
+   保留标题、文件列表与折叠；行点击打开这次改动的 diff 页签（review tab 与悬浮预览仍不在本移植范围）。 */
 import React, { memo, useState } from 'react';
 import type { ChangedFile, TurnChanges } from './changed-files';
-import { IconChevronDown, IconChevronUp, IconCode } from './icons';
-import { useOpenFile } from './open-file';
+import { IconChevronDown, IconChevronUp, IconFileCode } from './icons';
+import { useOpenDiff, useOpenFile } from './open-file';
 import styles from './ChangedFilesCard.module.css';
 
 /** 折叠前显示的行数 */
@@ -30,15 +30,17 @@ function Counts({ added, deleted }: { added: number; deleted: number }) {
   );
 }
 
-/** 一行文件：点击在右侧工作台预览该文件 */
+/** 一行文件：点击优先在右侧工作台看这次改动的 diff，拿不到时退回源码预览 */
 const FileRow = memo(function FileRow({
   file,
   cwd,
   open,
+  openDiff,
 }: {
   file: ChangedFile;
   cwd?: string;
   open?: (path: string) => void;
+  openDiff?: (target: { changeId: string; path: string }) => void;
 }) {
   const shown = displayPath(file.path, cwd);
   const body = (
@@ -47,7 +49,8 @@ const FileRow = memo(function FileRow({
       <Counts added={file.added} deleted={file.deleted} />
     </>
   );
-  if (!open) {
+  const diffTarget = file.changeId && openDiff ? { changeId: file.changeId, path: file.path } : undefined;
+  if (!open && !diffTarget) {
     return (
       <li className={styles.row} title={shown}>
         {body}
@@ -60,8 +63,8 @@ const FileRow = memo(function FileRow({
         type="button"
         className={styles.row}
         title={shown}
-        aria-label={`在预览中打开 ${shown}`}
-        onClick={() => open(file.path)}
+        aria-label={diffTarget ? `查看 ${shown} 的改动` : `在预览中打开 ${shown}`}
+        onClick={() => (diffTarget ? openDiff?.(diffTarget) : open?.(file.path))}
       >
         {body}
       </button>
@@ -82,9 +85,11 @@ export const ChangedFilesCard = memo(function ChangedFilesCard({
   cwd?: string;
 }) {
   const openFile = useOpenFile();
+  const openDiff = useOpenDiff();
   const [expanded, setExpanded] = useState(false);
   const single = changes.files.length === 1 ? changes.files[0] : undefined;
   const singlePath = single ? displayPath(single.path, cwd) : undefined;
+  const singleDiff = single?.changeId && openDiff ? { changeId: single.changeId, path: single.path } : undefined;
   const foldable = changes.files.length > FOLD_ROWS;
   const rows = foldable && !expanded ? changes.files.slice(0, FOLD_ROWS) : changes.files;
 
@@ -99,23 +104,23 @@ export const ChangedFilesCard = memo(function ChangedFilesCard({
 
   return (
     <div className={styles.card} data-changed-files>
-      {single && openFile ? (
+      {single && (singleDiff || openFile) ? (
         <button
           type="button"
           className={styles.header}
           title={singlePath}
-          aria-label={`在预览中打开 ${singlePath}`}
-          onClick={() => openFile(single.path)}
+          aria-label={singleDiff ? `查看 ${singlePath} 的改动` : `在预览中打开 ${singlePath}`}
+          onClick={() => (singleDiff ? openDiff?.(singleDiff) : single && openFile?.(single.path))}
         >
           <span className={styles.tile}>
-            <IconCode size={20} />
+            <IconFileCode size={20} />
           </span>
           <span className={styles.titles}>{titles}</span>
         </button>
       ) : (
         <div className={styles.header} title={singlePath}>
           <span className={styles.tile}>
-            <IconCode size={20} />
+            <IconFileCode size={20} />
           </span>
           <span className={styles.titles}>{titles}</span>
         </div>
@@ -123,7 +128,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard({
       {!single && (
         <ul className={styles.list}>
           {rows.map((file) => (
-            <FileRow key={file.path} file={file} cwd={cwd} open={openFile} />
+            <FileRow key={file.path} file={file} cwd={cwd} open={openFile} openDiff={openDiff} />
           ))}
         </ul>
       )}

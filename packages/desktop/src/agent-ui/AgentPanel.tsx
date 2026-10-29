@@ -12,7 +12,7 @@ import {
   ComposerPermission,
 } from './Composer';
 import { WorkspaceDock, type DockRequest, type DockTab } from './WorkspaceDock';
-import { OpenFileContext } from './open-file';
+import { OpenFileContext, type ChangeTarget, type OpenFileApi } from './open-file';
 import { IconClose, IconFork, IconMinimize, IconPanelRight } from './icons';
 import { BrandLogo } from '../components/BrandLogo';
 import { toast } from '../components/Toast';
@@ -465,9 +465,9 @@ export function TaskAgentPanel({
   const attachments = useAttachments(taskId);
 
   /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
-  const openDock = useCallback((kind: DockTab, path?: string) => {
+  const openDock = useCallback((kind: DockTab, path?: string, changeId?: string) => {
     setDockOpen(true);
-    setDockRequest({ kind, path, seq: ++dockSeq.current });
+    setDockRequest({ kind, path, changeId, seq: ++dockSeq.current });
   }, []);
 
   // 面板内快捷键：工作台开合与页签
@@ -574,8 +574,19 @@ export function TaskAgentPanel({
     [openDock]
   );
 
+  /** 改动卡的行：把这次改动作为 diff 页签打开 */
+  const openDiff = useCallback(
+    (target: ChangeTarget) => {
+      if (import.meta.env?.DEV) console.log('[AgentPanel] 改动对比:', target.path, target.changeId);
+      openDock('diff', target.path, target.changeId);
+    },
+    [openDock]
+  );
+
+  const openApi = useMemo<OpenFileApi>(() => ({ openFile, openDiff }), [openFile, openDiff]);
+
   return (
-    <OpenFileContext.Provider value={openFile}>
+    <OpenFileContext.Provider value={openApi}>
     <AgentPanelShell
       title={taskTitle || 'Agent 协作流'}
       subtitle={mode === 'inline' ? '与任务同屏协作' : undefined}
@@ -810,9 +821,9 @@ export function GlobalAgentPanel({
   const warmRef = useRef<{ id: string; used: boolean } | null>(null);
 
   /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
-  const openDock = useCallback((kind: DockTab, path?: string) => {
+  const openDock = useCallback((kind: DockTab, path?: string, changeId?: string) => {
     setDockOpen(true);
-    setDockRequest({ kind, path, seq: ++dockSeq.current });
+    setDockRequest({ kind, path, changeId, seq: ++dockSeq.current });
   }, []);
 
   // 斜杠指令（提供方为 /api/agent/commands-and-skills）
@@ -1783,6 +1794,17 @@ export function GlobalAgentPanel({
     [openDock]
   );
 
+  /** 改动卡的行：把这次改动作为 diff 页签打开 */
+  const openDiff = useCallback(
+    (target: ChangeTarget) => {
+      if (import.meta.env?.DEV) console.log('[AgentPanel] 改动对比:', target.path, target.changeId);
+      openDock('diff', target.path, target.changeId);
+    },
+    [openDock]
+  );
+
+  const openApi = useMemo<OpenFileApi>(() => ({ openFile, openDiff }), [openFile, openDiff]);
+
   /** 工作台展开按钮：顶栏形态放顶栏，整页形态（无顶栏）放右上角 */
   const dockToggle = (
     <button
@@ -1810,7 +1832,7 @@ export function GlobalAgentPanel({
   );
 
   return (
-    <OpenFileContext.Provider value={openFile}>
+    <OpenFileContext.Provider value={openApi}>
     <div
       className={`agent-scope ${styles.panel} ${
         mode === 'drawer' ? styles.panelDrawer : styles.panelPage

@@ -129,6 +129,8 @@ export interface ToolExecutionRecord {
   imageUrls?: string[];
   /** 调用发生时的工作目录，命令卡用它做提示符前缀 */
   cwd?: string;
+  /** 本轮该文件的改动标识：工作台 diff 页签用它取改动前后内容 */
+  changeId?: string;
 }
 
 /** 单条消息的模型用量，用于输入框上方统计胶囊 */

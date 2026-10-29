@@ -17,6 +17,7 @@ import {
 import { createLogger } from '../logger';
 import { compactToolResult } from './agent-format';
 import { buildPiExtensionArgs } from './pi-extensions';
+import { changeCaptureDir, changeIdOf, finishTurnChanges, forgetSessionChanges, rememberTurnWrite } from './turn-changes';
 import {
   AgentStatusEvent,
   AgentStreamEvent,
@@ -50,6 +51,11 @@ const TREE_COMMAND = 'openloop-tree';
  * 编译产物与本文件同目录树，跟着 dist 一起分发。
  */
 const TITLE_EXTENSION_PATH = path.join(__dirname, 'extensions', 'openloop-title.js');
+/**
+ * 改动捕获桥：在 pi 进程内、写入类工具执行前存一份改动前内容。
+ * 编译产物与本文件同目录树，跟着 dist 一起分发。
+ */
+const CAPTURE_EXTENSION_PATH = path.join(__dirname, 'extensions', 'openloop-capture.js');
 
 /** 工具入参摘要：只保留可展示的原始字段，供工具卡直接渲染 */
 function summarizeToolInput(args: any): Record<string, any> | undefined {
@@ -67,6 +73,16 @@ function summarizeToolInput(args: any): Record<string, any> | undefined {
     count += 1;
   }
   return Object.keys(summary).length > 0 ? summary : undefined;
+}
+
+/** 写入类工具的入参目标：pi 的 write / edit 用 path，其余变体一并兼容 */
+function writeTargetOf(args: any, cwd: string): string | undefined {
+  if (!args || typeof args !== 'object') return undefined;
+  for (const key of ['path', 'file_path', 'filePath', 'target']) {
+    const raw = args[key];
+    if (typeof raw === 'string' && raw) return path.resolve(cwd, raw);
+  }
+  return undefined;
 }
 
 /** 附件按本地路径拼进正文：模型按需读取，不把图片塞进请求体 */
@@ -163,6 +179,8 @@ export class PiRpcSessionInstance extends EventEmitter {
   public lastError?: string;
   /** 会话工作目录，工具记录直接带上，供命令卡显示提示符 */
   public cwd?: string;
+  /** 子进程实际启动目录：改动捕获解析相对路径用它，保证与 pi 进程内一致 */
+  private spawnCwd?: string;
   /** 本轮（一次用户提交）开始时间，运行中用于显示用时 */
   public turnStartedAt?: number;
   /** 上一轮从开始到结束的用时（毫秒） */
@@ -257,9 +275,16 @@ export class PiRpcSessionInstance extends EventEmitter {
     if (fs.existsSync(TITLE_EXTENSION_PATH)) {
       args.push('--extension', TITLE_EXTENSION_PATH);
     }
+    // 改动捕获桥：数据目录未注入或脚本缺失时跳过，diff 页签退回源码预览
+    const captureDir = changeCaptureDir(this.sessionId);
+    const captureReady = Boolean(captureDir) && fs.existsSync(CAPTURE_EXTENSION_PATH);
+    if (captureReady) {
+      args.push('--extension', CAPTURE_EXTENSION_PATH);
+    }
 
     const requestedCwd = options.cwd || os.tmpdir();
     const { cwd, recreated } = resolveSpawnCwd(requestedCwd);
+    this.spawnCwd = cwd;
     const nodeBinDir = path.dirname(process.execPath);
     const extraPath = [
       nodeBinDir,
@@ -271,6 +296,13 @@ export class PiRpcSessionInstance extends EventEmitter {
       ...process.env,
       PATH: `${extraPath}:${process.env.PATH || ''}`,
       ...(options.env || {}),
+      ...(captureReady
+        ? {
+            OPENLOOP_CHANGE_DIR: captureDir as string,
+            OPENLOOP_CHANGE_SESSION: this.sessionId,
+            OPENLOOP_CHANGE_CWD: cwd,
+          }
+        : {}),
     };
 
     logger.info(`启动 Pi RPC 会话进程: pi ${args.join(' ')} (CWD: ${cwd})`, undefined, {
@@ -695,6 +727,18 @@ export class PiRpcSessionInstance extends EventEmitter {
           owner.tool.args = record.args;
           owner.tool.input = summarizeToolInput(record.args);
           if (!owner.tool.kind) owner.tool.kind = classifyToolKind(owner.tool.name);
+          // 写入类工具：改动前内容已由捕获桥在工具执行前写盘，这里只记下本次改动的标识
+          if (owner.tool.kind === 'write') {
+            const target = writeTargetOf(record.args, this.spawnCwd || this.cwd || process.cwd());
+            if (target) {
+              const changeId = changeIdOf(this.sessionId, record.toolCallId);
+              rememberTurnWrite(this.sessionId, this.turnSeq, target, changeId);
+              owner.tool.changeId = changeId;
+              logger.debug(`改动捕获关联: ${target} → ${changeId} (第 ${this.turnSeq} 轮)`, undefined, {
+                taskId: this.taskId,
+              });
+            }
+          }
           this.emitTool(owner.messageId, owner.tool);
           this.notifyUpdate();
         }
@@ -773,6 +817,8 @@ export class PiRpcSessionInstance extends EventEmitter {
       }
 
       case 'turn_end': {
+        // 轮末补齐改动后内容：之后再打开 diff 页签就不用等
+        finishTurnChanges(this.sessionId, this.turnSeq);
         const msg = record.message;
         if (msg?.errorMessage || msg?.stopReason === 'error') {
           const errorText = msg.errorMessage || '模型调用失败';
@@ -812,6 +858,8 @@ export class PiRpcSessionInstance extends EventEmitter {
 
       case 'agent_settled': {
         this.isBusy = false;
+        // 轮末兜底：没收到 turn_end 时也把改动后内容补齐
+        finishTurnChanges(this.sessionId, this.turnSeq);
         // 一轮结束后仍未送达的输入不会再进本轮，回显层清零；若 pi 稍后采纳，会话流仍会显示它
         this.clearPendingInputs();
         this.finishTurn();
@@ -1351,6 +1399,8 @@ export class PiRpcSessionInstance extends EventEmitter {
   public terminate() {
     this.active = false;
     this.isBusy = false;
+    // 会话销毁：连同本轮改动的捕获记录与内容副本一起清理
+    forgetSessionChanges(this.sessionId);
     if (this.child) {
       try {
         if (this.child.stdin && !this.child.stdin.destroyed) {

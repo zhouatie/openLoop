@@ -1,6 +1,7 @@
 import React, { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { AgentMarkdown } from './Markdown';
+import { DiffPane } from './DiffPane';
 import { CodeBlock } from './dsh/CodeBlock';
 import { languageForPath } from './dsh/code-language';
 import { ImageLightbox } from './dsh/ImageLightbox';
@@ -16,13 +17,15 @@ import {
 } from './icons';
 import styles from './WorkspaceDock.module.css';
 
-export type DockTab = 'files' | 'preview';
+export type DockTab = 'files' | 'preview' | 'diff';
 
 /** 上层发起的页签请求：同一个请求重复触发也要生效，所以带序号 */
 export interface DockRequest {
   kind: DockTab;
   /** 预览页签的文件路径 */
   path?: string;
+  /** diff 页签的改动标识 */
+  changeId?: string;
   seq: number;
 }
 
@@ -32,6 +35,8 @@ interface DockPane {
   title: string;
   /** 预览页签的文件路径 */
   path?: string;
+  /** diff 页签的改动标识 */
+  changeId?: string;
   /** 重复打开同一个文件时递增，用来重新加载 */
   seq: number;
 }
@@ -95,6 +100,11 @@ function baseName(path: string): string {
 
 function previewKey(path: string): string {
   return `preview:${path}`;
+}
+
+/** diff 页签按改动标识区分：同一个文件在不同轮次是两个页签 */
+function diffKey(changeId: string): string {
+  return `diff:${changeId}`;
 }
 
 function pinnedPane(kind: DockTab): DockPane {
@@ -482,10 +492,26 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
     setActiveKey(key);
   }, []);
 
-  // 上层请求：打开文件页签，或把某个文件作为预览页签打开
+  /** 一次改动的 diff 页签：按 changeId 去重，重复点同一个改动只重新激活 */
+  const openDiff = useCallback((changeId: string, path: string) => {
+    if (import.meta.env?.DEV) console.log('[WorkspaceDock] 改动对比:', path, changeId);
+    const key = diffKey(changeId);
+    setPanes((prev) =>
+      prev.some((pane) => pane.key === key)
+        ? prev
+        : [...prev, { key, kind: 'diff' as const, title: baseName(path), path, changeId, seq: Date.now() }]
+    );
+    setActiveKey(key);
+  }, []);
+
+  // 上层请求：打开文件页签，或把某个文件作为预览 / diff 页签打开
   useEffect(() => {
     if (!request) return;
     if (import.meta.env?.DEV) console.log('[WorkspaceDock] 页签请求:', request);
+    if (request.kind === 'diff') {
+      if (request.changeId && request.path) openDiff(request.changeId, request.path);
+      return;
+    }
     if (request.kind === 'preview') {
       if (request.path) openPreview(request.path);
       return;
@@ -494,7 +520,7 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
       prev.some((pane) => pane.key === request.kind) ? prev : [...prev, pinnedPane(request.kind)]
     );
     setActiveKey(request.kind);
-  }, [request, openPreview]);
+  }, [request, openPreview, openDiff]);
 
   const closePane = useCallback(
     (key: string) => {
@@ -624,6 +650,9 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
               ))}
             {pane.kind === 'preview' && pane.path && (
               <FilePreview path={pane.path} seq={pane.seq} cwd={root} />
+            )}
+            {pane.kind === 'diff' && pane.changeId && pane.path && (
+              <DiffPane changeId={pane.changeId} path={pane.path} onOpenSource={openPreview} />
             )}
           </div>
         ))}
