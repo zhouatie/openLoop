@@ -1,3 +1,4 @@
+export * from './AppSplashScreen';
 export * from './Header';
 export * from './Sidebar';
 export * from './CreateTaskModal';
