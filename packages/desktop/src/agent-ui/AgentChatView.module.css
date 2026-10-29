@@ -101,23 +101,9 @@
   flex-direction: column;
 }
 
-/* 「更早的消息」：把窗口外的历史按页挂回来 */
-.more {
-  display: block;
-  margin: 0 auto 14px;
-  padding: 5px 12px;
-  border: 0;
-  border-radius: 100px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-secondary);
-  background: var(--dsw-alias-bg-layer-2);
-  cursor: pointer;
-}
-
-.more:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-layer-3);
+/* 顶部还有更早的消息：留一点余量，滚到顶自动加载下一页历史 */
+.olderEdge {
+  height: 12px;
 }
 
 .turnFooter {

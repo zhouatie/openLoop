@@ -41,10 +41,12 @@ const PREVIEW_PROMPT_CHARS = 80;
 const PREVIEW_RESPONSE_CHARS = 160;
 /**
  * 首屏只挂最近这些消息行：会话切换时不必等整段历史都进 DOM。
- * 更早的消息留在数据里，由顶部「更早的消息」按页挂回来。
+ * 更早的消息留在数据里，滚到顶部时按页自动挂回来。
  */
 const INITIAL_ROWS = 40;
 const ROWS_PER_PAGE = 80;
+/** 距顶部多少像素内即视为「滚到顶」，开始挂更早的消息 */
+const TOP_LOAD_THRESHOLD = 120;
 
 /** 默认空回显列表：避免每次渲染新建数组，让 memo 不失效 */
 const EMPTY_PENDING: PendingUserInput[] = [];
@@ -281,13 +283,38 @@ export const AgentChatView = React.memo(function AgentChatView({
 
   /** 已向前展开的消息条数：切换会话时归零，回到「只看最新一屏」 */
   const [revealCount, setRevealCount] = useState(0);
+  /** 上翻阅读时冻结的窗口起点；null 表示跟随最新消息（贴底） */
+  const frozenFromRef = useRef<number | null>(null);
   const [revealKey, setRevealKey] = useState(sessionKey);
   if (revealKey !== sessionKey) {
     setRevealKey(sessionKey);
+    frozenFromRef.current = null;
     if (revealCount !== 0) setRevealCount(0);
   }
-  const fromIndex = Math.max(0, shown.length - INITIAL_ROWS - revealCount);
+  const tailFrom = Math.max(0, shown.length - INITIAL_ROWS - revealCount);
+  const frozenFrom = frozenFromRef.current;
+  /** 贴底时窗口跟随最新消息；上翻阅读时冻结，流式追加不会把上面的内容裁掉 */
+  const fromIndex = frozenFrom === null ? tailFrom : Math.min(frozenFrom, tailFrom);
   const visibleBlocks = useMemo(() => sliceBlocks(blocks, fromIndex), [blocks, fromIndex]);
+
+  /** 窗口外还有更早的消息：滚动与布局回调里要读它，用 ref 避免闭包读旧值 */
+  const hasOlder = fromIndex > 0;
+  const hasOlderRef = useRef(hasOlder);
+  hasOlderRef.current = hasOlder;
+  const fromIndexRef = useRef(fromIndex);
+  fromIndexRef.current = fromIndex;
+
+  /** 挂一页更早的消息：新内容插在上方，加载后把视口留在原处 */
+  const anchorRef = useRef<{ height: number; top: number } | null>(null);
+  const revealOlder = useCallback(() => {
+    const node = scrollerRef.current;
+    anchorRef.current = node ? { height: node.scrollHeight, top: node.scrollTop } : null;
+    stickRef.current = false;
+    if (frozenFromRef.current !== null) {
+      frozenFromRef.current = Math.max(0, frozenFromRef.current - ROWS_PER_PAGE);
+    }
+    setRevealCount((prev) => prev + ROWS_PER_PAGE);
+  }, []);
 
   const railFrameRef = useRef<number | null>(null);
   const handleScroll = useCallback(() => {
@@ -297,6 +324,13 @@ export const AgentChatView = React.memo(function AgentChatView({
     const stick = distance <= STICK_THRESHOLD;
     stickRef.current = stick;
     setShowJump((prev) => (prev === !stick ? prev : !stick));
+
+    // 贴底则继续跟随最新消息；上翻则冻结窗口，新消息不会把正在读的内容顶掉
+    if (stick) frozenFromRef.current = null;
+    else if (frozenFromRef.current === null) frozenFromRef.current = fromIndexRef.current;
+
+    // 滚到顶部即挂下一页历史：加载后视口按锚点留在原处，不会跳回最新消息
+    if (node.scrollTop <= TOP_LOAD_THRESHOLD && hasOlderRef.current) revealOlder();
 
     // 定位轨要读布局（querySelectorAll + offsetTop）：一帧最多算一次，滚动事件再多也不卡
     if (railFrameRef.current !== null) return;
@@ -314,7 +348,7 @@ export const AgentChatView = React.memo(function AgentChatView({
       }
       setActiveTurn((prev) => (prev === current ? prev : current));
     });
-  }, []);
+  }, [revealOlder]);
 
   useEffect(
     () => () => {
@@ -340,6 +374,7 @@ export const AgentChatView = React.memo(function AgentChatView({
     if (!node) return;
     node.scrollTo({ top: node.scrollHeight, behavior });
     stickRef.current = true;
+    frozenFromRef.current = null;
     setShowJump(false);
   }, []);
 
@@ -416,15 +451,6 @@ export const AgentChatView = React.memo(function AgentChatView({
     return () => observer.disconnect();
   }, []);
 
-  /** 展开更早的消息：新内容插在上方，展开后把视口留在原处 */
-  const anchorRef = useRef<{ height: number; top: number } | null>(null);
-  const revealOlder = useCallback((count: number) => {
-    const node = scrollerRef.current;
-    anchorRef.current = node ? { height: node.scrollHeight, top: node.scrollTop } : null;
-    stickRef.current = false;
-    setRevealCount((prev) => prev + count);
-  }, []);
-
   /** 定位轨点到的轮次可能还在窗口外：先展开，等渲染完再滚过去 */
   const pendingTurnRef = useRef<number | null>(null);
   const jumpToTurn = useCallback(
@@ -437,6 +463,10 @@ export const AgentChatView = React.memo(function AgentChatView({
             ? target.index
             : target.user ?? target.steps[0];
       if (first !== undefined && first < fromIndex) {
+        const node = scrollerRef.current;
+        anchorRef.current = node ? { height: node.scrollHeight, top: node.scrollTop } : null;
+        // 跳到窗口外的轮次：窗口直接落到该条，并冻结在这里
+        frozenFromRef.current = first;
         pendingTurnRef.current = turn;
         setRevealCount((prev) => prev + (fromIndex - first));
         return;
@@ -466,10 +496,21 @@ export const AgentChatView = React.memo(function AgentChatView({
       return;
     }
     const anchor = anchorRef.current;
-    if (!anchor) return;
-    anchorRef.current = null;
-    node.scrollTop = anchor.top + (node.scrollHeight - anchor.height);
-  }, [fromIndex]);
+    if (anchor) {
+      anchorRef.current = null;
+      node.scrollTop = anchor.top + (node.scrollHeight - anchor.height);
+    }
+    if (!hasOlder) return;
+    // 已到顶部、或内容还不足一屏时补下一页，直到视口被填满或历史到底
+    const frame = requestAnimationFrame(() => {
+      const el = scrollerRef.current;
+      if (!el) return;
+      if (el.scrollTop <= TOP_LOAD_THRESHOLD || el.scrollHeight - el.clientHeight <= TOP_LOAD_THRESHOLD) {
+        revealOlder();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fromIndex, hasOlder, revealOlder]);
 
   const contentStyle = useMemo(
     () => (contentWidth ? ({ '--agent-content-width': `${contentWidth}px` } as React.CSSProperties) : undefined),
@@ -511,15 +552,7 @@ export const AgentChatView = React.memo(function AgentChatView({
           </div>
         ) : (
           <div ref={contentRef} className={styles.content} style={contentStyle}>
-            {fromIndex > 0 && (
-              <button
-                type="button"
-                className={styles.more}
-                onClick={() => revealOlder(Math.min(ROWS_PER_PAGE, fromIndex))}
-              >
-                {`显示更早的 ${Math.min(ROWS_PER_PAGE, fromIndex)} 条消息`}
-              </button>
-            )}
+            {hasOlder && <div className={styles.olderEdge} aria-hidden />}
             {visibleBlocks.map((block, blockIndex) => {
               const previousDay = blockIndex > 0 ? visibleBlocks[blockIndex - 1].day : '';
               const separator =
