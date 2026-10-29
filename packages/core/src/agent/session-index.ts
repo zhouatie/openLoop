@@ -66,9 +66,9 @@ interface CacheEntry {
 
 /** 单个会话文件最多解析的字节数，防止异常大文件拖垮列表 */
 /** 摘要扫描：从头读这么多，够了（首条用户消息 + 消息计数） */
-const HEAD_SCAN_BYTES = 4 * 1024 * 1024;
+const HEAD_SCAN_BYTES = 128 * 1024;
 /** 摘要扫描：再从尾部补一段，拿到最后一次 model_change */
-const TAIL_SCAN_BYTES = 1 * 1024 * 1024;
+const TAIL_SCAN_BYTES = 64 * 1024;
 /** 消息读取窗口：优先读文件尾部，长会话的最新几轮永远可见 */
 const MAX_MESSAGE_BYTES = 12 * 1024 * 1024;
 /** 全文搜索每个文件只看尾部这么多，控住总 IO */
@@ -145,6 +145,8 @@ function idFromFileName(filePath: string): string {
   return underscore >= 0 ? base.slice(underscore + 1) : base;
 }
 
+const CACHE_FILE_NAME = '.openloop-session-index-cache.json';
+
 /**
  * pi 会话索引
  *
@@ -154,8 +156,49 @@ function idFromFileName(filePath: string): string {
 export class PiSessionIndex {
   private cache = new Map<string, CacheEntry>();
   private scanning?: Promise<PiSessionSummary[]>;
+  private saveCacheTimer?: NodeJS.Timeout;
 
-  constructor(private rootDir: string = resolveSessionRoot()) {}
+  constructor(private rootDir: string = resolveSessionRoot()) {
+    this.loadCacheFromDisk();
+  }
+
+  private loadCacheFromDisk(): void {
+    try {
+      const cachePath = path.join(this.rootDir, CACHE_FILE_NAME);
+      if (!fs.existsSync(cachePath)) return;
+      const raw = fs.readFileSync(cachePath, 'utf-8');
+      const data = JSON.parse(raw);
+      if (Array.isArray(data)) {
+        for (const [key, entry] of data) {
+          if (
+            key &&
+            entry &&
+            typeof entry.size === 'number' &&
+            typeof entry.mtimeMs === 'number' &&
+            entry.summary
+          ) {
+            this.cache.set(key, entry);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  private saveCacheToDisk(): void {
+    try {
+      const cachePath = path.join(this.rootDir, CACHE_FILE_NAME);
+      const entries = Array.from(this.cache.entries());
+      fs.writeFileSync(cachePath, JSON.stringify(entries), 'utf-8');
+    } catch (_) {}
+  }
+
+  private scheduleSaveCache(): void {
+    if (this.saveCacheTimer) return;
+    this.saveCacheTimer = setTimeout(() => {
+      this.saveCacheTimer = undefined;
+      this.saveCacheToDisk();
+    }, 1500);
+  }
 
   public getRootDir(): string {
     return this.rootDir;
@@ -342,6 +385,7 @@ export class PiSessionIndex {
   public invalidate(filePath?: string) {
     if (filePath) this.cache.delete(filePath);
     else this.cache.clear();
+    this.scheduleSaveCache();
   }
 
   private async scan(): Promise<PiSessionSummary[]> {
@@ -381,9 +425,20 @@ export class PiSessionIndex {
     const summaries = described.filter((item): item is PiSessionSummary => item !== undefined);
 
     // 清理已删除文件的缓存
+    let cacheDirty = false;
     const alive = new Set(summaries.map((item) => item.path));
     for (const key of this.cache.keys()) {
-      if (!alive.has(key)) this.cache.delete(key);
+      if (!alive.has(key)) {
+        this.cache.delete(key);
+        cacheDirty = true;
+      }
+    }
+    if (cacheDirty || this.saveCacheTimer) {
+      if (this.saveCacheTimer) {
+        clearTimeout(this.saveCacheTimer);
+        this.saveCacheTimer = undefined;
+      }
+      this.saveCacheToDisk();
     }
 
     summaries.sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1));
@@ -413,6 +468,7 @@ export class PiSessionIndex {
     const summary = await parseSessionFile(filePath, stat);
     if (!summary) return undefined;
     this.cache.set(filePath, { size: stat.size, mtimeMs: stat.mtimeMs, summary });
+    this.scheduleSaveCache();
     return summary;
   }
 
@@ -470,7 +526,7 @@ async function readFileTail(
 async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSessionSummary | undefined> {
   let raw: string;
   try {
-    raw = await readFileHead(filePath);
+    raw = await readFileHead(filePath, Math.min(stat.size, HEAD_SCAN_BYTES));
   } catch (_) {
     return undefined;
   }
@@ -533,6 +589,36 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
         if (text.trim()) firstUserMessage = text.trim().slice(0, TITLE_MAX_CHARS);
       } catch (_) {}
     }
+  }
+
+  // 首屏未搜到首条用户消息且文件较大时，适当扩大范围探测
+  if (!firstUserMessage && stat.size > HEAD_SCAN_BYTES) {
+    try {
+      const extRaw = await readFileHead(filePath, Math.min(stat.size, 512 * 1024));
+      const extLines = extRaw.split('\n');
+      for (const line of extLines.slice(lines.length)) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (!sessionName && trimmed.includes('"type":"session_info"')) {
+          try {
+            const entry = JSON.parse(trimmed);
+            if (typeof entry?.name === 'string' && entry.name.trim()) {
+              sessionName = entry.name.trim().slice(0, TITLE_MAX_CHARS);
+            }
+          } catch (_) {}
+        }
+        if (trimmed.includes('"type":"message"')) {
+          messageCount += 1;
+          if (!firstUserMessage && trimmed.includes('"role":"user"')) {
+            try {
+              const entry = JSON.parse(trimmed);
+              const text = textOfContent(entry?.message?.content);
+              if (text.trim()) firstUserMessage = text.trim().slice(0, TITLE_MAX_CHARS);
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   // 长会话：再扫一段尾部，补齐总消息数与最后一次模型

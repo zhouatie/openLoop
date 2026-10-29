@@ -761,6 +761,34 @@ function readJsonArray(key: string): string[] {
   }
 }
 
+const SESSIONS_CACHE_KEY = 'openloop_agent_sessions_cache_v2';
+let memorySessionsCache: SessionListItem[] | null = null;
+
+function loadCachedSessions(): SessionListItem[] {
+  if (memorySessionsCache && memorySessionsCache.length > 0) {
+    return memorySessionsCache;
+  }
+  try {
+    const raw = localStorage.getItem(SESSIONS_CACHE_KEY);
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    if (Array.isArray(list) && list.length > 0) {
+      memorySessionsCache = list;
+      return list;
+    }
+  } catch (_) {}
+  return [];
+}
+
+function saveCachedSessions(sessions: SessionListItem[]) {
+  memorySessionsCache = sessions;
+  try {
+    // 缓存前 500 个最近会话（足以保证秒开与绝大部分历史直出，同时控制 localStorage 体积在 100KB 内）
+    const toSave = sessions.slice(0, 500);
+    localStorage.setItem(SESSIONS_CACHE_KEY, JSON.stringify(toSave));
+  } catch (_) {}
+}
+
 /** 全局会话：左侧项目（工作目录）树，展开后是该项目下的会话 */
 export function GlobalAgentPanel({
   mode,
@@ -770,7 +798,9 @@ export function GlobalAgentPanel({
 }: GlobalAgentPanelProps) {
   const initialSessionId = sessionRequest?.id || null;
   const { pick: pickDirectory, dialog: directoryDialog } = useDirectoryPicker();
-  const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [sessions, setSessions] = useState<SessionListItem[]>(loadCachedSessions);
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const [liveIds, setLiveIds] = useState<string[]>([]);
   const [busyIds, setBusyIds] = useState<string[]>([]);
   /** 最近一次已知的运行集合（poll / refresh / 实时事件共同维护） */
@@ -790,7 +820,7 @@ export function GlobalAgentPanel({
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [wsMenuOpen]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => loadCachedSessions().length === 0);
   const [query, setQuery] = useState('');
   const [activeId, setActiveId] = useState<string | null>(initialSessionId || newSessionId());
   /** 新会话占位行：对齐 DSH 的 blank session，点「新会话」后立刻在工作区里插入并选中 */
@@ -914,7 +944,10 @@ export function GlobalAgentPanel({
   }, []);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    // 只有在当前没有任何会话时才置 loading，已有缓存展示时静默刷新，不打扰用户
+    if (sessionsRef.current.length === 0) {
+      setLoading(true);
+    }
     try {
       const [list, live] = await Promise.all([
         api.getAgentSessions({ limit: 0 }),
@@ -925,20 +958,24 @@ export function GlobalAgentPanel({
       setLiveIds(liveList);
       setBusyIds(busyList);
       busyRef.current = new Set(busyList);
-      const fromDisk: SessionListItem[] = (list.sessions || []).map((item) => ({
-        id: item.id,
-        // 服务端已裁决好标题：重命名 > 会话名（任务标题 / 自动命名）> 首条消息兜底
-        title: item.title || dateLabel(item.modifiedAt),
-        cwd: item.cwd || '',
-        modifiedAt: item.modifiedAt,
-        messageCount: item.messageCount,
-        live: liveList.includes(item.id),
-        running: false,
-        createdAt: item.createdAt,
-        path: item.path,
-        archived: item.archived === true,
-        pinned: item.pinned === true,
-      }));
+      const fromDisk: SessionListItem[] = (list.sessions || []).map((item) => {
+        const modifiedMs = Date.parse(item.modifiedAt) || 0;
+        return {
+          id: item.id,
+          // 服务端已裁决好标题：重命名 > 会话名（任务标题 / 自动命名）> 首条消息兜底
+          title: item.title || dateLabel(item.modifiedAt),
+          cwd: item.cwd || '',
+          modifiedAt: item.modifiedAt,
+          modifiedMs,
+          messageCount: item.messageCount,
+          live: liveList.includes(item.id),
+          running: false,
+          createdAt: item.createdAt,
+          path: item.path,
+          archived: item.archived === true,
+          pinned: item.pinned === true,
+        };
+      });
       // 通知正文要显示会话名：随列表一起灌进缓存，不额外请求
       rememberAgentSessionTitles(fromDisk);
       // 刚落盘还没被列表扫到的会话（进程仍活着或在跑）要保留，否则该行会先消失再出现
@@ -950,7 +987,28 @@ export function GlobalAgentPanel({
         );
         const known = new Set(disk.map((item) => item.id));
         const keep = prev.filter((item) => !known.has(item.id) && (item.running || item.live));
-        return keep.length > 0 ? [...keep, ...disk] : disk;
+        const next = keep.length > 0 ? [...keep, ...disk] : disk;
+
+        // 浅比较：如果会话列表无变更，直接返回旧引用触发 React Bailout
+        if (
+          prev.length === next.length &&
+          prev.every((p, idx) => {
+            const n = next[idx];
+            return (
+              p.id === n.id &&
+              p.title === n.title &&
+              p.modifiedAt === n.modifiedAt &&
+              p.running === n.running &&
+              p.live === n.live &&
+              p.pinned === n.pinned &&
+              p.archived === n.archived
+            );
+          })
+        ) {
+          return prev;
+        }
+        saveCachedSessions(next);
+        return next;
       });
       applyRunning(busyList);
     } catch (err) {
@@ -959,7 +1017,22 @@ export function GlobalAgentPanel({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyRunning]);
+
+  // 挂载但在后台时（如应用冷启动初次渲染主工作区时）：在空闲时段静默预热一次会话列表
+  useEffect(() => {
+    if (active) return;
+    const idleId = (window.requestIdleCallback || ((cb) => setTimeout(cb, 150)))(() => {
+      void refresh();
+    });
+    return () => {
+      if (window.cancelIdleCallback) {
+        window.cancelIdleCallback(idleId as any);
+      } else {
+        clearTimeout(idleId as any);
+      }
+    };
+  }, [active, refresh]);
 
   // 面板打开时重新拉一次磁盘会话列表；隐藏期间外部新建的会话就靠这一下才出现
   useEffect(() => {
@@ -1159,6 +1232,7 @@ export function GlobalAgentPanel({
         title: '新会话',
         cwd: draft.cwd,
         modifiedAt: nowIso,
+        modifiedMs: Date.now(),
         createdAt: nowIso,
         messageCount: 0,
         draft: true,
@@ -1212,7 +1286,7 @@ export function GlobalAgentPanel({
       }
       const group = ensure(projectKey);
       group.sessions.push(session);
-      const time = Date.parse(session.modifiedAt) || 0;
+      const time = session.modifiedMs !== undefined ? session.modifiedMs : (Date.parse(session.modifiedAt) || 0);
       if (time > group.lastModified) group.lastModified = time;
       const created = Date.parse(session.createdAt || '');
       if (Number.isFinite(created) && (!group.createdAt || created < Date.parse(group.createdAt))) {
@@ -1226,7 +1300,9 @@ export function GlobalAgentPanel({
         ...group,
         sessions: group.sessions.sort((a, b) => {
           if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
-          return (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0);
+          const bTime = b.modifiedMs !== undefined ? b.modifiedMs : (Date.parse(b.modifiedAt) || 0);
+          const aTime = a.modifiedMs !== undefined ? a.modifiedMs : (Date.parse(a.modifiedAt) || 0);
+          return bTime - aTime;
         }),
       }))
       .sort((a, b) => {
@@ -1244,10 +1320,17 @@ export function GlobalAgentPanel({
         label: '未分组',
         cwd: '',
         readonly: true,
-        lastModified: Math.max(0, ...orphaned.map((item) => Date.parse(item.modifiedAt) || 0)),
-        sessions: orphaned.sort(
-          (a, b) => (Date.parse(b.modifiedAt) || 0) - (Date.parse(a.modifiedAt) || 0)
+        lastModified: Math.max(
+          0,
+          ...orphaned.map((item) =>
+            item.modifiedMs !== undefined ? item.modifiedMs : (Date.parse(item.modifiedAt) || 0)
+          )
         ),
+        sessions: orphaned.sort((a, b) => {
+          const bTime = b.modifiedMs !== undefined ? b.modifiedMs : (Date.parse(b.modifiedAt) || 0);
+          const aTime = a.modifiedMs !== undefined ? a.modifiedMs : (Date.parse(a.modifiedAt) || 0);
+          return bTime - aTime;
+        }),
       },
     ];
   }, [filteredSessions, extraProjects, projectMeta]);
@@ -1255,6 +1338,10 @@ export function GlobalAgentPanel({
   // 会话与工作区元数据操作
   const renameSession = useCallback(
     async (id: string, title: string) => {
+      // 乐观更新：本地立即生效
+      setSessions((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, title: title.trim() || item.title } : item))
+      );
       // 空标题等于清掉覆盖，回到默认标题
       await api.setAgentSessionMeta(id, { title: title.trim() }).catch(() => null);
       await refresh();
@@ -1264,6 +1351,10 @@ export function GlobalAgentPanel({
 
   const archiveSession = useCallback(
     async (id: string, archived: boolean) => {
+      // 乐观更新：本地立即生效
+      setSessions((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, archived } : item))
+      );
       await api.setAgentSessionMeta(id, { archived }).catch(() => null);
       await refresh();
     },
@@ -1272,6 +1363,10 @@ export function GlobalAgentPanel({
 
   const pinSession = useCallback(
     async (id: string, pinned: boolean) => {
+      // 乐观更新：本地立即生效
+      setSessions((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, pinned } : item))
+      );
       await api.setAgentSessionMeta(id, { pinned }).catch(() => null);
       await refresh();
     },
@@ -1427,6 +1522,8 @@ export function GlobalAgentPanel({
   const deleteSession = useCallback(
     async (id: string) => {
       if (!window.confirm('删除该会话？文件会移入 openLoop 回收目录。')) return;
+      // 乐观更新：立即从列表移除
+      setSessions((prev) => prev.filter((item) => item.id !== id));
       await api.deleteAgentSession(id, true).catch(() => null);
       if (id === activeId) {
         const next = newSessionId();
