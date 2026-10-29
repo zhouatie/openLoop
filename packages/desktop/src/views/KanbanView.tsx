@@ -3731,7 +3731,10 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                           </span>
                                           <div className="min-w-0 flex-1">
                                             <div className="flex items-center gap-1.5 flex-wrap">
-                                              <span className="text-[12px] font-medium text-[#1c1c21] truncate max-w-[280px]">
+                                              <span
+                                                className="text-[12px] font-medium text-[#1c1c21] truncate max-w-[280px]"
+                                                title={st.title}
+                                              >
                                                 {st.title}
                                               </span>
                                               {st.dependencies && st.dependencies.length > 0 && (
