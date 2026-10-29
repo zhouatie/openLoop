@@ -1202,28 +1202,6 @@ export class DesktopApiService {
     return `${BASE_URL}/api/agent/fs/raw?${fsQuery(path, base)}`;
   }
 
-  // ---- 终端 ----
-
-  async openTerminal(cwd?: string): Promise<{ id: string; cwd: string; replay: string }> {
-    return requestJson(`${BASE_URL}/api/agent/terminal`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cwd }),
-    });
-  }
-
-  async writeTerminal(id: string, data: string): Promise<{ success: boolean }> {
-    return requestJson(`${BASE_URL}/api/agent/terminal/${encodeURIComponent(id)}/input`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data }),
-    });
-  }
-
-  async closeTerminal(id: string): Promise<{ success: boolean }> {
-    return requestJson(`${BASE_URL}/api/agent/terminal/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  }
-
   async clearTaskSession(taskId: string): Promise<{ success: boolean }> {
     if (import.meta.env?.DEV) {
       console.log(`[UI:API] 请求清空任务 [${taskId}] 的 Agent 会话消息`);
