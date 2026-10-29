@@ -20,6 +20,7 @@ import { useDirectoryPicker } from '../components/useDirectoryPicker';
 import { ApprovalCard, type AgentUiRequest } from './ApprovalCard';
 import { ShortcutSheet } from './ShortcutSheet';
 import { useShortcutBindings } from '../hooks/useShortcutBindings';
+import { useShortcuts } from '../context/ShortcutContext';
 import { IconCheck, IconChevronDown, IconFolderClose, IconFolderOpen, IconPlus } from './icons';
 import { useDismissOnOutsidePointer } from './dsh/useDismissOnOutsidePointer.ts';
 import { useAttachments } from './useAttachments';
@@ -92,6 +93,29 @@ async function workspaceMentionItems(base: string, query: string): Promise<Compo
     /* 目录不可读时只返回空候选 */
   }
   return items;
+}
+
+/**
+ * 工作台展开按钮：收起时停在会话列右上角，与工作台页签条末端的收起按钮同一格。
+ * 开合前后按钮原地切换，鼠标不用来回找，也不会跳位置。
+ */
+function DockToggleButton({ onToggle }: { onToggle: () => void }) {
+  const { describeShortcut } = useShortcuts();
+  const keys = describeShortcut('dock.toggle').join('+');
+  return (
+    <button
+      type="button"
+      className={`${styles.iconButton} ${styles.cornerButton}`}
+      onClick={() => {
+        if (import.meta.env?.DEV) console.log('[AgentPanel] 展开工作台');
+        onToggle();
+      }}
+      title={keys ? `打开工作台：文件 / 预览（${keys}）` : '打开工作台：文件 / 预览'}
+      aria-label="工作台"
+    >
+      <IconPanelRight size={16} />
+    </button>
+  );
 }
 
 export interface AgentPanelShellProps {
@@ -605,20 +629,8 @@ export function TaskAgentPanel({
       onWithdrawQueued={handleWithdrawQueued}
       draftFill={draftFill}
       onClose={onClose}
-      headerExtra={
-        <>
-          {headerExtra}
-          <button
-            type="button"
-            className={`${styles.iconButton} ${dock.open ? styles.iconButtonActive : ''}`}
-            onClick={dock.toggle}
-            title={dock.open ? '收起工作台' : '打开工作台：文件 / 预览'}
-            aria-label="工作台"
-          >
-            <IconPanelRight size={16} />
-          </button>
-        </>
-      }
+      headerExtra={headerExtra}
+      cornerExtra={dock.open ? undefined : <DockToggleButton onToggle={dock.toggle} />}
       banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : banner}
       dock={
         <WorkspaceDock
@@ -1802,19 +1814,6 @@ export function GlobalAgentPanel({
 
   const openApi = useMemo<OpenFileApi>(() => ({ openFile, openDiff }), [openFile, openDiff]);
 
-  /** 工作台展开按钮：顶栏形态放顶栏，整页形态（无顶栏）放右上角 */
-  const dockToggle = (
-    <button
-      type="button"
-      className={`${styles.iconButton} ${dock.open ? styles.iconButtonActive : ''}`}
-      onClick={dock.toggle}
-      title={dock.open ? '收起工作台' : '打开工作台：文件 / 预览'}
-      aria-label="工作台"
-    >
-      <IconPanelRight size={16} />
-    </button>
-  );
-
   /** 会话树入口：与分叉同一套语义，只是不离开当前会话 */
   const treeToggle = (
     <ComposerIconButton
@@ -1916,8 +1915,7 @@ export function GlobalAgentPanel({
           attachments={attachments.items}
           onAddFiles={activeId ? attachments.add : undefined}
           onRemoveAttachment={attachments.remove}
-          headerExtra={dockToggle}
-          cornerExtra={mode === 'page' ? dockToggle : undefined}
+          cornerExtra={dock.open ? undefined : <DockToggleButton onToggle={dock.toggle} />}
           composerExtra={treeToggle}
           onRegenerate={
             activeId
