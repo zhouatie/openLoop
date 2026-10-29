@@ -183,10 +183,16 @@ const UserActions = memo(function UserActions({ text, timestamp }: { text: strin
   );
 });
 
-/** 用户消息时间标签（DSH 的 clock='start'） */
+/** 用户消息时间标签（DSH formatMessageClock）：今天只给 HH:mm，更早的补上日期 */
 function clockLabel(timestamp: number): string {
   const date = new Date(timestamp);
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  const now = new Date();
+  const clock = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  const sameYear = date.getFullYear() === now.getFullYear();
+  const sameDay = sameYear && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  if (sameDay) return clock;
+  const monthDay = `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+  return sameYear ? `${monthDay} ${clock}` : `${date.getFullYear()} 年 ${monthDay} ${clock}`;
 }
 
 export { formatTokens };
