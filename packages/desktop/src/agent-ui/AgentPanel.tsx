@@ -621,16 +621,15 @@ export function TaskAgentPanel({
       }
       banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : banner}
       dock={
-        dock.open ? (
-          <WorkspaceDock
-            cwd={cwd}
-            panes={dock.panes}
-            activeKey={dock.activeKey}
-            request={dock.request}
-            onPanesChange={dock.setPanes}
-            onClose={dock.close}
-          />
-        ) : undefined
+        <WorkspaceDock
+          cwd={cwd}
+          panes={dock.panes}
+          activeKey={dock.activeKey}
+          request={dock.request}
+          open={dock.open}
+          onPanesChange={dock.setPanes}
+          onClose={dock.close}
+        />
       }
       attachments={attachments.items}
       onAddFiles={attachments.add}
@@ -1945,16 +1944,15 @@ export function GlobalAgentPanel({
           draftFill={draftFill}
           draftKey={activeId || ''}
           dock={
-            dock.open ? (
-              <WorkspaceDock
-                cwd={activeCwd}
-                panes={dock.panes}
-                activeKey={dock.activeKey}
-                request={dock.request}
-                onPanesChange={dock.setPanes}
-                onClose={dock.close}
-              />
-            ) : undefined
+            <WorkspaceDock
+              cwd={activeCwd}
+              panes={dock.panes}
+              activeKey={dock.activeKey}
+              request={dock.request}
+              open={dock.open}
+              onPanesChange={dock.setPanes}
+              onClose={dock.close}
+            />
           }
           banner={
             uiRequest ? (

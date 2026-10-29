@@ -553,6 +553,8 @@ export interface WorkspaceDockProps {
   activeKey: string;
   /** 上层发起的页签请求：文件，或某个文件的预览 */
   request?: DockRequest | null;
+  /** 展开状态：面板常驻，靠盒宽过渡滑入滑出 */
+  open: boolean;
   /** 页签变化回写上层：切页签、关页签、打开新页签 */
   onPanesChange: (panes: DockPane[], activeKey: string) => void;
   onClose: () => void;
@@ -568,12 +570,36 @@ export const WorkspaceDock = memo(function WorkspaceDock({
   panes,
   activeKey,
   request,
+  open,
   onPanesChange,
   onClose,
 }: WorkspaceDockProps) {
   const root = cwd || '';
   const [width, setWidth] = useState(readDockWidth);
   const [addOpen, setAddOpen] = useState(false);
+  const asideRef = useRef<HTMLElement>(null);
+  /** 面板常驻：收起时内容还留着，滑出动画才有东西可滑；首次打开前不挂内容，避免空跑一次目录请求 */
+  const [everOpened, setEverOpened] = useState(open);
+
+  useEffect(() => {
+    if (open) setEverOpened(true);
+    if (import.meta.env?.DEV) console.log('[WorkspaceDock] 开合:', open ? '展开' : '收起');
+  }, [open]);
+
+  /** 面板最多占主行的 60%：窗口变窄时把持久化的大宽度收回，给会话列留位置 */
+  useEffect(() => {
+    if (!open) return;
+    const clampToRoom = () => {
+      const room = asideRef.current?.parentElement?.clientWidth;
+      if (!room) return;
+      const limit = Math.max(DOCK_MIN_WIDTH, Math.min(DOCK_MAX_WIDTH, Math.round(room * 0.6)));
+      setWidth((prev) => (prev > limit ? limit : prev));
+    };
+    clampToRoom();
+    window.addEventListener('resize', clampToRoom);
+    return () => window.removeEventListener('resize', clampToRoom);
+  }, [open]);
+
   /** 已经放行过的请求：切会话或重开面板时同一份请求不再重复落页签 */
   const appliedRequest = useRef(0);
 
@@ -657,8 +683,8 @@ export const WorkspaceDock = memo(function WorkspaceDock({
       const handle = event.currentTarget;
       const startX = event.clientX;
       const startWidth = width;
-      // 与样式里的 60% 上限对齐：拖到会话列还有位置为止
-      const room = handle.parentElement?.parentElement?.clientWidth || window.innerWidth;
+      // 与样式里的 60% 上限对齐：拖到会话列还有位置为止（resize → 内层 → 面板 → 主行）
+      const room = handle.parentElement?.parentElement?.parentElement?.clientWidth || window.innerWidth;
       const limit = Math.max(DOCK_MIN_WIDTH, Math.min(DOCK_MAX_WIDTH, Math.round(room * 0.6)));
       let latest = startWidth;
       handle.setPointerCapture(event.pointerId);
@@ -718,56 +744,67 @@ export const WorkspaceDock = memo(function WorkspaceDock({
   }
 
   return (
-    <aside className={styles.dock} style={{ width }} aria-label="工作台">
-      <div
-        className={styles.resize}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="调整工作台宽度"
-        tabIndex={0}
-        onPointerDown={startResize}
-        onDoubleClick={resetWidth}
-        onKeyDown={(event) => {
-          if (event.key === 'ArrowLeft') {
-            event.preventDefault();
-            nudgeWidth(24);
-          } else if (event.key === 'ArrowRight') {
-            event.preventDefault();
-            nudgeWidth(-24);
-          }
-        }}
-      />
+    <aside
+      ref={asideRef}
+      className={styles.dock}
+      style={{ width: open ? width : 0 }}
+      data-open={open}
+      aria-label="工作台"
+      aria-hidden={!open}
+    >
+      {(open || everOpened) && (
+        <div className={styles.dockInner} style={{ width }}>
+          <div
+            className={styles.resize}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整工作台宽度"
+            tabIndex={0}
+            onPointerDown={startResize}
+            onDoubleClick={resetWidth}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                nudgeWidth(24);
+              } else if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                nudgeWidth(-24);
+              }
+            }}
+          />
 
-      <TabStrip
-        panes={panes}
-        activeKey={activeKey}
-        onSelect={selectPane}
-        onClose={closePane}
-        onAdd={addPane}
-        addOpen={addOpen}
-        onAddOpenChange={setAddOpen}
-        onClosePanel={onClose}
-      />
+          <TabStrip
+            panes={panes}
+            activeKey={activeKey}
+            onSelect={selectPane}
+            onClose={closePane}
+            onAdd={addPane}
+            addOpen={addOpen}
+            onAddOpenChange={setAddOpen}
+            onClosePanel={onClose}
+          />
 
-      <div className={styles.dockBody}>
-        {/* 页签内容常驻：切页签不重挂，文件预览与滚动位置都留着 */}
-        {panes.map((pane) => (
-          <div key={pane.key} className={styles.pane} hidden={pane.key !== activeKey}>
-            {pane.kind === 'files' &&
-              (root ? (
-                <FileTree root={root} activePath={previewPath} onPick={(entry) => openPreview(entry.path)} />
-              ) : (
-                <div className={styles.dockEmpty}>选一个工作区后，这里显示它的文件。</div>
-              ))}
-            {pane.kind === 'preview' && pane.path && (
-              <FilePreview path={pane.path} seq={pane.seq} cwd={root} />
-            )}
-            {pane.kind === 'diff' && pane.changeId && pane.path && (
-              <DiffPane changeId={pane.changeId} path={pane.path} onOpenSource={openPreview} />
-            )}
+          <div className={styles.dockBody}>
+            {/* 页签内容常驻：切页签不重挂，文件预览与滚动位置都留着 */}
+            {panes.map((pane) => (
+              <div key={pane.key} className={styles.pane} hidden={pane.key !== activeKey}>
+                {pane.kind === 'files' &&
+                  (root ? (
+                    <FileTree root={root} activePath={previewPath} onPick={(entry) => openPreview(entry.path)} />
+                  ) : (
+                    <div className={styles.dockEmpty}>选一个工作区后，这里显示它的文件。</div>
+                  ))}
+                {pane.kind === 'preview' && pane.path && (
+                  <FilePreview path={pane.path} seq={pane.seq} cwd={root} />
+                )}
+                {pane.kind === 'diff' && pane.changeId && pane.path && (
+                  <DiffPane changeId={pane.changeId} path={pane.path} onOpenSource={openPreview} />
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </aside>
   );
 });
