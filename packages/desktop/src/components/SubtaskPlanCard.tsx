@@ -189,7 +189,10 @@ export const SubtaskPlanCard: React.FC<SubtaskPlanCardProps> = ({
                   #{index + 1}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-[12px] text-[#1c1c21] leading-snug">
+                  <div
+                    className="font-medium text-[12px] text-[#1c1c21] leading-snug"
+                    title={sub.title}
+                  >
                     {sub.title}
                   </div>
                 </div>

@@ -580,7 +580,10 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
         </div>
       </div>
 
-      <h4 className="text-[12.5px] font-medium text-[#1c1c21] leading-snug line-clamp-2 mb-1">
+      <h4
+        className="text-[12.5px] font-medium text-[#1c1c21] leading-snug line-clamp-2 mb-1"
+        title={task.title}
+      >
         {task.title}
       </h4>
 
@@ -611,7 +614,9 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
         <div className="flex items-center gap-1.5 py-1 px-2 rounded-[5px] bg-[#eff6ff] border border-[#bfdbfe]/60 text-[#1d4ed8] text-[10.5px] font-medium my-1.5 animate-fadeIn">
           <Loader2 size={10.5} className="animate-spin text-[#2563eb] shrink-0" />
           <span className="shrink-0 font-mono text-[#2563eb]">#{runningSubIndex + 1}</span>
-          <span className="truncate flex-1 font-normal text-[#1e40af]">{runningSub.title}</span>
+          <span className="truncate flex-1 font-normal text-[#1e40af]" title={runningSub.title}>
+            {runningSub.title}
+          </span>
           <span
             className="shrink min-w-0 max-w-[45%] truncate font-mono text-[9px] bg-[#dbeafe] text-[#1e40af] px-1 py-[0.5px] rounded border border-[#bfdbfe]"
             title={runningSubWorkflowName}
@@ -633,7 +638,9 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
         >
           <Clock size={10.5} className="animate-pulse text-[#b45309] shrink-0" />
           <span className="shrink-0 font-mono text-[#b45309]">#{waitingSubIndex + 1}</span>
-          <span className="truncate flex-1 font-normal text-[#92400e]">{waitingSub.title}</span>
+          <span className="truncate flex-1 font-normal text-[#92400e]" title={waitingSub.title}>
+            {waitingSub.title}
+          </span>
           <span
             className="shrink min-w-0 max-w-[45%] truncate font-mono text-[9px] bg-[#fef3c7] text-[#b45309] px-1 py-[0.5px] rounded border border-[#fde68a]"
             title={waitingSubWorkflowName}
@@ -850,7 +857,10 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                         #{orderNo}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="text-[11px] text-[#1c1c21] truncate font-medium group-hover/sub:text-[#4f46e5]">
+                        <div
+                          className="text-[11px] text-[#1c1c21] truncate font-medium group-hover/sub:text-[#4f46e5]"
+                          title={st.title}
+                        >
                           {st.title}
                         </div>
                         <div className="text-[9.5px] text-[#85858d] truncate mt-0.5">
