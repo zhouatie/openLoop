@@ -27,6 +27,8 @@ export interface MessageRowProps {
   forkUnavailable?: boolean;
   /** 正在为这条消息创建分支 */
   forkPending?: boolean;
+  /** 轮末附加内容（本轮改动文件卡）：渲染在操作条之上 */
+  beforeActions?: React.ReactNode;
 }
 
 export const MessageRow = memo(function MessageRow({
@@ -38,6 +40,7 @@ export const MessageRow = memo(function MessageRow({
   onFork,
   forkUnavailable,
   forkPending,
+  beforeActions,
 }: MessageRowProps) {
   if (message.role === 'system') {
     return (
@@ -78,6 +81,8 @@ export const MessageRow = memo(function MessageRow({
       )}
 
       {hasError && <div className={styles.error}>{message.errorMessage}</div>}
+
+      {beforeActions}
 
       {!compact && !running && (message.content.trim().length > 0 || onFork || forkUnavailable) && (
         <MessageActions

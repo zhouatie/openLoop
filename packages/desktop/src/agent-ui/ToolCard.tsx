@@ -1,6 +1,7 @@
 import React, { memo, useMemo, useState } from 'react';
-import { DiffBlock, type DiffBlockLabels, type DiffHunk } from './dsh/DiffBlock';
+import { DiffBlock, type DiffBlockLabels } from './dsh/DiffBlock';
 import type { ToolExecutionRecord } from '@openloop/core/types';
+import { mutationHunks } from './changed-files';
 import { IconCode, IconCommand, IconGlobe, IconSearch, IconThink } from './icons';
 import { ImageThumb, LIGHTBOX_LABELS } from './ImageLightbox';
 import { ImageLightbox } from './dsh/ImageLightbox';
@@ -109,15 +110,6 @@ function renderResult(result: any): string {
   return String(result);
 }
 
-function pickStringOf(source: any, keys: string[]): string | undefined {
-  if (!source || typeof source !== 'object') return undefined;
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === 'string') return value;
-  }
-  return undefined;
-}
-
 /**
  * 命令的退出码：pi 只在失败时把退出码写进正文（`Command exited with code N`），
  * 结构化字段存在时优先取结构化字段。取不到就当作未知，命令卡不显示胶囊。
@@ -129,31 +121,6 @@ function exitCodeOf(tool: ToolExecutionRecord, output: string): number | null | 
   if (typeof code === 'number') return code;
   const matched = /Command exited with code (\d+)/.exec(output);
   return matched ? Number(matched[1]) : undefined;
-}
-
-/**
- * 写入类工具的差分：pi 的 edit 工具把改动放在 edits[] 里，write 工具则是整份 content。
- * 转换成 DSH DiffBlock 需要的 {path, oldText, newText} 形状。
- */
-function diffHunksOfInput(tool: ToolExecutionRecord): DiffHunk[] | null {
-  const input = tool.input || {};
-  const path = pickStringOf(input, ['path', 'file_path', 'filePath', 'target']) || '';
-  const hunks: DiffHunk[] = [];
-  const edits = Array.isArray(input.edits) ? input.edits : [];
-  for (const edit of edits) {
-    const after = pickStringOf(edit, ['newText', 'newString', 'new_text']);
-    if (after === undefined) continue;
-    const before = pickStringOf(edit, ['oldText', 'oldString', 'old_text']);
-    hunks.push({ path, oldText: before ?? null, newText: after });
-  }
-  if (hunks.length === 0) {
-    const after = pickStringOf(input, ['content', 'newString', 'newText', 'after', 'text']);
-    if (after !== undefined) {
-      const before = pickStringOf(input, ['oldString', 'oldText', 'before']);
-      hunks.push({ path, oldText: before ?? null, newText: after });
-    }
-  }
-  return hunks.length > 0 ? hunks : null;
 }
 
 const DIFF_LABELS: DiffBlockLabels = {
@@ -176,8 +143,8 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
   const output = useMemo(() => renderResult(tool.result), [tool.result]);
   const hasOutput = output.trim().length > 0;
   const diffHunks = useMemo(
-    () => (kind === 'write' ? diffHunksOfInput(tool) : null),
-    [kind, tool.input]
+    () => (kind === 'write' ? mutationHunks(tool) : null),
+    [kind, tool]
   );
   // 命令类工具：展开后是 DSH 的终端卡（提示行 + 输出），不再铺原始入参 JSON
   const command = useMemo(() => pickString(tool.input, ['command', 'cmd', 'script']), [tool.input]);

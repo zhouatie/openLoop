@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PendingUserInput, SessionChatMessage, SessionUsage } from '@openloop/core/types';
 import { MessageRow } from './MessageRow';
+import { ChangedFilesCard } from './ChangedFilesCard';
+import { toolChange, type TurnChanges } from './changed-files';
 import { TurnRail, type TurnRailItem } from './TurnRail';
 import { TextShimmer } from './dsh/TextShimmer';
 import { Tooltip } from './dsh/Tooltip';
@@ -25,6 +27,8 @@ export interface AgentChatViewProps {
   emptyHint?: string;
   /** 内容列最大宽度，整页形态可以更宽 */
   contentWidth?: number;
+  /** 会话工作目录：改动文件路径按它展示为相对路径 */
+  cwd?: string;
   /** 重新生成最后一轮回答 */
   onRegenerate?: () => void;
   /** 从某一轮回答分叉出新会话（新会话保留到这条为止） */
@@ -132,6 +136,8 @@ interface TurnBlock {
   steps: number[];
   /** 轮末操作条锚点：该轮最后一条助手消息 */
   tail: number | null;
+  /** 本轮文件工具改动汇总（没有改动时为 undefined） */
+  changes?: TurnChanges;
   usage?: SessionUsage;
   model?: string;
 }
@@ -192,6 +198,22 @@ function buildBlocks(messages: SessionChatMessage[]): { blocks: Block[]; railIte
     turn.steps.push(index);
     turn.tail = index;
 
+    // 本轮改动由文件工具入参推导：不读 git、不落盘，历史回放与实时会话同一套口径
+    for (const tool of message.tools || []) {
+      const change = toolChange(tool);
+      if (!change) continue;
+      const changes = (turn.changes ??= { files: [], added: 0, deleted: 0 });
+      const known = changes.files.find((file) => file.path === change.path);
+      if (known) {
+        known.added += change.added;
+        known.deleted += change.deleted;
+      } else {
+        changes.files.push({ ...change });
+      }
+      changes.added += change.added;
+      changes.deleted += change.deleted;
+    }
+
     if (derived.response) {
       const rail = railItems[railItems.length - 1];
       if (rail) rail.response = derived.response;
@@ -230,6 +252,7 @@ export const AgentChatView = React.memo(function AgentChatView({
   emptyTitle,
   emptyHint,
   contentWidth,
+  cwd,
   onRegenerate,
   onFork,
   forkPendingEntryId = null,
@@ -566,6 +589,11 @@ export const AgentChatView = React.memo(function AgentChatView({
                         }
                         forkUnavailable={isTail && Boolean(onFork) && !canFork}
                         forkPending={isTail && Boolean(forkEntryId) && forkPendingEntryId === forkEntryId}
+                        beforeActions={
+                          isTail && block.changes && !(isBusy && isLiveTurn) ? (
+                            <ChangedFilesCard changes={block.changes} cwd={cwd} />
+                          ) : undefined
+                        }
                       />
                     );
                   })}
