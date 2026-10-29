@@ -1,12 +1,40 @@
-/* 工作台：右侧停靠面板，页签容器对齐 DSH 的停靠面板（ui-dockkit） */
+/* 工作台：右侧停靠面板，页签容器对齐 DSH 的停靠面板（ui-dockkit）
+ * 展开/收起是宽度过渡：面板盒随 flex 轨道伸缩，定宽内容贴着左缘被裁切，看着像整块滑出。
+ * 收起后 visibility 延后一档关掉，滑完才彻底不可点、不可聚焦。 */
 .dock {
   position: relative;
   flex: none;
-  display: flex;
-  flex-direction: column;
   min-width: 0;
   /* 拖动宽度再大也给会话列留位置：抽屉只有 620px 时也要能继续对话 */
   max-width: 60%;
+  overflow: hidden;
+  visibility: hidden;
+  transition:
+    width var(--ds-transition-duration-slow) var(--ds-ease-in-out),
+    visibility 0s linear var(--ds-transition-duration-slow);
+}
+
+.dock[data-open='true'] {
+  visibility: visible;
+  transition: width var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock,
+  .dock[data-open='true'] {
+    transition: none;
+  }
+}
+
+/* 内容定宽：滑入滑出时里面不重排，只有面板盒的宽度在动。
+ * 贴左钉住，盒子左缘往右走时整块内容跟着向右滑出屏幕右缘（DSH 的滑出方向）。 */
+.dockInner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
   border-left: 0.5px solid var(--dsw-alias-border-l3);
   background: var(--dsw-alias-bg-base);
 }
@@ -16,7 +44,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -4px;
+  left: 0;
   z-index: 2;
   width: 8px;
   cursor: col-resize;
@@ -28,7 +56,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 3.5px;
+  left: 0;
   width: 1px;
   opacity: 0;
   background: linear-gradient(to bottom, transparent, var(--dsw-alias-label-caption) 50%, transparent)
