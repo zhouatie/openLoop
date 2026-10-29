@@ -11,7 +11,7 @@ import {
   ComposerMentionItem,
   ComposerPermission,
 } from './Composer';
-import { WorkspaceDock, type DockRequest, type DockTab } from './WorkspaceDock';
+import { WorkspaceDock, useAgentDock } from './WorkspaceDock';
 import { OpenFileContext, type ChangeTarget, type OpenFileApi } from './open-file';
 import { IconClose, IconFork, IconMinimize, IconPanelRight } from './icons';
 import { BrandLogo } from '../components/BrandLogo';
@@ -454,10 +454,8 @@ export function TaskAgentPanel({
   cwd,
 }: TaskAgentPanelProps) {
   const [sending, setSending] = useState(false);
-  const [dockOpen, setDockOpen] = useState(false);
-  /** 工作台的页签请求：文件，或某个文件的预览 */
-  const [dockRequest, setDockRequest] = useState<DockRequest | null>(null);
-  const dockSeq = useRef(0);
+  /** 工作台：开合与页签都跟着会话走 */
+  const dock = useAgentDock(`task_${taskId}`);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   const [commands, setCommands] = useState<ComposerCommand[]>([]);
   /** 回填输入框：seq 变化即生效 */
@@ -465,14 +463,11 @@ export function TaskAgentPanel({
   const attachments = useAttachments(taskId);
 
   /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
-  const openDock = useCallback((kind: DockTab, path?: string, changeId?: string) => {
-    setDockOpen(true);
-    setDockRequest({ kind, path, changeId, seq: ++dockSeq.current });
-  }, []);
+  const openDock = dock.openTab;
 
   // 面板内快捷键：工作台开合与页签
   useShortcutBindings({
-    'dock.toggle': () => setDockOpen((prev) => !prev),
+    'dock.toggle': () => dock.toggle(),
     'dock.files': () => openDock('files'),
   });
 
@@ -615,9 +610,9 @@ export function TaskAgentPanel({
           {headerExtra}
           <button
             type="button"
-            className={`${styles.iconButton} ${dockOpen ? styles.iconButtonActive : ''}`}
-            onClick={() => setDockOpen((prev) => !prev)}
-            title={dockOpen ? '收起工作台' : '打开工作台：文件 / 预览'}
+            className={`${styles.iconButton} ${dock.open ? styles.iconButtonActive : ''}`}
+            onClick={dock.toggle}
+            title={dock.open ? '收起工作台' : '打开工作台：文件 / 预览'}
             aria-label="工作台"
           >
             <IconPanelRight size={16} />
@@ -626,8 +621,15 @@ export function TaskAgentPanel({
       }
       banner={uiRequest ? <ApprovalCard request={uiRequest} onRespond={respondUi} /> : banner}
       dock={
-        dockOpen ? (
-          <WorkspaceDock cwd={cwd} request={dockRequest} onClose={() => setDockOpen(false)} />
+        dock.open ? (
+          <WorkspaceDock
+            cwd={cwd}
+            panes={dock.panes}
+            activeKey={dock.activeKey}
+            request={dock.request}
+            onPanesChange={dock.setPanes}
+            onClose={dock.close}
+          />
         ) : undefined
       }
       attachments={attachments.items}
@@ -800,10 +802,6 @@ export function GlobalAgentPanel({
   const [projectMeta, setProjectMeta] = useState<
     Record<string, { title?: string; hidden?: boolean; pinned?: boolean; order?: number }>
   >({});
-  const [dockOpen, setDockOpen] = useState(false);
-  /** 工作台的页签请求：文件，或某个文件的预览 */
-  const [dockRequest, setDockRequest] = useState<DockRequest | null>(null);
-  const dockSeq = useRef(0);
   const [uiRequest, setUiRequest] = useState<AgentUiRequest | null>(null);
   /** 刚发过消息、文件还没落盘的会话：id -> 占位行信息 */
   const pendingRows = useRef<Record<string, { title: string; cwd: string }>>({});
@@ -820,11 +818,11 @@ export function GlobalAgentPanel({
    */
   const warmRef = useRef<{ id: string; used: boolean } | null>(null);
 
+  /** 工作台：开合与页签都跟着会话走，切会话换一套 */
+  const dock = useAgentDock(activeId || '');
+
   /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
-  const openDock = useCallback((kind: DockTab, path?: string, changeId?: string) => {
-    setDockOpen(true);
-    setDockRequest({ kind, path, changeId, seq: ++dockSeq.current });
-  }, []);
+  const openDock = dock.openTab;
 
   // 斜杠指令（提供方为 /api/agent/commands-and-skills）
   useEffect(() => {
@@ -1650,7 +1648,7 @@ export function GlobalAgentPanel({
         const target = sessions.find((item) => item.id === activeId);
         if (target) void archiveSession(target.id, !target.archived);
       },
-      'dock.toggle': () => setDockOpen((prev) => !prev),
+      'dock.toggle': () => dock.toggle(),
       'dock.files': () => openDock('files'),
       'session.tree': () => void openTree(),
     },
@@ -1809,9 +1807,9 @@ export function GlobalAgentPanel({
   const dockToggle = (
     <button
       type="button"
-      className={`${styles.iconButton} ${dockOpen ? styles.iconButtonActive : ''}`}
-      onClick={() => setDockOpen((prev) => !prev)}
-      title={dockOpen ? '收起工作台' : '打开工作台：文件 / 预览'}
+      className={`${styles.iconButton} ${dock.open ? styles.iconButtonActive : ''}`}
+      onClick={dock.toggle}
+      title={dock.open ? '收起工作台' : '打开工作台：文件 / 预览'}
       aria-label="工作台"
     >
       <IconPanelRight size={16} />
@@ -1947,8 +1945,15 @@ export function GlobalAgentPanel({
           draftFill={draftFill}
           draftKey={activeId || ''}
           dock={
-            dockOpen ? (
-              <WorkspaceDock cwd={activeCwd} request={dockRequest} onClose={() => setDockOpen(false)} />
+            dock.open ? (
+              <WorkspaceDock
+                cwd={activeCwd}
+                panes={dock.panes}
+                activeKey={dock.activeKey}
+                request={dock.request}
+                onPanesChange={dock.setPanes}
+                onClose={dock.close}
+              />
             ) : undefined
           }
           banner={
