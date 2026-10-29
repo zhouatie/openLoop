@@ -111,6 +111,90 @@ function pinnedPane(kind: DockTab): DockPane {
   return PINNED_PANES.find((pane) => pane.kind === kind) || PINNED_PANES[0];
 }
 
+/** 一个会话的工作台：开合状态与它自己的一套页签 */
+interface DockSurface {
+  open: boolean;
+  panes: DockPane[];
+  activeKey: string;
+  /** 最近一次页签请求：同样归会话所有，切回来不会落到别的会话上 */
+  request: DockRequest | null;
+}
+
+const INITIAL_SURFACE: DockSurface = {
+  open: false,
+  panes: PINNED_PANES,
+  activeKey: PINNED_PANES[0].key,
+  request: null,
+};
+
+/** 上层持有的工作台状态与入口，交给 WorkspaceDock 渲染 */
+export interface AgentDock {
+  /** 当前会话的工作台是否展开 */
+  open: boolean;
+  /** 当前会话的页签与激活项 */
+  panes: DockPane[];
+  activeKey: string;
+  /** 最近一次页签请求 */
+  request: DockRequest | null;
+  /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
+  openTab: (kind: DockTab, path?: string, changeId?: string) => void;
+  /** 收起 / 展开工作台 */
+  toggle: () => void;
+  /** 收起工作台 */
+  close: () => void;
+  /** 面板内部改页签：切页签、关页签、重开固定页签 */
+  setPanes: (panes: DockPane[], activeKey: string) => void;
+}
+
+/**
+ * 工作台的会话状态：开合与页签都按会话各存一份，切会话换一套，切回来还在。
+ * 与 DSH 的停靠面板一致 —— 面板属于会话，开关与页签都跟着会话走。
+ */
+export function useAgentDock(sessionKey: string): AgentDock {
+  const [surfaces, setSurfaces] = useState<Record<string, DockSurface>>({});
+  const seq = useRef(0);
+  const session = sessionKey || '';
+  const surface = surfaces[session] ?? INITIAL_SURFACE;
+
+  const patch = useCallback(
+    (next: (surface: DockSurface) => DockSurface) => {
+      setSurfaces((prev) => {
+        const current = prev[session] ?? INITIAL_SURFACE;
+        const updated = next(current);
+        return updated === current ? prev : { ...prev, [session]: updated };
+      });
+    },
+    [session]
+  );
+
+  const openTab = useCallback(
+    (kind: DockTab, path?: string, changeId?: string) => {
+      if (import.meta.env?.DEV) console.log('[AgentDock] 打开页签:', { session, kind, path, changeId });
+      const request: DockRequest = { kind, path, changeId, seq: ++seq.current };
+      patch((current) => ({ ...current, open: true, request }));
+    },
+    [patch, session]
+  );
+
+  const toggle = useCallback(() => patch((current) => ({ ...current, open: !current.open })), [patch]);
+  const close = useCallback(() => patch((current) => ({ ...current, open: false })), [patch]);
+  const setPanes = useCallback(
+    (panes: DockPane[], activeKey: string) => patch((current) => ({ ...current, panes, activeKey })),
+    [patch]
+  );
+
+  return {
+    open: surface.open,
+    panes: surface.panes,
+    activeKey: surface.activeKey,
+    request: surface.request,
+    openTab,
+    toggle,
+    close,
+    setPanes,
+  };
+}
+
 /** 文本预览的代码卡文案，与 Markdown 里的围栏代码块一致 */
 const PREVIEW_TOOLBAR_LABELS = {
   codeLabel: '文本',
@@ -464,63 +548,89 @@ const FilePreview = memo(function FilePreview({
 
 export interface WorkspaceDockProps {
   cwd?: string;
+  /** 本会话的页签与激活项，由上层按会话持有 */
+  panes: DockPane[];
+  activeKey: string;
   /** 上层发起的页签请求：文件，或某个文件的预览 */
   request?: DockRequest | null;
+  /** 页签变化回写上层：切页签、关页签、打开新页签 */
+  onPanesChange: (panes: DockPane[], activeKey: string) => void;
   onClose: () => void;
 }
 
 /**
  * 右侧工作台：文件 / 预览。页签容器对齐 DSH 停靠面板 —— 一行胶囊页签、
  * 每个页签可单独关闭、「+」重开固定页签，左缘可拖动改变宽度。
+ * 页签本身归上层按会话保存，这里只负责画和报手势。
  */
-export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose }: WorkspaceDockProps) {
+export const WorkspaceDock = memo(function WorkspaceDock({
+  cwd,
+  panes,
+  activeKey,
+  request,
+  onPanesChange,
+  onClose,
+}: WorkspaceDockProps) {
   const root = cwd || '';
-  const [panes, setPanes] = useState<DockPane[]>(PINNED_PANES);
-  const [activeKey, setActiveKey] = useState<string>(PINNED_PANES[0].key);
   const [width, setWidth] = useState(readDockWidth);
   const [addOpen, setAddOpen] = useState(false);
+  /** 已经放行过的请求：切会话或重开面板时同一份请求不再重复落页签 */
+  const appliedRequest = useRef(0);
 
-  const openPreview = useCallback((path: string) => {
-    if (import.meta.env?.DEV) console.log('[WorkspaceDock] 预览文件:', path);
-    const key = previewKey(path);
-    const seq = Date.now();
-    setPanes((prev) =>
-      prev.some((pane) => pane.key === key)
-        ? prev.map((pane) => (pane.key === key ? { ...pane, seq } : pane))
-        : [...prev, { key, kind: 'preview' as const, title: baseName(path), path, seq }]
-    );
-    setActiveKey(key);
-  }, []);
+  const openPreview = useCallback(
+    (path: string) => {
+      if (import.meta.env?.DEV) console.log('[WorkspaceDock] 预览文件:', path);
+      const key = previewKey(path);
+      const seq = Date.now();
+      onPanesChange(
+        panes.some((pane) => pane.key === key)
+          ? panes.map((pane) => (pane.key === key ? { ...pane, seq } : pane))
+          : [...panes, { key, kind: 'preview' as const, title: baseName(path), path, seq }],
+        key
+      );
+    },
+    [panes, onPanesChange]
+  );
 
   /** 一次改动的 diff 页签：按 changeId 去重，重复点同一个改动只重新激活 */
-  const openDiff = useCallback((changeId: string, path: string) => {
-    if (import.meta.env?.DEV) console.log('[WorkspaceDock] 改动对比:', path, changeId);
-    const key = diffKey(changeId);
-    setPanes((prev) =>
-      prev.some((pane) => pane.key === key)
-        ? prev
-        : [...prev, { key, kind: 'diff' as const, title: baseName(path), path, changeId, seq: Date.now() }]
-    );
-    setActiveKey(key);
-  }, []);
+  const openDiff = useCallback(
+    (changeId: string, path: string) => {
+      if (import.meta.env?.DEV) console.log('[WorkspaceDock] 改动对比:', path, changeId);
+      const key = diffKey(changeId);
+      onPanesChange(
+        panes.some((pane) => pane.key === key)
+          ? panes
+          : [...panes, { key, kind: 'diff' as const, title: baseName(path), path, changeId, seq: Date.now() }],
+        key
+      );
+    },
+    [panes, onPanesChange]
+  );
+
+  /** 固定页签：「+」菜单与 files 请求都走这里 */
+  const addPane = useCallback(
+    (kind: DockTab) => {
+      setAddOpen(false);
+      onPanesChange(panes.some((pane) => pane.key === kind) ? panes : [...panes, pinnedPane(kind)], kind);
+    },
+    [panes, onPanesChange]
+  );
 
   // 上层请求：打开文件页签，或把某个文件作为预览 / diff 页签打开
   useEffect(() => {
-    if (!request) return;
+    if (!request || request.seq === appliedRequest.current) return;
+    appliedRequest.current = request.seq;
     if (import.meta.env?.DEV) console.log('[WorkspaceDock] 页签请求:', request);
-    if (request.kind === 'diff') {
-      if (request.changeId && request.path) openDiff(request.changeId, request.path);
-      return;
-    }
     if (request.kind === 'preview') {
       if (request.path) openPreview(request.path);
       return;
     }
-    setPanes((prev) =>
-      prev.some((pane) => pane.key === request.kind) ? prev : [...prev, pinnedPane(request.kind)]
-    );
-    setActiveKey(request.kind);
-  }, [request, openPreview, openDiff]);
+    if (request.kind === 'diff') {
+      if (request.changeId && request.path) openDiff(request.changeId, request.path);
+      return;
+    }
+    addPane(request.kind);
+  }, [request, openPreview, openDiff, addPane]);
 
   const closePane = useCallback(
     (key: string) => {
@@ -528,22 +638,16 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
       if (index < 0) return;
       if (import.meta.env?.DEV) console.log('[WorkspaceDock] 关闭页签:', key);
       const next = panes.filter((pane) => pane.key !== key);
-      // 页签全关掉就收起工作台，与 DSH 合并掉空面板一致
+      // 页签全关掉就收起工作台，与 DSH 合并掉空面板一致；再打开时回到固定的文件页签
       if (next.length === 0) {
+        onPanesChange(PINNED_PANES, PINNED_PANES[0].key);
         onClose();
         return;
       }
-      setPanes(next);
-      if (activeKey === key) setActiveKey(next[Math.min(index, next.length - 1)].key);
+      onPanesChange(next, activeKey === key ? next[Math.min(index, next.length - 1)].key : activeKey);
     },
-    [panes, activeKey, onClose]
+    [panes, activeKey, onPanesChange, onClose]
   );
-
-  const addPane = useCallback((kind: DockTab) => {
-    setAddOpen(false);
-    setPanes((prev) => (prev.some((pane) => pane.key === kind) ? prev : [...prev, pinnedPane(kind)]));
-    setActiveKey(kind);
-  }, []);
 
   /** 拖动左缘改宽度：窗口监听，指针离开面板也跟手 */
   const startResize = useCallback(
@@ -600,6 +704,13 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
     [width]
   );
 
+  const selectPane = useCallback(
+    (key: string) => {
+      if (key !== activeKey) onPanesChange(panes, key);
+    },
+    [panes, activeKey, onPanesChange]
+  );
+
   // 文件树的高亮跟着最近打开的那份预览，切到别的页签也不丢
   let previewPath: string | undefined;
   for (const pane of panes) {
@@ -630,7 +741,7 @@ export const WorkspaceDock = memo(function WorkspaceDock({ cwd, request, onClose
       <TabStrip
         panes={panes}
         activeKey={activeKey}
-        onSelect={setActiveKey}
+        onSelect={selectPane}
         onClose={closePane}
         onAdd={addPane}
         addOpen={addOpen}
