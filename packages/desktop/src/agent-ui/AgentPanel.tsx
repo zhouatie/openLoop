@@ -1818,7 +1818,6 @@ export function GlobalAgentPanel({
               <div className={styles.brandRow}>
                 <BrandLogo size={20} className={styles.brandLogo} />
                 <span className={styles.brandName}>openLoop</span>
-                <span className={styles.brandTag}>智能体</span>
               </div>
             </>
           }

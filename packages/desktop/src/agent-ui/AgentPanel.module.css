@@ -363,26 +363,6 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* 徽章不再用填充胶囊：去掉色块，靠细线分隔与字距成为安静的一行注脚 */
-.brandTag {
-  display: inline-flex;
-  align-items: center;
-  margin-left: auto;
-  padding-right: 2px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  line-height: 16px;
-  letter-spacing: 0.04em;
-}
-
-.brandTag::before {
-  content: '';
-  width: 1px;
-  height: 11px;
-  margin-right: 9px;
-  background: var(--dsw-alias-border-l3);
-}
-
 /* 面板内提示条：分叉完成 / 失败时在输入卡上方给一句反馈 */
 .notice {
   align-self: center;
