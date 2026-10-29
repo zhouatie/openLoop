@@ -6,6 +6,9 @@
 - build/icons/icon.icns    macOS 图标包
 
 SVG 是唯一图形来源。优先使用 rsvg-convert 渲染；没有则回退到 macOS 的 qlmanage。
+
+注意：build/icon.svg 必须是满画布（rect 覆盖 0..1024），不要内缩圆角底板。
+qlmanage 回退方案会把透明区域渲染成不透明白色，内缩底板会在 Dock 上露出一圈白边。
 """
 
 import os

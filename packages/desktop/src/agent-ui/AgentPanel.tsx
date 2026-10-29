@@ -115,6 +115,8 @@ export interface AgentPanelShellProps {
   emptyTitle?: string;
   emptyHint?: string;
   contentWidth?: number;
+  /** 会话工作目录：改动文件卡片按它展示相对路径 */
+  cwd?: string;
   composerDisabled?: boolean;
   sending?: boolean;
   onSend: (message: string) => void | Promise<void>;
@@ -186,6 +188,7 @@ export function AgentPanelShell({
   emptyTitle,
   emptyHint,
   contentWidth,
+  cwd,
   composerDisabled,
   sending,
   onSend,
@@ -403,6 +406,7 @@ export function AgentPanelShell({
                 emptyTitle={emptyTitle}
                 emptyHint={emptyHint}
                 contentWidth={contentWidth}
+                cwd={cwd}
                 onRegenerate={onRegenerate}
                 onFork={onFork}
                 forkPendingEntryId={forkPendingEntryId}
@@ -587,6 +591,7 @@ export function TaskAgentPanel({
       contentWidth={920}
       sending={sending}
       commands={commands}
+      cwd={cwd}
       onRequestMentions={requestMentions}
       onSend={handleSend}
       onStop={() => void stop()}
@@ -1876,6 +1881,7 @@ export function GlobalAgentPanel({
           models={models}
           onModelSelect={models.length > 0 ? handleModelSelect : undefined}
           contentWidth={920}
+          cwd={activeCwd}
           sending={sending}
           onSend={handleSend}
           onStop={() => void stop()}

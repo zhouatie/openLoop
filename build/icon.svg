@@ -1,15 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
-  <title>openLoop owl app icon (light surface)</title>
+  <title>openLoop owl app icon</title>
   <defs>
-    <linearGradient id="ol-surface" x1="226" y1="138" x2="798" y2="888" gradientUnits="userSpaceOnUse">
+    <linearGradient id="ol-surface" x1="176" y1="0" x2="848" y2="1024" gradientUnits="userSpaceOnUse">
       <stop stop-color="#fbfbfc"/>
       <stop offset="0.55" stop-color="#f4f4f6"/>
       <stop offset="1" stop-color="#ececef"/>
     </linearGradient>
   </defs>
-  <rect x="84" y="84" width="856" height="856" rx="214" fill="url(#ol-surface)"/>
-  <rect x="84.5" y="84.5" width="855" height="855" rx="213.5" stroke="#e3e3e8"/>
-  <g transform="translate(166 186) scale(5.4)">
+  <rect width="1024" height="1024" fill="url(#ol-surface)"/>
+  <g transform="translate(115 90) scale(6.2)">
     <path d="M29 17 L36 46 L50 38 Z" fill="#1c1c21"/>
     <path d="M99 17 L92 46 L78 38 Z" fill="#1c1c21"/>
     <path fill-rule="evenodd" fill="#1c1c21" d="
