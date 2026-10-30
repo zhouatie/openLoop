@@ -676,42 +676,6 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* 工作区标题变成下拉触发器 */
-.sectionTitleButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  max-width: 150px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 500;
-  cursor: pointer;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.sectionTitleButton:hover {
-  color: var(--dsw-alias-state-business-primary);
-}
-
-/* 单列表模式的区头是纯标签（对齐 DSH 的「会话」），仍保留工作区筛选入口 */
-.sectionTitleFlat,
-.sectionTitleFlat:hover {
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.sectionChevron {
-  flex: none;
-  transform: rotate(90deg);
-  color: var(--dsw-alias-label-tertiary);
-}
-
 .iconButtonActive {
   color: var(--dsw-alias-state-business-primary);
   background: var(--dsw-alias-interactive-bg-hover);
@@ -774,12 +738,6 @@
 /* 图标随选中状态一起变主色 */
 .menuItemActive svg {
   color: inherit;
-}
-
-.menuCount {
-  float: right;
-  color: var(--dsw-alias-label-caption);
-  font-size: 11px;
 }
 
 /* 删除工作区确认框：portal 到 body，自己带 .agent-scope 承载主题令牌 */
