@@ -715,6 +715,21 @@ export const SessionList = memo(function SessionList({
         hideCard();
       }}
     >
+      {/* 顶条与红黄绿同排：收起入口贴侧栏右上角（对齐 DSH topStrip） */}
+      <div className={styles.topStrip}>
+        {onCollapse && (
+          <button
+            type="button"
+            className={styles.iconButton}
+            onClick={onCollapse}
+            title="收起侧边栏"
+            aria-label="收起侧边栏"
+          >
+            <IconPanelLeft size={16} />
+          </button>
+        )}
+      </div>
+
       {brandSlot}
 
       <button
@@ -756,16 +771,6 @@ export const SessionList = memo(function SessionList({
             {/* 区头是纯标签（对齐 DSH）：单列表模式显示「会话」，否则「工作区」 */}
             <span className={styles.sectionTitle}>{groupBy === 'flat' ? '会话' : '工作区'}</span>
             <span className={styles.sectionActions}>
-              {onCollapse && (
-                <button
-                  type="button"
-                  className={styles.iconButton}
-                  onClick={onCollapse}
-                  title="收起侧边栏"
-                >
-                  <IconPanelLeft size={16} />
-                </button>
-              )}
               <button
                 type="button"
                 className={styles.iconButton}

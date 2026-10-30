@@ -357,13 +357,7 @@
   flex-direction: column;
 }
 
-/* macOS 红黄绿窗口按钮独占一行（对齐 DSH 的 topStrip），品牌行让到它下面 */
-.windowStrip {
-  flex: none;
-  height: 34px;
-}
-
-/* 会话列品牌标识：标识与字标沉在左侧，右侧只留一句被细线隔开的模式说明 */
+/* 会话列品牌标识：标识与字标沉在左侧（上方一行留给侧栏顶条的收起入口） */
 .brandRow {
   display: flex;
   align-items: center;
