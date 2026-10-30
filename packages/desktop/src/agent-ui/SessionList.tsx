@@ -136,7 +136,7 @@ interface HoverCardState {
 }
 
 interface MenuState {
-  kind: 'project' | 'session' | 'workspace';
+  kind: 'project' | 'session';
   cwd: string;
   /** 项目键：临时工作区的键与 cwd 不同 */
   key?: string;
@@ -360,10 +360,9 @@ export const SessionList = memo(function SessionList({
   const [contentHits, setContentHits] = useState<SessionContentHit[]>([]);
   const [contentLoading, setContentLoading] = useState(false);
   const [hitIndex, setHitIndex] = useState(0);
-  const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [rename, setRename] = useState<RenameState | null>(null);
-  /** 新会话的工作区：当前会话所在工作区优先（对齐 DSH），其次筛选的工作区、列表首个工作区 */
-  const newSessionCwd = activeCwd || projectFilter || groups[0]?.cwd || '';
+  /** 新会话的工作区：当前会话所在工作区优先（对齐 DSH），其次列表首个工作区 */
+  const newSessionCwd = activeCwd || groups[0]?.cwd || '';
   /** 首次扫描未回：只有工作区壳子、会话还没到，先不渲染半成品列表，避免先出现空工作区再跳成真实会话 */
   const scanning = Boolean(loading) && groups.every((group) => group.sessions.length === 0);
 
@@ -428,13 +427,14 @@ export const SessionList = memo(function SessionList({
     [archivedFilter]
   );
 
-  const filteredGroups = useMemo(() => {
-    const scoped = projectFilter ? orderedGroups.filter((group) => group.key === projectFilter) : orderedGroups;
-    return scoped
-      .map((group) => ({ ...group, sessions: group.sessions.filter(matchesArchive) }))
-      // 真正没有会话的空工作区保留（新建后立刻可见）；只因归档过滤变空的组才收起
-      .filter((group, index) => group.sessions.length > 0 || scoped[index].sessions.length === 0);
-  }, [orderedGroups, projectFilter, matchesArchive]);
+  const filteredGroups = useMemo(
+    () =>
+      orderedGroups
+        .map((group) => ({ ...group, sessions: group.sessions.filter(matchesArchive) }))
+        // 真正没有会话的空工作区保留（新建后立刻可见）；只因归档过滤变空的组才收起
+        .filter((group, index) => group.sessions.length > 0 || orderedGroups[index].sessions.length === 0),
+    [orderedGroups, matchesArchive]
+  );
 
   /** 单列表模式：把全部工作区的会话摊平成一条列表 */
   const flatSessions = useMemo(
@@ -808,28 +808,8 @@ export const SessionList = memo(function SessionList({
           </label>
         ) : (
           <>
-            <button
-              type="button"
-              className={`${styles.sectionTitleButton} ${
-                groupBy === 'flat' ? styles.sectionTitleFlat : ''
-              }`}
-              onClick={(event) => {
-                event.stopPropagation();
-                const rect = event.currentTarget.getBoundingClientRect();
-                setMenu({ kind: 'workspace', cwd: '', top: rect.bottom + 4, left: rect.left });
-              }}
-              title="切换工作区"
-            >
-              {/* 单列表模式没有工作区层级，区头按 DSH 显示「会话」纯标签 */}
-              {groupBy === 'flat'
-                ? '会话'
-                : projectFilter
-                  ? orderedGroups.find((group) => group.key === projectFilter)?.label || '工作区'
-                  : '工作区'}
-              {groupBy !== 'flat' && (
-                <IconTriangleRight size={12} className={styles.sectionChevron} />
-              )}
-            </button>
+            {/* 区头是纯标签（对齐 DSH）：单列表模式显示「会话」，否则「工作区」 */}
+            <span className={styles.sectionTitle}>{groupBy === 'flat' ? '会话' : '工作区'}</span>
             <span className={styles.sectionActions}>
               {onToggleRail && (
                 <button
@@ -1234,39 +1214,6 @@ export const SessionList = memo(function SessionList({
           onClick={(event) => event.stopPropagation()}
           onKeyDown={handleMenuKeyDown}
         >
-          {menu.kind === 'workspace' && (
-            <>
-              <button
-                type="button"
-                className={`${styles.menuItem} ${projectFilter === null ? styles.menuItemActive : ''}`}
-                onClick={() => {
-                  setProjectFilter(null);
-                  setMenu(null);
-                }}
-              >
-                全部工作区
-              </button>
-              {orderedGroups.map((group) => (
-                <button
-                  key={group.key}
-                  type="button"
-                  className={`${styles.menuItem} ${
-                    projectFilter === group.key ? styles.menuItemActive : ''
-                  }`}
-                  onClick={() => {
-                    setProjectFilter(group.key);
-                    setExpandedGroups((prev) =>
-                      prev.includes(group.key) ? prev : [...prev, group.key]
-                    );
-                    setMenu(null);
-                  }}
-                >
-                  {group.label}
-                  <span className={styles.menuCount}>{group.sessions.length}</span>
-                </button>
-              ))}
-            </>
-          )}
           {menu.kind === 'project' && (
             <>
               <button type="button" className={styles.menuItem} onClick={() => onNewInGroup(menu.cwd)}>
@@ -1368,16 +1315,14 @@ export const SessionList = memo(function SessionList({
               )}
             </>
           )}
-          {menu.kind !== 'workspace' && (
-            <button
-              type="button"
-              className={styles.menuItem}
-              onClick={() => reveal(menu.cwd || '.')}
-              disabled={!menu.cwd}
-            >
-              在访达中打开
-            </button>
-          )}
+          <button
+            type="button"
+            className={styles.menuItem}
+            onClick={() => reveal(menu.cwd || '.')}
+            disabled={!menu.cwd}
+          >
+            在访达中打开
+          </button>
           {menu.kind === 'project' && (
             <button type="button" className={styles.menuItem} onClick={() => copyText(menu.cwd)}>
               复制路径
