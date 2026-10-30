@@ -663,6 +663,11 @@ export function TaskAgentPanel({
   );
 }
 
+/** 历史会话的模型：正文里最后一次 model_change 优先，其次摘要记录的 lastModel */
+function modelOfDetail(detail: { model?: string; summary?: { lastModel?: string } }): string {
+  return detail.model || detail.summary?.lastModel || '';
+}
+
 export interface GlobalAgentPanelProps {
   /** page：整页（带会话列）；overlay：全屏浮层（带会话列 + 关闭）；drawer：抽屉（无会话列） */
   mode: 'page' | 'overlay' | 'drawer';
@@ -841,6 +846,15 @@ export function GlobalAgentPanel({
     return `agent_${id}`;
   });
   const [history, setHistory] = useState<SessionChatMessage[] | undefined>(undefined);
+  /**
+   * 当前会话已知的模型：离线会话没有实时状态，用历史里最后一次使用的模型撑住输入框的模型标签，
+   * 否则同一段会话在任务面板显示模型、在全局面板不显示。
+   */
+  const [sessionModel, setSessionModel] = useState('');
+  /** 系统默认模型：新会话还没有任何消息时显示它，与任务会话一致 */
+  const [defaultModel, setDefaultModel] = useState('');
+  /** 输入框当前显示的模型：发消息与预热进程按它建会话，显示与实际生效保持一致 */
+  const modelHintRef = useRef('');
   /** 当前选中的会话历史是否还在加载（切换会话时消息区据此保留上一段内容） */
   const [historyLoading, setHistoryLoading] = useState<boolean>(Boolean(initialSessionId));
   /** 切换序号：快速连点以最后一次点击为准，旧的响应直接丢弃 */
@@ -983,6 +997,7 @@ export function GlobalAgentPanel({
           running: false,
           createdAt: item.createdAt,
           path: item.path,
+          lastModel: item.lastModel,
           archived: item.archived === true,
           pinned: item.pinned === true,
         };
@@ -1068,6 +1083,8 @@ export function GlobalAgentPanel({
     setActiveId(id);
     setStreamKey(`agent_${id}`);
     setHistory(undefined);
+    // 先用列表里的模型占位，历史读回来再校准，避免模型标签闪一下
+    setSessionModel(sessionsRef.current.find((item) => item.id === id)?.lastModel || '');
     setHistoryLoading(true);
     // 上一个会话遗留的审批卡不能带到新会话
     setUiRequest(null);
@@ -1080,6 +1097,7 @@ export function GlobalAgentPanel({
       const detail = await api.getAgentSession(id);
       if (seq !== selectSeq.current) return;
       setHistory(detail.messages || []);
+      setSessionModel(modelOfDetail(detail));
       setCwd(detail.summary?.cwd || '');
       // 打开会话即展开它所在的项目，侧栏能看到选中行
       const projectKey = normalizeProjectCwd(detail.summary?.cwd || '');
@@ -1122,6 +1140,18 @@ export function GlobalAgentPanel({
     return result.state;
   }, [activeId]);
 
+  // 系统默认模型：新会话在首轮之前也能看到模型（与任务会话一致）
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((settings) => setDefaultModel((settings?.defaultModel || '').trim()))
+      .catch(() => setDefaultModel(''));
+    const off = api.on('settings:update', (updated: any) => {
+      if (updated?.defaultModel !== undefined) setDefaultModel(String(updated.defaultModel).trim());
+    });
+    return () => off?.();
+  }, []);
+
   const transport = useMemo(
     () =>
       activeId
@@ -1129,6 +1159,7 @@ export function GlobalAgentPanel({
             send: (message: string, files?: TaskAttachment[]) =>
               api.sendAgentSessionMessage(activeId, message, {
                 cwd: cwd || undefined,
+                model: modelHintRef.current || undefined,
                 attachments: files,
                 permission,
               }),
@@ -1149,6 +1180,10 @@ export function GlobalAgentPanel({
       transport,
       enabled: Boolean(streamKey),
     });
+
+  /** 输入框显示的模型：实时状态 > 历史最后一次 > 系统默认（新会话首轮之前） */
+  const modelHint = state?.model || sessionModel || defaultModel;
+  modelHintRef.current = modelHint;
 
   /** 编辑排队中的插话：先撤回，正文回到输入框 */
   const handleEditQueued = useCallback(
@@ -1173,6 +1208,7 @@ export function GlobalAgentPanel({
     setActiveId(id);
     setStreamKey(`agent_${id}`);
     setHistory([]);
+    setSessionModel('');
     setHistoryLoading(false);
     setCwd(safeCwd);
     setDraft({ id, cwd: safeCwd });
@@ -1465,6 +1501,7 @@ export function GlobalAgentPanel({
         const detail = await api.getAgentSession(activeId);
         if (cancelled) return;
         setHistory(detail.messages || []);
+        setSessionModel(modelOfDetail(detail));
         if (import.meta.env?.DEV) console.log('[AgentPanel] 会话文件已更新，重载历史', activeId);
       } catch (err) {
         if (import.meta.env?.DEV) console.warn('[AgentPanel] 检查会话文件失败:', err);
@@ -1818,7 +1855,7 @@ export function GlobalAgentPanel({
       warmRef.current = { id: activeId, used: false };
       if (import.meta.env?.DEV) console.log('[AgentPanel] 预热 Agent 进程:', { id: activeId, cwd: activeCwd });
       api
-        .openAgentSession(activeId, { cwd: activeCwd, permission })
+        .openAgentSession(activeId, { cwd: activeCwd, permission, model: modelHintRef.current || undefined })
         .then((result) => {
           // 预热期间已经切走：这条进程没人要了，立刻收回
           if (warmRef.current?.id !== activeId) {
@@ -2015,7 +2052,7 @@ export function GlobalAgentPanel({
           turnStartedAt={state?.turnStartedAt}
           lastTurnDurationMs={state?.lastTurnDurationMs}
           awaitingInput={awaitingInput}
-          model={state?.model}
+          model={modelHint}
           commands={commands}
           onRequestMentions={requestMentions}
           permission={permission}
