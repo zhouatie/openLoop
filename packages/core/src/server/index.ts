@@ -247,7 +247,10 @@ export class OpenLoopServer {
         ws.on('message', async (message) => {
           try {
             const data = JSON.parse(message.toString());
-            serverLogger.debug(`[WS:Message] 收到客户端消息: ${data.type}`);
+            // 终端按键逐字上报，不逐条打日志，避免刷穿控制台
+            if (data.type !== 'terminal:input') {
+              serverLogger.debug(`[WS:Message] 收到客户端消息: ${data.type}`);
+            }
             this.handleWsMessage(ws, data);
           } catch (e) {
             serverLogger.warn(`[WS:Message] 解析客户端消息失败: ${message.toString().slice(0, 100)}`);
@@ -3787,6 +3790,12 @@ ${existingSubSummary}
   private handleWsMessage(ws: WebSocket, msg: any) {
     if (msg.type === 'ping') {
       ws.send(JSON.stringify({ type: 'pong' }));
+      return;
+    }
+    // 终端按键与输出走同一条有序通道：转义序列、方向键与鼠标事件按顺序进 PTY，
+    // 不会被多条 HTTP 请求的到达顺序打乱（TUI 程序对顺序极其敏感）
+    if (msg.type === 'terminal:input' && typeof msg.data?.id === 'string' && typeof msg.data?.data === 'string') {
+      terminalHost.write(msg.data.id, msg.data.data);
     }
   }
 }

@@ -1,7 +1,7 @@
 /* 取自 deepseek-harness packages/client/ui-sidebar-terminal/src/client/terminal.tsx（MIT）：
    右侧边栏的 xterm 屏幕（主题、光标、尺寸自适应与状态条）。
    dsh 的 Remote 帧协议 / 多端跟随 / 只读接管没有搬：这里改接 openLoop 的
-   /api/agent/terminal（REST 开、写、改尺寸、关）与 WS 的 agent:terminal 输出事件。 */
+   /api/agent/terminal（REST 开、改尺寸、关）与 WS 的 agent:terminal 输出、terminal:input 输入事件。 */
 import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -142,8 +142,9 @@ export function TerminalPane({ cwd, active }: TerminalPaneProps) {
         if (import.meta.env?.DEV) console.log('[TerminalPane] 终端启动失败:', message);
       });
 
+    // 按键与终端查询应答都回写到 PTY：走 WS 上行，保证 TUI 程序收到的顺序不乱
     const input = term.onData((data) => {
-      if (terminalId) void api.writeTerminal(terminalId, data);
+      if (terminalId) api.writeTerminal(terminalId, data);
     });
 
     // 面板拖动与窗口缩放都会连着触发，逐帧合并成一次 fit
