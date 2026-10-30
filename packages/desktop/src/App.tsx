@@ -57,8 +57,14 @@ export const AppContent: React.FC = () => {
     return false;
   });
   const userInteractedAgentOverlayRef = useRef<boolean>(false);
-  /** 外部页面请求在全局智能体里打开的会话（seq 递增即一次新请求） */
-  const [agentSessionRequest, setAgentSessionRequest] = useState<{ id: string; seq: number } | null>(null);
+  /** 外部页面请求在全局智能体里打开的会话（seq 递增即一次新请求，可选带任务上下文） */
+  const [agentSessionRequest, setAgentSessionRequest] = useState<{
+    id: string;
+    seq: number;
+    taskId?: string;
+    taskTitle?: string;
+    cwd?: string;
+  } | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
     try {
       // 权限向导依赖 Electron 主进程能力；浏览器预览（含靶机）无法检测与授权
@@ -87,12 +93,19 @@ export const AppContent: React.FC = () => {
   });
 
   /** 外部页面请求打开某条智能体会话：打开浮层并切到该会话 */
-  const handleOpenAgentSession = useCallback((sessionId: string) => {
-    if (import.meta.env?.DEV) console.log('[App] 打开全局智能体会话:', sessionId);
-    userInteractedAgentOverlayRef.current = true;
-    setAgentSessionRequest((prev) => ({ id: sessionId, seq: (prev?.seq ?? 0) + 1 }));
-    setIsAgentOverlayOpen(true);
-  }, []);
+  const handleOpenAgentSession = useCallback(
+    (sessionId: string, context?: { taskId?: string; taskTitle?: string; cwd?: string }) => {
+      if (import.meta.env?.DEV) console.log('[App] 打开全局智能体会话:', sessionId, context);
+      userInteractedAgentOverlayRef.current = true;
+      setAgentSessionRequest((prev) => ({
+        id: sessionId,
+        seq: (prev?.seq ?? 0) + 1,
+        ...context,
+      }));
+      setIsAgentOverlayOpen(true);
+    },
+    []
+  );
 
   // Agent 一轮回复结束的全局通知：点击通知直达该会话
   useAgentNotifications(handleOpenAgentSession);

@@ -52,6 +52,7 @@ import {
   Unlink,
   Link2,
   PanelRight,
+  Maximize2,
 } from 'lucide-react';
 import type {
   Task,
@@ -125,8 +126,11 @@ interface KanbanViewProps {
   onTaskUpdate?: (task: Task) => void;
   selectedWorkspaceFilter?: string;
   onWorkspaceFilterChange?: (workspace: string) => void;
-  /** 打开某条智能体会话（全局智能体浮层） */
-  onOpenAgentSession: (sessionId: string) => void;
+  /** 打开某条智能体会话（全局智能体浮层），可选携带任务上下文 */
+  onOpenAgentSession: (
+    sessionId: string,
+    context?: { taskId?: string; taskTitle?: string; cwd?: string }
+  ) => void;
 }
 
 interface ColumnDef {
@@ -888,12 +892,15 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   };
 
   // 任务会话就是同一条 pi 会话：交给上层在全局智能体里打开它
-  const handleOpenAgentSession = (sessionId: string) => {
+  const handleOpenAgentSession = (
+    sessionId: string,
+    context?: { taskId?: string; taskTitle?: string; cwd?: string }
+  ) => {
     if (!onOpenAgentSession) return;
     if (import.meta.env?.DEV) {
-      console.log('[KanbanView] 在全局智能体中打开会话:', sessionId);
+      console.log('[KanbanView] 在全局智能体中打开会话:', sessionId, context);
     }
-    onOpenAgentSession(sessionId);
+    onOpenAgentSession(sessionId, context);
   };
 
   // 暂停 / 恢复当前智能体会话
@@ -3866,7 +3873,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           cwd={curTask.workspace}
                           sendExtra={buildChatSendExtra}
                           headerExtra={
-                            <>
+                            <div className="flex items-center gap-1.5">
                               <AgentChatChangedFiles
                                 taskId={curTask.id}
                                 taskTitle={curTask.title}
@@ -3876,7 +3883,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setIsQaSelectorOpen(true)}
-                                className="h-[22px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] text-[10.5px] font-medium text-[#4b4b53]"
+                                className="h-[22px] px-2 rounded-[4px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] hover:border-[#d4d4d8] text-[10.5px] font-medium text-[#4b4b53] transition-colors cursor-pointer select-none"
                                 title="选择要随消息发送的 QA 测试产物"
                               >
                                 {selectedQaTotalCount > 0
@@ -3888,22 +3895,34 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                   type="button"
                                   disabled={isPausingSession}
                                   onClick={handleTogglePauseSession}
-                                  className="h-[22px] px-2 rounded-[5px] bg-[#1c1c21] text-white text-[10.5px] font-medium hover:bg-[#2e2f36]"
+                                  className="h-[22px] px-2 rounded-[4px] bg-[#1c1c21] text-white text-[10.5px] font-medium hover:bg-[#2e2f36] transition-colors cursor-pointer select-none"
                                 >
                                   {isPausingSession ? '恢复中' : '继续'}
                                 </button>
                               )}
-                              {curTaskSessionId && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenAgentSession(curTaskSessionId)}
-                                  className="h-[22px] px-1.5 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f1f1f4] text-[10.5px] text-[#85858d] hover:text-[#1c1c21]"
-                                  title="在全局智能体中打开该任务的会话"
-                                >
-                                  全局会话
-                                </button>
-                              )}
-                            </>
+
+                              <div className="h-3.5 w-px bg-[#e3e3e8] mx-0.5 shrink-0" />
+
+                              {/* 视窗模式：展开至全局工作台（沉浸全屏） */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const targetSessionId =
+                                    curTaskSessionId ||
+                                    `session_${curTask.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                                  handleOpenAgentSession(targetSessionId, {
+                                    taskId: curTask.id,
+                                    taskTitle: curTask.kind === 'group' ? '任务组架构师' : curTask.title,
+                                    cwd: curTask.workspace,
+                                  });
+                                }}
+                                className="h-[22px] w-[22px] rounded-[4px] border border-[#e3e3e8] bg-white hover:border-[#d8d6fb] hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] flex items-center justify-center transition-all shadow-2xs cursor-pointer select-none shrink-0"
+                                title="展开至全局工作台（沉浸模式：全屏视窗、多终端与完整 Diff）"
+                                aria-label="展开至全局工作台"
+                              >
+                                <Maximize2 size={11} strokeWidth={2.2} />
+                              </button>
+                            </div>
                           }
                         />
                       </aside>
