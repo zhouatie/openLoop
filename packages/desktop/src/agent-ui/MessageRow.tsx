@@ -8,7 +8,8 @@ import { ReasoningRow } from './dsh/ReasoningRow';
 import { MessageActions, formatTokens } from './dsh/MessageActions';
 import { Tooltip } from './dsh/Tooltip';
 import { writeClipboard } from './dsh/clipboard';
-import { IconCopy } from './icons';
+import { IconCopy, IconFile, IconFolderClose, IconNewChat } from './icons';
+import { splitMentions, stripReferenceContext } from './mentions';
 import styles from './MessageRow.module.css';
 
 export interface MessageRowProps {
@@ -100,6 +101,40 @@ export const MessageRow = memo(function MessageRow({
   );
 });
 
+/**
+ * 用户文本里的 @ 引用渲染成行内 chip，其余文字原样保留。
+ * 引用 chip 沿用 dsh 的样式：跟随正文基线、字号 1em 的图标、业务主色。
+ */
+const MentionText = memo(function MentionText({ text }: { text: string }) {
+  const runs = useMemo(() => splitMentions(text), [text]);
+  if (!runs.some((run) => run.type === 'ref')) return <>{text}</>;
+  return (
+    <>
+      {runs.map((run, index) =>
+        run.type === 'text' ? (
+          <React.Fragment key={index}>{run.text}</React.Fragment>
+        ) : (
+          <span
+            key={index}
+            className={styles.mention}
+            data-mention={run.ref.kind}
+            title={run.ref.raw}
+          >
+            {run.ref.kind === 'session' ? (
+              <IconNewChat size={16} className={styles.mentionIcon} />
+            ) : run.ref.kind === 'file' ? (
+              <IconFile size={16} className={styles.mentionIcon} />
+            ) : (
+              <IconFolderClose size={16} className={styles.mentionIcon} />
+            )}
+            {run.ref.label}
+          </span>
+        )
+      )}
+    </>
+  );
+});
+
 /** 用户消息：正文在上，随附图片缩略图贴在气泡底部（点击放大） */
 const UserMessageRow = memo(function UserMessageRow({
   message,
@@ -110,7 +145,11 @@ const UserMessageRow = memo(function UserMessageRow({
   compact?: boolean;
   pending?: boolean;
 }) {
-  const { text, images: promptImages } = useMemo(() => splitPromptImages(message.content), [message.content]);
+  // 跨会话引用快照是发给模型的背景资料，气泡里只显示用户写的那部分
+  const { text, images: promptImages } = useMemo(
+    () => splitPromptImages(stripReferenceContext(message.content)),
+    [message.content]
+  );
   const attachments = message.attachments || [];
   const images = useMemo(() => {
     const attached = attachments.filter((item) => Boolean(item.url));
@@ -128,7 +167,11 @@ const UserMessageRow = memo(function UserMessageRow({
   return (
     <div className={styles.userRow}>
       <div className={`${styles.userBubble} ${pending ? styles.userBubblePending : ''}`}>
-        {text.trim().length > 0 && <div className={styles.userText}>{text}</div>}
+        {text.trim().length > 0 && (
+          <div className={styles.userText}>
+            <MentionText text={text} />
+          </div>
+        )}
         {images.length > 0 && (
           <div className={styles.imageGrid}>
             {images.map((item) => (

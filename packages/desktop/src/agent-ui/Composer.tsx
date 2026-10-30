@@ -13,6 +13,10 @@ import {
   IconShield,
 } from './icons';
 import styles from './Composer.module.css';
+import { ComposerEditor } from './composer-editor/ComposerEditor';
+import type { ComposerEditorHandle } from './composer-editor/ComposerEditor';
+import type { EditorProjection } from './composer-editor/projection';
+import { sessionMention } from './mentions';
 import { useShortcuts } from '../context/ShortcutContext';
 
 export interface ComposerAttachmentItem {
@@ -35,6 +39,8 @@ export interface ComposerMentionItem {
   label: string;
   kind: 'file' | 'dir' | 'session';
   description?: string;
+  /** 会话候选的会话 id：会话引用要带上它 */
+  refId?: string;
 }
 
 export type ComposerPermission = 'full' | 'readonly' | 'noshell';
@@ -106,6 +112,8 @@ interface MenuItem {
   tag?: string;
   group?: string;
   mentionKind?: ComposerMentionItem['kind'];
+  /** 会话行带上会话 id，选中后写进引用 */
+  refId?: string;
 }
 
 interface MenuState {
@@ -114,6 +122,8 @@ interface MenuState {
   index: number;
   /** 由 ➕ 面板进入的子菜单：顶部给一行返回 */
   fromAdd?: boolean;
+  /** @ 菜单当前查询词：目录下钻后用来还原面包屑 */
+  query?: string;
 }
 
 const PERMISSION_ORDER: ComposerPermission[] = ['full', 'readonly', 'noshell'];
@@ -143,6 +153,33 @@ function slashBoundaryOk(text: string, index: number): boolean {
   if (prev === '/') return false;
   if (prev === ':' && index >= 2 && !/\s/u.test(text.charAt(index - 2))) return false;
   return true;
+}
+
+/** @ 候选行：文件 / 目录 / 会话共用一套行结构，按类型分组 */
+function mentionRows(list: ComposerMentionItem[]): MenuItem[] {
+  return list.map((item) => ({
+    key: item.key,
+    label: item.label,
+    description: item.description,
+    isDir: item.kind === 'dir',
+    mentionKind: item.kind,
+    refId: item.refId,
+    group: item.kind === 'session' ? '会话' : '文件与文件夹',
+  }));
+}
+
+/** 已下钻的目录：从工作区根到当前层逐级可回退，和 dsh 的面包屑一致 */
+function mentionCrumbs(query: string): Array<{ label: string; prefix: string }> | null {
+  const slash = query.lastIndexOf('/');
+  if (slash < 0) return null;
+  const segments = query.slice(0, slash).split('/').filter(Boolean);
+  return [
+    { label: '工作区', prefix: '' },
+    ...segments.map((label, index) => ({
+      label,
+      prefix: `${segments.slice(0, index + 1).join('/')}/`,
+    })),
+  ];
 }
 
 /** 光标前的 / token：和 dsh 一致，行首与文字中间都可触发 */
@@ -182,25 +219,17 @@ export const Composer = React.memo(function Composer({
 }: ComposerProps) {
   const { matchShortcut } = useShortcuts();
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<ComposerEditorHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
-
-  // 高度随内容增长，最多 8 行
-  useEffect(() => {
-    const node = textareaRef.current;
-    if (!node) return;
-    node.style.height = 'auto';
-    const lineHeight = 24;
-    const maxHeight = lineHeight * 8 + 8;
-    node.style.height = `${Math.min(node.scrollHeight, maxHeight)}px`;
-  }, [value]);
+  /** 编辑器里的草稿文本（chip 展开成 `@path`）：发送与可发送判断都用它 */
+  const [text, setText] = useState(value);
 
   /** 发送后焦点留在输入框：发送期间输入框会短暂禁用，解禁后再补回焦点 */
   const restoreFocusRef = useRef(false);
-  const focusInput = useCallback(() => textareaRef.current?.focus(), []);
+  const focusInput = useCallback(() => editorRef.current?.focus(), []);
 
   useEffect(() => {
     if (disabled || !restoreFocusRef.current) return;
@@ -214,20 +243,46 @@ export const Composer = React.memo(function Composer({
   }, [disabled, focusInput]);
 
   const submit = useCallback(() => {
-    const trimmed = value.trim();
+    const trimmed = text.trim();
+    if (import.meta.env?.DEV) console.log('[Composer] 提交:', { length: trimmed.length });
     if (!trimmed || disabled) return;
     // 生成中发送会作为追加消息排入本轮，由输入卡上方的排队条承接反馈
     onSend(trimmed);
     // 发送会让输入框短暂禁用：下一帧取回焦点，仍禁用则等解禁后补回
     restoreFocusRef.current = true;
     window.requestAnimationFrame(focusInput);
-  }, [value, disabled, onSend, focusInput]);
+  }, [text, disabled, onSend, focusInput]);
 
   /** @ 候选的请求序号：连续输入时只采纳最后一次的结果，避免旧结果盖掉新候选 */
   const mentionSeq = useRef(0);
   const mentionTimer = useRef<number | null>(null);
   /** 当前 @ / 斜杠 token 在草稿里的范围：选中候选时只替换这一段，不动前后文字 */
   const tokenSpan = useRef<{ start: number; end: number } | null>(null);
+
+  /** @ 候选请求：输入与目录下钻走同一条路径，后到的结果覆盖先到的 */
+  const loadMentions = useCallback(
+    (query: string) => {
+      const request = onRequestMentions;
+      if (!request) return;
+      const seq = ++mentionSeq.current;
+      void request(query)
+        .then((list) => {
+          if (seq !== mentionSeq.current) return;
+          if (import.meta.env?.DEV && list.length > 0) {
+            console.log('[Composer] @ 候选:', { query, count: list.length });
+          }
+          setMenu(
+            list.length > 0
+              ? { kind: 'mention', items: mentionRows(list), index: 0, query }
+              : null
+          );
+        })
+        .catch(() => {
+          if (seq === mentionSeq.current) setMenu(null);
+        });
+    },
+    [onRequestMentions]
+  );
 
   /** 斜杠指令与 @ 文件：按光标前的 token 决定候选菜单 */
   const syncSuggestions = useCallback(
@@ -260,47 +315,26 @@ export const Composer = React.memo(function Composer({
         return;
       }
 
+      if (import.meta.env?.DEV) {
+        console.log('[Composer] 候选检测:', { caret, head: text.slice(0, caret) });
+      }
       const request = onRequestMentions;
       const at = request ? atTokenBefore(text, caret) : null;
       if (at && request) {
         tokenSpan.current = { start: at.start, end: caret };
         const query = at.query;
-        const seq = ++mentionSeq.current;
+        // 敲键立刻作废在途请求，防抖窗内不会闪回旧候选
+        mentionSeq.current += 1;
         mentionTimer.current = window.setTimeout(() => {
           mentionTimer.current = null;
-          void request(query)
-            .then((list) => {
-              if (seq !== mentionSeq.current) return;
-              if (import.meta.env?.DEV && list.length > 0) {
-                console.log('[Composer] @ 候选:', { query, span: tokenSpan.current, count: list.length });
-              }
-              setMenu(
-                list.length > 0
-                  ? {
-                      kind: 'mention',
-                      items: list.slice(0, 14).map((item) => ({
-                        key: item.key,
-                        label: item.label,
-                        description: item.description,
-                        isDir: item.kind === 'dir',
-                        mentionKind: item.kind,
-                        group: item.kind === 'session' ? '会话' : '文件与文件夹',
-                      })),
-                      index: 0,
-                    }
-                  : null
-              );
-            })
-            .catch(() => {
-              if (seq === mentionSeq.current) setMenu(null);
-            });
+          loadMentions(query);
         }, MENTION_DEBOUNCE_MS);
         return;
       }
 
       setMenu((prev) => (prev && (prev.kind === 'slash' || prev.kind === 'mention') ? null : prev));
     },
-    [commands, onRequestMentions]
+    [commands, onRequestMentions, loadMentions]
   );
 
   useEffect(
@@ -309,6 +343,24 @@ export const Composer = React.memo(function Composer({
     },
     []
   );
+
+  /** 编辑器每次提交后同步草稿与候选菜单 */
+  const handleEditorUpdate = useCallback(
+    (projection: EditorProjection) => {
+      setText(projection.clipboardText);
+      onChange(projection.clipboardText);
+      // 只有焦点在输入框时才驱动候选：发送后清空、切会话恢复草稿不应弹出面板
+      if (!rootRef.current?.contains(document.activeElement)) return;
+      syncSuggestions(projection.detectText, projection.caret ?? projection.detectText.length);
+    },
+    [onChange, syncSuggestions]
+  );
+
+  /** 外部改写草稿（发送后清空、切会话、指令回填）：让编辑器跟随 */
+  useEffect(() => {
+    if (value === text) return;
+    editorRef.current?.setDraft(value);
+  }, [value, text]);
 
   /** 权限 / 模型清单：面板与底部 chip 共用同一套行渲染 */
   const openMenu = useCallback(
@@ -335,8 +387,8 @@ export const Composer = React.memo(function Composer({
       // 没有对应回调时这行本就不出现，这里只做防御
       if (rows.length === 0) return;
       setMenu({ kind, items: rows, index: 0, fromAdd });
-      // 焦点留在输入框：菜单的键盘选择走 textarea 的按键处理
-      textareaRef.current?.focus();
+      // 焦点留在输入框：菜单的键盘选择走编辑器的按键处理
+      editorRef.current?.focus();
     },
     [menu, permission, model, models]
   );
@@ -380,29 +432,20 @@ export const Composer = React.memo(function Composer({
     }
     if (import.meta.env?.DEV) console.log('[Composer] 打开 ➕ 面板:', items.map((item) => item.key));
     setMenu({ kind: 'add', items, index: 0 });
-    // 点加号不抢焦点：面板的上下键与回车由 textarea 承接
-    textareaRef.current?.focus();
+    // 点加号不抢焦点：面板的上下键与回车由编辑器承接
+    editorRef.current?.focus();
   }, [menu, onAddFiles, onPermissionSelect, onModelSelect, models]);
 
   /** 选中候选：只替换当前 token，前后文字和光标都原位保留 */
-  const insertToken = useCallback(
-    (text: string) => {
-      const span = tokenSpan.current;
-      const start = span ? span.start : value.length;
-      const end = span ? span.end : value.length;
-      onChange(`${value.slice(0, start)}${text}${value.slice(end)}`);
-      setMenu(null);
-      tokenSpan.current = null;
-      const caret = start + text.length;
-      window.requestAnimationFrame(() => {
-        const node = textareaRef.current;
-        if (!node) return;
-        node.focus();
-        node.setSelectionRange(caret, caret);
-      });
-    },
-    [onChange, value]
-  );
+  const insertToken = useCallback((insert: string, keepSpan = false) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const span = tokenSpan.current ?? editor.caretSpan();
+    editor.replaceText(span, insert);
+    setMenu(null);
+    // 目录下钻后面板还要接着用：保留 token 范围，下一层候选仍能原位替换
+    tokenSpan.current = keepSpan ? { start: span.start, end: span.start + insert.length } : null;
+  }, []);
 
   const applyMenuChoice = useCallback(
     (choice: { key: string }) => {
@@ -432,26 +475,56 @@ export const Composer = React.memo(function Composer({
         return;
       }
       if (menu.kind === 'mention') {
-        insertToken(`@${choice.key} `);
+        // 键盘与鼠标都按选中的那一行判断：目录行下钻，其余行写入草稿
+        const picked = menu.items.find((item) => item.key === choice.key);
+        if (picked?.isDir) {
+          insertToken(`@${picked.key}`, true);
+          loadMentions(picked.key);
+          return;
+        }
+        if (!picked) return;
+        const editor = editorRef.current;
+        if (!editor) return;
+        const span = tokenSpan.current ?? editor.caretSpan();
+        // 会话与文件都落成真实引用 chip：会话的文本形式带标题，空格不再是分隔符
+        if (picked.mentionKind === 'session') {
+          const id = picked.refId ?? picked.key;
+          editor.insertReference(span, {
+            ref: id,
+            label: picked.label,
+            appearance: 'session',
+            clipboardText: sessionMention(picked.label, id),
+          });
+          setMenu(null);
+          tokenSpan.current = null;
+          editor.focus();
+          return;
+        }
+        editor.insertReference(span, {
+          ref: picked.key,
+          label: picked.label.replace(/\/$/, ''),
+          appearance: 'file',
+          clipboardText: `@${picked.key}`,
+        });
+        setMenu(null);
+        tokenSpan.current = null;
       }
     },
-    [menu, openMenu, onModelSelect, onPermissionSelect, insertToken]
+    [menu, openMenu, onModelSelect, onPermissionSelect, insertToken, loadMentions]
   );
 
   const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
       // 中文输入法候选阶段的回车不能触发发送
       if (event.nativeEvent.isComposing) return;
 
       if (menu && menu.items.length > 0) {
-        if (event.key === 'ArrowDown') {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          // 拦在编辑器之前：否则方向键会先移动光标
           event.preventDefault();
-          setMenu({ ...menu, index: (menu.index + 1) % menu.items.length });
-          return;
-        }
-        if (event.key === 'ArrowUp') {
-          event.preventDefault();
-          setMenu({ ...menu, index: (menu.index - 1 + menu.items.length) % menu.items.length });
+          event.stopPropagation();
+          const step = event.key === 'ArrowDown' ? 1 : -1;
+          setMenu({ ...menu, index: (menu.index + step + menu.items.length) % menu.items.length });
           return;
         }
         if (event.key === 'Escape') {
@@ -460,25 +533,34 @@ export const Composer = React.memo(function Composer({
           setMenu(null);
           return;
         }
+        if (event.key === 'Tab' && menu.kind === 'mention' && menu.items[menu.index]?.isDir) {
+          // Tab 与行尾箭头同一个动作：进入目录并保持面板
+          event.preventDefault();
+          event.stopPropagation();
+          applyMenuChoice(menu.items[menu.index]);
+          return;
+        }
         if (event.key === 'Enter') {
           event.preventDefault();
+          event.stopPropagation();
           applyMenuChoice(menu.items[menu.index]);
           return;
         }
       }
 
       if (event.key === 'Enter' && !event.shiftKey) {
+        // 拦截在编辑器之前，否则 Lexical 会先插入换行
+        event.preventDefault();
+        event.stopPropagation();
         // Super + Enter：打断当前回答并立刻发送
-        if (onAcceleratedSend && matchShortcut(event.nativeEvent, 'chat.acceleratedSend') && value.trim()) {
-          event.preventDefault();
-          onAcceleratedSend(value.trim());
+        if (onAcceleratedSend && matchShortcut(event.nativeEvent, 'chat.acceleratedSend') && text.trim()) {
+          onAcceleratedSend(text.trim());
           return;
         }
-        event.preventDefault();
         submit();
       }
     },
-    [submit, menu, applyMenuChoice]
+    [submit, menu, applyMenuChoice, onAcceleratedSend, matchShortcut, text]
   );
 
   const acceptFiles = useCallback(
@@ -501,19 +583,20 @@ export const Composer = React.memo(function Composer({
   );
 
   const handlePaste = useCallback(
-    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
       if (!onAddFiles) return;
       const picked = Array.from(event.clipboardData?.files || []).filter((item) =>
         item.type.startsWith('image/')
       );
       if (picked.length === 0) return;
+      // 图片走附件，其余文本交给编辑器自己插入
       event.preventDefault();
       onAddFiles(picked);
     },
     [onAddFiles]
   );
 
-  const canSend = value.trim().length > 0 && !disabled;
+  const canSend = text.trim().length > 0 && !disabled;
 
   /** 命令面板：点面板外关闭；Esc 只关面板，不穿透到面板级的缩放/关闭快捷键 */
   useEffect(() => {
@@ -551,6 +634,8 @@ export const Composer = React.memo(function Composer({
   /** ➕ 面板与权限 / 模型清单共用一套行渲染，斜杠与 @ 保留紧凑候选列表 */
   const panelMenu =
     menu && (menu.kind === 'add' || menu.kind === 'permission' || menu.kind === 'model') ? menu : null;
+  /** @ 菜单下钻后的面包屑：最后一级是当前目录，不能点 */
+  const crumbs = menu?.kind === 'mention' ? mentionCrumbs(menu.query || '') : null;
 
   return (
     <div className={styles.root} ref={rootRef}>
@@ -608,6 +693,30 @@ export const Composer = React.memo(function Composer({
           role="listbox"
           data-agent-transient
         >
+          {crumbs && (
+            <div className={styles.popoverCrumbs}>
+              {crumbs.map((crumb, index) => {
+                const current = index === crumbs.length - 1;
+                return (
+                  <React.Fragment key={`crumb-${crumb.prefix}`}>
+                    {index > 0 && <span className={styles.popoverCrumbSep}>/</span>}
+                    <button
+                      type="button"
+                      className={`${styles.popoverCrumb} ${current ? styles.popoverCrumbCurrent : ''}`}
+                      disabled={current}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        insertToken(`@${crumb.prefix}`, true);
+                        loadMentions(crumb.prefix);
+                      }}
+                    >
+                      {crumb.label}
+                    </button>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          )}
           {menu.items.map((item, index) => {
             const showGroup = Boolean(item.group) && item.group !== menu.items[index - 1]?.group;
             return (
@@ -753,21 +862,15 @@ export const Composer = React.memo(function Composer({
           </div>
         )}
 
-        <textarea
-          ref={textareaRef}
-          className={styles.input}
-          value={value}
-          onChange={(event) => {
-            onChange(event.target.value);
-            syncSuggestions(event.target.value, event.target.selectionStart ?? event.target.value.length);
-          }}
-          onKeyDown={handleKeyDown}
+        <ComposerEditor
+          ref={editorRef}
+          onUpdate={handleEditorUpdate}
+          onKeyDownCapture={handleKeyDown}
           onFocus={() => {
             restoreFocusRef.current = false;
           }}
           onPaste={handlePaste}
           placeholder={placeholder || '描述你想要构建的内容，/ 调用指令，@ 引用文件'}
-          rows={1}
           disabled={disabled}
         />
 
