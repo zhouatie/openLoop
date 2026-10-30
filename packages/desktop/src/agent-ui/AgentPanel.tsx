@@ -13,7 +13,7 @@ import {
 } from './Composer';
 import { WorkspaceDock, useAgentDock } from './WorkspaceDock';
 import { OpenFileContext, type ChangeTarget, type OpenFileApi } from './open-file';
-import { IconClose, IconFork, IconMinimize, IconPanelRight } from './icons';
+import { IconClose, IconFork, IconMinimize, IconNewChat, IconPanelLeft, IconPanelRight } from './icons';
 import { BrandLogo } from '../components/BrandLogo';
 import { toast } from '../components/Toast';
 import { useDirectoryPicker } from '../components/useDirectoryPicker';
@@ -152,6 +152,8 @@ export interface AgentPanelShellProps {
   /** 撤回排队中的插话 */
   onWithdrawQueued?: (item: PendingUserInput) => void;
   headerExtra?: React.ReactNode;
+  /** 顶栏最左侧的图标组（侧边栏收起后放展开入口与新会话） */
+  leading?: React.ReactNode;
   onClose?: () => void;
   /** 提供时右上角显示最小化按钮（浮层形态） */
   onMinimize?: () => void;
@@ -232,6 +234,7 @@ export function AgentPanelShell({
   onRemoveAttachment,
   hero,
   headerless,
+  leading,
   commands,
   onRequestMentions,
   permission,
@@ -372,6 +375,7 @@ export function AgentPanelShell({
       {!headerless && (
       <header className={styles.header}>
         <div className={styles.headerMain}>
+          {leading && <div className={styles.headerLeading}>{leading}</div>}
           {title ? <div className={styles.title}>{title}</div> : null}
           {subtitle && <div className={styles.subtitle}>{subtitle}</div>}
         </div>
@@ -1803,7 +1807,8 @@ export function GlobalAgentPanel({
   const activeSession = sessions.find((item) => item.id === activeId);
   const [searchSignal, setSearchSignal] = useState(0);
   const [renameSignal, setRenameSignal] = useState(0);
-  const [rail, setRail] = useState(false);
+  /** 侧边栏展开状态：收起后不留图标轨道，展开入口交给顶栏（对齐 DSH） */
+  const [listOpen, setListOpen] = useState(true);
 
   // 面板导航快捷键：命令表在 constants/agentShortcuts.ts，可在设置页改键
   useShortcutBindings(
@@ -1975,6 +1980,37 @@ export function GlobalAgentPanel({
 
   const openApi = useMemo<OpenFileApi>(() => ({ openFile, openDiff }), [openFile, openDiff]);
 
+  /**
+   * 侧边栏收起后的顶栏入口：展开侧边栏 + 新会话。
+   * 对齐 DSH `shell.leading`：入口与红黄绿同排，只留两个图标，不留图标轨道。
+   */
+  const headerLeading = listOpen ? null : (
+    <>
+      {trafficLightInset && <span className={styles.headerTrafficInset} aria-hidden="true" />}
+      <button
+        type="button"
+        className={styles.iconButton}
+        onClick={() => {
+          if (import.meta.env?.DEV) console.log('[AgentPanel] 展开侧边栏');
+          setListOpen(true);
+        }}
+        title="展开侧边栏"
+        aria-label="展开侧边栏"
+      >
+        <IconPanelLeft size={16} />
+      </button>
+      <button
+        type="button"
+        className={styles.iconButton}
+        onClick={() => startNewSession(activeCwd || groups[0]?.cwd || '')}
+        title="新会话"
+        aria-label="新会话"
+      >
+        <IconNewChat size={16} />
+      </button>
+    </>
+  );
+
 
   /** 会话树入口：与分叉同一套语义，只是不离开当前会话 */
   const treeToggle = (
@@ -1996,7 +2032,7 @@ export function GlobalAgentPanel({
         mode === 'drawer' ? styles.panelDrawer : styles.panelPage
       } ${mode === 'overlay' ? styles.panelOverlay : ''}`}
     >
-      {mode !== 'drawer' && (
+      {mode !== 'drawer' && listOpen && (
         <SessionList
           brandSlot={
             <>
@@ -2033,8 +2069,10 @@ export function GlobalAgentPanel({
           onSearchContent={(text) => api.searchAgentSessions(text, 20).then((data) => data.results)}
           renameSignal={renameSignal}
           activeCwd={activeCwd}
-          rail={rail}
-          onToggleRail={() => setRail((value) => !value)}
+          onCollapse={() => {
+            if (import.meta.env?.DEV) console.log('[AgentPanel] 收起侧边栏');
+            setListOpen(false);
+          }}
         />
       )}
 
@@ -2071,6 +2109,7 @@ export function GlobalAgentPanel({
           onMinimize={mode === 'overlay' ? onClose : undefined}
           composerDisabled={!activeId}
           headerless={mode === 'page'}
+          leading={headerLeading}
           shortcutsEnabled={active}
           shortcutPriority={1}
           headerExtra={

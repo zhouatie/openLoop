@@ -97,9 +97,8 @@ export interface SessionListProps {
   renameSignal?: number;
   /** 当前打开会话所属工作区的 cwd：左上角新会话默认建在这里 */
   activeCwd?: string;
-  /** 折叠成 56px 图标轨道 */
-  rail?: boolean;
-  onToggleRail?: () => void;
+  /** 收起侧边栏：图标入口交给主列顶栏（对齐 DSH 折叠后不留图标轨道） */
+  onCollapse?: () => void;
 }
 
 const SESSION_VISIBLE_COUNT = 5;
@@ -344,8 +343,7 @@ export const SessionList = memo(function SessionList({
   onSearchContent,
   renameSignal,
   activeCwd,
-  rail,
-  onToggleRail,
+  onCollapse,
 }: SessionListProps) {
   const searching = query.trim().length > 0;
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -709,59 +707,6 @@ export const SessionList = memo(function SessionList({
     [menu, orderedGroups]
   );
 
-
-
-  // 折叠成图标轨道
-  if (rail) {
-    return (
-      <aside className={`${styles.root} ${styles.rootRail}`}>
-        <div className={styles.railTop}>
-          {onToggleRail && (
-            <button
-              type="button"
-              className={styles.railButton}
-              onClick={onToggleRail}
-              title="展开侧边栏"
-              aria-label="展开侧边栏"
-            >
-              <IconPanelLeft size={18} />
-            </button>
-          )}
-          <button
-            type="button"
-            className={styles.railButton}
-            onClick={() => onNewInGroup(newSessionCwd)}
-            title="新会话"
-            aria-label="新会话"
-          >
-            <IconNewChat size={18} />
-          </button>
-          <button
-            type="button"
-            className={styles.railButton}
-            onClick={() => {
-              onToggleRail?.();
-              setSearchOpen(true);
-            }}
-            title="搜索会话"
-            aria-label="搜索会话"
-          >
-            <IconSearch size={18} />
-          </button>
-          <button
-            type="button"
-            className={styles.railButton}
-            onClick={onAddProject}
-            title="新建工作区"
-            aria-label="新建工作区"
-          >
-            <IconProjectAdd size={18} />
-          </button>
-        </div>
-      </aside>
-    );
-  }
-
   return (
     <aside
       className={styles.root}
@@ -811,11 +756,11 @@ export const SessionList = memo(function SessionList({
             {/* 区头是纯标签（对齐 DSH）：单列表模式显示「会话」，否则「工作区」 */}
             <span className={styles.sectionTitle}>{groupBy === 'flat' ? '会话' : '工作区'}</span>
             <span className={styles.sectionActions}>
-              {onToggleRail && (
+              {onCollapse && (
                 <button
                   type="button"
                   className={styles.iconButton}
-                  onClick={onToggleRail}
+                  onClick={onCollapse}
                   title="收起侧边栏"
                 >
                   <IconPanelLeft size={16} />

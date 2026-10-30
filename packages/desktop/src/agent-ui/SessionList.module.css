@@ -639,43 +639,6 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* ---- 折叠成 56px 图标轨道（DSH sidebar rail） ---- */
-.rootRail {
-  width: 56px;
-  min-width: 56px;
-  max-width: 56px;
-  padding: 6px 6px 10px;
-  align-items: center;
-}
-
-.railTop {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding-top: 18px;
-}
-
-.railButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: none;
-  border-radius: var(--dsw-radius-md);
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
-  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
-}
-
-.railButton:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
 .iconButtonActive {
   color: var(--dsw-alias-state-business-primary);
   background: var(--dsw-alias-interactive-bg-hover);

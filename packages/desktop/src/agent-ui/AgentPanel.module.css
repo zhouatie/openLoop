@@ -59,6 +59,22 @@
   min-width: 0;
 }
 
+/* 侧边栏收起后的顶栏图标组：两个 26px 图标，8px 间距（对齐 DSH shell.leading） */
+.headerLeading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* 红黄绿占位：让图标从 x=88 开始，与 DSH leadingSeat 一致 */
+.headerTrafficInset {
+  flex: none;
+  display: block;
+  width: 72px;
+  height: 1px;
+}
+
 .title {
   font-size: 13px;
   font-weight: 500;
