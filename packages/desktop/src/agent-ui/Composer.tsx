@@ -120,6 +120,42 @@ const PERMISSION_ORDER: ComposerPermission[] = ['full', 'readonly', 'noshell'];
 /** @ 候选的本地防抖：每次按键都请求会让工作区文件列表接口排队 */
 const MENTION_DEBOUNCE_MS = 120;
 
+/**
+ * 光标前的 @ token：按光标判定，文字中间（光标不在末尾）输入的 @ 同样有效。
+ * 返回 token 在草稿里的起点与查询词，选中候选时只替换这一段。
+ */
+function atTokenBefore(text: string, caret: number): { start: number; query: string } | null {
+  const match = /@([^\s]*)$/u.exec(text.slice(0, caret));
+  if (!match) return null;
+  const start = caret - match[0].length;
+  // @ 前是 ASCII 字母数字或下划线时不算触发点：邮箱、URL 这类词内 @ 不开面板
+  if (start > 0 && /\w/u.test(text.charAt(start - 1))) return null;
+  return { start, query: match[1] };
+}
+
+/** 斜杠的词边界：行首、空白或标点后才算触发点，URL 里的斜杠不算 */
+function slashBoundaryOk(text: string, index: number): boolean {
+  if (index === 0) return true;
+  const prev = text.charAt(index - 1);
+  if (/\s/u.test(prev)) return true;
+  if (/\w/u.test(prev)) return false;
+  // 协议、`//` 与 Windows 盘符里的斜杠当普通字符
+  if (prev === '/') return false;
+  if (prev === ':' && index >= 2 && !/\s/u.test(text.charAt(index - 2))) return false;
+  return true;
+}
+
+/** 光标前的 / token：和 dsh 一致，行首与文字中间都可触发 */
+function slashTokenBefore(text: string, caret: number): { start: number; query: string } | null {
+  for (let i = caret - 1; i >= 0; i--) {
+    const char = text.charAt(i);
+    if (/\s/u.test(char)) return null;
+    if (char !== '/' || !slashBoundaryOk(text, i)) continue;
+    return { start: i, query: text.slice(i + 1, caret) };
+  }
+  return null;
+}
+
 /** 输入卡：28px 圆角面板 + 底部控件行，交互保留 textarea（中文输入法最稳） */
 export const Composer = React.memo(function Composer({
   value,
@@ -190,17 +226,24 @@ export const Composer = React.memo(function Composer({
   /** @ 候选的请求序号：连续输入时只采纳最后一次的结果，避免旧结果盖掉新候选 */
   const mentionSeq = useRef(0);
   const mentionTimer = useRef<number | null>(null);
+  /** 当前 @ / 斜杠 token 在草稿里的范围：选中候选时只替换这一段，不动前后文字 */
+  const tokenSpan = useRef<{ start: number; end: number } | null>(null);
 
   /** 斜杠指令与 @ 文件：按光标前的 token 决定候选菜单 */
   const syncSuggestions = useCallback(
-    (text: string) => {
+    (text: string, caret: number) => {
       if (mentionTimer.current !== null) {
         window.clearTimeout(mentionTimer.current);
         mentionTimer.current = null;
       }
-      if (commands && commands.length > 0 && /^\/[^\s]*$/.test(text)) {
-        const query = text.slice(1).toLowerCase();
-        const matched = commands.filter((command) => command.name.toLowerCase().includes(query)).slice(0, 10);
+      const slashCommands = commands && commands.length > 0 ? commands : null;
+      const slash = slashCommands ? slashTokenBefore(text, caret) : null;
+      if (slash && slashCommands) {
+        tokenSpan.current = { start: slash.start, end: caret };
+        const query = slash.query.toLowerCase();
+        const matched = slashCommands
+          .filter((command) => command.name.toLowerCase().includes(query))
+          .slice(0, 10);
         const items = matched.map((command) => ({
           key: `/${command.name}`,
           label: `/${command.name}`,
@@ -217,15 +260,20 @@ export const Composer = React.memo(function Composer({
         return;
       }
 
-      const mention = /(?:^|\s)@([^\s]*)$/.exec(text);
-      if (mention && onRequestMentions) {
-        const query = mention[1];
+      const request = onRequestMentions;
+      const at = request ? atTokenBefore(text, caret) : null;
+      if (at && request) {
+        tokenSpan.current = { start: at.start, end: caret };
+        const query = at.query;
         const seq = ++mentionSeq.current;
         mentionTimer.current = window.setTimeout(() => {
           mentionTimer.current = null;
-          void onRequestMentions(query)
+          void request(query)
             .then((list) => {
               if (seq !== mentionSeq.current) return;
+              if (import.meta.env?.DEV && list.length > 0) {
+                console.log('[Composer] @ 候选:', { query, span: tokenSpan.current, count: list.length });
+              }
               setMenu(
                 list.length > 0
                   ? {
@@ -336,6 +384,26 @@ export const Composer = React.memo(function Composer({
     textareaRef.current?.focus();
   }, [menu, onAddFiles, onPermissionSelect, onModelSelect, models]);
 
+  /** 选中候选：只替换当前 token，前后文字和光标都原位保留 */
+  const insertToken = useCallback(
+    (text: string) => {
+      const span = tokenSpan.current;
+      const start = span ? span.start : value.length;
+      const end = span ? span.end : value.length;
+      onChange(`${value.slice(0, start)}${text}${value.slice(end)}`);
+      setMenu(null);
+      tokenSpan.current = null;
+      const caret = start + text.length;
+      window.requestAnimationFrame(() => {
+        const node = textareaRef.current;
+        if (!node) return;
+        node.focus();
+        node.setSelectionRange(caret, caret);
+      });
+    },
+    [onChange, value]
+  );
+
   const applyMenuChoice = useCallback(
     (choice: { key: string }) => {
       if (!menu) return;
@@ -360,18 +428,14 @@ export const Composer = React.memo(function Composer({
         return;
       }
       if (menu.kind === 'slash') {
-        onChange(`${choice.key} `);
-        setMenu(null);
-        textareaRef.current?.focus();
+        insertToken(`${choice.key} `);
         return;
       }
       if (menu.kind === 'mention') {
-        onChange(value.replace(/@([^\s]*)$/, `@${choice.key} `));
-        setMenu(null);
-        textareaRef.current?.focus();
+        insertToken(`@${choice.key} `);
       }
     },
-    [menu, openMenu, onModelSelect, onPermissionSelect, onChange, value]
+    [menu, openMenu, onModelSelect, onPermissionSelect, insertToken]
   );
 
   const handleKeyDown = useCallback(
@@ -695,7 +759,7 @@ export const Composer = React.memo(function Composer({
           value={value}
           onChange={(event) => {
             onChange(event.target.value);
-            syncSuggestions(event.target.value);
+            syncSuggestions(event.target.value, event.target.selectionStart ?? event.target.value.length);
           }}
           onKeyDown={handleKeyDown}
           onFocus={() => {
