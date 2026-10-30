@@ -33,6 +33,8 @@ export interface SessionListItem {
   running?: boolean;
   createdAt?: string;
   path?: string;
+  /** 会话最后一次使用的模型：离线会话靠它显示输入框的模型标签 */
+  lastModel?: string;
   archived?: boolean;
   pinned?: boolean;
   /** 未落盘的新会话占位行（对齐 DSH blank session）：只显示标题，不显示时间与操作 */

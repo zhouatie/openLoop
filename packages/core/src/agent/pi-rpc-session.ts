@@ -633,6 +633,8 @@ export class PiRpcSessionInstance extends EventEmitter {
           if (taken) this.emitPending();
           this.notifyUpdate(true);
         } else if (msg.role === 'assistant') {
+          // 会话没指定模型时模型由 pi 决定，只能从消息里得知：记下来供输入框显示与后续消息沿用
+          if (msg.model) this.model = msg.model;
           const newAssistantMsg: SessionChatMessage = {
             id: `msg_a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             role: 'assistant',
@@ -803,7 +805,10 @@ export class PiRpcSessionInstance extends EventEmitter {
           // 用量与模型归属：供输入框上方统计胶囊与工具卡展示
           const usage = compactUsage(msg?.usage);
           if (usage) this.currentAssistantMessage.usage = usage;
-          if (msg?.model) this.currentAssistantMessage.model = msg.model;
+          if (msg?.model) {
+            this.model = msg.model;
+            this.currentAssistantMessage.model = msg.model;
+          }
           if (msg?.stopReason) this.currentAssistantMessage.stopReason = msg.stopReason;
           this.emitMessage(this.currentAssistantMessage);
           this.notifyUpdate(true);
