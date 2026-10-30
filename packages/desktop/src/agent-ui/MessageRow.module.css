@@ -78,6 +78,8 @@
 }
 
 .mentionIcon {
+  /* preflight 把 svg 设成 block，行内 chip 会被顶成两行 */
+  display: inline;
   width: 1em;
   height: 1em;
   margin-right: 4px;
