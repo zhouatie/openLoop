@@ -6,8 +6,11 @@ import {
   IconFolderClose,
   IconChevronDown,
   IconClose,
+  IconCheck,
+  IconChip,
   IconFile,
   IconNewChat,
+  IconShield,
 } from './icons';
 import styles from './Composer.module.css';
 import { useShortcuts } from '../context/ShortcutContext';
@@ -88,18 +91,29 @@ export function ComposerIconButton({
   );
 }
 
+interface MenuItem {
+  key: string;
+  label: string;
+  /** ➕ 面板行：中文名旁的英文命令名 */
+  alias?: string;
+  description?: string;
+  icon?: React.ReactNode;
+  /** ➕ 面板的分组标题（添加 / 指令） */
+  section?: string;
+  /** 当前生效的选项 */
+  checked?: boolean;
+  isDir?: boolean;
+  tag?: string;
+  group?: string;
+  mentionKind?: ComposerMentionItem['kind'];
+}
+
 interface MenuState {
-  kind: 'slash' | 'mention' | 'model' | 'permission';
-  items: Array<{
-    key: string;
-    label: string;
-    description?: string;
-    isDir?: boolean;
-    tag?: string;
-    group?: string;
-    mentionKind?: ComposerMentionItem['kind'];
-  }>;
+  kind: 'slash' | 'mention' | 'add' | 'model' | 'permission';
+  items: MenuItem[];
   index: number;
+  /** 由 ➕ 面板进入的子菜单：顶部给一行返回 */
+  fromAdd?: boolean;
 }
 
 const PERMISSION_ORDER: ComposerPermission[] = ['full', 'readonly', 'noshell'];
@@ -131,6 +145,7 @@ export const Composer = React.memo(function Composer({
   toolsExtra,
 }: ComposerProps) {
   const { matchShortcut } = useShortcuts();
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -247,9 +262,93 @@ export const Composer = React.memo(function Composer({
     []
   );
 
+  /** 权限 / 模型清单：面板与底部 chip 共用同一套行渲染 */
+  const openMenu = useCallback(
+    (kind: 'model' | 'permission', fromAdd = false) => {
+      // 底部 chip 再点一次收起
+      if (!fromAdd && menu?.kind === kind) {
+        setMenu(null);
+        return;
+      }
+      const rows: MenuItem[] =
+        kind === 'permission'
+          ? PERMISSION_ORDER.map((preset) => ({
+              key: preset,
+              label: PERMISSION_LABEL[preset],
+              icon: <IconShield size={16} />,
+              checked: preset === permission,
+            }))
+          : (models || []).map((item) => ({
+              key: item.id,
+              label: item.label,
+              icon: <IconChip size={16} />,
+              checked: item.id === model,
+            }));
+      // 没有对应回调时这行本就不出现，这里只做防御
+      if (rows.length === 0) return;
+      setMenu({ kind, items: rows, index: 0, fromAdd });
+      // 焦点留在输入框：菜单的键盘选择走 textarea 的按键处理
+      textareaRef.current?.focus();
+    },
+    [menu, permission, model, models]
+  );
+
+  /** ➕ 面板：添加 / 指令两段，行内带图标、命令名与说明（取自 DSH 命令菜单） */
+  const openAddMenu = useCallback(() => {
+    if (menu?.kind === 'add') {
+      setMenu(null);
+      return;
+    }
+    const items: MenuItem[] = [];
+    if (onAddFiles) {
+      items.push({
+        key: 'file',
+        label: '文件',
+        alias: 'file',
+        description: '上传图片作为附件',
+        icon: <IconFile size={16} />,
+        section: '添加',
+      });
+    }
+    if (onPermissionSelect) {
+      items.push({
+        key: 'permission',
+        label: '权限',
+        alias: 'permission',
+        description: '切换工具权限预设',
+        icon: <IconShield size={16} />,
+        section: '指令',
+      });
+    }
+    if (onModelSelect && models && models.length > 0) {
+      items.push({
+        key: 'model',
+        label: '模型',
+        alias: 'model',
+        description: '选择本会话使用的模型',
+        icon: <IconChip size={16} />,
+        section: '指令',
+      });
+    }
+    if (import.meta.env?.DEV) console.log('[Composer] 打开 ➕ 面板:', items.map((item) => item.key));
+    setMenu({ kind: 'add', items, index: 0 });
+    // 点加号不抢焦点：面板的上下键与回车由 textarea 承接
+    textareaRef.current?.focus();
+  }, [menu, onAddFiles, onPermissionSelect, onModelSelect, models]);
+
   const applyMenuChoice = useCallback(
     (choice: { key: string }) => {
       if (!menu) return;
+      if (menu.kind === 'add') {
+        if (import.meta.env?.DEV) console.log('[Composer] ➕ 面板选择:', choice.key);
+        if (choice.key === 'file') {
+          setMenu(null);
+          fileInputRef.current?.click();
+          return;
+        }
+        openMenu(choice.key === 'permission' ? 'permission' : 'model', true);
+        return;
+      }
       if (menu.kind === 'model' && onModelSelect) {
         onModelSelect(choice.key);
         setMenu(null);
@@ -272,7 +371,7 @@ export const Composer = React.memo(function Composer({
         textareaRef.current?.focus();
       }
     },
-    [menu, onModelSelect, onPermissionSelect, onChange, value]
+    [menu, openMenu, onModelSelect, onPermissionSelect, onChange, value]
   );
 
   const handleKeyDown = useCallback(
@@ -297,7 +396,7 @@ export const Composer = React.memo(function Composer({
           setMenu(null);
           return;
         }
-        if (event.key === 'Enter' && (menu.kind === 'slash' || menu.kind === 'mention')) {
+        if (event.key === 'Enter') {
           event.preventDefault();
           applyMenuChoice(menu.items[menu.index]);
           return;
@@ -350,33 +449,28 @@ export const Composer = React.memo(function Composer({
     [onAddFiles]
   );
 
-  const openMenu = (kind: 'model' | 'permission') => {
-    if (kind === 'permission' && onPermissionSelect) {
-      setMenu({
-        kind,
-        index: 0,
-        items: PERMISSION_ORDER.map((preset) => ({
-          key: preset,
-          label: PERMISSION_LABEL[preset],
-          description: preset === permission ? '当前' : undefined,
-        })),
-      });
-      return;
-    }
-    if (kind === 'model' && onModelSelect && models && models.length > 0) {
-      setMenu({
-        kind,
-        index: 0,
-        items: models.map((item) => ({
-          key: item.id,
-          label: item.label,
-          description: item.id === model ? '当前' : undefined,
-        })),
-      });
-    }
-  };
-
   const canSend = value.trim().length > 0 && !disabled;
+
+  /** 命令面板：点面板外关闭；Esc 只关面板，不穿透到面板级的缩放/关闭快捷键 */
+  useEffect(() => {
+    if (!menu) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setMenu(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setMenu(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [menu]);
+
   useEffect(() => {
     if (!preview) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -390,10 +484,61 @@ export const Composer = React.memo(function Composer({
   }, [preview]);
 
   const hasAttachments = Boolean(attachments && attachments.length > 0);
+  /** ➕ 面板与权限 / 模型清单共用一套行渲染，斜杠与 @ 保留紧凑候选列表 */
+  const panelMenu =
+    menu && (menu.kind === 'add' || menu.kind === 'permission' || menu.kind === 'model') ? menu : null;
 
   return (
-    <div className={styles.root}>
-      {menu && menu.items.length > 0 && (
+    <div className={styles.root} ref={rootRef}>
+      {panelMenu && panelMenu.items.length > 0 && (
+        <div
+          className={`${styles.popover} ${styles.popoverPanel}`}
+          role="menu"
+          aria-label={panelMenu.fromAdd ? '子菜单' : '添加'}
+          data-agent-transient
+        >
+          {panelMenu.fromAdd && (
+            <button
+              type="button"
+              className={styles.panelBack}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={openAddMenu}
+            >
+              <IconChevronDown size={12} className={styles.panelBackChevron} />
+              返回
+            </button>
+          )}
+          {panelMenu.items.map((item, index) => (
+            <React.Fragment key={item.key}>
+              {item.section && item.section !== panelMenu.items[index - 1]?.section && (
+                <div className={styles.panelSection}>{item.section}</div>
+              )}
+              <button
+                type="button"
+                className={`${styles.panelItem} ${
+                  index === panelMenu.index ? styles.panelItemActive : ''
+                }`}
+                role="menuitem"
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setMenu({ ...panelMenu, index })}
+                onClick={() => applyMenuChoice(item)}
+              >
+                {item.icon && <span className={styles.panelIcon}>{item.icon}</span>}
+                <span className={styles.panelLabel}>{item.label}</span>
+                {item.alias && <span className={styles.panelAlias}>{item.alias}</span>}
+                {item.description && <span className={styles.panelDesc}>{item.description}</span>}
+                {item.checked && (
+                  <span className={styles.panelCheck}>
+                    <IconCheck size={14} />
+                  </span>
+                )}
+              </button>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+
+      {menu && (menu.kind === 'slash' || menu.kind === 'mention') && menu.items.length > 0 && (
         <div
           className={`${styles.popover} ${menu.kind === 'mention' ? styles.popoverList : ''}`}
           role="listbox"
@@ -579,9 +724,12 @@ export const Composer = React.memo(function Composer({
                 />
                 <button
                   type="button"
-                  className={styles.add}
-                  onClick={() => fileInputRef.current?.click()}
-                  title="添加图片附件"
+                  className={`${styles.add} ${menu?.kind === 'add' ? styles.addActive : ''}`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={openAddMenu}
+                  title="添加"
+                  aria-haspopup="menu"
+                  aria-expanded={menu?.kind === 'add'}
                 >
                   <IconPlus size={16} />
                 </button>

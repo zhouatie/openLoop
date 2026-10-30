@@ -156,6 +156,31 @@ export const IconMinimize = createIcon('IconMinimize', 16, () => (
   <path d="M3.5 8h9" stroke="currentColor" />
 ));
 
+/** 权限：DSH PermissionIcon 的盾形轮廓 */
+export const IconShield = createIcon('IconShield', 16, () => (
+  <>
+    <path
+      d="M6.59624 2.14853C7.50155 1.80917 8.49914 1.80919 9.40444 2.14859L13.9245 3.84317V7.11961C13.9245 11.6089 10.5565 13.5975 8.00035 14.5779C5.44423 13.5975 2.07544 11.6089 2.07544 7.11961V3.84317L6.59624 2.14853Z"
+      stroke="currentColor"
+      strokeLinejoin="round"
+    />
+    <path d="M8 4.39209V9.89209" stroke="currentColor" />
+    <path d="M8 10.8081V11.8081" stroke="currentColor" />
+  </>
+));
+
+/** 模型：芯片轮廓 */
+export const IconChip = createIcon('IconChip', 16, () => (
+  <>
+    <rect x="3.9" y="3.9" width="8.2" height="8.2" rx="2.2" stroke="currentColor" />
+    <rect x="6.6" y="6.6" width="2.8" height="2.8" rx="1" stroke="currentColor" />
+    <path
+      d="M6.4 3.9V2M9.6 3.9V2M6.4 14V12.1M9.6 14V12.1M3.9 6.4H2M3.9 9.6H2M14 6.4H12.1M14 9.6H12.1"
+      stroke="currentColor"
+    />
+  </>
+));
+
 /** 右侧工作台面板图标：方框 + 右侧分栏 */
 export const IconPanelRight = createIcon('IconPanelRight', 16, () => (
   <>
