@@ -276,10 +276,10 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* 候选菜单：贴在输入卡上方 */
+/* 候选菜单：贴在输入卡上方（表面取 DSH MenuSurface：无描边、浮起描边投影） */
 .popover {
   position: absolute;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 4px);
   left: 50%;
   transform: translateX(-50%);
   width: min(100% - 32px, var(--agent-composer-max-width));
@@ -291,10 +291,11 @@
   overflow: auto;
   box-sizing: border-box;
   padding: 4px;
-  border: 1px solid var(--dsw-alias-border-l3);
-  border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-bg-base);
+  border: 0;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-specific-menu);
   box-shadow: var(--dsw-elevation-prominent);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
 }
 
 .popoverItem {
@@ -331,6 +332,7 @@
   text-overflow: ellipsis;
   font-size: 12px;
   color: var(--dsw-alias-label-tertiary);
+  text-align: right;
 }
 
 /* ➕ 面板：与输入卡同宽、同左边界的菜单面（DSH 命令菜单） */
@@ -448,19 +450,19 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* 文件与文件夹候选：与输入卡同宽、同圆角，行内带图标 */
+/* 文件与文件夹候选：与输入卡同宽同圆角，行取 DSH 菜单的 34px 紧凑结构 */
 .popoverList {
   gap: 0;
-  max-height: 320px;
-  padding: 8px 8px 12px;
-  border-radius: var(--dsw-radius-xl);
+  max-height: min(400px, 60vh);
+  padding: 4px;
 }
 
 .popoverHeader {
-  padding: 4px 8px 8px;
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-caption);
+  flex: none;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* 目录下钻的面包屑：吸在列表顶部，回退路径不被滚动带走（对齐 dsh） */
@@ -472,10 +474,10 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 2px;
-  margin: -4px -4px 2px;
-  padding: 5px 6px 4px;
+  margin-bottom: 2px;
+  padding: 3px 3px 5px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-base);
+  background: var(--dsw-specific-menu);
 }
 
 .popoverCrumb {
@@ -508,19 +510,16 @@
 
 .popoverCrumbSep {
   flex: none;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 16px;
+  display: inline-flex;
+  color: var(--dsw-alias-menu-icon);
 }
 
 .popoverRow {
   align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  height: 38px;
-  border-radius: var(--dsw-radius-sm);
-  font-size: 14px;
-  line-height: 22px;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: var(--dsw-radius-md);
 }
 
 .popoverIcon {
@@ -528,38 +527,52 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.popoverIconDir {
-  color: var(--dsw-alias-label-secondary);
+  width: 14px;
+  height: 14px;
+  color: var(--dsw-alias-menu-icon);
 }
 
 .popoverName {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+/* 行尾：进入提示只在当前行出现，箭头常驻，右侧边缘始终对齐 */
 .popoverTrailing {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 6px;
-  color: var(--dsw-alias-label-tertiary);
+  gap: 3px;
+  margin-left: auto;
 }
 
-.popoverHint {
-  font-size: 12px;
+.popoverDrillHint {
+  color: var(--dsw-alias-label-caption);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.popoverKey {
+  padding: 0 4px;
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-caption);
+  font-family: inherit;
+  font-size: 10px;
   line-height: 16px;
 }
 
-.popoverChevron {
-  transform: rotate(-90deg);
+.popoverDrill {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--dsw-radius-xs);
+  color: var(--dsw-alias-menu-icon);
 }
 
 /* 附件大图预览 */

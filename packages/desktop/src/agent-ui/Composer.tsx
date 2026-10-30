@@ -5,11 +5,13 @@ import {
   IconStop,
   IconFolderClose,
   IconChevronDown,
+  IconChevronRight,
   IconClose,
   IconCheck,
   IconChip,
   IconFile,
-  IconNewChat,
+  IconReferenceFile,
+  IconChatLines,
   IconShield,
 } from './icons';
 import styles from './Composer.module.css';
@@ -699,7 +701,11 @@ export const Composer = React.memo(function Composer({
                 const current = index === crumbs.length - 1;
                 return (
                   <React.Fragment key={`crumb-${crumb.prefix}`}>
-                    {index > 0 && <span className={styles.popoverCrumbSep}>/</span>}
+                    {index > 0 && (
+                      <span className={styles.popoverCrumbSep}>
+                        <IconChevronRight size={12} />
+                      </span>
+                    )}
                     <button
                       type="button"
                       className={`${styles.popoverCrumb} ${current ? styles.popoverCrumbCurrent : ''}`}
@@ -733,17 +739,13 @@ export const Composer = React.memo(function Composer({
                   onClick={() => applyMenuChoice(item)}
                 >
                   {menu.kind === 'mention' && (
-                    <span
-                      className={`${styles.popoverIcon} ${
-                        item.mentionKind === 'dir' ? styles.popoverIconDir : ''
-                      }`}
-                    >
+                    <span className={styles.popoverIcon}>
                       {item.mentionKind === 'session' ? (
-                        <IconNewChat size={16} />
+                        <IconChatLines size={14} />
                       ) : item.isDir ? (
-                        <IconFolderClose size={16} />
+                        <IconFolderClose size={14} />
                       ) : (
-                        <IconFile size={16} />
+                        <IconReferenceFile size={14} />
                       )}
                     </span>
                   )}
@@ -753,8 +755,16 @@ export const Composer = React.memo(function Composer({
                   {item.description && <span className={styles.popoverDesc}>{item.description}</span>}
                   {menu.kind === 'mention' && item.isDir && (
                     <span className={styles.popoverTrailing}>
-                      <span className={styles.popoverHint}>进入目录</span>
-                      <IconChevronDown size={12} className={styles.popoverChevron} />
+                      {/* 与 dsh 一致：进入提示只在当前行出现，箭头常驻以对齐右边缘 */}
+                      {index === menu.index && (
+                        <>
+                          <span className={styles.popoverDrillHint}>进入目录</span>
+                          <kbd className={styles.popoverKey}>Tab</kbd>
+                        </>
+                      )}
+                      <span className={styles.popoverDrill}>
+                        <IconChevronRight size={12} />
+                      </span>
                     </span>
                   )}
                   {menu.kind === 'slash' && item.tag && (
