@@ -29,6 +29,7 @@ import { SessionTreePanel } from './SessionTreePanel';
 import { useAgentStream } from './useAgentStream';
 import { setViewingAgentSession, rememberAgentSessionTitles } from '../hooks/useAgentNotifications';
 import { QueuedInputs } from './QueuedInputs';
+import { Workflow } from 'lucide-react';
 import styles from './AgentPanel.module.css';
 
 /** @ 菜单里的会话时间：够用即可，不做本地化库 */
@@ -119,8 +120,8 @@ function DockToggleButton({ onToggle }: { onToggle: () => void }) {
 }
 
 export interface AgentPanelShellProps {
-  title: string;
-  subtitle?: string;
+  title: React.ReactNode;
+  subtitle?: React.ReactNode;
   messages: SessionChatMessage[];
   /** 已提交、等待 Agent 采纳的用户输入：起新一轮的在消息流尾部，插话的进输入卡上方的排队条 */
   pendingInputs?: PendingUserInput[];
@@ -370,7 +371,7 @@ export function AgentPanelShell({
       {!headerless && (
       <header className={styles.header}>
         <div className={styles.headerMain}>
-          <div className={styles.title}>{title}</div>
+          {title ? <div className={styles.title}>{title}</div> : null}
           {subtitle && <div className={styles.subtitle}>{subtitle}</div>}
         </div>
         <div className={styles.headerActions}>
@@ -608,8 +609,12 @@ export function TaskAgentPanel({
   return (
     <OpenFileContext.Provider value={openApi}>
     <AgentPanelShell
-      title={taskTitle || 'Agent 协作流'}
-      subtitle={mode === 'inline' ? '与任务同屏协作' : undefined}
+      title={
+        mode === 'inline' ? null : (
+          taskTitle || 'Agent 协作流'
+        )
+      }
+      subtitle={undefined}
       draftKey={`task_${taskId}`}
       sessionKey={`task_${taskId}`}
       messages={messages}
@@ -663,7 +668,13 @@ export interface GlobalAgentPanelProps {
   mode: 'page' | 'overlay' | 'drawer';
   onClose?: () => void;
   /** 外部请求打开某条会话：seq 递增即切换，同一条会话再次请求也会切回去 */
-  sessionRequest?: { id: string; seq: number } | null;
+  sessionRequest?: {
+    id: string;
+    seq: number;
+    taskId?: string;
+    taskTitle?: string;
+    cwd?: string;
+  } | null;
   /** 不可见时关闭面板级快捷键 */
   active?: boolean;
 }
@@ -1062,6 +1073,9 @@ export function GlobalAgentPanel({
     setUiRequest(null);
     // 离开新会话就撤掉占位行
     setDraft((prev) => (prev?.id === id ? prev : null));
+    if (sessionRequest?.id !== id) {
+      setTaskContext(null);
+    }
     try {
       const detail = await api.getAgentSession(id);
       if (seq !== selectSeq.current) return;
@@ -1083,12 +1097,22 @@ export function GlobalAgentPanel({
     }
   }, []);
 
+  const [taskContext, setTaskContext] = useState<{ taskId?: string; taskTitle?: string } | null>(null);
+
   // 外部请求（例如任务详情页打开会话）：seq 变化就切过去；面板内部切换不回写这里
   const appliedRequestSeq = useRef(0);
   useEffect(() => {
     if (!sessionRequest || sessionRequest.seq === appliedRequestSeq.current) return;
     appliedRequestSeq.current = sessionRequest.seq;
-    if (import.meta.env?.DEV) console.log('[AgentPanel] 外部请求打开会话:', sessionRequest.id);
+    if (import.meta.env?.DEV) console.log('[AgentPanel] 外部请求打开会话:', sessionRequest.id, sessionRequest);
+    if (sessionRequest.taskId || sessionRequest.taskTitle) {
+      setTaskContext({ taskId: sessionRequest.taskId, taskTitle: sessionRequest.taskTitle });
+    } else {
+      setTaskContext(null);
+    }
+    if (sessionRequest.cwd) {
+      setCwd(sessionRequest.cwd);
+    }
     void selectSession(sessionRequest.id);
   }, [sessionRequest, selectSession]);
 
@@ -2011,6 +2035,26 @@ export function GlobalAgentPanel({
           headerless={mode === 'page'}
           shortcutsEnabled={active}
           shortcutPriority={1}
+          headerExtra={
+            taskContext?.taskTitle && mode === 'overlay' ? (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#eeedfd] border border-[#d8d6fb] text-[#4f46e5] text-[10.5px] font-medium select-none shadow-2xs">
+                <Workflow size={11} className="shrink-0" />
+                <span className="truncate max-w-[200px]" title={taskContext.taskTitle}>
+                  看板任务: {taskContext.taskTitle}
+                </span>
+                {onClose && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="ml-1 text-[10px] font-medium text-[#4f46e5] hover:text-[#3730a3] underline cursor-pointer"
+                    title="收起全局工作台，返回任务看板与详情"
+                  >
+                    返回详情
+                  </button>
+                )}
+              </div>
+            ) : undefined
+          }
           hero={hero}
           attachments={attachments.items}
           onAddFiles={activeId ? attachments.add : undefined}
