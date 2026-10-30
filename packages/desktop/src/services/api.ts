@@ -24,7 +24,7 @@ import {
   StorageCleanResult,
   SessionChatMessage,
 } from '@openloop/core';
-import type { SessionTreeSnapshot } from '@openloop/core/types';
+import type { OpenInAppTarget, SessionTreeSnapshot } from '@openloop/core/types';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
@@ -1373,6 +1373,46 @@ export class DesktopApiService {
     } catch (err) {
       if (import.meta.env?.DEV) {
         console.error('[UI:System] 服务端打开系统目录失败:', err);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * 本机可用的「打开方式」应用（访达 / 编辑器 / 终端），含内联图标
+   */
+  async getOpenInAppTargets(): Promise<OpenInAppTarget[]> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:System] 拉取本机「打开方式」应用表');
+    }
+    try {
+      const res = await requestJson<{ targets: OpenInAppTarget[] }>(`${BASE_URL}/api/system/open-targets`);
+      return Array.isArray(res?.targets) ? res.targets : [];
+    } catch (err) {
+      if (import.meta.env?.DEV) {
+        console.error('[UI:System] 拉取本机应用表失败:', err);
+      }
+      return [];
+    }
+  }
+
+  /**
+   * 用指定应用打开工作区目录
+   */
+  async openInApp(app: string, dirPath: string): Promise<boolean> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:System] 用 ${app} 打开目录: ${dirPath}`);
+    }
+    try {
+      const res = await requestJson<{ success: boolean }>(`${BASE_URL}/api/system/open-target`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app, path: dirPath }),
+      });
+      return !!res.success;
+    } catch (err) {
+      if (import.meta.env?.DEV) {
+        console.error('[UI:System] 打开目录失败:', err);
       }
       return false;
     }

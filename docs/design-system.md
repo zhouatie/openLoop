@@ -164,4 +164,5 @@
 | `dsh/ImageLightbox.tsx` | ui-primitives | 原图预览（portal、焦点还原） |
 | `dsh/ReasoningRow.tsx` | ui-chat | 思考行（摘要 + 展开正文） |
 | `dsh/MessageActions.tsx` | ui-chat | 消息操作条 |
+| `dsh/OpenInAppButton.tsx` | ui-open-in-app | 右上角「打开方式」分割按钮（访达 / 编辑器 / 终端） |
 | `dsh/TurnUsagePanel.tsx` | ui-chat | 本轮用量药丸 + 明细对话框 |

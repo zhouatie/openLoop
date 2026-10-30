@@ -780,6 +780,14 @@ export interface StorageCleanResult {
   durationMs: number;
 }
 
+/** 本机可用的「打开方式」应用：核心服务探测本机安装后返回 */
+export interface OpenInAppTarget {
+  id: string;
+  name: string;
+  /** 64px PNG 的 data URL；取不到图标时为 null */
+  icon: string | null;
+}
+
 
 
 
