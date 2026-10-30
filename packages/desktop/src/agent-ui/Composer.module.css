@@ -573,6 +573,11 @@
   height: 18px;
   border-radius: var(--dsw-radius-xs);
   color: var(--dsw-alias-menu-icon);
+  cursor: pointer;
+}
+
+.popoverDrill:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 /* 附件大图预览 */

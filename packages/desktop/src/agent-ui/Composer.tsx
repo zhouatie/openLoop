@@ -449,8 +449,9 @@ export const Composer = React.memo(function Composer({
     tokenSpan.current = keepSpan ? { start: span.start, end: span.start + insert.length } : null;
   }, []);
 
+  /** @param drill 目录行的下钻动作：dsh 里只有 Tab 与行尾箭头下钻，选中一律落成 chip */
   const applyMenuChoice = useCallback(
-    (choice: { key: string }) => {
+    (choice: { key: string }, drill = false) => {
       if (!menu) return;
       if (menu.kind === 'add') {
         if (import.meta.env?.DEV) console.log('[Composer] ➕ 面板选择:', choice.key);
@@ -477,14 +478,13 @@ export const Composer = React.memo(function Composer({
         return;
       }
       if (menu.kind === 'mention') {
-        // 键盘与鼠标都按选中的那一行判断：目录行下钻，其余行写入草稿
         const picked = menu.items.find((item) => item.key === choice.key);
-        if (picked?.isDir) {
+        if (!picked) return;
+        if (picked.isDir && drill) {
           insertToken(`@${picked.key}`, true);
           loadMentions(picked.key);
           return;
         }
-        if (!picked) return;
         const editor = editorRef.current;
         if (!editor) return;
         const span = tokenSpan.current ?? editor.caretSpan();
@@ -502,10 +502,11 @@ export const Composer = React.memo(function Composer({
           editor.focus();
           return;
         }
+        // 目录引用同样落成 chip，路径保留结尾斜杠以区分文件夹
         editor.insertReference(span, {
           ref: picked.key,
           label: picked.label.replace(/\/$/, ''),
-          appearance: 'file',
+          appearance: picked.isDir ? 'folder' : 'file',
           clipboardText: `@${picked.key}`,
         });
         setMenu(null);
@@ -539,7 +540,7 @@ export const Composer = React.memo(function Composer({
           // Tab 与行尾箭头同一个动作：进入目录并保持面板
           event.preventDefault();
           event.stopPropagation();
-          applyMenuChoice(menu.items[menu.index]);
+          applyMenuChoice(menu.items[menu.index], true);
           return;
         }
         if (event.key === 'Enter') {
@@ -762,7 +763,21 @@ export const Composer = React.memo(function Composer({
                           <kbd className={styles.popoverKey}>Tab</kbd>
                         </>
                       )}
-                      <span className={styles.popoverDrill}>
+                      <span
+                        role="button"
+                        tabIndex={-1}
+                        className={styles.popoverDrill}
+                        aria-label="进入目录"
+                        // 行尾箭头是下钻的唯一鼠标入口，不能让事件冒泡成整行选中
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          applyMenuChoice(item, true);
+                        }}
+                      >
                         <IconChevronRight size={12} />
                       </span>
                     </span>
