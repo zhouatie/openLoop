@@ -746,6 +746,16 @@ export const Composer = React.memo(function Composer({
                 {PERMISSION_LABEL[permission || 'full']}
               </button>
             )}
+            {thinking && thinking !== 'off' && (
+              <span className={styles.chip} title={`思考等级：${thinking}`}>
+                思考 {thinking}
+              </span>
+            )}
+            {awaitingInput && <span className={styles.hint}>等待你的回复</span>}
+          </div>
+
+          <div className={styles.trailing}>
+            {/* 模型席位与 dsh 一致：停在输入框右下角，紧邻发送按钮 */}
             {model && (
               <button
                 type="button"
@@ -757,15 +767,6 @@ export const Composer = React.memo(function Composer({
                 {model}
               </button>
             )}
-            {thinking && thinking !== 'off' && (
-              <span className={styles.chip} title={`思考等级：${thinking}`}>
-                思考 {thinking}
-              </span>
-            )}
-            {awaitingInput && <span className={styles.hint}>等待你的回复</span>}
-          </div>
-
-          <div className={styles.trailing}>
             <button
               type="button"
               className={styles.primary}
