@@ -295,6 +295,13 @@ export class DesktopApiService {
     this.listeners.get(event)?.forEach((cb) => cb(data));
   }
 
+  /** 客户端上行消息：WebSocket 保证到达顺序，用于对顺序敏感的指令（如终端按键） */
+  private sendWs(type: string, data: unknown): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify({ type, data }));
+    return true;
+  }
+
   // 连接状态订阅：注册即回推当前快照（电平信号），避免初始化阶段早于订阅的状态变更丢失
   public onConnectionChange(callback: (connected: boolean) => void): () => void {
     const off = this.on('connection:change', callback);
@@ -1228,12 +1235,16 @@ export class DesktopApiService {
     });
   }
 
-  async writeTerminal(id: string, data: string): Promise<{ success: boolean }> {
-    return requestJson(`${BASE_URL}/api/agent/terminal/${encodeURIComponent(id)}/input`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data }),
-    });
+  /**
+   * 终端按键 / 终端查询应答：走 WebSocket 而不是逐条 POST。
+   * 一条通道天然有序，TUI 程序（lazygit、yazi 等）收到的转义序列不会被打乱。
+   */
+  writeTerminal(id: string, data: string): boolean {
+    const sent = this.sendWs('terminal:input', { id, data });
+    if (!sent && import.meta.env?.DEV) {
+      console.warn('[UI:API] 终端输入通道未就绪，丢弃按键', { id, bytes: data.length });
+    }
+    return sent;
   }
 
   /** 同步 PTY 窗口大小：面板拖宽或窗口缩放后调用 */
