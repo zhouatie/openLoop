@@ -1,0 +1,101 @@
+/* 取自 deepseek-harness packages/client/ui-open-in-app/src/client/OpenTargetButton.module.css（MIT）：
+   24px 分割按钮的尺寸、描边与悬浮反馈取原值，菜单换成面板内绝对定位的浮层。 */
+
+.split {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  box-sizing: border-box;
+  height: 24px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm);
+  font-family: var(--dsw-font-family);
+}
+
+.main,
+.chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.main {
+  gap: 4px;
+  padding: 3px 5px;
+}
+
+.chevron {
+  padding: 3px 4px 3px 3px;
+  border-left: 0.5px solid var(--dsw-alias-border-l4);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.main:focus-visible,
+.chevron:focus-visible,
+.main:hover:not(:disabled),
+.chevron:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* 打开中只停反馈，不换外观 */
+.main:disabled,
+.chevron:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.appIcon {
+  object-fit: contain;
+  border-radius: 3px;
+}
+
+/* 菜单：贴按钮右缘向下展开，表面与输入卡候选菜单同一套令牌 */
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 156px;
+  padding: 4px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+  box-shadow: var(--dsw-elevation-prominent);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.menuLabel {
+  flex: 1 1 auto;
+}

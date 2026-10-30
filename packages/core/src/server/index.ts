@@ -37,6 +37,7 @@ import { agentSessionHost, GLOBAL_AGENT_PREFIX, type AgentPermissionPreset } fro
 import { agentSessionMeta, moveSessionFileToTrash } from '../agent/session-meta';
 import { resolveSessionTitle } from '../agent/title-text';
 import { createDirectory, listDirectory, readTextFile, statFile } from '../agent/fs-browser';
+import { listOpenInAppTargets, openInApp } from '../system/open-in-app';
 import { terminalHost } from '../agent/terminal-host';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
@@ -3758,6 +3759,21 @@ ${existingSubSummary}
           serverLogger.error(`[System:OpenPath] 打开系统路径失败: ${err.message}`, err);
           return this.sendJson(res, 500, { success: false, error: err.message }, reqMeta);
         }
+      }
+
+      // 本机「打开方式」应用表：首次调用探测一次，图标为内联 PNG
+      if (pathname === '/api/system/open-targets' && method === 'GET') {
+        return this.sendJson(res, 200, { targets: await listOpenInAppTargets() }, reqMeta);
+      }
+
+      // 用指定应用打开工作区目录
+      if (pathname === '/api/system/open-target' && method === 'POST') {
+        const body = await this.parseJsonBody(req).catch(() => ({}));
+        if (!body.app || !body.path) {
+          return this.sendJson(res, 400, { success: false, error: 'app and path are required' }, reqMeta);
+        }
+        const opened = openInApp(String(body.app), String(body.path));
+        return this.sendJson(res, opened ? 200 : 400, { success: opened }, reqMeta);
       }
 
       this.sendJson(res, 404, { error: 'Not Found' }, reqMeta);

@@ -23,6 +23,7 @@ import { useShortcutBindings } from '../hooks/useShortcutBindings';
 import { useShortcuts } from '../context/ShortcutContext';
 import { IconCheck, IconChevronDown, IconFolderClose, IconFolderOpen, IconPlus } from './icons';
 import { useDismissOnOutsidePointer } from './dsh/useDismissOnOutsidePointer.ts';
+import { OpenInAppButton } from './dsh/OpenInAppButton';
 import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
 import { SessionTreePanel } from './SessionTreePanel';
@@ -2073,24 +2074,28 @@ export function GlobalAgentPanel({
           shortcutsEnabled={active}
           shortcutPriority={1}
           headerExtra={
-            taskContext?.taskTitle && mode === 'overlay' ? (
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#eeedfd] border border-[#d8d6fb] text-[#4f46e5] text-[10.5px] font-medium select-none shadow-2xs">
-                <Workflow size={11} className="shrink-0" />
-                <span className="truncate max-w-[200px]" title={taskContext.taskTitle}>
-                  看板任务: {taskContext.taskTitle}
-                </span>
-                {onClose && (
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="ml-1 text-[10px] font-medium text-[#4f46e5] hover:text-[#3730a3] underline cursor-pointer"
-                    title="收起全局工作台，返回任务看板与详情"
-                  >
-                    返回详情
-                  </button>
-                )}
-              </div>
-            ) : undefined
+            <>
+              {taskContext?.taskTitle && mode === 'overlay' ? (
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#eeedfd] border border-[#d8d6fb] text-[#4f46e5] text-[10.5px] font-medium select-none shadow-2xs">
+                  <Workflow size={11} className="shrink-0" />
+                  <span className="truncate max-w-[200px]" title={taskContext.taskTitle}>
+                    看板任务: {taskContext.taskTitle}
+                  </span>
+                  {onClose && (
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="ml-1 text-[10px] font-medium text-[#4f46e5] hover:text-[#3730a3] underline cursor-pointer"
+                      title="收起全局工作台，返回任务看板与详情"
+                    >
+                      返回详情
+                    </button>
+                  )}
+                </div>
+              ) : null}
+              {/* 工作区在当前目录打开：访达 / 编辑器 / 终端由核心服务探测本机安装；抽屉顶栏太窄不放 */}
+              {mode !== 'drawer' && <OpenInAppButton path={activeCwd} />}
+            </>
           }
           hero={hero}
           attachments={attachments.items}
