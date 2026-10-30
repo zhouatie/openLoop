@@ -116,6 +116,41 @@ function findOverlapStart(
   return start;
 }
 
+/** 消息指纹：同一条消息两侧 id 不同，只能按角色 + 正文对齐 */
+function signature(message: SessionChatMessage): string {
+  return `${message.role}\u0000${message.content || ''}`;
+}
+
+/**
+ * 找不到锚点时的兜底：实时段是会话最新的一段，按内容去重后整段插回历史
+ *
+ * 直接拼在历史后面会让历史尾部甩到最新消息下面（界面上旧消息出现在最后一条之后），
+ * 同一句话还会出现两次。这里保留历史里实时段没有的部分，再按时间戳把实时段放回原位。
+ */
+function placeLiveSegment(history: SessionChatMessage[], live: SessionChatMessage[]): SessionChatMessage[] {
+  const quota = new Map<string, number>();
+  for (const message of live) quota.set(signature(message), (quota.get(signature(message)) || 0) + 1);
+
+  // 从后往前扣减：重复的同文消息里让历史保留靠前的，实时段接管靠后的
+  const kept: SessionChatMessage[] = [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    const key = signature(message);
+    const left = quota.get(key) || 0;
+    if (left > 0) {
+      quota.set(key, left - 1);
+      continue;
+    }
+    kept.push(message);
+  }
+  kept.reverse();
+
+  const head = live[0].timestamp || 0;
+  let at = kept.length;
+  while (at > 0 && (kept[at - 1].timestamp || 0) > head) at -= 1;
+  return kept.slice(0, at).concat(live, kept.slice(at));
+}
+
 function mergeMessages(
   history: SessionChatMessage[] | undefined,
   live: SessionChatMessage[] | undefined,
@@ -125,11 +160,7 @@ function mergeMessages(
   if (!history || history.length === 0) return live;
 
   const start = findOverlapStart(history, live, cache);
-  if (start < 0) {
-    const seen = new Set(history.map((message) => message.id));
-    const extra = live.filter((message) => !seen.has(message.id));
-    return extra.length === 0 ? history : history.concat(extra);
-  }
+  if (start < 0) return placeLiveSegment(history, live);
 
   const covered = Math.min(live.length, history.length - start);
   // 历史已被实时段完全覆盖：直接用实时段，不多一次数组拷贝
