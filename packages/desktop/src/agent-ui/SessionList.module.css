@@ -38,6 +38,17 @@
   }
 }
 
+/* ---- 顶条 ---- */
+/* 与红黄绿窗口按钮同排，收起入口贴右上角（对齐 DSH topStrip） */
+.topStrip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 34px;
+  margin-bottom: 2px;
+}
+
 /* ---- 新会话 ---- */
 .newSession {
   flex: none;

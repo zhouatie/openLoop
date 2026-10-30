@@ -2035,13 +2035,10 @@ export function GlobalAgentPanel({
       {mode !== 'drawer' && listOpen && (
         <SessionList
           brandSlot={
-            <>
-              {trafficLightInset && <div className={styles.windowStrip} />}
-              <div className={styles.brandRow}>
-                <BrandLogo size={26} className={styles.brandLogo} />
-                <span className={styles.brandName}>openLoop</span>
-              </div>
-            </>
+            <div className={styles.brandRow}>
+              <BrandLogo size={26} className={styles.brandLogo} />
+              <span className={styles.brandName}>openLoop</span>
+            </div>
           }
           groups={groups}
           activeId={activeId}
