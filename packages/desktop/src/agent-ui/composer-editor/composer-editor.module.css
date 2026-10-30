@@ -1,11 +1,15 @@
 /* 输入区（Lexical 宿主）与行内引用 chip */
 
 .editor {
+  /* 占位文字与正文共用同一内缩 */
+  --composer-editor-pad-x: 14px;
+  --composer-editor-pad-y: 4px;
+  position: relative;
   box-sizing: border-box;
   min-height: 36px;
   /* 8 行正文 + 内边距，超出后自身滚动 */
   max-height: 200px;
-  padding: 4px 14px 0;
+  padding: var(--composer-editor-pad-y) var(--composer-editor-pad-x) 0;
   outline: none;
   background: transparent;
   color: var(--dsw-alias-label-primary);
@@ -28,9 +32,16 @@
   opacity: 0.7;
 }
 
+/* 占位文字脱开行内流：否则它的匿名行块会把首段挤到第二行，光标与占位错位。
+   内缩与 .editor 的 padding 一致，首行基线对齐。 */
 .editor[data-empty='true']::before {
   content: attr(data-placeholder);
+  position: absolute;
+  inset: var(--composer-editor-pad-y) var(--composer-editor-pad-x) auto;
+  overflow: hidden;
   color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
   pointer-events: none;
 }
 
