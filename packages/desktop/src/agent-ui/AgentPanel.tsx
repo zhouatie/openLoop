@@ -73,28 +73,25 @@ function toComposerCommands(data: any): ComposerCommand[] {
   ];
 }
 
-/** @ 菜单候选：按目录前缀列出工作区里的文件与文件夹 */
+/** @ 菜单候选：整个工作区模糊排序，带 / 的查询直列该层目录（对齐 dsh） */
 async function workspaceMentionItems(base: string, query: string): Promise<ComposerMentionItem[]> {
-  const slash = query.lastIndexOf('/');
-  const dirPart = slash >= 0 ? query.slice(0, slash + 1) : '';
-  const namePart = slash >= 0 ? query.slice(slash + 1) : query;
-  const dir = dirPart ? `${base.replace(/\/$/, '')}/${dirPart}` : base;
-  const items: ComposerMentionItem[] = [];
   try {
-    const listing = await api.listAgentFs(dir);
-    for (const entry of listing.entries) {
-      if (namePart && !entry.name.toLowerCase().includes(namePart.toLowerCase())) continue;
-      items.push({
-        key: `${dirPart}${entry.name}${entry.isDir ? '/' : ''}`,
-        label: `${entry.name}${entry.isDir ? '/' : ''}`,
-        kind: entry.isDir ? 'dir' : 'file',
-      });
-      if (items.length >= 12) break;
-    }
+    const result = await api.searchAgentFs(base, query);
+    return (result.entries || []).map((entry) => {
+      const cut = entry.path.lastIndexOf('/');
+      const name = cut < 0 ? entry.path : entry.path.slice(cut + 1);
+      return {
+        key: `${entry.path}${entry.isDir ? '/' : ''}`,
+        label: `${name}${entry.isDir ? '/' : ''}`,
+        kind: entry.isDir ? ('dir' as const) : ('file' as const),
+        // 下钻后面包屑已经说明位置，行内不再重复父目录
+        description: query.includes('/') || cut < 0 ? undefined : entry.path.slice(0, cut),
+      };
+    });
   } catch (_) {
-    /* 目录不可读时只返回空候选 */
+    /* 工作区不可读时只返回空候选 */
+    return [];
   }
-  return items;
 }
 
 /**
@@ -1785,17 +1782,21 @@ export function GlobalAgentPanel({
       const base = cwd || sessions.find((item) => item.id === activeId)?.cwd || '';
       const items: ComposerMentionItem[] = base ? await workspaceMentionItems(base, query) : [];
 
+      // 会话候选：同一工作区排在前面（对齐 dsh 的亲和度排序），异地会话补工作区名
       const keyword = query.toLowerCase();
       const matched = sessions
         .filter((item) => item.id !== activeId)
         .filter((item) => !keyword || (item.title || '').toLowerCase().includes(keyword))
+        .sort((a, b) => Number(b.cwd === base) - Number(a.cwd === base))
         .slice(0, 5);
       for (const item of matched) {
+        const age = relativeSessionTime(item.modifiedAt);
         items.push({
           key: item.title || item.id,
           label: item.title || '未命名会话',
           kind: 'session',
-          description: relativeSessionTime(item.modifiedAt),
+          refId: item.id,
+          description: item.cwd === base ? age : `${projectLabel(item.cwd)} · ${age}`,
         });
       }
 

@@ -1,0 +1,57 @@
+/* 输入区（Lexical 宿主）与行内引用 chip */
+
+.editor {
+  box-sizing: border-box;
+  min-height: 36px;
+  /* 8 行正文 + 内边距，超出后自身滚动 */
+  max-height: 200px;
+  padding: 4px 14px 0;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  caret-color: var(--dsw-alias-state-business-primary);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+}
+
+/* Lexical 的段落默认带外边距，这里压平以便与旧 textarea 的行距一致 */
+.editor p {
+  margin: 0;
+}
+
+.editor[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.editor[data-empty='true']::before {
+  content: attr(data-placeholder);
+  color: var(--dsw-alias-label-tertiary);
+  pointer-events: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  max-width: 240px;
+  margin: 0 1px;
+  color: var(--dsw-alias-state-business-primary);
+  font-weight: 500;
+  user-select: none;
+}
+
+.chipIcon {
+  flex: none;
+  align-self: center;
+}
+
+.chipLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

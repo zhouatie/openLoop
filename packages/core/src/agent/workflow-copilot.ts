@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { Store } from '../store';
 import { WorkflowDefinition, WorkflowSessionState, SessionChatMessage, WorkflowNode, WorkflowEdge } from '../types';
+import { composeMessageWithSessionReferences } from './session-reference';
 import { PiRpcSessionInstance } from './pi-rpc-session';
 import { getEffectivePrompt } from '../constants/prompts';
 import { createLogger } from '../logger';
@@ -106,7 +107,12 @@ export class WorkflowCopilotManager extends EventEmitter {
 
     const settings = this.store.getSettings();
     const systemPrompt = getEffectivePrompt('workflowCopilot', settings.prompts);
-    const fullPrompt = `${systemPrompt}\n${contextTopology}\n\n[用户编排需求]\n${userMessage}`;
+    // @ 了别的会话：把被引用会话投影成只读快照追加在需求之后，失败不阻断发送
+    const userSection = await composeMessageWithSessionReferences({
+      message: userMessage,
+      ownerSessionId: `workflow_copilot_${workflowId}`,
+    });
+    const fullPrompt = `${systemPrompt}\n${contextTopology}\n\n[用户编排需求]\n${userSection}`;
 
     // 设立 5 秒超时兜底监控，确保任何网络/RPC 进程受阻时前端绝不挂死
     let hasResponded = false;

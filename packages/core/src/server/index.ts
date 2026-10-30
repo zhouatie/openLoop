@@ -27,6 +27,7 @@ import { createLogger } from '../logger';
 import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
 import { sanitizeChatMessages } from '../agent/agent-format';
 import { piSessionIndex } from '../agent/session-index';
+import { composeMessageWithSessionReferences } from '../agent/session-reference';
 import {
   DEFAULT_PI_EXTENSION_PACKAGES,
   getEnabledPiExtensions,
@@ -37,6 +38,7 @@ import { agentSessionHost, GLOBAL_AGENT_PREFIX, type AgentPermissionPreset } fro
 import { agentSessionMeta, moveSessionFileToTrash } from '../agent/session-meta';
 import { resolveSessionTitle } from '../agent/title-text';
 import { createDirectory, listDirectory, readTextFile, statFile } from '../agent/fs-browser';
+import { searchWorkspaceFiles } from '../agent/fs-search';
 import { listOpenInAppTargets, openInApp } from '../system/open-in-app';
 import { terminalHost } from '../agent/terminal-host';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
@@ -924,6 +926,19 @@ export class OpenLoopServer {
         }
       }
 
+      // @ 引用候选：全工作区路径模糊排序，带 / 的查询直列该层目录
+      if (pathname === '/api/agent/fs/search' && method === 'GET') {
+        const target = parsedUrl.searchParams.get('path') || process.cwd();
+        const query = parsedUrl.searchParams.get('q') || '';
+        try {
+          const entries = await searchWorkspaceFiles(target, query);
+          serverLogger.debug(`[文件搜索] q="${query}" → ${entries.length} 条 ${target}`);
+          return this.sendJson(res, 200, { entries }, reqMeta);
+        } catch (err: any) {
+          return this.sendJson(res, 400, { error: err?.message || '无法搜索工作区' }, reqMeta);
+        }
+      }
+
       if (pathname === '/api/agent/fs/mkdir' && method === 'POST') {
         const body = await this.parseJsonBody(req).catch(() => ({}) as any);
         try {
@@ -1093,10 +1108,15 @@ export class OpenLoopServer {
             return this.sendJson(res, 200, result, reqMeta);
           }
           if (action === 'chat') {
-            const message = typeof body?.message === 'string' ? body.message.trim() : '';
-            if (!message) {
+            const rawMessage = typeof body?.message === 'string' ? body.message.trim() : '';
+            if (!rawMessage) {
               return this.sendJson(res, 400, { error: '缺少 message' }, reqMeta);
             }
+            // 消息里 @ 了别的会话：附上只读快照后再发给模型
+            const message = await composeMessageWithSessionReferences({
+              message: rawMessage,
+              ownerSessionId: sessionKey,
+            });
             // 流水线常驻会话持有同一份 pi 会话：消息直接转给它，否则两个进程会同时写同一个会话文件
             const pipeline = PiRpcSessionManager.getInstance().findLiveBySessionId(sessionKey);
             if (pipeline) {
@@ -2391,7 +2411,13 @@ export class OpenLoopServer {
         let excludeTools: string | undefined = undefined;
 
         // 仅当当前任务真正由 Agent 节点驱动流水线时，才注入完成协议提示词，提示 Agent 在验证通过后输出完成标记
-        let promptToSend = enrichedMessage;
+        // 消息里 @ 了别的会话：把那些会话投影成只读快照追加到正文之后，准备失败不阻断发送
+        const ownSessionId =
+          task.context?.sessionId || task.context?.piSessionId || `session_${task.id}`;
+        let promptToSend = await composeMessageWithSessionReferences({
+          message: enrichedMessage,
+          ownerSessionId: ownSessionId,
+        });
         if (isCurrentAgentNode) {
           promptToSend += `\n\n【完成协议（重要）】\n- 需求修改并验证通过后，在最后一条回复末尾单独一行输出 ${PIPELINE_DONE_MARKER}，流水线据此流转到下一个节点。\n- 只要还需要用户确认方案、补充信息或回答问题，就直接提问并不要输出该标记，流水线会停留在本节点等待用户回复。`;
         } else if (isTaskGroup) {
@@ -2467,7 +2493,7 @@ ${existingSubSummary}
         }
 
         // 若当前无活跃会话，立即自动拉起/唤醒 Agent RPC 会话，响应用户追加指令
-        const sessionId = task.context?.sessionId || task.context?.piSessionId || `session_${task.id}`;
+        const sessionId = ownSessionId;
         const cwd = task.context?.worktree?.worktreeDir || task.workspace || process.cwd();
         const settings = this.store.getSettings() || {};
         const provider = getAgentProviderMeta(

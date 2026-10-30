@@ -1177,6 +1177,16 @@ export class DesktopApiService {
     return requestJson(`${BASE_URL}/api/agent/fs/list?path=${encodeURIComponent(path)}`);
   }
 
+  /** @ 引用候选：工作区路径模糊排序，带 / 的查询直列该层目录 */
+  async searchAgentFs(
+    path: string,
+    query: string
+  ): Promise<{ entries: Array<{ path: string; isDir: boolean }> }> {
+    return requestJson(
+      `${BASE_URL}/api/agent/fs/search?path=${encodeURIComponent(path)}&q=${encodeURIComponent(query)}`
+    );
+  }
+
   /** 在浏览面板里新建子目录 */
   async createAgentFsDir(parent: string, name: string): Promise<{ path: string }> {
     return requestJson(`${BASE_URL}/api/agent/fs/mkdir`, {

@@ -39,31 +39,6 @@
 }
 
 /* ---- 正文 ---- */
-.input {
-  box-sizing: border-box;
-  min-height: 36px;
-  max-height: 200px;
-  padding: 4px 14px 0;
-  border: none;
-  outline: none;
-  resize: none;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  caret-color: var(--dsw-alias-state-business-primary);
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
-  overflow-y: auto;
-}
-
-.input::placeholder {
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.input:disabled {
-  cursor: default;
-}
-
 /* ---- 底部控件行 ---- */
 .row {
   display: flex;
@@ -486,6 +461,56 @@
   font-size: 12px;
   line-height: 16px;
   color: var(--dsw-alias-label-caption);
+}
+
+/* 目录下钻的面包屑：吸在列表顶部，回退路径不被滚动带走（对齐 dsh） */
+.popoverCrumbs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: -4px -4px 2px;
+  padding: 5px 6px 4px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+}
+
+.popoverCrumb {
+  max-width: 40%;
+  overflow: hidden;
+  padding: 2px 5px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.popoverCrumb:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.popoverCrumbCurrent,
+.popoverCrumbCurrent:hover {
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: default;
+}
+
+.popoverCrumbSep {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
 }
 
 .popoverRow {

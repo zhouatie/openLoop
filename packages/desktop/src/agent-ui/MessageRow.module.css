@@ -66,6 +66,24 @@
   opacity: 0.66;
 }
 
+/* @ 引用 chip：行内跟随正文基线，区别于周围文字但不变大变色块 */
+.mention {
+  display: inline;
+  max-width: 100%;
+  margin: 0 2px;
+  color: var(--dsw-alias-state-business-primary);
+  font-weight: 500;
+  white-space: inherit;
+  overflow-wrap: anywhere;
+}
+
+.mentionIcon {
+  width: 1em;
+  height: 1em;
+  margin-right: 4px;
+  vertical-align: -0.125em;
+}
+
 .attachments {
   display: flex;
   flex-wrap: wrap;
