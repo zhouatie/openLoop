@@ -37,6 +37,9 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     chunkSizeWarningLimit: 1000,
+    // 目标定在 es2022：xterm 6 的 ESM 产物带 `||=` 写回，压到 es2020 时 esbuild 会降级
+    // 逻辑赋值并误删声明，导致打包后首条 DCS 查询抛 ReferenceError，TUI（yazi、vim）直接白屏
+    target: 'es2022',
     rollupOptions: {
       output: {
         manualChunks(id) {
