@@ -589,6 +589,29 @@ ipcMain.handle('system:checkSystemStatus', async () => {
   };
 });
 
+// 待点击的桌面通知：主进程必须持有引用，否则对象被回收后点击事件不会再回到应用
+const pendingNotifications = new Set<Notification>();
+
+/**
+ * 通知点击后把主窗口提到最前。
+ * macOS 只调窗口 focus 不足以越过其他前台应用，必须用 app.focus({ steal: true })；
+ * 不用 app.dock.show()——应用常驻 Dock，该调用只会让 Dock 重排并卡在异常磁贴状态。
+ */
+async function activateMainWindow(sessionId?: string): Promise<void> {
+  if (!mainWindow) await createWindow();
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  if (process.platform === 'darwin') app.focus({ steal: true });
+  mainWindow.focus();
+  if (!sessionId) return;
+  // 窗口刚创建时渲染进程仍在加载，等首帧就绪再派发，避免会话标识丢失
+  const contents = mainWindow.webContents;
+  const send = () => contents.send('notification:activate', { sessionId });
+  if (contents.isLoading()) contents.once('did-finish-load', send);
+  else send();
+}
+
 // 注册系统级 IPC：桌面通知（任务待验收 / 执行失败、Agent 一轮回复结束等需要人工介入的时机）
 ipcMain.handle('notification:show', (_event, payload: { title: string; body: string; sessionId?: string }) => {
   if (!payload?.title || !Notification.isSupported()) return false;
@@ -596,21 +619,18 @@ ipcMain.handle('notification:show', (_event, payload: { title: string; body: str
     console.log('[Desktop Main] Showing desktop notification:', payload);
   }
   const notification = new Notification({ title: payload.title, body: payload.body });
-  // 点击通知唤起主窗口，直达待处理现场
-  notification.on('click', () => {
-    if (process.platform === 'darwin') app.dock?.show();
-    if (!mainWindow) {
-      createWindow();
-      return;
-    }
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-    // 通知属于某条会话时，把会话标识交回渲染进程就地切换
-    if (payload.sessionId) {
-      mainWindow.webContents.send('notification:activate', { sessionId: payload.sessionId });
-    }
+  pendingNotifications.add(notification);
+  // 点击通知唤起主窗口直达待处理现场；点击或关闭后立即释放引用，历史条目不留常驻内存
+  const release = () => {
+    pendingNotifications.delete(notification);
+    notification.removeAllListeners();
+  };
+  notification.once('click', () => {
+    if (!app.isPackaged) console.log('[Desktop Main] Notification clicked:', payload);
+    release();
+    void activateMainWindow(payload.sessionId);
   });
+  notification.once('close', release);
   notification.show();
   return true;
 });
