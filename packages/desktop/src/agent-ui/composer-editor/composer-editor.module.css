@@ -66,3 +66,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 草稿里的目录 token：普通文本，只换引用色（不改变字形度量，输入时不跳动） */
+.textRef {
+  color: var(--dsw-alias-state-business-primary);
+}

@@ -21,6 +21,7 @@ import type { EditorProjection } from './projection';
 import { $composerLayout, $projectComposer } from './projection';
 import type { ReferenceInsert } from './ReferenceChipNode';
 import { $createReferenceChipNode, ReferenceChipNode } from './ReferenceChipNode';
+import { FolderRefNode, registerFolderRef } from './folder-ref';
 
 /** 连续输入的撤销合并窗口，和 dsh 一致 */
 const HISTORY_MERGE_DELAY_MS = 1000;
@@ -43,7 +44,7 @@ export class ComposerEditorRuntime {
   constructor(private readonly deps: ComposerEditorDeps) {
     this.editor = createEditor({
       namespace: 'openloop-composer',
-      nodes: [ReferenceChipNode],
+      nodes: [ReferenceChipNode, FolderRefNode],
       onError: (error) => {
         throw error;
       },
@@ -54,6 +55,7 @@ export class ComposerEditorRuntime {
   register(): () => void {
     const unregister = mergeRegister(
       registerPlainText(this.editor),
+      registerFolderRef(this.editor),
       registerHistory(this.editor, createEmptyHistoryState(), HISTORY_MERGE_DELAY_MS),
       this.editor.registerUpdateListener(() => {
         this.refreshProjection();

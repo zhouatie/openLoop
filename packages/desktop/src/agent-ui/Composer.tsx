@@ -481,6 +481,7 @@ export const Composer = React.memo(function Composer({
         const picked = menu.items.find((item) => item.key === choice.key);
         if (!picked) return;
         if (picked.isDir && drill) {
+          if (import.meta.env?.DEV) console.log('[Composer] @ 目录下钻:', picked.key);
           insertToken(`@${picked.key}`, true);
           loadMentions(picked.key);
           return;
@@ -536,11 +537,13 @@ export const Composer = React.memo(function Composer({
           setMenu(null);
           return;
         }
-        if (event.key === 'Tab' && menu.kind === 'mention' && menu.items[menu.index]?.isDir) {
-          // Tab 与行尾箭头同一个动作：进入目录并保持面板
+        if (event.key === 'Tab' && (menu.kind === 'mention' || menu.kind === 'slash')) {
+          // 与 dsh 一致：Shift+Tab 收起面板；目录行 Tab 下钻并保持面板，其余行 Tab 直接落成引用
           event.preventDefault();
           event.stopPropagation();
-          applyMenuChoice(menu.items[menu.index], true);
+          const picked = menu.items[menu.index];
+          if (event.shiftKey) setMenu(null);
+          else if (picked) applyMenuChoice(picked, picked.isDir === true);
           return;
         }
         if (event.key === 'Enter') {
