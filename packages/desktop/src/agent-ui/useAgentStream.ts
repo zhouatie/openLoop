@@ -77,10 +77,24 @@ interface OverlapCache {
   start: number;
 }
 
+/** 对齐时向前看几行：压缩提示这类历史独有的行会让两侧错位，但错位只在一两行内 */
+const ALIGN_LOOKAHEAD = 16;
+
+/** 从 from 起向后找一条与 target 同内容的行，返回下标；找不到返回 -1 */
+function findMatch(rows: SessionChatMessage[], from: number, target: SessionChatMessage): number {
+  const end = Math.min(rows.length, from + ALIGN_LOOKAHEAD);
+  for (let index = from; index < end; index += 1) {
+    if (sameMessage(rows[index], target)) return index;
+  }
+  return -1;
+}
+
 /**
  * 实时段在历史里的起点
  *
  * 实时段是同一会话的尾部延续，定位只需要一个锚点：从后往前找第一条能与实时段连续对齐的历史消息。
+ * 历史里还有实时段不会产生的行（压缩提示、扩展消息、pi 没有回显的重复用户消息），
+ * 对齐时允许跳过它们，否则一遇到压缩提示就找不到锚点。
  * 越靠后的同文消息越可能是实时段的起点，所以从后往前扫、命中即停。
  * 历史与实时段都不再变化时（同一数组 + 同一首条消息）直接复用上次结果，流式期间每帧都是 O(1)。
  */
@@ -95,16 +109,20 @@ function findOverlapStart(
   let start = -1;
   for (let index = history.length - 1; index >= 0; index -= 1) {
     if (!sameMessage(history[index], live[0])) continue;
+    let cursor = index + 1;
     let matched = 1;
-    while (
-      matched < live.length &&
-      index + matched < history.length &&
-      sameMessage(history[index + matched], live[matched])
-    ) {
-      matched += 1;
+    while (matched < live.length && cursor < history.length) {
+      if (sameMessage(history[cursor], live[matched])) {
+        matched += 1;
+        cursor += 1;
+        continue;
+      }
+      const skip = findMatch(history, cursor + 1, live[matched]);
+      if (skip < 0) break;
+      cursor = skip;
     }
-    // 只认两种收尾：实时段全部对上，或历史尾部全部对上（实时段带着还没落盘的新消息）
-    if (matched === live.length || index + matched === history.length) {
+    // 只认两种收尾：实时段全部对上，或历史尾部全部用完（实时段带着还没落盘的新消息）
+    if (matched === live.length || cursor >= history.length) {
       start = index;
       break;
     }
@@ -122,33 +140,74 @@ function signature(message: SessionChatMessage): string {
 }
 
 /**
- * 找不到锚点时的兜底：实时段是会话最新的一段，按内容去重后整段插回历史
- *
- * 直接拼在历史后面会让历史尾部甩到最新消息下面（界面上旧消息出现在最后一条之后），
- * 同一句话还会出现两次。这里保留历史里实时段没有的部分，再按时间戳把实时段放回原位。
+ * 找不到锚点时的兜底：历史一行都不动，只把历史里还没有的实时消息补在末尾。
+ * 实时段永远比历史新，补在末尾不会让旧消息跑到最新消息下面。
  */
-function placeLiveSegment(history: SessionChatMessage[], live: SessionChatMessage[]): SessionChatMessage[] {
-  const quota = new Map<string, number>();
-  for (const message of live) quota.set(signature(message), (quota.get(signature(message)) || 0) + 1);
+function appendFreshLive(history: SessionChatMessage[], live: SessionChatMessage[]): SessionChatMessage[] {
+  const left = new Map<string, number>();
+  for (const message of history) left.set(signature(message), (left.get(signature(message)) || 0) + 1);
 
-  // 从后往前扣减：重复的同文消息里让历史保留靠前的，实时段接管靠后的
-  const kept: SessionChatMessage[] = [];
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const message = history[index];
+  const fresh: SessionChatMessage[] = [];
+  for (const message of live) {
     const key = signature(message);
-    const left = quota.get(key) || 0;
-    if (left > 0) {
-      quota.set(key, left - 1);
+    const count = left.get(key) || 0;
+    if (count > 0) {
+      left.set(key, count - 1);
       continue;
     }
-    kept.push(message);
+    fresh.push(message);
   }
-  kept.reverse();
+  return fresh.length === 0 ? history : history.concat(fresh);
+}
 
-  const head = live[0].timestamp || 0;
-  let at = kept.length;
-  while (at > 0 && (kept[at - 1].timestamp || 0) > head) at -= 1;
-  return kept.slice(0, at).concat(live, kept.slice(at));
+/**
+ * 对齐合并
+ *
+ * 对齐的行以实时段为准（它持有流式状态与工具记录，增量事件也按它的 id 打补丁），
+ * 历史独有的行留在原位，实时段独有的行插在对齐位置。
+ * 历史任何一行都不会被挪到末尾：旧消息出现在最新消息下面，正是这条规则要杜绝的。
+ */
+function alignLive(
+  history: SessionChatMessage[],
+  live: SessionChatMessage[],
+  start: number
+): SessionChatMessage[] {
+  const merged = history.slice(0, start);
+  let cursor = start;
+  let index = 0;
+
+  while (index < live.length) {
+    if (cursor >= history.length) {
+      merged.push(live[index]);
+      index += 1;
+      continue;
+    }
+    if (sameMessage(history[cursor], live[index])) {
+      merged.push(live[index]);
+      cursor += 1;
+      index += 1;
+      continue;
+    }
+    // 历史独有的行（压缩提示等）：原位保留，继续用实时段对齐
+    if (findMatch(history, cursor + 1, live[index]) >= 0) {
+      merged.push(history[cursor]);
+      cursor += 1;
+      continue;
+    }
+    // 实时段独有的行（还没落盘的新消息）：插在对齐位置
+    if (findMatch(live, index + 1, history[cursor]) >= 0) {
+      merged.push(live[index]);
+      index += 1;
+      continue;
+    }
+    // 同一条消息内容被改写：以实时段为准
+    merged.push(live[index]);
+    cursor += 1;
+    index += 1;
+  }
+
+  for (; cursor < history.length; cursor += 1) merged.push(history[cursor]);
+  return merged;
 }
 
 function mergeMessages(
@@ -160,13 +219,9 @@ function mergeMessages(
   if (!history || history.length === 0) return live;
 
   const start = findOverlapStart(history, live, cache);
-  if (start < 0) return placeLiveSegment(history, live);
+  if (start < 0) return appendFreshLive(history, live);
 
-  const covered = Math.min(live.length, history.length - start);
-  // 历史已被实时段完全覆盖：直接用实时段，不多一次数组拷贝
-  if (start === 0 && covered === history.length) return live;
-  // 重叠部分一律以实时段为准：它持有流式状态与工具记录，增量事件也按它的 id 打补丁
-  return history.slice(0, start).concat(live, history.slice(start + covered));
+  return alignLive(history, live, start);
 }
 
 /**

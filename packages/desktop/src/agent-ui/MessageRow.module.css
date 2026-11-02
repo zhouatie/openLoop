@@ -14,10 +14,15 @@
 
 .systemText {
   flex: none;
+  min-width: 0;
   max-width: 70%;
   font-size: 11.5px;
   color: var(--dsw-alias-label-caption);
   text-align: center;
+  /* 分隔行永远单行：多行正文会被两侧的线穿过，看着就是乱的 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .userRow {

@@ -792,10 +792,11 @@ function mapEntriesToMessages(branch: any[], sessionId: string, cwd?: string) {
     }
 
     if (entry.type === 'compaction') {
+      // 分隔行只给结论：摘要动辄几百字符，铺进分隔线会把消息流搞乱，摘要本身去会话树里看
       messages.push({
         id: nextId('sys', entry),
         role: 'system',
-        content: entry.summary ? `上下文已压缩：${String(entry.summary).slice(0, 200)}` : '上下文已压缩',
+        content: '上下文已压缩',
         timestamp: Date.parse(entry.timestamp) || Date.now(),
         source: 'history',
         entryId: entry.id,
