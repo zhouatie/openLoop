@@ -21,7 +21,7 @@ import type { EditorProjection } from './projection';
 import { $composerLayout, $projectComposer } from './projection';
 import type { ReferenceInsert } from './ReferenceChipNode';
 import { $createReferenceChipNode, ReferenceChipNode } from './ReferenceChipNode';
-import { FolderRefNode, registerFolderRef } from './folder-ref';
+import { registerTextRefs, rescanTextRefs, TextRefNode } from './text-ref';
 
 /** 连续输入的撤销合并窗口，和 dsh 一致 */
 const HISTORY_MERGE_DELAY_MS = 1000;
@@ -34,6 +34,8 @@ export interface ComposerEditorDeps {
 /** 一个 Composer 一个实例，随组件卸载释放 */
 export class ComposerEditorRuntime {
   readonly editor: LexicalEditor;
+  /** 斜杠 token 着色的词表：指令与技能名，后到后重扫 */
+  private slashNames: ReadonlySet<string> = new Set();
   private projected: EditorProjection = {
     detectText: '',
     clipboardText: '',
@@ -44,7 +46,7 @@ export class ComposerEditorRuntime {
   constructor(private readonly deps: ComposerEditorDeps) {
     this.editor = createEditor({
       namespace: 'openloop-composer',
-      nodes: [ReferenceChipNode, FolderRefNode],
+      nodes: [ReferenceChipNode, TextRefNode],
       onError: (error) => {
         throw error;
       },
@@ -55,7 +57,7 @@ export class ComposerEditorRuntime {
   register(): () => void {
     const unregister = mergeRegister(
       registerPlainText(this.editor),
-      registerFolderRef(this.editor),
+      registerTextRefs(this.editor, () => this.slashNames),
       registerHistory(this.editor, createEmptyHistoryState(), HISTORY_MERGE_DELAY_MS),
       this.editor.registerUpdateListener(() => {
         this.refreshProjection();
@@ -70,6 +72,17 @@ export class ComposerEditorRuntime {
 
   get projection(): EditorProjection {
     return this.projected;
+  }
+
+  /** 斜杠词表（指令 / 技能名）：变了就重扫草稿，已输入的 `/name` 直接变成引用色 */
+  setSlashNames(names: readonly string[]): void {
+    const next = new Set(names);
+    const same =
+      next.size === this.slashNames.size && names.every((name) => this.slashNames.has(name));
+    if (same) return;
+    this.slashNames = next;
+    if (import.meta.env?.DEV) console.log('[ComposerEditor] 斜杠词表更新:', { size: next.size });
+    rescanTextRefs(this.editor);
   }
 
   refreshProjection(): void {

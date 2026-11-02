@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   IconPlus,
   IconSend,
@@ -131,18 +131,22 @@ interface MenuState {
 const PERMISSION_ORDER: ComposerPermission[] = ['full', 'readonly', 'noshell'];
 /** @ 候选的本地防抖：每次按键都请求会让工作区文件列表接口排队 */
 const MENTION_DEBOUNCE_MS = 120;
+/** 词内字符：与 dsh 的 WORD_CHAR 一致，中文等非 ASCII 字母也算词内 */
+const WORD_CHAR = /[\p{L}\p{N}_]/u;
 
 /**
- * 光标前的 @ token：按光标判定，文字中间（光标不在末尾）输入的 @ 同样有效。
+ * 光标前的 @ token：与 dsh 的 activeAtToken 同规则。
+ * @ 只在草稿开头或空白之后触发，邮箱这类词内 @ 不开面板；
+ * `@"` 打开引号写法，查询词可带空格。
  * 返回 token 在草稿里的起点与查询词，选中候选时只替换这一段。
  */
 function atTokenBefore(text: string, caret: number): { start: number; query: string } | null {
-  const match = /@([^\s]*)$/u.exec(text.slice(0, caret));
-  if (!match) return null;
-  const start = caret - match[0].length;
-  // @ 前是 ASCII 字母数字或下划线时不算触发点：邮箱、URL 这类词内 @ 不开面板
-  if (start > 0 && /\w/u.test(text.charAt(start - 1))) return null;
-  return { start, query: match[1] };
+  const before = text.slice(0, caret);
+  const quoted = /(?:^|\s)(@"([^"]*))$/u.exec(before);
+  if (quoted !== null) return { start: caret - quoted[1].length, query: quoted[2] };
+  const plain = /(?:^|\s)(@([^\s]*))$/u.exec(before);
+  if (plain === null) return null;
+  return { start: caret - plain[1].length, query: plain[2] };
 }
 
 /** 斜杠的词边界：行首、空白或标点后才算触发点，URL 里的斜杠不算 */
@@ -150,7 +154,7 @@ function slashBoundaryOk(text: string, index: number): boolean {
   if (index === 0) return true;
   const prev = text.charAt(index - 1);
   if (/\s/u.test(prev)) return true;
-  if (/\w/u.test(prev)) return false;
+  if (WORD_CHAR.test(prev)) return false;
   // 协议、`//` 与 Windows 盘符里的斜杠当普通字符
   if (prev === '/') return false;
   if (prev === ':' && index >= 2 && !/\s/u.test(text.charAt(index - 2))) return false;
@@ -260,6 +264,8 @@ export const Composer = React.memo(function Composer({
   const mentionTimer = useRef<number | null>(null);
   /** 当前 @ / 斜杠 token 在草稿里的范围：选中候选时只替换这一段，不动前后文字 */
   const tokenSpan = useRef<{ start: number; end: number } | null>(null);
+  /** 斜杠 token 着色的词表：指令与技能名 */
+  const refNames = useMemo(() => (commands ?? []).map((item) => item.name), [commands]);
 
   /** @ 候选请求：输入与目录下钻走同一条路径，后到的结果覆盖先到的 */
   const loadMentions = useCallback(
@@ -893,6 +899,7 @@ export const Composer = React.memo(function Composer({
         <ComposerEditor
           ref={editorRef}
           onUpdate={handleEditorUpdate}
+          refNames={refNames}
           onKeyDownCapture={handleKeyDown}
           onFocus={() => {
             restoreFocusRef.current = false;

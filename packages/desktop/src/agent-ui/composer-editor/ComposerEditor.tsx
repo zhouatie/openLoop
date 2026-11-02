@@ -31,6 +31,8 @@ export interface ComposerEditorHandle {
 export interface ComposerEditorProps {
   /** 每次内容或光标变化后回调，参数是当前投影 */
   onUpdate: (projection: EditorProjection) => void;
+  /** 斜杠 token 着色的词表：指令与技能名 */
+  refNames?: readonly string[];
   onKeyDownCapture?: React.KeyboardEventHandler<HTMLDivElement>;
   onPaste?: React.ClipboardEventHandler<HTMLDivElement>;
   onFocus?: React.FocusEventHandler<HTMLDivElement>;
@@ -40,7 +42,10 @@ export interface ComposerEditorProps {
 
 /** 输入区：contentEditable 宿主 + 全屏宽度自适应高度 */
 export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(
-  function ComposerEditor({ onUpdate, onKeyDownCapture, onPaste, onFocus, placeholder, disabled }, ref) {
+  function ComposerEditor(
+    { onUpdate, refNames, onKeyDownCapture, onPaste, onFocus, placeholder, disabled },
+    ref
+  ) {
     const rootRef = useRef<HTMLDivElement | null>(null);
     const updateRef = useRef(onUpdate);
     updateRef.current = onUpdate;
@@ -73,6 +78,10 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
     useEffect(() => {
       runtime.editor.setEditable(!disabled);
     }, [runtime, disabled]);
+
+    useEffect(() => {
+      runtime.setSlashNames(refNames ?? []);
+    }, [runtime, refNames]);
 
     const focus = useCallback(() => {
       runtime.focus();
