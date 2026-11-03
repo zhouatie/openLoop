@@ -806,6 +806,7 @@ export class OpenLoopServer {
               projectTitle: project.title,
               projectHidden: project.hidden === true,
               projectOrder: project.order,
+              lastModel: meta.model || session.lastModel,
             };
           })
           .filter((session) => !session.deleted);
@@ -841,7 +842,10 @@ export class OpenLoopServer {
         if (!detail) {
           return this.sendJson(res, 404, { error: 'Session Not Found' }, reqMeta);
         }
-        return this.sendJson(res, 200, detail, reqMeta);
+        const settings = agentSessionHost.getSettings(sessionKey);
+        const meta = agentSessionMeta.getSession(sessionKey);
+        const effectiveModel = settings.model || meta.model || detail.model;
+        return this.sendJson(res, 200, { ...detail, model: effectiveModel }, reqMeta);
       }
 
       // 当前活跃的全局 Agent 会话（用于界面判断哪些会话可实时连接）
@@ -1065,6 +1069,12 @@ export class OpenLoopServer {
           cancelled: body?.cancelled === true ? true : undefined,
         });
         return this.sendJson(res, 200, { success }, reqMeta);
+      }
+
+      // 全局可用模型（模型选择器）
+      if (pathname === '/api/agent/models' && method === 'GET') {
+        const models = await agentSessionHost.listAvailableModels().catch(() => []);
+        return this.sendJson(res, 200, { models }, reqMeta);
       }
 
       // 会话可用模型（模型选择器）
@@ -2686,6 +2696,45 @@ ${existingSubSummary}
         this.broadcastTaskUpdate(task);
         serverLogger.info(`[Tasks:ClearSession] 已清空任务 [${taskId}] 的全部会话消息`);
         return this.sendJson(res, 200, { success: true }, reqMeta);
+      }
+
+      // Task session model switch: /api/tasks/:id/session/model
+      const taskModelMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/model$/);
+      if (taskModelMatch && method === 'POST') {
+        const taskId = taskModelMatch[1];
+        const task = this.store.getTask(taskId);
+        if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
+
+        const body = await this.parseJsonBody(req).catch(() => ({}) as any);
+        const model = typeof body?.model === 'string' ? body.model.trim() : undefined;
+        const thinking = typeof body?.thinking === 'string' ? body.thinking.trim() : undefined;
+
+        if (!task.context) task.context = {};
+        if (model !== undefined) task.context.model = model;
+        if (thinking !== undefined) task.context.thinking = thinking;
+        this.store.saveTask(task);
+
+        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        let applied = false;
+        let queued = false;
+        if (rpcSession && rpcSession.active) {
+          const res = await rpcSession.applyRuntimeSettings({ model, thinking });
+          applied = res !== 'failed';
+          queued = res === 'queued';
+        } else {
+          queued = true;
+        }
+
+        const sessionId = task.context.sessionId || task.context.piSessionId;
+        if (sessionId) {
+          agentSessionMeta.setSession(sessionId, { model, thinking });
+        }
+
+        this.broadcastTaskUpdate(task);
+        serverLogger.info(
+          `[Tasks:Model] 任务 [${taskId}] 模型切换为: ${model || '默认'} (applied: ${applied}, queued: ${queued})`
+        );
+        return this.sendJson(res, 200, { applied, queued, model: task.context.model }, reqMeta);
       }
 
       // Task files search: /api/tasks/:id/files

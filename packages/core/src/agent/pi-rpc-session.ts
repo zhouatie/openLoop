@@ -163,6 +163,7 @@ export interface PiRpcSessionOptions {
 }
 
 export class PiRpcSessionInstance extends EventEmitter {
+  public static onModelsDiscovered?: (models: Array<{ id: string; provider: string; label?: string }>) => void;
   public taskId: string;
   public sessionId: string;
   public agentName: string;
@@ -1227,8 +1228,15 @@ export class PiRpcSessionInstance extends EventEmitter {
     const models = Array.isArray(data?.models) ? data.models : [];
     const resolved = models
       .filter((m: any) => m && typeof m.id === 'string' && typeof m.provider === 'string')
-      .map((m: any) => ({ id: m.id, provider: m.provider }));
+      .map((m: any) => ({
+        id: m.id,
+        provider: m.provider,
+        label: m.name ? `${m.name} (${m.provider}/${m.id})` : `${m.provider}/${m.id}`,
+      }));
     this.modelsCache = resolved;
+    if (resolved.length > 0) {
+      PiRpcSessionInstance.onModelsDiscovered?.(resolved);
+    }
     return resolved;
   }
 

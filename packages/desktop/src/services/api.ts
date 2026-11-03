@@ -1126,11 +1126,27 @@ export class DesktopApiService {
     });
   }
 
-  async getAgentSessionModels(sessionId: string): Promise<{ models: Array<{ id: string; provider: string }> }> {
+  async getAgentModels(): Promise<{ models: Array<{ id: string; provider: string; label?: string }> }> {
+    return requestJson(`${BASE_URL}/api/agent/models`);
+  }
+
+  async getAgentSessionModels(sessionId: string): Promise<{ models: Array<{ id: string; provider: string; label?: string }> }> {
     return requestJson(`${BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}/models`);
   }
 
   // ---- 模型 / 权限 / 重发 ----
+
+  async setTaskSessionModel(
+    taskId: string,
+    model?: string,
+    thinking?: string
+  ): Promise<{ applied: boolean; queued: boolean; model?: string }> {
+    return requestJson(`${BASE_URL}/api/tasks/${encodeURIComponent(taskId)}/session/model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, thinking }),
+    });
+  }
 
   async setAgentSessionModel(
     sessionId: string,
