@@ -29,6 +29,7 @@ import { sanitizeChatMessages } from '../agent/agent-format';
 import { piSessionIndex } from '../agent/session-index';
 import { composeMessageWithSessionReferences } from '../agent/session-reference';
 import { composeMessageWithTaskReferences } from '../agent/task-reference';
+import { buildTaskSessionIndex } from '../agent/task-session';
 import {
   DEFAULT_PI_EXTENSION_PACKAGES,
   getEnabledPiExtensions,
@@ -788,6 +789,8 @@ export class OpenLoopServer {
         // 先取全量再按 limit 截断，total 才是真实会话总数
         const raw = await piSessionIndex.list({ cwd });
         const projectMeta = agentSessionMeta.listProjects();
+        // 任务会话标注：侧栏据此显示「任务」标记与任务标题
+        const taskBySession = buildTaskSessionIndex(this.store.getTaskSummaries());
         const sessions = raw
           .map((session) => {
             const meta = agentSessionMeta.getSession(session.id);
@@ -806,6 +809,7 @@ export class OpenLoopServer {
               projectTitle: project.title,
               projectHidden: project.hidden === true,
               projectOrder: project.order,
+              task: taskBySession.get(session.id),
             };
           })
           .filter((session) => !session.deleted);

@@ -24,6 +24,7 @@ import {
   StorageCleanOptions,
   StorageCleanResult,
   SessionChatMessage,
+  TaskSessionRef,
 } from '@openloop/core';
 import type { OpenInAppTarget, SessionTreeSnapshot } from '@openloop/core/types';
 
@@ -974,6 +975,8 @@ export class DesktopApiService {
       projectTitle?: string;
       projectHidden?: boolean;
       projectOrder?: number;
+      /** 该会话所属的看板任务（任务会话才有） */
+      task?: TaskSessionRef;
     }>;
   }> {
     const search = new URLSearchParams();

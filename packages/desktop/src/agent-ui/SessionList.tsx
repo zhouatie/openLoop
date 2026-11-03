@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import type { TaskSessionRef } from '@openloop/core';
 import {
   IconFolderClose,
   IconMore,
@@ -39,6 +40,8 @@ export interface SessionListItem {
   pinned?: boolean;
   /** 未落盘的新会话占位行（对齐 DSH blank session）：只显示标题，不显示时间与操作 */
   draft?: boolean;
+  /** 该会话所属的看板任务：任务会话才有，用于标注归属 */
+  task?: TaskSessionRef;
 }
 
 export interface SessionGroupItem {
@@ -108,6 +111,7 @@ interface SearchRow {
   workspace: string;
   running?: boolean;
   snippet?: string;
+  task?: TaskSessionRef;
 }
 
 const SESSION_VISIBLE_COUNT = 5;
@@ -152,6 +156,7 @@ interface HoverCardState {
   title: string;
   path: string;
   time: string;
+  task?: string;
   top: number;
   left: number;
   /** 侧栏有 backdrop-filter，会成为 fixed 子元素的包含块并裁切浮层；挂到 agent-scope 根节点 */
@@ -221,7 +226,7 @@ interface SessionRowItemProps {
     event: React.MouseEvent,
     item: { kind: 'session'; cwd: string; sessionId: string; archived?: boolean; pinned?: boolean }
   ) => void;
-  onShowCard: (target: HTMLElement, title: string, cwd: string, time: string) => void;
+  onShowCard: (target: HTMLElement, title: string, cwd: string, time: string, task?: string) => void;
   onHideCard: () => void;
 }
 
@@ -259,7 +264,8 @@ const SessionRowItem = memo(function SessionRowItem({
           event.currentTarget,
           session.title || '未命名会话',
           session.cwd,
-          createdLabel(session.createdAt)
+          createdLabel(session.createdAt),
+          session.task?.title
         )
       }
       onMouseLeave={onHideCard}
@@ -293,6 +299,11 @@ const SessionRowItem = memo(function SessionRowItem({
         />
       ) : (
         <span className={styles.sessionTitle}>{session.title || '未命名会话'}</span>
+      )}
+      {session.task && (
+        <span className={styles.taskTag} title={`任务：${session.task.title}`}>
+          任务
+        </span>
       )}
       {session.pinned && (
         <span className={styles.pinMark} aria-label="已置顶">
@@ -507,7 +518,13 @@ export const SessionList = memo(function SessionList({
       for (const session of group.sessions) {
         if (session.draft || !matchesArchive(session) || seen.has(session.id)) continue;
         const title = (session.title || '').toLowerCase();
-        if (!title.includes(keyword) && !labelMatched && !session.id.toLowerCase().includes(keyword)) {
+        const taskTitle = (session.task?.title || '').toLowerCase();
+        if (
+          !title.includes(keyword) &&
+          !taskTitle.includes(keyword) &&
+          !labelMatched &&
+          !session.id.toLowerCase().includes(keyword)
+        ) {
           continue;
         }
         seen.add(session.id);
@@ -517,6 +534,7 @@ export const SessionList = memo(function SessionList({
             title: session.title || '未命名会话',
             workspace: group.label,
             running: session.running,
+            task: session.task,
           },
           updatedMs:
             session.modifiedMs !== undefined
@@ -547,6 +565,7 @@ export const SessionList = memo(function SessionList({
           workspace: found.workspace,
           running: found.session.running,
           snippet: hit.snippet,
+          task: found.session.task,
         },
       ];
     });
@@ -667,7 +686,13 @@ export const SessionList = memo(function SessionList({
   }, [deleteTarget]);
 
   /** 悬浮卡：首次停留 800ms 才显示，同一列表内已显示过则立即跟随（对齐 DSH HoverCardGroup 的 grouped 预热） */
-  const showCard = (element: HTMLElement, title: string, path: string, time: string) => {
+  const showCard = (
+    element: HTMLElement,
+    title: string,
+    path: string,
+    time: string,
+    task?: string
+  ) => {
     if (cardTimer.current !== null) clearTimeout(cardTimer.current);
     cardTimer.current = null;
     const open = () => {
@@ -677,6 +702,7 @@ export const SessionList = memo(function SessionList({
         title,
         path: homeShortened(path),
         time,
+        task,
         top: Math.min(Math.max(12, rect.top - 4), window.innerHeight - 150),
         left: Math.min(rect.right + 10, window.innerWidth - 312),
         host: element.closest<HTMLElement>('.agent-scope') || document.body,
@@ -790,6 +816,11 @@ export const SessionList = memo(function SessionList({
               {row.running && <span className={styles.liveSpinner} aria-label="进行中" />}
             </span>
             <span className={styles.searchHitTitle}>{row.title}</span>
+            {row.task && (
+              <span className={styles.taskTag} title={`任务：${row.task.title}`}>
+                任务
+              </span>
+            )}
           </span>
           <span className={styles.searchHitMeta}>
             <span className={styles.searchHitWorkspace}>{row.workspace}</span>
@@ -1184,6 +1215,7 @@ export const SessionList = memo(function SessionList({
             data-agent-transient
           >
             <div className={styles.hoverTitle}>{card.title}</div>
+            {card.task && <div className={styles.hoverTask}>任务 · {card.task}</div>}
             {card.path && <div className={styles.hoverPath}>{card.path}</div>}
             {card.time && <div className={styles.hoverTime}>{card.time}</div>}
           </div>,

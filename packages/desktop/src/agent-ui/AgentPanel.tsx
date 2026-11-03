@@ -1045,6 +1045,7 @@ export function GlobalAgentPanel({
           lastModel: item.lastModel,
           archived: item.archived === true,
           pinned: item.pinned === true,
+          task: item.task,
         };
       });
       // 通知正文要显示会话名：随列表一起灌进缓存，不额外请求
@@ -1072,7 +1073,9 @@ export function GlobalAgentPanel({
               p.running === n.running &&
               p.live === n.live &&
               p.pinned === n.pinned &&
-              p.archived === n.archived
+              p.archived === n.archived &&
+              p.task?.id === n.task?.id &&
+              p.task?.title === n.task?.title
             );
           })
         ) {
@@ -1344,6 +1347,23 @@ export function GlobalAgentPanel({
       };
       rows = [row, ...sessions];
     }
+    // 任务会话尚未落盘（任务还没聊过）：补一条选中行，侧栏能看到任务对应的会话
+    if (taskContext?.taskId && activeId && !keyword && !rows.some((item) => item.id === activeId)) {
+      const nowIso = new Date().toISOString();
+      const taskTitle = taskContext.taskTitle || '任务会话';
+      const row: SessionListItem = {
+        id: activeId,
+        title: taskTitle,
+        cwd,
+        modifiedAt: nowIso,
+        modifiedMs: Date.now(),
+        createdAt: nowIso,
+        messageCount: 0,
+        draft: true,
+        task: { id: taskContext.taskId, title: taskTitle },
+      };
+      rows = [row, ...rows];
+    }
     // 同一会话可能因工作区改名或搬移留下新旧两份文件（id 相同）：行 key 必须唯一，否则会重复出行且多行同时高亮
     const seen = new Set<string>();
     const unique: SessionListItem[] = [];
@@ -1353,11 +1373,15 @@ export function GlobalAgentPanel({
       unique.push(item);
     }
     return unique;
-  }, [sessions, draft, activeId, keyword]);
+  }, [sessions, draft, activeId, keyword, taskContext, cwd]);
 
   const filteredSessions = useMemo(() => {
     if (!keyword) return listedSessions;
-    return listedSessions.filter((item) => item.title.toLowerCase().includes(keyword));
+    return listedSessions.filter(
+      (item) =>
+        item.title.toLowerCase().includes(keyword) ||
+        (item.task?.title || '').toLowerCase().includes(keyword)
+    );
   }, [listedSessions, keyword]);
 
   const groups = useMemo<ProjectGroup[]>(() => {
