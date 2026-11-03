@@ -24,6 +24,7 @@ import type { EditorProjection } from './composer-editor/projection';
 import { sessionMention, taskMention } from './mentions';
 import type { TaskActionMode } from './TaskActionPanel';
 import { useShortcuts } from '../context/ShortcutContext';
+import { useShortcutBindings } from '../hooks/useShortcutBindings';
 
 export interface ComposerAttachmentItem {
   id: string;
@@ -88,6 +89,10 @@ export interface ComposerProps {
   toolsExtra?: React.ReactNode;
   /** ➕ 面板里的任务入口：未传时该分组不出现 */
   onTaskAction?: (mode: TaskActionMode) => void;
+  /** 快捷键是否生效 */
+  shortcutsEnabled?: boolean;
+  /** 快捷键层级优先级 */
+  shortcutPriority?: number;
 }
 
 /** 输入卡内的图标操作：与输入卡同一套圆角与悬停态 */
@@ -234,8 +239,11 @@ export const Composer = React.memo(function Composer({
   onModelSelect,
   toolsExtra,
   onTaskAction,
+  shortcutsEnabled = true,
+  shortcutPriority = 0,
 }: ComposerProps) {
-  const { matchShortcut } = useShortcuts();
+  const { matchShortcut, describeShortcut } = useShortcuts();
+  const addKeys = describeShortcut('composer.addMenu').join('+');
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<ComposerEditorHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -398,12 +406,16 @@ export const Composer = React.memo(function Composer({
               icon: <IconShield size={16} />,
               checked: preset === permission,
             }))
-          : (models || []).map((item) => ({
-              key: item.id,
-              label: item.label,
-              icon: <IconChip size={16} />,
-              checked: item.id === model,
-            }));
+          : (models || []).map((item) => {
+              const provider = item.id.includes('/') ? item.id.split('/')[0] : '通用';
+              return {
+                key: item.id,
+                label: item.label,
+                icon: <IconChip size={16} />,
+                section: provider,
+                checked: item.id === model || item.id === (model ? model.split(':')[0] : ''),
+              };
+            });
       // 没有对应回调时这行本就不出现，这里只做防御
       if (rows.length === 0) return;
       setMenu({ kind, items: rows, index: 0, fromAdd });
@@ -483,6 +495,17 @@ export const Composer = React.memo(function Composer({
     // 点加号不抢焦点：面板的上下键与回车由编辑器承接
     editorRef.current?.focus();
   }, [menu, onAddFiles, onPermissionSelect, onModelSelect, models, onTaskAction]);
+
+  useShortcutBindings(
+    useMemo(
+      () => ({
+        'composer.addMenu': onAddFiles ? openAddMenu : undefined,
+      }),
+      [onAddFiles, openAddMenu]
+    ),
+    shortcutsEnabled && !disabled,
+    shortcutPriority
+  );
 
   /** 选中候选：只替换当前 token，前后文字和光标都原位保留 */
   const insertToken = useCallback((insert: string, keepSpan = false) => {
@@ -979,7 +1002,7 @@ export const Composer = React.memo(function Composer({
                   className={`${styles.add} ${menu?.kind === 'add' ? styles.addActive : ''}`}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={openAddMenu}
-                  title="添加"
+                  title={`添加 ${addKeys}`}
                   aria-haspopup="menu"
                   aria-expanded={menu?.kind === 'add'}
                 >
@@ -1008,15 +1031,15 @@ export const Composer = React.memo(function Composer({
 
           <div className={styles.trailing}>
             {/* 模型席位与 dsh 一致：停在输入框右下角，紧邻发送按钮 */}
-            {model && (
+            {(model || onModelSelect) && (
               <button
                 type="button"
                 className={styles.chip}
                 onClick={() => openMenu('model')}
-                title={onModelSelect ? '切换模型' : model}
+                title={onModelSelect ? '切换模型' : (model || '选择模型')}
                 disabled={!onModelSelect}
               >
-                {model}
+                {model || '选择模型'}
               </button>
             )}
             <button

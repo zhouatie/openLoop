@@ -136,7 +136,8 @@ export function TaskActionPanel({
   const [title, setTitle] = useState('');
   const [groupLines, setGroupLines] = useState('');
   const [workflowId, setWorkflowId] = useState('');
-  const [autoRun, setAutoRun] = useState(false);
+  /** 默认勾选「创建后立即执行」：面板建任务多为建完就跑 */
+  const [autoRun, setAutoRun] = useState(true);
   const [query, setQuery] = useState('');
   const [pickingWorkflow, setPickingWorkflow] = useState(false);
   const [pickingWorkspace, setPickingWorkspace] = useState(false);

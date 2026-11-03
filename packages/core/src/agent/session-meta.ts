@@ -10,6 +10,8 @@ export interface AgentSessionMeta {
   deleted?: boolean;
   /** 置顶：会话列中排在前面 */
   pinned?: boolean;
+  model?: string;
+  thinking?: string;
   updatedAt?: number;
 }
 
@@ -33,7 +35,7 @@ function emptyMeta(): MetaFile {
   return { version: 1, sessions: {}, projects: {} };
 }
 
-function resolveMetaDir(): string {
+export function resolveMetaDir(): string {
   return process.env.OPENLOOP_STORE_DIR || path.join(os.homedir(), '.openloop');
 }
 
