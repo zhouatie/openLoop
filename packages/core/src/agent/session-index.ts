@@ -578,6 +578,16 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
             lastModel = entry.provider ? `${entry.provider}/${entry.modelId}` : entry.modelId;
           }
         } catch (_) {}
+      } else if (trimmed.includes('"role":"assistant"') && trimmed.includes('"model"')) {
+        try {
+          const entry = JSON.parse(trimmed);
+          const msg = entry?.message;
+          if (msg?.model) {
+            lastModel = msg.provider && !msg.model.startsWith(`${msg.provider}/`)
+              ? `${msg.provider}/${msg.model}`
+              : msg.model;
+          }
+        } catch (_) {}
       }
       continue;
     }
@@ -641,6 +651,16 @@ async function parseSessionFile(filePath: string, stat: fs.Stats): Promise<PiSes
             const entry = JSON.parse(trimmed);
             if (entry?.modelId) {
               lastModel = entry.provider ? `${entry.provider}/${entry.modelId}` : entry.modelId;
+            }
+          } catch (_) {}
+        } else if (trimmed.includes('"role":"assistant"') && trimmed.includes('"model"')) {
+          try {
+            const entry = JSON.parse(trimmed);
+            const msg = entry?.message;
+            if (msg?.model) {
+              lastModel = msg.provider && !msg.model.startsWith(`${msg.provider}/`)
+                ? `${msg.provider}/${msg.model}`
+                : msg.model;
             }
           } catch (_) {}
         }
@@ -859,7 +879,10 @@ function mapEntriesToMessages(branch: any[], sessionId: string, cwd?: string) {
       const usage = compactUsage(msg.usage);
       if (usage?.totalTokens) usageTotal.totalTokens += usage.totalTokens;
       if (usage?.cost) usageTotal.cost += usage.cost;
-      if (msg.model) model = msg.model;
+      const fullModel = msg.provider && typeof msg.model === 'string' && !msg.model.startsWith(`${msg.provider}/`)
+        ? `${msg.provider}/${msg.model}`
+        : msg.model;
+      if (fullModel) model = fullModel;
 
       const chatMessage: SessionChatMessage = {
         id: nextId('msg_a', entry),
@@ -869,7 +892,7 @@ function mapEntriesToMessages(branch: any[], sessionId: string, cwd?: string) {
         tools: tools.length > 0 ? tools : undefined,
         timestamp,
         usage,
-        model: msg.model,
+        model: fullModel,
         stopReason: msg.stopReason,
         source: 'history',
         entryId: entry.id,
