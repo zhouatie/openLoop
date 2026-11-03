@@ -53,6 +53,7 @@ import {
   Link2,
   PanelRight,
   Maximize2,
+  Archive,
 } from 'lucide-react';
 import type {
   Task,
@@ -1392,6 +1393,36 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
 
+  // 归档任务：子工序已全部完成时，将其标记为已完成并归入「已完成」泳道
+  const handleArchiveTask = async (taskId: string) => {
+    const currentTask = tasks.find((t) => t.id === taskId);
+    if (!currentTask) return;
+    if (import.meta.env?.DEV) {
+      console.log(`[KanbanView] 归档任务 [${taskId}] 至已完成状态`);
+    }
+
+    const optimisticTask: Task = { ...currentTask, status: 'completed', kanbanColumn: 'done' };
+    onTaskUpdate?.(optimisticTask);
+    if (selectedTask?.id === taskId) setSelectedTask(optimisticTask);
+
+    try {
+      const updated = await api.archiveTask(taskId);
+      if (updated) {
+        onTaskUpdate?.(updated);
+        if (selectedTask?.id === taskId) setSelectedTask(updated);
+      }
+      toast.success('已归档至已完成');
+      await onRefresh();
+    } catch (e: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 归档任务失败:', e);
+      }
+      onTaskUpdate?.(currentTask);
+      if (selectedTask?.id === taskId) setSelectedTask(currentTask);
+      toast.error(`归档失败: ${e?.message || '未知错误'}`);
+    }
+  };
+
   // Inbox 快捕回包就地合并：新建任务或子工序都不重拉整块看板
   const handleIdeaCreated = ({ task, subtask, parent }: { task?: Task; subtask?: Task; parent?: Task }) => {
     if (import.meta.env?.DEV) {
@@ -2465,6 +2496,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         onOpenTaskLogs={onOpenTaskLogs}
                         onDeleteTask={setTaskToDelete}
                         onRunTask={handleRunTask}
+                        onArchiveTask={handleArchiveTask}
                         onSkipNode={handleSkipNode}
                         onVisualAcceptance={setVisualAcceptanceTask}
                         onApprove={handleApprove}
@@ -3205,6 +3237,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       const displayGroupSubtasks = orderSubTasksForDisplay(groupSubtasks);
                       const groupPassed = groupSubtasks.filter((s) => s.status === 'completed').length;
                       const groupTotal = groupSubtasks.length;
+                      const groupAllPassed = groupTotal > 0 && groupPassed === groupTotal;
                       const groupPct = groupTotal > 0 ? Math.round((groupPassed / groupTotal) * 100) : 0;
                       const modeLabel =
                         curTask.executionMode === 'parallel'
@@ -3710,16 +3743,29 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                   <h4 className="text-[11px] font-semibold text-[#1c1c21] tracking-tight">
                                     工序流转链路 ({groupSubtasks.length})
                                   </h4>
-                                  {curTask.status === 'pending' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRunTask(curTask.id)}
-                                      className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:underline font-medium cursor-pointer"
-                                    >
-                                      <Play size={10} className="fill-current" />
-                                      <span>启动整组流水线</span>
-                                    </button>
-                                  )}
+                                  <div className="flex items-center gap-2.5">
+                                    {groupAllPassed && curTask.status !== 'completed' && curTask.status !== 'running' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleArchiveTask(curTask.id)}
+                                        className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:underline font-medium cursor-pointer"
+                                        title="工序已全部完成，归档此任务组到「已完成」泳道"
+                                      >
+                                        <Archive size={10} />
+                                        <span>归档到已完成</span>
+                                      </button>
+                                    )}
+                                    {curTask.status === 'pending' && !groupAllPassed && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRunTask(curTask.id)}
+                                        className="flex items-center gap-1 text-[11px] text-[#4f46e5] hover:underline font-medium cursor-pointer"
+                                      >
+                                        <Play size={10} className="fill-current" />
+                                        <span>启动整组流水线</span>
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
 
                                 <div className="space-y-1.5">

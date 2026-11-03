@@ -36,6 +36,7 @@ import {
   Workflow,
   UserCheck,
   ScanLine,
+  Archive,
 } from 'lucide-react';
 import { Task, KanbanColumn, TaskAttachment, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
@@ -186,6 +187,7 @@ export interface KanbanCardProps {
   onOpenLogs: (taskId: string, nodeId?: string) => void;
   onDelete: (task: Task) => void;
   onRun: (taskId: string) => void;
+  onArchive?: (taskId: string) => void;
   onSkipNode: (taskId: string, nodeId?: string) => void;
   onVisualAcceptance: (task: Task) => void;
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
@@ -218,6 +220,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   onOpenLogs,
   onDelete,
   onRun,
+  onArchive,
   onSkipNode,
   onVisualAcceptance,
   onApprove,
@@ -353,6 +356,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
 
   const groupCompletedCount = childSubtasks.filter((s) => s.status === 'completed').length;
   const groupTotalCount = childSubtasks.length || task.subTaskIds?.length || 0;
+  const allSubtasksCompleted = groupTotalCount > 0 && groupCompletedCount === groupTotalCount;
   const groupProgressPct = groupTotalCount > 0 ? Math.round((groupCompletedCount / groupTotalCount) * 100) : (task.status === 'completed' ? 100 : 0);
 
   const runningSub = useMemo(() => {
@@ -952,17 +956,34 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
             </div>
           ) : (
             <div className="flex items-center gap-1.5">
-              <button
-                disabled={isRunning}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRun(task.id);
-                }}
-                className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
-              >
-                <Play size={10} strokeWidth={2.4} />
-                <span>{isRunning ? '启动中...' : (isGroup && groupCompletedCount > 0 ? '推进流水线' : '启动流水线')}</span>
-              </button>
+              {allSubtasksCompleted && onArchive ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (import.meta.env?.DEV) {
+                      console.log('[KanbanCard] 归档已完成的子工序任务组:', task.id);
+                    }
+                    onArchive(task.id);
+                  }}
+                  className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
+                  title="工序已全部完成，归档此任务组到「已完成」泳道"
+                >
+                  <Archive size={10} strokeWidth={2.4} />
+                  <span>归档已完成</span>
+                </button>
+              ) : (
+                <button
+                  disabled={isRunning}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRun(task.id);
+                  }}
+                  className="flex-1 h-[24px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all active:scale-95 shadow-sm"
+                >
+                  <Play size={10} strokeWidth={2.4} />
+                  <span>{isRunning ? '启动中...' : (isGroup && groupCompletedCount > 0 ? '推进流水线' : '启动流水线')}</span>
+                </button>
+              )}
               {!(isGroup && groupCompletedCount > 0) && (
                 <button
                   disabled={isMoving}
