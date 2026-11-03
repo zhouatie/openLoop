@@ -395,8 +395,13 @@ export class PiRpcSessionInstance extends EventEmitter {
     if (options.autoStart === false) {
       return;
     }
+    this.sendInitialPrompt(options.initialPrompt, options.initialAttachments);
+  }
+
+  public sendInitialPrompt(prompt: string, attachments?: TaskAttachment[]) {
+    if (this.initialPromptSent) return;
     this.initialPromptSent = true;
-    this.sendPrompt(options.initialPrompt, options.initialAttachments).catch((err) => {
+    this.sendPrompt(prompt, attachments).catch((err) => {
       const errMsg = err?.message || '发送初始 Prompt 失败';
       logger.error(`发送初始 Prompt 失败: ${errMsg}`, undefined, { taskId: this.taskId });
       this.emitLog('stderr', `[Agent 报错] ${errMsg}`);
@@ -1500,7 +1505,8 @@ export class PiRpcSessionManager extends EventEmitter {
       this.sessions.delete(options.taskId);
     }
 
-    const session = new PiRpcSessionInstance(options);
+    const shouldAutoStart = options.autoStart !== false && Boolean(options.initialPrompt);
+    const session = new PiRpcSessionInstance({ ...options, autoStart: false });
     this.sessions.set(options.taskId, session);
 
     session.on('update', () => {
@@ -1510,6 +1516,10 @@ export class PiRpcSessionManager extends EventEmitter {
     session.on('uiRequest', (request) => {
       this.emit('uiRequest', { ...request, taskId: options.taskId, sessionId: session.sessionId });
     });
+
+    if (shouldAutoStart) {
+      session.sendInitialPrompt(options.initialPrompt, options.initialAttachments);
+    }
 
     return session;
   }

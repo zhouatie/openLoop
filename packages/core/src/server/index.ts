@@ -29,7 +29,7 @@ import { sanitizeChatMessages } from '../agent/agent-format';
 import { piSessionIndex } from '../agent/session-index';
 import { composeMessageWithSessionReferences } from '../agent/session-reference';
 import { composeMessageWithTaskReferences } from '../agent/task-reference';
-import { buildTaskSessionIndex } from '../agent/task-session';
+import { buildTaskSessionIndex, resolveTaskSessionId } from '../agent/task-session';
 import {
   DEFAULT_PI_EXTENSION_PACKAGES,
   getEnabledPiExtensions,
@@ -139,7 +139,15 @@ export class OpenLoopServer {
   private globalAgentAlias(taskId: string | undefined): string | undefined {
     if (!taskId) return undefined;
     const session = PiRpcSessionManager.getInstance().getSession(taskId);
-    return session ? `${GLOBAL_AGENT_PREFIX}${session.sessionId}` : undefined;
+    if (session?.sessionId) {
+      return `${GLOBAL_AGENT_PREFIX}${session.sessionId}`;
+    }
+    const task = this.store.getTask(taskId);
+    if (task) {
+      const sessionId = resolveTaskSessionId(task);
+      return `${GLOBAL_AGENT_PREFIX}${sessionId}`;
+    }
+    return undefined;
   }
 
   private setupEngineEvents() {
@@ -1052,11 +1060,12 @@ export class OpenLoopServer {
       const agentLiveMatch = pathname.match(/^\/api\/agent\/sessions\/(.+)\/live$/);
       if (agentLiveMatch && method === 'GET') {
         const sessionKey = decodeURIComponent(agentLiveMatch[1]);
-        const state =
+        const rawState =
           agentSessionHost.getState(sessionKey) ||
           // 流水线 agent 节点的会话不在全局宿主里，接上同一份实时状态
           PiRpcSessionManager.getInstance().getStateBySessionId(sessionKey) ||
           null;
+        const state = rawState ? { ...rawState, taskId: `${GLOBAL_AGENT_PREFIX}${sessionKey}` } : null;
         return this.sendJson(res, 200, { state }, reqMeta);
       }
 
@@ -2592,6 +2601,11 @@ ${existingSubSummary}
             this.store.addLog(logEntry);
             this.broadcast({ type: 'log', data: logEntry });
           },
+          onEvent: (event) => {
+            this.broadcast({ type: 'agent:stream', data: event });
+            const alias = this.globalAgentAlias(event.taskId);
+            if (alias) this.broadcast({ type: 'agent:stream', data: { ...event, taskId: alias } });
+          },
           onUpdate: (state) => {
             const currentTask = this.store.getTask(taskId);
             if (currentTask) {
@@ -2606,13 +2620,16 @@ ${existingSubSummary}
                 this.broadcastTaskUpdate(currentTask);
               }
             }
+            const updateData = {
+              ...state,
+              awaitingInput: isCurrentAgentNode ? !!state.awaitingInput : false,
+            };
             this.broadcast({
               type: 'agent:chat_update',
-              data: {
-                ...state,
-                awaitingInput: isCurrentAgentNode ? !!state.awaitingInput : false,
-              },
+              data: updateData,
             });
+            const alias = this.globalAgentAlias(state.taskId);
+            if (alias) this.broadcast({ type: 'agent:chat_update', data: { ...updateData, taskId: alias } });
           },
           onFinished: (error) => {
             serverLogger.info(`[AgentChat] 对话处理轮次完成: ${error || '成功'}`, undefined, { taskId });
