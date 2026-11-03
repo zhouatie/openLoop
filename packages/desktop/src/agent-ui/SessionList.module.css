@@ -560,44 +560,20 @@
   color: var(--dsw-alias-label-caption);
 }
 
-/* 搜索弹层：结果列表浮在会话列右侧 */
-.searchPanel {
-  position: absolute;
-  z-index: 55;
-  top: 92px;
-  left: calc(100% + 8px);
-  width: 340px;
-  max-height: 60vh;
-  display: flex;
-  flex-direction: column;
-  padding: 6px;
-  border: 1px solid var(--dsw-alias-border-l3);
-  border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-bg-base);
-  box-shadow: var(--dsw-elevation-prominent);
-}
-
-.searchPanelHead {
-  padding: 4px 8px 8px;
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-caption);
-}
-
-.searchPanelList {
+/* 搜索结果：直接占据侧栏列表区（对齐 DSH，结果取代项目树，不浮层） */
+.searchResults {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  overflow: auto;
 }
 
 .searchHit {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
   width: 100%;
-  height: 30px;
-  padding: 0 8px;
+  padding: 4px 8px;
   border: none;
   border-radius: var(--dsw-radius-sm);
   background: transparent;
@@ -613,6 +589,14 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+.searchHitHeading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  line-height: 20px;
+}
+
 .searchHitTitle {
   flex: 1 1 auto;
   min-width: 0;
@@ -621,20 +605,24 @@
   text-overflow: ellipsis;
 }
 
+/* 工作区标签与正文片段共用第二行，左边留出状态槽宽度 */
 .searchHitMeta {
-  flex: none;
-  max-width: 100px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 22px;
+  font-size: 11.5px;
+  line-height: 16px;
   color: var(--dsw-alias-label-tertiary);
 }
 
-.searchHitTime {
+.searchHitWorkspace {
   flex: none;
-  font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
+  max-width: 45%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .rowIconActive {
@@ -670,32 +658,20 @@
   outline: none;
 }
 
-/* 正文命中：标题下多一行片段 */
-.searchHitContent {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  height: auto;
-  padding: 6px 8px;
-}
-
-.searchHitBadge {
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: var(--dsw-radius-xs);
-  background: var(--dsw-alias-interactive-bg-hover);
-  font-size: 10.5px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
+/* 正文片段：标题下第二行的右侧内容 */
 .searchHitSnippet {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 11.5px;
+}
+
+.searchStatus {
+  padding: 6px 8px;
+  font-size: 11px;
   line-height: 16px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-caption);
 }
 
 .searchPanelFoot {

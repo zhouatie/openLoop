@@ -101,6 +101,15 @@ export interface SessionListProps {
   onCollapse?: () => void;
 }
 
+/** 某条命中会话的展示行：本地元数据命中与正文命中合并后共用 */
+interface SearchRow {
+  id: string;
+  title: string;
+  workspace: string;
+  running?: boolean;
+  snippet?: string;
+}
+
 const SESSION_VISIBLE_COUNT = 5;
 /** 工作区分组单次展开步长，防止一次性挂载过多 DOM 阻塞主线程 */
 const GROUP_WATERMARK_STEP = 30;
@@ -119,10 +128,25 @@ const ARCHIVED_LABEL: Record<ArchivedFilter, string> = {
   show: '全部对话（显示已归档）',
   only: '仅显示已归档',
 };
-/** 标题搜索命中上限，超出时提示缩小范围（对齐 DSH search.hasMore） */
-const SEARCH_TITLE_LIMIT = 20;
+/** 搜索请求与合并结果的条数上限（对齐 DSH SESSION_SEARCH_RESULT_LIMIT） */
+const SEARCH_RESULT_LIMIT = 20;
+/** 搜索输入与请求的 UTF-16 长度上限（对齐 DSH session.search 契约） */
+const SEARCH_QUERY_MAX_CHARS = 500;
+/** 输入停顿后请求正文搜索（对齐 DSH SEARCH_DEBOUNCE_MS） */
+const SEARCH_DEBOUNCE_MS = 250;
 /** 单列表模式每页渲染的会话数 */
 const FLAT_PAGE_SIZE = 120;
+
+/** 搜索词清洗：去掉 NUL，并按 UTF-16 上限截断（不拆代理对） */
+function sanitizeQuery(value: string): string {
+  const text = value.replace(/\0/g, '');
+  if (text.length <= SEARCH_QUERY_MAX_CHARS) return text;
+  let end = SEARCH_QUERY_MAX_CHARS;
+  const last = text.charCodeAt(end - 1);
+  const next = text.charCodeAt(end);
+  if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end -= 1;
+  return text.slice(0, end);
+}
 
 interface HoverCardState {
   title: string;
@@ -355,6 +379,8 @@ export const SessionList = memo(function SessionList({
   /** 单列表一次渲染的会话数（逐步加载，避免一次性铺 2000+ 行） */
   const [flatLimit, setFlatLimit] = useState(FLAT_PAGE_SIZE);
   const [searchOpen, setSearchOpen] = useState(false);
+  /** 已有搜索词时强制展开输入框（面板重挂载后也不会出现「有结果无输入框」） */
+  const searchExpanded = searchOpen || searching;
   const [contentHits, setContentHits] = useState<SessionContentHit[]>([]);
   const [contentLoading, setContentLoading] = useState(false);
   const [hitIndex, setHitIndex] = useState(0);
@@ -440,10 +466,11 @@ export const SessionList = memo(function SessionList({
     [filteredGroups, sortSessions]
   );
 
-  // 正文全文搜索：输入停顿 260ms 再请求
+  // 正文全文搜索：输入停顿 250ms 再请求（对齐 DSH）
   useEffect(() => {
     if (!searching || !onSearchContent) {
       setContentHits([]);
+      setContentLoading(false);
       return;
     }
     const keyword = query.trim();
@@ -462,44 +489,81 @@ export const SessionList = memo(function SessionList({
         .finally(() => {
           if (!cancelled) setContentLoading(false);
         });
-    }, 260);
+    }, SEARCH_DEBOUNCE_MS);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
   }, [searching, query, onSearchContent]);
 
-  const titleHits = useMemo(() => {
+  /** 本地命中：标题、工作区名、会话 ID（对齐 DSH deriveSearchResults） */
+  const localHits = useMemo(() => {
     if (!searching) return [];
     const keyword = query.trim().toLowerCase();
-    const hits: SessionListItem[] = [];
+    const hits: Array<{ row: SearchRow; updatedMs: number }> = [];
     const seen = new Set<string>();
-    for (const group of orderedGroups) {
+    for (const group of groups) {
+      const labelMatched = group.label.toLowerCase().includes(keyword);
       for (const session of group.sessions) {
-        const title = session.title || '未命名会话';
-        if (!title.toLowerCase().includes(keyword) && !group.label.toLowerCase().includes(keyword)) continue;
-        if (seen.has(session.id)) continue;
+        if (session.draft || !matchesArchive(session) || seen.has(session.id)) continue;
+        const title = (session.title || '').toLowerCase();
+        if (!title.includes(keyword) && !labelMatched && !session.id.toLowerCase().includes(keyword)) {
+          continue;
+        }
         seen.add(session.id);
-        hits.push(session);
+        hits.push({
+          row: {
+            id: session.id,
+            title: session.title || '未命名会话',
+            workspace: group.label,
+            running: session.running,
+          },
+          updatedMs:
+            session.modifiedMs !== undefined
+              ? session.modifiedMs
+              : Date.parse(session.modifiedAt) || 0,
+        });
       }
     }
-    return hits
-      .sort((a, b) => {
-        const bTime = b.modifiedMs !== undefined ? b.modifiedMs : (Date.parse(b.modifiedAt) || 0);
-        const aTime = a.modifiedMs !== undefined ? a.modifiedMs : (Date.parse(a.modifiedAt) || 0);
-        return bTime - aTime;
-      })
-      .slice(0, 20);
-  }, [searching, orderedGroups, query]);
+    return hits.sort((a, b) => b.updatedMs - a.updatedMs).map((item) => item.row);
+  }, [searching, groups, matchesArchive, query]);
 
+  /** 正文命中：只保留仍在列表中、且符合归档筛选的会话 */
   const contentRows = useMemo(() => {
-    const lookup = new Map<string, SessionListItem>();
-    for (const group of groups) for (const session of group.sessions) lookup.set(session.id, session);
-    return contentHits
-      .filter((hit) => !titleHits.some((item) => item.id === hit.id))
-      .map((hit) => ({ hit, session: lookup.get(hit.id) }))
-      .slice(0, 20);
-  }, [contentHits, groups, titleHits]);
+    if (!searching) return [];
+    const localIds = new Set(localHits.map((row) => row.id));
+    const lookup = new Map<string, { session: SessionListItem; workspace: string }>();
+    for (const group of groups) {
+      for (const session of group.sessions) lookup.set(session.id, { session, workspace: group.label });
+    }
+    return contentHits.flatMap((hit): SearchRow[] => {
+      if (localIds.has(hit.id)) return [];
+      const found = lookup.get(hit.id);
+      if (!found || found.session.draft || !matchesArchive(found.session)) return [];
+      return [
+        {
+          id: hit.id,
+          title: found.session.title || '未命名会话',
+          workspace: found.workspace,
+          running: found.session.running,
+          snippet: hit.snippet,
+        },
+      ];
+    });
+  }, [searching, contentHits, groups, localHits, matchesArchive]);
+
+  /** 合并结果：本地命中在前，正文命中在后；重复会话用正文片段补全（对齐 DSH） */
+  const searchRows = useMemo(() => {
+    const contentById = new Map(contentHits.map((hit) => [hit.id, hit]));
+    return [
+      ...localHits.map((row) => ({ ...row, snippet: contentById.get(row.id)?.snippet })),
+      ...contentRows,
+    ].slice(0, SEARCH_RESULT_LIMIT);
+  }, [localHits, contentRows, contentHits]);
+
+  const searchHasMore =
+    localHits.length + contentRows.length > SEARCH_RESULT_LIMIT ||
+    contentHits.length >= SEARCH_RESULT_LIMIT;
 
   const [card, setCard] = useState<HoverCardState | null>(null);
   /** 悬浮卡的停留计时器与「本列表已显示过」预热标记 */
@@ -516,15 +580,27 @@ export const SessionList = memo(function SessionList({
   const menuRef = useRef<HTMLDivElement>(null);
   /** 待确认删除的工作区（对齐 DSH：删除只影响列表，不动文件夹与会话） */
   const [deleteTarget, setDeleteTarget] = useState<{ key: string; title: string } | null>(null);
+  const searchHeaderRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   // 搜索展开后聚焦输入框（点击与快捷键共用）
   useEffect(() => {
-    if (!searchOpen) return;
+    if (!searchExpanded) return;
     const timer = window.setTimeout(() => searchInputRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
-  }, [searchOpen, searchSignal]);
+  }, [searchExpanded, searchSignal]);
+
+  // 空搜索时点击区头外收起（对齐 DSH：有搜索词时保持展开）
+  useEffect(() => {
+    if (!searchExpanded || searching) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && searchHeaderRef.current?.contains(event.target)) return;
+      setSearchOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [searchExpanded, searching]);
 
   // 重命名时聚焦并全选
   useEffect(() => {
@@ -666,16 +742,17 @@ export const SessionList = memo(function SessionList({
   const viewOptionsActive =
     groupBy !== 'workspace' || orderBy !== 'updated' || archivedFilter !== 'hide';
 
-  const contentHitRows = contentRows.length;
-  const flatHits = useMemo(
-    () => [
-      ...titleHits.map((item) => ({ kind: 'title' as const, id: item.id })),
-      ...contentRows.map((row) => ({ kind: 'content' as const, id: row.hit.id })),
-    ],
-    [titleHits, contentRows]
-  );
+  /** 搜索结果当前高亮项（结果变少时夹紧索引） */
+  const searchActiveIndex = Math.min(hitIndex, Math.max(0, searchRows.length - 1));
 
-  /** 搜索结果键盘导航：↑↓ 选择，Enter 打开 */
+  /** 打开搜索结果：清空搜索并收起（对齐 DSH openSearchResult） */
+  const openSearchHit = (id: string) => {
+    onSelectSession(id);
+    onQueryChange('');
+    setSearchOpen(false);
+  };
+
+  /** 搜索结果键盘导航：↑↓ 选择，Enter 打开（DSH 之外的增强） */
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Escape') {
       onQueryChange('');
@@ -683,20 +760,54 @@ export const SessionList = memo(function SessionList({
       return;
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      if (flatHits.length === 0) return;
+      if (searchRows.length === 0) return;
       event.preventDefault();
       const step = event.key === 'ArrowDown' ? 1 : -1;
-      setHitIndex((prev) => (prev + step + flatHits.length) % flatHits.length);
+      setHitIndex((prev) => (prev + step + searchRows.length) % searchRows.length);
       return;
     }
     if (event.key === 'Enter') {
-      const hit = flatHits[hitIndex];
+      const hit = searchRows[searchActiveIndex];
       if (!hit) return;
       event.preventDefault();
-      onSelectSession(hit.id);
-      setSearchOpen(false);
+      openSearchHit(hit.id);
     }
   };
+
+  /** 搜索结果平铺在侧栏列表区（对齐 DSH：结果取代项目树，不是浮层） */
+  const searchBody = (
+    <div className={styles.searchResults} data-agent-transient>
+      {searchRows.map((row, index) => (
+        <button
+          key={row.id}
+          type="button"
+          className={`${styles.searchHit} ${index === searchActiveIndex ? styles.searchHitActive : ''}`}
+          onClick={() => openSearchHit(row.id)}
+          onMouseEnter={() => setHitIndex(index)}
+        >
+          <span className={styles.searchHitHeading}>
+            <span className={styles.statusSlot}>
+              {row.running && <span className={styles.liveSpinner} aria-label="进行中" />}
+            </span>
+            <span className={styles.searchHitTitle}>{row.title}</span>
+          </span>
+          <span className={styles.searchHitMeta}>
+            <span className={styles.searchHitWorkspace}>{row.workspace}</span>
+            {row.snippet && <span className={styles.searchHitSnippet}>{row.snippet}</span>}
+          </span>
+        </button>
+      ))}
+      {contentLoading && <div className={styles.searchStatus}>正在搜索会话历史…</div>}
+      {!contentLoading && searchRows.length === 0 && (
+        <div className={styles.searchStatus}>无匹配会话</div>
+      )}
+      {searchHasMore && (
+        <div className={styles.searchPanelFoot}>
+          仅显示前 {SEARCH_RESULT_LIMIT} 条结果，请缩小搜索范围。
+        </div>
+      )}
+    </div>
+  );
 
   /** 当前菜单指向的项目（项目菜单里重命名 / 置顶 / 隐藏共用） */
   const menuProject = useMemo(
@@ -741,8 +852,8 @@ export const SessionList = memo(function SessionList({
         <span className={styles.newSessionLabel}>新会话</span>
       </button>
 
-      <div className={styles.sectionHeader}>
-        {searchOpen ? (
+      <div ref={searchHeaderRef} className={styles.sectionHeader}>
+        {searchExpanded ? (
           <label className={styles.searchPill}>
             <IconSearch size={14} className={styles.searchIcon} />
             <input
@@ -750,8 +861,9 @@ export const SessionList = memo(function SessionList({
               className={styles.search}
               value={query}
               placeholder="搜索会话与内容"
+              maxLength={SEARCH_QUERY_MAX_CHARS}
               autoFocus
-              onChange={(event) => onQueryChange(event.target.value)}
+              onChange={(event) => onQueryChange(sanitizeQuery(event.target.value))}
               onKeyDown={handleSearchKeyDown}
             />
             <button
@@ -804,64 +916,19 @@ export const SessionList = memo(function SessionList({
         )}
       </div>
 
-      {searching && (
-        <div className={styles.searchPanel} data-agent-transient>
-          <div className={styles.searchPanelHead}>
-            {flatHits.length > 0
-              ? `${flatHits.length} 个匹配会话${contentLoading ? ' · 正在搜索会话历史…' : ''}`
-              : contentLoading
-                ? '正在搜索会话历史…'
-                : '无匹配会话'}
-          </div>
-          <div className={styles.searchPanelList}>
-            {titleHits.map((hit, index) => (
-              <button
-                key={`title-${hit.id}`}
-                type="button"
-                className={`${styles.searchHit} ${hitIndex === index ? styles.searchHitActive : ''}`}
-                onClick={() => onSelectSession(hit.id)}
-              >
-                <span className={styles.searchHitTitle}>{hit.title || '未命名会话'}</span>
-                <span className={styles.searchHitTime}>{relativeTime(hit.modifiedAt)}</span>
-              </button>
-            ))}
-            {contentRows.map((row, index) => (
-              <button
-                key={`content-${row.hit.id}`}
-                type="button"
-                className={`${styles.searchHit} ${styles.searchHitContent} ${
-                  hitIndex === titleHits.length + index ? styles.searchHitActive : ''
-                }`}
-                onClick={() => onSelectSession(row.hit.id)}
-              >
-                <span className={styles.searchHitTitle}>
-                  {row.session?.title || '未命名会话'}
-                  <span className={styles.searchHitBadge}>{row.hit.matches} 处正文</span>
-                </span>
-                <span className={styles.searchHitSnippet}>{row.hit.snippet}</span>
-              </button>
-            ))}
-          </div>
-          {titleHits.length >= SEARCH_TITLE_LIMIT && (
-            <div className={styles.searchPanelFoot}>
-              仅显示前 {SEARCH_TITLE_LIMIT} 条结果，请缩小搜索范围。
-            </div>
-          )}
-        </div>
-      )}
-
       <div className={styles.list}>
-        {scanning && <div className={styles.placeholder}>正在扫描会话…</div>}
-        {!loading && groups.length === 0 && (
+        {searching && searchBody}
+        {!searching && scanning && <div className={styles.placeholder}>正在扫描会话…</div>}
+        {!searching && !loading && groups.length === 0 && (
           <div className={styles.placeholder}>还没有工作区。点右上角图标选择一个目录。</div>
         )}
-        {!loading && groups.length > 0 && filteredGroups.length === 0 && (
+        {!searching && !loading && groups.length > 0 && filteredGroups.length === 0 && (
           <div className={styles.placeholder}>
             {archivedFilter === 'only' ? '暂无已归档会话' : '暂无会话'}
           </div>
         )}
 
-        {!scanning && groupBy === 'flat' && (
+        {!searching && !scanning && groupBy === 'flat' && (
           <>
             {flatSessions.length === 0 ? (
               <div className={styles.placeholder}>
@@ -899,16 +966,14 @@ export const SessionList = memo(function SessionList({
           </>
         )}
 
-        {!scanning && groupBy === 'workspace' && filteredGroups.map((group) => {
-          const isCollapsed = !searching && collapsed.includes(group.key);
-          const isExpanded = searching || expandedGroups.includes(group.key);
+        {!searching && !scanning && groupBy === 'workspace' && filteredGroups.map((group) => {
+          const isCollapsed = collapsed.includes(group.key);
+          const isExpanded = expandedGroups.includes(group.key);
           const sortedSessions = sortSessions(group.sessions);
           const watermark = expandedWatermarks[group.key] || SESSION_VISIBLE_COUNT;
-          const visibleSessions = searching
-            ? sortedSessions
-            : isExpanded
-              ? sortedSessions.slice(0, watermark)
-              : sortedSessions.slice(0, SESSION_VISIBLE_COUNT);
+          const visibleSessions = isExpanded
+            ? sortedSessions.slice(0, watermark)
+            : sortedSessions.slice(0, SESSION_VISIBLE_COUNT);
           const hiddenCount = sortedSessions.length - visibleSessions.length;
           const renamingProject = rename?.kind === 'project' && rename.key === group.key;
 
