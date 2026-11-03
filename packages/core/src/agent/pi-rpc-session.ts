@@ -345,6 +345,10 @@ export class PiRpcSessionInstance extends EventEmitter {
       logger.error(`Pi RPC 进程启动失败: ${err.message}`, undefined, { taskId: this.taskId });
       this.emitLog('stderr', `[Pi RPC 异常] ${err.message}`);
       this.active = false;
+      for (const [, deferred] of this.pendingCommands) {
+        deferred.reject(err);
+      }
+      this.pendingCommands.clear();
       // 让界面能显示失败原因，而不是只留一条终端日志
       this.lastError = err.message;
       this.emitStatus({ active: false });
@@ -359,6 +363,10 @@ export class PiRpcSessionInstance extends EventEmitter {
       logger.info(`Pi RPC 进程退出，退出码: ${code}`, undefined, { taskId: this.taskId });
       this.active = false;
       this.isBusy = false;
+      for (const [, deferred] of this.pendingCommands) {
+        deferred.reject(new Error(`RPC 进程已退出 (${code})`));
+      }
+      this.pendingCommands.clear();
       this.clearPendingInputs();
       this.finishTurn();
       this.emitStatus({ active: false, isBusy: false, turnStartedAt: this.turnStartedAt });
@@ -1074,17 +1082,27 @@ export class PiRpcSessionInstance extends EventEmitter {
   public async pause(): Promise<boolean> {
     if (!this.active) return false;
     this.isPaused = true;
+    this.isBusy = false;
+    this.clearPendingInputs();
+    this.finishTurn();
+    if (this.currentAssistantMessage) {
+      this.currentAssistantMessage.isStreaming = false;
+      this.currentAssistantMessage.isThinking = false;
+      this.emitMessagePatch(this.currentAssistantMessage.id, { isStreaming: false, isThinking: false });
+      this.currentAssistantMessage = null;
+    }
+    this.emitStatus({ isPaused: true, isBusy: false, turnStartedAt: this.turnStartedAt });
+    this.notifyUpdate(true);
+
     try {
-      await this.sendCommand({ type: 'abort' });
-      this.isBusy = false;
-      this.clearPendingInputs();
-      this.finishTurn();
-      this.emitStatus({ isPaused: true, isBusy: false, turnStartedAt: this.turnStartedAt });
-      this.notifyUpdate(true);
+      await this.sendCommandWithTimeout({ type: 'abort' }, 1500);
       return true;
     } catch (e: any) {
-      logger.error(`暂停会话失败: ${e.message}`, undefined, { taskId: this.taskId });
-      return false;
+      logger.warn(`中止命令响应超时或失败 (${e.message})，强制终止底层进程以恢复待命`, undefined, {
+        taskId: this.taskId,
+      });
+      this.terminate();
+      return true;
     }
   }
 
@@ -1232,14 +1250,20 @@ export class PiRpcSessionInstance extends EventEmitter {
     return resolved;
   }
 
-  /** 带超时的命令下发，避免进程无响应时阻塞设置保存链路 */
+  /** 带超时的命令下发，避免进程无响应时阻塞设置保存或终止链路 */
   private async sendCommandWithTimeout(command: any, timeoutMs = 3000): Promise<any> {
     let timer: any;
+    let cmdId: string | undefined;
     const timeout = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`命令响应超时 (${command.type})`)), timeoutMs);
+      timer = setTimeout(() => {
+        if (cmdId) this.pendingCommands.delete(cmdId);
+        reject(new Error(`命令响应超时 (${command.type})`));
+      }, timeoutMs);
     });
     try {
-      return await Promise.race([this.sendCommand(command), timeout]);
+      const sendPromise = this.sendCommand(command);
+      cmdId = command.id;
+      return await Promise.race([sendPromise, timeout]);
     } finally {
       clearTimeout(timer);
     }
@@ -1404,6 +1428,10 @@ export class PiRpcSessionInstance extends EventEmitter {
   public terminate() {
     this.active = false;
     this.isBusy = false;
+    for (const [, deferred] of this.pendingCommands) {
+      deferred.reject(new Error('RPC session terminated'));
+    }
+    this.pendingCommands.clear();
     // 会话销毁：连同本轮改动的捕获记录与内容副本一起清理
     forgetSessionChanges(this.sessionId);
     if (this.child) {
