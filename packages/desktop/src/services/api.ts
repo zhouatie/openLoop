@@ -752,13 +752,23 @@ export class DesktopApiService {
     });
   }
 
-  async getTaskSandboxStatus(id: string): Promise<{ status: 'running' | 'stopped' | 'none'; port?: number; targetUrl?: string }> {
+  async getTaskSandboxStatus(id: string): Promise<{
+    status: 'running' | 'stopped' | 'none';
+    port?: number;
+    targetUrl?: string;
+    scanUrl?: string;
+    lanIp?: string | null;
+  }> {
     if (import.meta.env?.DEV) {
       console.log(`[UI:API] 探测任务 [${id}] 沙箱靶机状态`);
     }
-    return requestJson<{ status: 'running' | 'stopped' | 'none'; port?: number; targetUrl?: string }>(
-      `${BASE_URL}/api/tasks/${id}/sandbox/status`
-    );
+    return requestJson<{
+      status: 'running' | 'stopped' | 'none';
+      port?: number;
+      targetUrl?: string;
+      scanUrl?: string;
+      lanIp?: string | null;
+    }>(`${BASE_URL}/api/tasks/${id}/sandbox/status`);
   }
 
   async getTaskWorktreeDiff(id: string): Promise<TaskWorktreeDiffResult> {

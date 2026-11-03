@@ -13,3 +13,11 @@
 | **[架构与通信协议规范](plugin-system/architecture.md)** | 定义插件沙箱物理隔离模型、双向通信协议（OLPP v1）、握手机制、RPC 与事件总线。 |
 | **[接口与能力规范](plugin-system/api-spec.md)** | 详细定义基座开放的能力命名空间（`workspace`、`task`、`ui`、`agent`）与 Manifest 清单字段。 |
 | **[开发实战指南](plugin-system/quickstart.md)** | 指导开发者如何以独立的 Git 仓库构建插件，并以接入 `pi-desktop` 为例演示实操流程。 |
+
+---
+
+## 沙箱与真机调试 (Sandbox & Device)
+
+| 文档 | 描述 |
+| :--- | :--- |
+| **[手机扫码预览](dev-server-scan.md)** | 开发服务靶机启动后扫码直达 RN / 移动端页面，以及 `scanUrl` 配置约定。 |

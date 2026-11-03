@@ -40,6 +40,7 @@ import { resolveSessionTitle } from '../agent/title-text';
 import { createDirectory, listDirectory, readTextFile, statFile } from '../agent/fs-browser';
 import { searchWorkspaceFiles } from '../agent/fs-search';
 import { listOpenInAppTargets, openInApp } from '../system/open-in-app';
+import { getLanIpv4 } from '../system/net';
 import { terminalHost } from '../agent/terminal-host';
 import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
@@ -2967,6 +2968,16 @@ ${existingSubSummary}
             : 19890;
           targetUrl = targetUrl.replace('corePort=19888', `corePort=${safePort}`);
         }
+        // 手机端扫码地址：优先流水线 env-prepare 声明的 scanUrl，缺省为本机局域网服务地址
+        const lanIp = getLanIpv4();
+        const envNode = this.store.getWorkflow(task.workflowId)?.nodes.find((n) => n.type === 'env-prepare');
+        const scanTemplate = envNode?.config.scanUrl?.trim() || 'http://{{lanIp}}:{{webPort}}';
+        const scanUrl = interpolateString(scanTemplate, {
+          task,
+          lanIp: lanIp || '127.0.0.1',
+          webPort: port,
+          ports: { webPort: port, ...(task.context.worktree.ports || {}) },
+        });
         // 轻量极速端口探针 (<200ms)
         const isRunning = await new Promise<boolean>((resolve) => {
           const socket = new net.Socket();
@@ -2993,6 +3004,8 @@ ${existingSubSummary}
             status: isRunning ? 'running' : 'stopped',
             port,
             targetUrl,
+            scanUrl,
+            lanIp,
             worktreeDir: task.context.worktree.worktreeDir,
             branchName: task.context.worktree.branchName,
           },
