@@ -388,6 +388,8 @@ export function AgentPanelShell({
           if (import.meta.env?.DEV) console.log('[AgentPanel] 打开任务面板:', mode);
           setTaskAction(mode);
         }}
+        shortcutsEnabled={shortcutsEnabled}
+        shortcutPriority={shortcutPriority}
       />
     </div>
   );
