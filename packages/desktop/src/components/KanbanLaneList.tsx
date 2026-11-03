@@ -24,6 +24,7 @@ export interface KanbanLaneListProps {
   onOpenTaskLogs: (taskId: string, nodeId?: string) => void;
   onDeleteTask: (task: Task) => void;
   onRunTask: (taskId: string) => void;
+  onArchiveTask: (taskId: string) => void;
   onSkipNode: (taskId: string, nodeId?: string) => void;
   onVisualAcceptance: (task: Task) => void;
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
@@ -56,6 +57,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
   onOpenTaskLogs,
   onDeleteTask,
   onRunTask,
+  onArchiveTask,
   onSkipNode,
   onVisualAcceptance,
   onApprove,
@@ -121,6 +123,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
           onOpenLogs={onOpenTaskLogs}
           onDelete={onDeleteTask}
           onRun={onRunTask}
+          onArchive={onArchiveTask}
           onSkipNode={onSkipNode}
           onVisualAcceptance={onVisualAcceptance}
           onApprove={onApprove}

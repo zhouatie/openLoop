@@ -6,6 +6,7 @@ import {
   TaskSessionState,
   OpenLoopSettings,
   KanbanColumn,
+  TaskStatus,
   TaskAttachment,
   WorkflowSessionState,
   QaSuite,
@@ -593,6 +594,7 @@ export class DesktopApiService {
       qaInstructions?: string[];
       context?: Record<string, any>;
       kanbanColumn?: KanbanColumn;
+      status?: TaskStatus;
       workspace?: string;
       attachments?: TaskAttachment[];
       triggerSource?: 'shortcut' | 'debug' | 'kanban' | 'api' | 'manual';
@@ -613,6 +615,14 @@ export class DesktopApiService {
       console.log(`[UI:API] 流转任务 [${id}] 至泳道: ${column}`);
     }
     return this.updateTask(id, { kanbanColumn: column });
+  }
+
+  /** 归档任务：标记为已完成并归入「已完成」泳道 */
+  async archiveTask(id: string): Promise<Task> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 归档任务至已完成: ${id}`);
+    }
+    return this.updateTask(id, { status: 'completed', kanbanColumn: 'done' });
   }
 
   async deleteTask(id: string): Promise<{ success: boolean; id: string }> {
