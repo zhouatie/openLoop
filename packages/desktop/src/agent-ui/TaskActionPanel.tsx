@@ -28,6 +28,7 @@ import {
   STORAGE_KEY_RECENT_WORKSPACES,
 } from '../components/WorkspacePicker';
 import { loadTaskOptions, TASK_STATUS_LABEL, type TaskOption } from './task-options';
+import { readLastWorkflowId, rememberWorkflowId } from '../utils/workflowMemory';
 import { IconClose } from './icons';
 import styles from './TaskActionPanel.module.css';
 
@@ -83,6 +84,12 @@ async function loadWorkflows(): Promise<WorkflowOption[]> {
 
 function matches(text: string, query: string): boolean {
   return query === '' || text.toLowerCase().includes(query.toLowerCase());
+}
+
+/** 默认只回填上次用过的流水线；没有记忆就停在空态，不按列表顺序硬猜 */
+function pickRememberedWorkflowId(items: WorkflowOption[]): string {
+  const remembered = readLastWorkflowId();
+  return remembered && items.some((item) => item.id === remembered) ? remembered : '';
 }
 
 const MAX_RECENT_WORKSPACES = 30;
@@ -170,7 +177,11 @@ export function TaskActionPanel({
       if (!alive) return;
       if (wfResult.status === 'fulfilled') {
         setWorkflows(wfResult.value);
-        setWorkflowId((prev) => prev || wfResult.value[0]?.id || '');
+        const initialWorkflowId = pickRememberedWorkflowId(wfResult.value);
+        if (import.meta.env?.DEV) {
+          console.log('[TaskActionPanel] 流水线默认值:', initialWorkflowId || '空态待选');
+        }
+        setWorkflowId((prev) => prev || initialWorkflowId);
       }
       if (taskResult.status === 'fulfilled') setTasks(taskResult.value);
       setLoading(false);
@@ -275,6 +286,7 @@ export function TaskActionPanel({
               triggerSource: 'kanban',
             });
       toast.success(`${mode === 'group' ? '已创建任务组' : '已创建任务'}「${task.title}」`);
+      rememberWorkflowId(workflowId);
       onOutcome?.({ action: 'created', taskId: task.id, title: task.title });
       onClose();
     } catch (error: any) {
@@ -619,7 +631,7 @@ export function TaskActionPanel({
             <span className={styles.rowIcon}>
               <Workflow size={13} />
             </span>
-            <span className={styles.rowTitle}>{workflowName}</span>
+            <span className={workflowId ? styles.rowTitle : styles.rowPlaceholder}>{workflowName}</span>
             <span className={styles.rowMeta}>流水线</span>
           </button>
 

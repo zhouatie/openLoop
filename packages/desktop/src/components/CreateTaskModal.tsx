@@ -25,12 +25,12 @@ import {
 } from 'lucide-react';
 import type { WorkflowDefinition, NodeType, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { WorkflowRecommender } from '../utils/workflowRecommender';
+import { readLastWorkflowId, rememberWorkflowId } from '../utils/workflowMemory';
 import { WorkspacePicker } from './WorkspacePicker';
 import { TaskPromptArea } from './TaskPromptArea';
 import { toast } from './Toast';
 import { api } from '../services/api';
 
-const STORAGE_KEY_LAST_WORKFLOW = 'openloop_last_used_workflow_id';
 const STORAGE_KEY_RECENT_WORKFLOWS = 'openloop_recent_workflow_ids';
 const STORAGE_KEY_LAST_WORKSPACE = 'openloop_last_used_workspace';
 const MAX_RECENT_COUNT = 3;
@@ -178,17 +178,13 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       }
     }
 
-    try {
-      const lastId = localStorage.getItem(STORAGE_KEY_LAST_WORKFLOW);
-      if (lastId && workflows.some((w) => w.id === lastId)) {
-        setWorkflowId(lastId);
-        if (import.meta.env?.DEV) {
-          console.log('[CreateTaskModal] 从本地记忆回填上次使用的工作流:', lastId);
-        }
-        return;
+    const lastId = readLastWorkflowId();
+    if (lastId && workflows.some((w) => w.id === lastId)) {
+      setWorkflowId(lastId);
+      if (import.meta.env?.DEV) {
+        console.log('[CreateTaskModal] 从本地记忆回填上次使用的工作流:', lastId);
       }
-    } catch (err) {
-      console.warn('[CreateTaskModal] 读取流程历史记忆失败:', err);
+      return;
     }
 
     if (workflows.length > 0 && !workflows.some((w) => w.id === workflowId)) {
@@ -659,7 +655,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
       // 保存本地记忆与 LRU 最近使用列表
       try {
-        localStorage.setItem(STORAGE_KEY_LAST_WORKFLOW, workflowId);
+        rememberWorkflowId(workflowId);
         const nextRecents = [
           workflowId,
           ...recentWorkflowIds.filter((id) => id !== workflowId),
