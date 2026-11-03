@@ -46,6 +46,14 @@ export const SHORTCUT_COMMANDS: ShortcutCommand[] = [
     allowInInput: true,
   },
   {
+    id: 'taskAction.confirm',
+    label: '任务面板：确认',
+    description: '在 ➕ 面板里确认候选、创建任务或执行流水线',
+    group: 'panel',
+    defaultBinding: 'super+enter',
+    allowInInput: true,
+  },
+  {
     id: 'session.new',
     label: '新会话',
     description: '在当前工作区新建会话',

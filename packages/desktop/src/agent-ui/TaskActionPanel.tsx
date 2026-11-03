@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
+import { useShortcuts } from '../context/ShortcutContext';
 import { toast } from '../components/Toast';
 import { useDirectoryPicker } from '../components/useDirectoryPicker';
 import { formatCompactPath, getWorkspaceDirName } from '../components/workspace-path';
@@ -151,6 +152,15 @@ export function TaskActionPanel({
 
   const titleRef = useRef<HTMLInputElement>(null);
   const queryRef = useRef<HTMLInputElement>(null);
+
+  const { matchShortcut, describeShortcut } = useShortcuts();
+  const confirmKeys = describeShortcut('taskAction.confirm').join('+');
+  /** Super + 回车才算确认：面板里单按回车不再建任务或跑流水线 */
+  const handleConfirm = (event: React.KeyboardEvent, action: () => void) => {
+    if (!matchShortcut(event.nativeEvent, 'taskAction.confirm')) return;
+    event.preventDefault();
+    action();
+  };
 
   useEffect(() => {
     let alive = true;
@@ -392,7 +402,7 @@ export function TaskActionPanel({
     </div>
   );
 
-  const searchRow = (placeholder: string, onEnter: () => void) => (
+  const searchRow = (placeholder: string, onConfirm: () => void) => (
     <div className={styles.search}>
       <Search size={13} className={styles.searchIcon} />
       <input
@@ -401,12 +411,7 @@ export function TaskActionPanel({
         value={query}
         placeholder={placeholder}
         onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={(event) => {
-          // 回车直取第一条：候选已经按关键词排好序，不必再挪鼠标
-          if (event.key !== 'Enter') return;
-          event.preventDefault();
-          onEnter();
-        }}
+        onKeyDown={(event) => handleConfirm(event, onConfirm)}
       />
     </div>
   );
@@ -587,9 +592,7 @@ export function TaskActionPanel({
                 value={title}
                 placeholder="任务组名称（可留空自动命名）"
                 onChange={(event) => setTitle(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void createTask();
-                }}
+                onKeyDown={(event) => handleConfirm(event, () => void createTask())}
               />
               <textarea
                 className={styles.linesInput}
@@ -597,6 +600,7 @@ export function TaskActionPanel({
                 rows={5}
                 placeholder={'子工序，一行一个，按顺序串行执行\n例如：\n梳理数据结构\n实现接口\n补齐回归用例'}
                 onChange={(event) => setGroupLines(event.target.value)}
+                onKeyDown={(event) => handleConfirm(event, () => void createTask())}
               />
             </>
           ) : (
@@ -604,11 +608,9 @@ export function TaskActionPanel({
               ref={titleRef}
               className={styles.titleInput}
               value={title}
-              placeholder="任务标题，回车创建"
+              placeholder={`任务标题，${confirmKeys} 创建`}
               onChange={(event) => setTitle(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') void createTask();
-              }}
+              onKeyDown={(event) => handleConfirm(event, () => void createTask())}
             />
           )}
 
