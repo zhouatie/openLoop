@@ -27,7 +27,7 @@ import {
   STORAGE_KEY_LAST_WORKSPACE,
   STORAGE_KEY_RECENT_WORKSPACES,
 } from '../components/WorkspacePicker';
-import { loadTaskOptions, TASK_STATUS_LABEL, type TaskOption } from './task-options';
+import { loadTaskOptions, invalidateTaskOptions, TASK_STATUS_LABEL, type TaskOption } from './task-options';
 import { readLastWorkflowId, rememberWorkflowId } from '../utils/workflowMemory';
 import { IconClose } from './icons';
 import styles from './TaskActionPanel.module.css';
@@ -148,6 +148,9 @@ export function TaskActionPanel({
   const [query, setQuery] = useState('');
   const [pickingWorkflow, setPickingWorkflow] = useState(false);
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
+  /** 新建任务时可选归属的任务组；空串表示建独立任务 */
+  const [pickingParent, setPickingParent] = useState(false);
+  const [parentTaskId, setParentTaskId] = useState('');
   const [pickedTask, setPickedTask] = useState<TaskOption | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -193,12 +196,12 @@ export function TaskActionPanel({
 
   useEffect(() => {
     // 焦点落在第一个输入：候选形态落在搜索，新建形态落在标题
-    if (pickingWorkspace || pickingWorkflow || (mode === 'pipeline' && !pickedTask)) {
+    if (pickingWorkspace || pickingWorkflow || pickingParent || (mode === 'pipeline' && !pickedTask)) {
       queryRef.current?.focus();
     } else {
       titleRef.current?.focus();
     }
-  }, [mode, pickedTask, pickingWorkflow, pickingWorkspace]);
+  }, [mode, pickedTask, pickingParent, pickingWorkflow, pickingWorkspace]);
 
   const workflowName = useMemo(
     () => workflows.find((item) => item.id === workflowId)?.name ?? '选择流水线',
@@ -213,6 +216,19 @@ export function TaskActionPanel({
   const filteredTasks = useMemo(
     () => tasks.filter((item) => matches(item.title, query)).slice(0, 40),
     [tasks, query]
+  );
+
+  /** 任务组候选：只有组根节点能接收新工序，子工序不出现在列表里 */
+  const groups = useMemo(() => tasks.filter((item) => item.isGroup), [tasks]);
+
+  const filteredGroups = useMemo(
+    () => groups.filter((item) => matches(item.title, query)),
+    [groups, query]
+  );
+
+  const parentName = useMemo(
+    () => groups.find((item) => item.id === parentTaskId)?.title ?? '',
+    [groups, parentTaskId]
   );
 
   const workspaceCandidates = useMemo(() => {
@@ -243,6 +259,9 @@ export function TaskActionPanel({
     [groupLines]
   );
 
+  /** 选中任务组后新任务变为子工序，交由任务组调度，不再单独触发执行 */
+  const underGroup = mode === 'task' && parentTaskId !== '';
+
   const canSubmit = Boolean(workflowId) && !submitting && (mode === 'group' ? true : title.trim() !== '');
 
   const createTask = useCallback(async () => {
@@ -254,6 +273,7 @@ export function TaskActionPanel({
         title,
         workflowId,
         subtasks: mode === 'group' ? subtaskLines.length : 0,
+        parentTaskId: parentTaskId || undefined,
         autoRun,
         workspace: workspaceDir,
       });
@@ -261,6 +281,22 @@ export function TaskActionPanel({
     try {
       const description = (draft || '').trim();
       const taskWorkspace = workspaceDir || undefined;
+
+      if (underGroup) {
+        const created = await api.addSubTask(parentTaskId, {
+          title: title.trim(),
+          workflowId,
+          description,
+          workspace: taskWorkspace,
+        });
+        toast.success(`已加入任务组「${parentName || created.parent.title}」`);
+        invalidateTaskOptions();
+        rememberWorkflowId(workflowId);
+        onOutcome?.({ action: 'created', taskId: created.subtask.id, title: created.subtask.title });
+        onClose();
+        return;
+      }
+
       const task =
         mode === 'group'
           ? await api.createTask({
@@ -286,6 +322,7 @@ export function TaskActionPanel({
               triggerSource: 'kanban',
             });
       toast.success(`${mode === 'group' ? '已创建任务组' : '已创建任务'}「${task.title}」`);
+      invalidateTaskOptions();
       rememberWorkflowId(workflowId);
       onOutcome?.({ action: 'created', taskId: task.id, title: task.title });
       onClose();
@@ -302,8 +339,11 @@ export function TaskActionPanel({
     mode,
     onClose,
     onOutcome,
+    parentName,
+    parentTaskId,
     subtaskLines,
     title,
+    underGroup,
     workflowId,
     workspaceDir,
   ]);
@@ -316,6 +356,15 @@ export function TaskActionPanel({
     setPickingWorkspace(false);
     setQuery('');
     if (import.meta.env?.DEV) console.log('[TaskActionPanel] 选定项目目录:', path);
+    requestAnimationFrame(() => titleRef.current?.focus());
+  }, []);
+
+  /** 选定任务组：选空串恢复为独立任务 */
+  const chooseParent = useCallback((id: string) => {
+    setParentTaskId(id);
+    setPickingParent(false);
+    setQuery('');
+    if (import.meta.env?.DEV) console.log('[TaskActionPanel] 选定任务组:', id || '独立任务');
     requestAnimationFrame(() => titleRef.current?.focus());
   }, []);
 
@@ -362,6 +411,11 @@ export function TaskActionPanel({
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
+        if (pickingParent) {
+          setPickingParent(false);
+          setQuery('');
+          return;
+        }
         if (pickingWorkspace) {
           setPickingWorkspace(false);
           setQuery('');
@@ -380,7 +434,7 @@ export function TaskActionPanel({
         onClose();
       }
     },
-    [onClose, pickedTask, pickingWorkflow, pickingWorkspace]
+    [onClose, pickedTask, pickingParent, pickingWorkflow, pickingWorkspace]
   );
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -460,20 +514,27 @@ export function TaskActionPanel({
   /** 三种形态共用一块面板：标题、返回与正文按状态计算 */
   const headerLabel = pickingWorkspace
     ? '选择项目目录'
-    : mode === 'pipeline' && pickedTask
-      ? `为「${pickedTask.title}」选择流水线`
-      : MODE_TITLE[mode];
+    : pickingParent
+      ? '选择任务组'
+      : mode === 'pipeline' && pickedTask
+        ? `为「${pickedTask.title}」选择流水线`
+        : MODE_TITLE[mode];
   const back = pickingWorkspace
     ? () => {
         setPickingWorkspace(false);
         setQuery('');
       }
-    : mode === 'pipeline' && pickedTask
+    : pickingParent
       ? () => {
-          setPickedTask(null);
+          setPickingParent(false);
           setQuery('');
         }
-      : undefined;
+      : mode === 'pipeline' && pickedTask
+        ? () => {
+            setPickedTask(null);
+            setQuery('');
+          }
+        : undefined;
   const workspaceName = workspaceDir ? getWorkspaceDirName(workspaceDir) : '';
   return (
     <div
@@ -595,7 +656,64 @@ export function TaskActionPanel({
         </>
       )}
 
-      {mode !== 'pipeline' && !pickingWorkflow && !pickingWorkspace && (
+      {mode !== 'pipeline' && pickingParent && (
+        <>
+          {searchRow('搜索任务组', () => {
+            const first = filteredGroups[0];
+            if (first) chooseParent(first.id);
+          })}
+          <div className={styles.list} role="listbox">
+            <button
+              type="button"
+              role="option"
+              aria-selected={parentTaskId === ''}
+              className={styles.row}
+              onClick={() => chooseParent('')}
+            >
+              <span className={styles.rowIcon}>
+                <ListTodo size={13} />
+              </span>
+              <span className={styles.rowTitle}>不加入任务组</span>
+              <span className={styles.rowMeta}>独立任务</span>
+              {parentTaskId === '' && (
+                <span className={styles.rowCheck}>
+                  <Check size={13} />
+                </span>
+              )}
+            </button>
+            {filteredGroups.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="option"
+                aria-selected={item.id === parentTaskId}
+                className={styles.row}
+                onClick={() => chooseParent(item.id)}
+              >
+                <span className={styles.rowIcon}>
+                  <Layers size={13} />
+                </span>
+                <span className={styles.rowTitle}>{item.title}</span>
+                <span className={`${styles.rowMeta} ${item.status === 'running' ? styles.rowRunning : ''}`}>
+                  {TASK_STATUS_LABEL[item.status] || item.status}
+                </span>
+                {item.id === parentTaskId && (
+                  <span className={styles.rowCheck}>
+                    <Check size={13} />
+                  </span>
+                )}
+              </button>
+            ))}
+            {filteredGroups.length === 0 && !loading && (
+              <div className={styles.empty}>
+                {groups.length === 0 ? '还没有任务组，先在 ➕ 面板新建任务组' : '没有匹配的任务组'}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {mode !== 'pipeline' && !pickingWorkflow && !pickingWorkspace && !pickingParent && (
         <>
           {mode === 'group' ? (
             <>
@@ -657,18 +775,40 @@ export function TaskActionPanel({
             </span>
           </button>
 
+          {mode === 'task' && (
+            <button
+              type="button"
+              className={styles.pickRow}
+              title={parentName || undefined}
+              onClick={() => {
+                setQuery('');
+                setPickingParent(true);
+              }}
+            >
+              <span className={styles.rowIcon}>
+                <Layers size={13} />
+              </span>
+              <span className={parentTaskId ? styles.rowTitle : styles.rowPlaceholder}>
+                {parentName || '不加入任务组'}
+              </span>
+              <span className={styles.rowMeta}>{parentTaskId ? '任务组' : '独立任务'}</span>
+            </button>
+          )}
+
           <div className={styles.footer}>
             <button
               type="button"
-              className={`${styles.toggle} ${autoRun ? styles.toggleOn : ''}`}
+              className={`${styles.toggle} ${autoRun && !underGroup ? styles.toggleOn : ''}`}
               onClick={() => setAutoRun((prev) => !prev)}
-              title="创建后立即启动流水线"
+              disabled={underGroup}
+              title={underGroup ? '加入任务组后由任务组调度' : '创建后立即启动流水线'}
             >
               <span className={styles.toggleDot} />
               创建后立即执行
             </button>
             {mode === 'group' && <span className={styles.hint}>{subtaskLines.length} 个子工序</span>}
-            {mode !== 'group' && draft && draft.trim() !== '' && (
+            {underGroup && <span className={styles.hint}>作为工序加入「{parentName}」</span>}
+            {mode !== 'group' && !underGroup && draft && draft.trim() !== '' && (
               <span className={styles.hint}>说明取自输入卡草稿</span>
             )}
             <button
@@ -678,7 +818,7 @@ export function TaskActionPanel({
               onClick={() => void createTask()}
             >
               {submitting ? <Loader2 size={13} className={styles.spin} /> : <Play size={13} />}
-              创建
+              {underGroup ? '加入' : '创建'}
             </button>
           </div>
         </>
