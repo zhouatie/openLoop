@@ -28,6 +28,7 @@ import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
 import { SessionTreePanel } from './SessionTreePanel';
 import { useAgentStream } from './useAgentStream';
+import { useAgentModels } from '../hooks/useAgentModels';
 import { setViewingAgentSession, rememberAgentSessionTitles } from '../hooks/useAgentNotifications';
 import { QueuedInputs } from './QueuedInputs';
 import { TaskActionPanel, type TaskActionMode } from './TaskActionPanel';
@@ -530,6 +531,25 @@ export function TaskAgentPanel({
   /** 回填输入框：seq 变化即生效 */
   const [draftFill, setDraftFill] = useState<{ text: string; seq: number }>();
   const attachments = useAttachments(taskId);
+  const { models: availableModels } = useAgentModels();
+  const [taskModel, setTaskModel] = useState<string>('');
+
+  useEffect(() => {
+    if (state?.model) setTaskModel(state.model);
+    else if (model) setTaskModel(model);
+  }, [state?.model, model]);
+
+  const handleModelSelect = useCallback(
+    async (modelId: string) => {
+      if (!taskId) return;
+      if (import.meta.env?.DEV) console.log('[AgentPanel] 切换任务会话模型:', { taskId, modelId });
+      setTaskModel(modelId);
+      await api.setTaskSessionModel(taskId, modelId).catch((err) => {
+        if (import.meta.env?.DEV) console.warn('[AgentPanel] 切换任务会话模型失败:', err);
+      });
+    },
+    [taskId]
+  );
 
   /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
   const openDock = dock.openTab;
@@ -670,7 +690,9 @@ export function TaskAgentPanel({
       turnStartedAt={state?.turnStartedAt}
       lastTurnDurationMs={state?.lastTurnDurationMs}
       awaitingInput={awaitingInput}
-      model={state?.model || model}
+      model={taskModel || state?.model || model}
+      models={availableModels}
+      onModelSelect={availableModels.length > 0 ? handleModelSelect : undefined}
       contentWidth={920}
       sending={sending}
       commands={commands}
@@ -910,6 +932,7 @@ export function GlobalAgentPanel({
   const [sending, setSending] = useState(false);
   const [commands, setCommands] = useState<ComposerCommand[]>([]);
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([]);
+  const { models: globalModels } = useAgentModels();
   const [permission, setPermission] = useState<ComposerPermission>('full');
   /** 回填输入框：seq 变化即生效，同一句正文重复跳转也有效 */
   const [draftFill, setDraftFill] = useState<{ text: string; seq: number }>();
@@ -1680,26 +1703,41 @@ export function GlobalAgentPanel({
     [refreshProjectMeta]
   );
 
-  // 模型候选：会话在线时可列举，离线时用当前模型占位
+  // 模型候选：在线时拉取会话特定模型，离线或未就绪时继承全局模型
   useEffect(() => {
-    if (!activeId || !liveIds.includes(activeId)) return;
+    if (!activeId) return;
+    if (!liveIds.includes(activeId)) {
+      if (globalModels.length > 0 && models.length === 0) {
+        setModels(globalModels);
+      }
+      return;
+    }
     api
       .getAgentSessionModels(activeId)
       .then((data) => {
-        setModels(
-          (data.models || []).map((item) => ({
-            id: `${item.provider}/${item.id}`,
-            label: `${item.provider}/${item.id}`,
-          }))
-        );
+        if (Array.isArray(data.models) && data.models.length > 0) {
+          setModels(
+            data.models.map((item) => ({
+              id: `${item.provider}/${item.id}`,
+              label: item.label || `${item.provider}/${item.id}`,
+            }))
+          );
+        }
       })
-      .catch(() => setModels([]));
-  }, [activeId, liveIds]);
+      .catch(() => null);
+  }, [activeId, liveIds, globalModels, models.length]);
 
   const handleModelSelect = useCallback(
     async (modelId: string) => {
       if (!activeId) return;
-      await api.setAgentSessionModel(activeId, modelId).catch(() => null);
+      if (import.meta.env?.DEV) console.log('[AgentPanel] 切换全局会话模型:', { activeId, modelId });
+      setSessionModel(modelId);
+      setSessions((prev) =>
+        prev.map((item) => (item.id === activeId ? { ...item, lastModel: modelId } : item))
+      );
+      await api.setAgentSessionModel(activeId, modelId).catch((err) => {
+        if (import.meta.env?.DEV) console.warn('[AgentPanel] 切换全局会话模型失败:', err);
+      });
     },
     [activeId]
   );
@@ -2142,8 +2180,8 @@ export function GlobalAgentPanel({
           onRequestMentions={requestMentions}
           permission={permission}
           onPermissionSelect={handlePermissionSelect}
-          models={models}
-          onModelSelect={models.length > 0 ? handleModelSelect : undefined}
+          models={models.length > 0 ? models : globalModels}
+          onModelSelect={(models.length > 0 ? models : globalModels).length > 0 ? handleModelSelect : undefined}
           contentWidth={920}
           cwd={activeCwd}
           sending={sending}

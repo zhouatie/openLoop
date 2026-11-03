@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import os from 'os';
 import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
@@ -5,7 +7,7 @@ import type { SessionTreeSnapshot, TaskAttachment, TaskSessionState } from '../t
 import type { AgentStreamEvent } from './agent-events';
 import { PiRpcSessionInstance, PiRpcSessionManager } from './pi-rpc-session';
 import { piSessionIndex } from './session-index';
-import { agentSessionMeta } from './session-meta';
+import { agentSessionMeta, resolveMetaDir } from './session-meta';
 import { readSessionTree } from './session-tree';
 
 const logger = createLogger('AgentSessionHost');
@@ -105,14 +107,15 @@ export class AgentSessionHost extends EventEmitter {
     }
 
     const previous = this.settingsBySession.get(sessionId);
+    const meta = agentSessionMeta.getSession(sessionId);
     // 已知工作目录就不去查会话文件：那次查寻要遍历全部会话目录，冷缓存下要好几秒
     const summary = options.cwd || previous?.cwd ? undefined : await piSessionIndex.find(sessionId).catch(() => undefined);
     const cwd = options.cwd || previous?.cwd || summary?.cwd || os.homedir();
     const taskId = `${GLOBAL_AGENT_PREFIX}${sessionId}`;
     const permission = options.permission || previous?.permission || 'full';
     const flags = permissionPresetFlags(permission);
-    const model = options.model || previous?.model;
-    const thinking = options.thinking || previous?.thinking;
+    const model = options.model || previous?.model || meta.model;
+    const thinking = options.thinking || previous?.thinking || meta.thinking;
 
     const session = new PiRpcSessionInstance({
       taskId,
@@ -312,7 +315,7 @@ export class AgentSessionHost extends EventEmitter {
     return { sessionId, leafEntryId: nextLeaf };
   }
 
-  /** 模型 / 思考等级：进程在线时热切换，离线时记入下次启动参数 */
+  /** 模型 / 思考等级：进程在线时热切换，离线时记入下次启动参数并持久化元数据 */
   public async setModel(
     sessionId: string,
     model?: string,
@@ -320,10 +323,15 @@ export class AgentSessionHost extends EventEmitter {
   ): Promise<{ applied: boolean; queued: boolean }> {
     const session = this.sessions.get(sessionId);
     const previous = this.settingsBySession.get(sessionId) || { permission: 'full' as AgentPermissionPreset };
-    this.settingsBySession.set(sessionId, {
+    const nextSettings = {
       ...previous,
       model: model || previous.model,
       thinking: thinking || previous.thinking,
+    };
+    this.settingsBySession.set(sessionId, nextSettings);
+    agentSessionMeta.setSession(sessionId, {
+      model: nextSettings.model,
+      thinking: nextSettings.thinking,
     });
     if (!session || !session.active) return { applied: false, queued: true };
     const result = await session.applyRuntimeSettings({ model, thinking });
@@ -347,15 +355,126 @@ export class AgentSessionHost extends EventEmitter {
     return { applied: true, restarted: true };
   }
 
-  /** 会话可用模型列表；进程未启动时返回空数组 */
-  public async listModels(sessionId: string): Promise<Array<{ id: string; provider: string }>> {
+  private cachedModels: Array<{ id: string; provider: string; label?: string }> | null = null;
+
+  public updateCachedModels(models: Array<{ id: string; provider: string; label?: string }>) {
+    if (Array.isArray(models) && models.length > 0) {
+      this.cachedModels = models;
+      this.saveModelsToCache(models);
+    }
+  }
+
+  private getModelsCacheFile(): string {
+    return path.join(resolveMetaDir(), 'agent-models-cache.json');
+  }
+
+  private saveModelsToCache(models: Array<{ id: string; provider: string; label?: string }>) {
+    try {
+      const file = this.getModelsCacheFile();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(models, null, 2), 'utf8');
+    } catch (err) {
+      logger.warn('[AgentSessionHost] 写入模型缓存失败', undefined, { error: String(err) });
+    }
+  }
+
+  private loadModelsFromCache(): Array<{ id: string; provider: string; label?: string }> {
+    try {
+      const file = this.getModelsCacheFile();
+      if (fs.existsSync(file)) {
+        const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (Array.isArray(raw) && raw.length > 0) return raw;
+      }
+    } catch {
+      // 忽略读取异常
+    }
+    return [];
+  }
+
+  private loadModelsFromPiConfig(): Array<{ id: string; provider: string; label?: string }> {
+    try {
+      const configPath = path.join(os.homedir(), '.pi', 'agent', 'models.json');
+      if (!fs.existsSync(configPath)) return [];
+      const content = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const models: Array<{ id: string; provider: string; label?: string }> = [];
+      if (content?.providers && typeof content.providers === 'object') {
+        for (const [provider, info] of Object.entries(content.providers) as [string, any][]) {
+          if (Array.isArray(info?.models)) {
+            for (const m of info.models) {
+              if (m && typeof m.id === 'string') {
+                models.push({
+                  id: m.id,
+                  provider,
+                  label: m.name ? `${m.name} (${provider}/${m.id})` : `${provider}/${m.id}`,
+                });
+              }
+            }
+          }
+        }
+      }
+      return models;
+    } catch {
+      return [];
+    }
+  }
+
+  public async listAvailableModels(): Promise<Array<{ id: string; provider: string; label?: string }>> {
+    if (this.cachedModels && this.cachedModels.length > 0) {
+      return this.cachedModels;
+    }
+
+    // 1. 尝试从运行中会话拉取
+    for (const session of this.sessions.values()) {
+      if (session.active) {
+        const liveModels = await session.listModels().catch(() => []);
+        if (liveModels.length > 0) {
+          this.cachedModels = liveModels;
+          this.saveModelsToCache(liveModels);
+          return liveModels;
+        }
+      }
+    }
+
+    // 2. 尝试从磁盘持久化缓存读取
+    const diskCache = this.loadModelsFromCache();
+    if (diskCache.length > 0) {
+      this.cachedModels = diskCache;
+      return diskCache;
+    }
+
+    // 3. 尝试从 ~/.pi/agent/models.json 读取配置的模型
+    const staticModels = this.loadModelsFromPiConfig();
+    if (staticModels.length > 0) {
+      this.cachedModels = staticModels;
+      this.saveModelsToCache(staticModels);
+      return staticModels;
+    }
+
+    return [];
+  }
+
+  /** 会话可用模型列表；未启动时回退至全局可用模型 */
+  public async listModels(sessionId: string): Promise<Array<{ id: string; provider: string; label?: string }>> {
     const session = this.sessions.get(sessionId);
-    if (!session || !session.active) return [];
-    return session.listModels();
+    if (session && session.active) {
+      const liveModels = await session.listModels().catch(() => []);
+      if (liveModels.length > 0) {
+        this.updateCachedModels(liveModels);
+        return liveModels;
+      }
+    }
+    return this.listAvailableModels();
   }
 
   public getSettings(sessionId: string): AgentSessionSettings {
-    return this.settingsBySession.get(sessionId) || { permission: 'full' };
+    const mem = this.settingsBySession.get(sessionId);
+    if (mem) return mem;
+    const meta = agentSessionMeta.getSession(sessionId);
+    return {
+      permission: 'full',
+      model: meta.model,
+      thinking: meta.thinking,
+    };
   }
 
   public stop(sessionId: string): boolean {
@@ -399,3 +518,7 @@ export class AgentSessionHost extends EventEmitter {
 }
 
 export const agentSessionHost = AgentSessionHost.getInstance();
+
+PiRpcSessionInstance.onModelsDiscovered = (models) => {
+  agentSessionHost.updateCachedModels(models);
+};

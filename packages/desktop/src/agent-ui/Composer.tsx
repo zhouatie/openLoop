@@ -406,12 +406,16 @@ export const Composer = React.memo(function Composer({
               icon: <IconShield size={16} />,
               checked: preset === permission,
             }))
-          : (models || []).map((item) => ({
-              key: item.id,
-              label: item.label,
-              icon: <IconChip size={16} />,
-              checked: item.id === model,
-            }));
+          : (models || []).map((item) => {
+              const provider = item.id.includes('/') ? item.id.split('/')[0] : '通用';
+              return {
+                key: item.id,
+                label: item.label,
+                icon: <IconChip size={16} />,
+                section: provider,
+                checked: item.id === model || item.id === (model ? model.split(':')[0] : ''),
+              };
+            });
       // 没有对应回调时这行本就不出现，这里只做防御
       if (rows.length === 0) return;
       setMenu({ kind, items: rows, index: 0, fromAdd });
@@ -1027,15 +1031,15 @@ export const Composer = React.memo(function Composer({
 
           <div className={styles.trailing}>
             {/* 模型席位与 dsh 一致：停在输入框右下角，紧邻发送按钮 */}
-            {model && (
+            {(model || onModelSelect) && (
               <button
                 type="button"
                 className={styles.chip}
                 onClick={() => openMenu('model')}
-                title={onModelSelect ? '切换模型' : model}
+                title={onModelSelect ? '切换模型' : (model || '选择模型')}
                 disabled={!onModelSelect}
               >
-                {model}
+                {model || '选择模型'}
               </button>
             )}
             <button
