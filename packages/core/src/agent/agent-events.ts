@@ -185,8 +185,22 @@ export function applyAgentEvent(
     return event.state;
   }
 
-  if (!state || state.taskId !== event.taskId) {
-    // 快照到达之前先忽略增量，避免半截状态
+  if (!state) {
+    if (event.kind === 'status' || event.kind === 'pending' || event.kind === 'message') {
+      state = {
+        taskId: event.taskId,
+        active: true,
+        isBusy: false,
+        isPaused: false,
+        messages: [],
+      };
+    } else {
+      // 快照到达之前先忽略增量，避免半截状态
+      return state;
+    }
+  }
+
+  if (state.taskId !== event.taskId) {
     return state;
   }
 

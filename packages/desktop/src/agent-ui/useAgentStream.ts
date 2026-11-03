@@ -66,8 +66,15 @@ function sameMessage(a: SessionChatMessage, b: SessionChatMessage): boolean {
   if (a.role !== b.role) return false;
   const left = a.content || '';
   const right = b.content || '';
-  if (left === right) return true;
-  if (left.length === right.length || left.length === 0 || right.length === 0) return false;
+  if (left === right) {
+    if (left.length > 0) return true;
+    if (a.id && b.id && a.id === b.id) return true;
+    const aTool = a.tools?.[0]?.id;
+    const bTool = b.tools?.[0]?.id;
+    if (aTool && bTool && aTool === bTool) return true;
+    return false;
+  }
+  if (left.length === 0 || right.length === 0) return false;
   return left.length > right.length ? left.startsWith(right) : right.startsWith(left);
 }
 
@@ -134,29 +141,14 @@ function findOverlapStart(
   return start;
 }
 
-/** 消息指纹：同一条消息两侧 id 不同，只能按角色 + 正文对齐 */
-function signature(message: SessionChatMessage): string {
-  return `${message.role}\u0000${message.content || ''}`;
-}
-
 /**
  * 找不到锚点时的兜底：历史一行都不动，只把历史里还没有的实时消息补在末尾。
  * 实时段永远比历史新，补在末尾不会让旧消息跑到最新消息下面。
+ * 绝不能按「角色 + 内容」判重，否则工具调用助手空行与用户重复指令都会被误吞。
  */
 function appendFreshLive(history: SessionChatMessage[], live: SessionChatMessage[]): SessionChatMessage[] {
-  const left = new Map<string, number>();
-  for (const message of history) left.set(signature(message), (left.get(signature(message)) || 0) + 1);
-
-  const fresh: SessionChatMessage[] = [];
-  for (const message of live) {
-    const key = signature(message);
-    const count = left.get(key) || 0;
-    if (count > 0) {
-      left.set(key, count - 1);
-      continue;
-    }
-    fresh.push(message);
-  }
+  const seenIds = new Set(history.map((message) => message.id));
+  const fresh = live.filter((message) => !seenIds.has(message.id));
   return fresh.length === 0 ? history : history.concat(fresh);
 }
 
@@ -317,7 +309,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
         scheduleRender();
         return;
       }
-      stateRef.current = next;
+      stateRef.current = next ? { ...next, taskId: streamKey } : null;
       syncBusy(Boolean(next.isBusy));
       scheduleRender();
     } catch (err) {
@@ -334,17 +326,21 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
     stateRef.current = null;
     reload();
 
-    /** 事件是否来自同一条物理会话的另一个进程（例如全局 Agent 面板接着对话） */
+    /** 事件是否来自同一条物理会话的另一个进程（例如全局 Agent 面板与任务流水线） */
     const isExternalSameSession = (routeKey: string) => {
       const ownSessionId = stateRef.current?.sessionId;
-      return Boolean(ownSessionId) && routeKey === `${GLOBAL_AGENT_PREFIX}${ownSessionId}`;
+      if (!ownSessionId) return false;
+      return (
+        routeKey === `${GLOBAL_AGENT_PREFIX}${ownSessionId}` ||
+        streamKey === `${GLOBAL_AGENT_PREFIX}${ownSessionId}`
+      );
     };
 
     const offSnapshot = api.on('agent:chat_update', (state: TaskSessionState) => {
       if (disposed || !state) return;
       if (state.taskId !== streamKey) {
-        // 同一份 pi 会话在别处被继续对话：只当刷新信号，等这一轮闲下来再重新取快照
-        if (!isExternalSameSession(state.taskId) || state.isBusy) return;
+        // 同一份 pi 会话在别处被继续对话：重新拉取快照
+        if (!isExternalSameSession(state.taskId)) return;
         // 自己这场会话有常驻进程时，实时事件已经覆盖，不必再取快照
         if (stateRef.current?.active) return;
         const now = Date.now();
@@ -356,8 +352,8 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
       }
       if (import.meta.env?.DEV) console.log('[AgentStream] 快照', state.taskId, 'isBusy=', state.isBusy);
       stateStampRef.current += 1;
-      // 快照为权威状态：保留历史前缀，实时段整体替换
-      stateRef.current = { ...state, messages: state.messages };
+      // 快照为权威状态：保留历史前缀，实时段整体替换，确保路由标识对齐当前流键
+      stateRef.current = { ...state, taskId: streamKey, messages: state.messages };
       syncBusy(Boolean(state.isBusy));
       scheduleRender();
     });
@@ -440,8 +436,8 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   const state = stateRef.current;
   const overlapCache = useRef<OverlapCache>({ start: -1 });
   const messages = useMemo(
-    () => mergeMessages(historyRef.current, state?.messages, overlapCache.current),
-    [state, historyRef.current]
+    () => mergeMessages(historyMessages, state?.messages, overlapCache.current),
+    [state, historyMessages]
   );
   const pendingInputs = useMemo(() => state?.pendingInputs ?? [], [state]);
   const pendingCount = pendingInputs.length;

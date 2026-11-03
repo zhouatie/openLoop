@@ -1170,7 +1170,10 @@ export function GlobalAgentPanel({
     setUiRequest(null);
     // 离开新会话就撤掉占位行
     setDraft((prev) => (prev?.id === id ? prev : null));
-    if (sessionRequest?.id !== id) {
+    const sessionItem = sessionsRef.current.find((item) => item.id === id);
+    if (sessionItem?.task) {
+      setTaskContext({ taskId: sessionItem.task.id, taskTitle: sessionItem.task.title });
+    } else if (sessionRequest?.id !== id) {
       setTaskContext(null);
     }
     try {
