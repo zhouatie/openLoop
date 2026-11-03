@@ -40,6 +40,8 @@ export interface NodeConfig {
   targetPlatform?: QaPlatform;
   warmupTimeoutMs?: number;
   background?: boolean; // 是否作为任务关联的后台守护服务常驻
+  /** 扫码预览地址模板（支持 {{lanIp}} / {{webPort}} 等变量），缺省为本机局域网服务地址 */
+  scanUrl?: string;
 
   // 沙箱隔离 (worktree-setup) 专用
   sharedPaths?: string[];   // 需要软链共享的相对路径列表，默认 ['node_modules']

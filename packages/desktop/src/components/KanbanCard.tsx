@@ -35,6 +35,7 @@ import {
   X,
   Workflow,
   UserCheck,
+  ScanLine,
 } from 'lucide-react';
 import { Task, KanbanColumn, TaskAttachment, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
@@ -43,6 +44,7 @@ import { openInDefaultBrowser } from '../utils/openExternalBrowser';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
 import { orderSubTasksForDisplay } from '../utils/subtaskOrder';
+import { ScanPreviewModal } from './qa/ScanPreviewModal';
 
 interface RunningNodeVisual {
   label: string;
@@ -224,6 +226,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   onAddSubtasks,
 }) => {
   const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped' | 'starting'>('checking');
+  const [isScanOpen, setIsScanOpen] = useState(false);
   // 空任务组默认展开，让「添加子工序」入口一眼可见
   const [isExpanded, setIsExpanded] = useState<boolean>(() => task.kind === 'group' && !(task.subTaskIds || []).length);
   const [idCopied, setIdCopied] = useState<boolean>(false);
@@ -1100,6 +1103,19 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                 )}
               </div>
               <div className="flex items-center gap-1 shrink-0">
+                {task.context?.worktree && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsScanOpen(true);
+                    }}
+                    className="h-[19px] px-1.5 rounded-[4px] bg-white/90 hover:bg-white text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all shadow-xs"
+                    title="扫码在手机上打开靶机页面"
+                  >
+                    <ScanLine size={8.5} className="text-[#85858d]" />
+                    <span>扫码</span>
+                  </button>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1155,38 +1171,51 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                 </span>
               </span>
               {task.context?.worktree && (
-                <button
-                  type="button"
-                  onClick={handleOpenOrStartSandbox}
-                  className={`text-[9.5px] font-mono px-1.5 py-[1.5px] rounded border flex items-center gap-1 transition-all cursor-pointer ${
-                    sandboxStatus === 'running'
-                      ? 'bg-[#eff6ff] hover:bg-[#dbeafe] text-[#2563eb] border-[#bfdbfe]'
-                      : sandboxStatus === 'starting'
-                      ? 'bg-[#fffbeb] text-[#b45309] border-[#fde68a]'
-                      : 'bg-[#f4f4f6] hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] border-[#e3e3e8]'
-                  }`}
-                  title={
-                    sandboxStatus === 'running'
-                      ? '沙箱靶机在线运行中，点击在新标签页打开'
-                      : sandboxStatus === 'starting'
-                      ? '正在拉起沙箱靶机服务...'
-                      : '沙箱靶机离线，点击一键唤醒'
-                  }
-                >
-                  {sandboxStatus === 'starting' ? (
-                    <Loader2 size={9} className="animate-spin text-[#b45309]" />
-                  ) : sandboxStatus === 'running' ? (
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#059669] shrink-0" />
-                  ) : (
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#a1a1aa] shrink-0" />
-                  )}
-                  <span>靶机 :{task.context.worktree.webPort}</span>
-                  {sandboxStatus === 'running' ? (
-                    <ExternalLink size={8} className="opacity-70" />
-                  ) : sandboxStatus === 'stopped' ? (
-                    <Play size={7} className="fill-current opacity-70" />
-                  ) : null}
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setIsScanOpen(true);
+                    }}
+                    className="w-[20px] h-[19px] rounded-[4px] text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-colors cursor-pointer"
+                    title="扫码在手机上打开靶机页面"
+                  >
+                    <ScanLine size={10} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenOrStartSandbox}
+                    className={`text-[9.5px] font-mono px-1.5 py-[1.5px] rounded border flex items-center gap-1 transition-all cursor-pointer ${
+                      sandboxStatus === 'running'
+                        ? 'bg-[#eff6ff] hover:bg-[#dbeafe] text-[#2563eb] border-[#bfdbfe]'
+                        : sandboxStatus === 'starting'
+                        ? 'bg-[#fffbeb] text-[#b45309] border-[#fde68a]'
+                        : 'bg-[#f4f4f6] hover:bg-[#ececf0] text-[#71717a] hover:text-[#1c1c21] border-[#e3e3e8]'
+                    }`}
+                    title={
+                      sandboxStatus === 'running'
+                        ? '沙箱靶机在线运行中，点击在新标签页打开'
+                        : sandboxStatus === 'starting'
+                        ? '正在拉起沙箱靶机服务...'
+                        : '沙箱靶机离线，点击一键唤醒'
+                    }
+                  >
+                    {sandboxStatus === 'starting' ? (
+                      <Loader2 size={9} className="animate-spin text-[#b45309]" />
+                    ) : sandboxStatus === 'running' ? (
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#059669] shrink-0" />
+                    ) : (
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#a1a1aa] shrink-0" />
+                    )}
+                    <span>靶机 :{task.context.worktree.webPort}</span>
+                    {sandboxStatus === 'running' ? (
+                      <ExternalLink size={8} className="opacity-70" />
+                    ) : sandboxStatus === 'stopped' ? (
+                      <Play size={7} className="fill-current opacity-70" />
+                    ) : null}
+                  </button>
+                </div>
               )}
             </div>
 
@@ -1280,6 +1309,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
           <span className="font-mono">{isGroup ? groupProgressPct : progressPct}%</span>
         </div>
       </div>
+      {isScanOpen && <ScanPreviewModal task={task} onClose={() => setIsScanOpen(false)} />}
     </div>
   );
 };

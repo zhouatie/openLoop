@@ -36,12 +36,14 @@ import {
   GitCommitHorizontal,
   Smartphone,
   UserCheck,
+  ScanLine,
 } from 'lucide-react';
 import { Task, QaRunRecord, StepTimelineRecord, WorktreeContextInfo, TaskWorktreeDiffResult, WorkflowDefinition } from '@openloop/core';
 import { api } from '../../services/api';
 import { toast } from '../Toast';
 import { openInDefaultBrowser } from '../../utils/openExternalBrowser';
 import { CodeDiffViewerModal } from '../diff/CodeDiffViewerModal';
+import { ScanPreviewModal } from './ScanPreviewModal';
 import { resolveQaTestNodeId } from '../../utils/nodeMeta';
 
 interface VisualAcceptanceModalProps {
@@ -140,6 +142,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
 
   const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped'>('checking');
   const [isStartingSandbox, setIsStartingSandbox] = useState<boolean>(false);
+  const [isScanOpen, setIsScanOpen] = useState<boolean>(false);
 
   // 代码变更 Diff 与审查模态框状态
   const [diffResult, setDiffResult] = useState<TaskWorktreeDiffResult | null>(null);
@@ -999,6 +1002,17 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                       : `启动沙箱靶机${worktree?.webPort ? ` (${worktree.webPort})` : ''}`}
                   </span>
                   {sandboxStatus === 'running' && <ExternalLink size={10} className="text-[#85858d] shrink-0" />}
+                </button>
+
+                {/* 扫码预览：将局域网服务地址渲染为二维码，手机扫码直达 */}
+                <button
+                  type="button"
+                  onClick={() => setIsScanOpen(true)}
+                  className="h-[28px] px-2 rounded-[6px] bg-white hover:bg-[#fafafc] text-[#71717a] hover:text-[#1c1c21] border border-[#e3e3e8] text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                  title="生成二维码，手机扫码打开靶机页面"
+                >
+                  <ScanLine size={12} className="shrink-0" />
+                  <span className="whitespace-nowrap">扫码</span>
                 </button>
 
                 {/* 在线时展示一键关停微按钮 */}
@@ -1952,6 +1966,9 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
           onClose={() => setIsDiffModalOpen(false)}
         />
       )}
+
+      {/* 扫码预览模态框 */}
+      {isScanOpen && <ScanPreviewModal task={currentTask} onClose={() => setIsScanOpen(false)} />}
     </div>
   );
 };
