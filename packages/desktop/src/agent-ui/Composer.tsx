@@ -13,12 +13,16 @@ import {
   IconReferenceFile,
   IconChatLines,
   IconShield,
+  IconTask,
+  IconGroup,
+  IconRun,
 } from './icons';
 import styles from './Composer.module.css';
 import { ComposerEditor } from './composer-editor/ComposerEditor';
 import type { ComposerEditorHandle } from './composer-editor/ComposerEditor';
 import type { EditorProjection } from './composer-editor/projection';
-import { sessionMention } from './mentions';
+import { sessionMention, taskMention } from './mentions';
+import type { TaskActionMode } from './TaskActionPanel';
 import { useShortcuts } from '../context/ShortcutContext';
 
 export interface ComposerAttachmentItem {
@@ -39,9 +43,9 @@ export interface ComposerCommand {
 export interface ComposerMentionItem {
   key: string;
   label: string;
-  kind: 'file' | 'dir' | 'session';
+  kind: 'file' | 'dir' | 'session' | 'task';
   description?: string;
-  /** 会话候选的会话 id：会话引用要带上它 */
+  /** 会话 / 任务的 id：引用要带上它 */
   refId?: string;
 }
 
@@ -82,6 +86,8 @@ export interface ComposerProps {
   onModelSelect?: (model: string) => void;
   /** 输入卡左侧控件行的附加操作（会话树入口等） */
   toolsExtra?: React.ReactNode;
+  /** ➕ 面板里的任务入口：未传时该分组不出现 */
+  onTaskAction?: (mode: TaskActionMode) => void;
 }
 
 /** 输入卡内的图标操作：与输入卡同一套圆角与悬停态 */
@@ -161,7 +167,7 @@ function slashBoundaryOk(text: string, index: number): boolean {
   return true;
 }
 
-/** @ 候选行：文件 / 目录 / 会话共用一套行结构，按类型分组 */
+/** @ 候选行：文件 / 目录 / 会话 / 任务共用一套行结构，按类型分组 */
 function mentionRows(list: ComposerMentionItem[]): MenuItem[] {
   return list.map((item) => ({
     key: item.key,
@@ -170,7 +176,12 @@ function mentionRows(list: ComposerMentionItem[]): MenuItem[] {
     isDir: item.kind === 'dir',
     mentionKind: item.kind,
     refId: item.refId,
-    group: item.kind === 'session' ? '会话' : '文件与文件夹',
+    group:
+      item.kind === 'session'
+        ? '会话'
+        : item.kind === 'task'
+          ? '任务'
+          : '文件与文件夹',
   }));
 }
 
@@ -222,6 +233,7 @@ export const Composer = React.memo(function Composer({
   models,
   onModelSelect,
   toolsExtra,
+  onTaskAction,
 }: ComposerProps) {
   const { matchShortcut } = useShortcuts();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -401,13 +413,41 @@ export const Composer = React.memo(function Composer({
     [menu, permission, model, models]
   );
 
-  /** ➕ 面板：添加 / 指令两段，行内带图标、命令名与说明（取自 DSH 命令菜单） */
+  /** ➕ 面板：任务 / 添加 / 指令三段，行内带图标、命令名与说明（取自 DSH 命令菜单） */
   const openAddMenu = useCallback(() => {
     if (menu?.kind === 'add') {
       setMenu(null);
       return;
     }
     const items: MenuItem[] = [];
+    if (onTaskAction) {
+      items.push(
+        {
+          key: 'task',
+          label: '任务',
+          alias: 'task',
+          description: '把输入卡里的需求变成任务',
+          icon: <IconTask size={16} />,
+          section: '任务与流水线',
+        },
+        {
+          key: 'group',
+          label: '任务组',
+          alias: 'group',
+          description: '一行一个子工序，串行编排',
+          icon: <IconGroup size={16} />,
+          section: '任务与流水线',
+        },
+        {
+          key: 'pipeline',
+          label: '流水线',
+          alias: 'run',
+          description: '为已有任务选择流水线并启动',
+          icon: <IconRun size={16} />,
+          section: '任务与流水线',
+        }
+      );
+    }
     if (onAddFiles) {
       items.push({
         key: 'file',
@@ -442,7 +482,7 @@ export const Composer = React.memo(function Composer({
     setMenu({ kind: 'add', items, index: 0 });
     // 点加号不抢焦点：面板的上下键与回车由编辑器承接
     editorRef.current?.focus();
-  }, [menu, onAddFiles, onPermissionSelect, onModelSelect, models]);
+  }, [menu, onAddFiles, onPermissionSelect, onModelSelect, models, onTaskAction]);
 
   /** 选中候选：只替换当前 token，前后文字和光标都原位保留 */
   const insertToken = useCallback((insert: string, keepSpan = false) => {
@@ -464,6 +504,11 @@ export const Composer = React.memo(function Composer({
         if (choice.key === 'file') {
           setMenu(null);
           fileInputRef.current?.click();
+          return;
+        }
+        if (choice.key === 'task' || choice.key === 'group' || choice.key === 'pipeline') {
+          setMenu(null);
+          onTaskAction?.(choice.key);
           return;
         }
         openMenu(choice.key === 'permission' ? 'permission' : 'model', true);
@@ -495,14 +540,17 @@ export const Composer = React.memo(function Composer({
         const editor = editorRef.current;
         if (!editor) return;
         const span = tokenSpan.current ?? editor.caretSpan();
-        // 会话与文件都落成真实引用 chip：会话的文本形式带标题，空格不再是分隔符
-        if (picked.mentionKind === 'session') {
+        // 会话与任务都落成带标题的引用 chip：标题里的空格不再是分隔符
+        if (picked.mentionKind === 'session' || picked.mentionKind === 'task') {
           const id = picked.refId ?? picked.key;
+          const isTask = picked.mentionKind === 'task';
           editor.insertReference(span, {
             ref: id,
             label: picked.label,
-            appearance: 'session',
-            clipboardText: sessionMention(picked.label, id),
+            appearance: isTask ? 'task' : 'session',
+            clipboardText: isTask
+              ? taskMention(picked.label, id)
+              : sessionMention(picked.label, id),
           });
           setMenu(null);
           tokenSpan.current = null;
@@ -520,7 +568,7 @@ export const Composer = React.memo(function Composer({
         tokenSpan.current = null;
       }
     },
-    [menu, openMenu, onModelSelect, onPermissionSelect, insertToken, loadMentions]
+    [menu, openMenu, onModelSelect, onPermissionSelect, insertToken, loadMentions, onTaskAction]
   );
 
   const handleKeyDown = useCallback(
@@ -752,6 +800,8 @@ export const Composer = React.memo(function Composer({
                     <span className={styles.popoverIcon}>
                       {item.mentionKind === 'session' ? (
                         <IconChatLines size={14} />
+                      ) : item.mentionKind === 'task' ? (
+                        <IconTask size={14} />
                       ) : item.isDir ? (
                         <IconFolderClose size={14} />
                       ) : (

@@ -28,6 +28,7 @@ import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-sessi
 import { sanitizeChatMessages } from '../agent/agent-format';
 import { piSessionIndex } from '../agent/session-index';
 import { composeMessageWithSessionReferences } from '../agent/session-reference';
+import { composeMessageWithTaskReferences } from '../agent/task-reference';
 import {
   DEFAULT_PI_EXTENSION_PACKAGES,
   getEnabledPiExtensions,
@@ -1113,10 +1114,13 @@ export class OpenLoopServer {
             if (!rawMessage) {
               return this.sendJson(res, 400, { error: '缺少 message' }, reqMeta);
             }
-            // 消息里 @ 了别的会话：附上只读快照后再发给模型
-            const message = await composeMessageWithSessionReferences({
-              message: rawMessage,
-              ownerSessionId: sessionKey,
+            // 消息里 @ 了别的会话或任务：附上只读快照后再发给模型
+            const message = composeMessageWithTaskReferences({
+              message: await composeMessageWithSessionReferences({
+                message: rawMessage,
+                ownerSessionId: sessionKey,
+              }),
+              store: this.store,
             });
             // 流水线常驻会话持有同一份 pi 会话：消息直接转给它，否则两个进程会同时写同一个会话文件
             const pipeline = PiRpcSessionManager.getInstance().findLiveBySessionId(sessionKey);
@@ -2415,9 +2419,12 @@ export class OpenLoopServer {
         // 消息里 @ 了别的会话：把那些会话投影成只读快照追加到正文之后，准备失败不阻断发送
         const ownSessionId =
           task.context?.sessionId || task.context?.piSessionId || `session_${task.id}`;
-        let promptToSend = await composeMessageWithSessionReferences({
-          message: enrichedMessage,
-          ownerSessionId: ownSessionId,
+        let promptToSend = composeMessageWithTaskReferences({
+          message: await composeMessageWithSessionReferences({
+            message: enrichedMessage,
+            ownerSessionId: ownSessionId,
+          }),
+          store: this.store,
         });
         if (isCurrentAgentNode) {
           promptToSend += `\n\n【完成协议（重要）】\n- 需求修改并验证通过后，在最后一条回复末尾单独一行输出 ${PIPELINE_DONE_MARKER}，流水线据此流转到下一个节点。\n- 只要还需要用户确认方案、补充信息或回答问题，就直接提问并不要输出该标记，流水线会停留在本节点等待用户回复。`;

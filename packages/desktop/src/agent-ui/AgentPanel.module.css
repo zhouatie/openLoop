@@ -162,6 +162,21 @@
   flex: none;
 }
 
+/* 输入卡与它上方的任务面板：面板贴住卡片上沿浮起，不推动消息区 */
+.composerHost {
+  position: relative;
+  flex: none;
+  width: 100%;
+}
+
+.taskActionLayer {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: max(16px, calc(50% - 476px));
+  width: min(100% - 32px, 952px);
+  z-index: 30;
+}
+
 /* ---- 空会话：整块垂直居中（DSH 的 hero 栈） ---- */
 .heroArea {
   flex: 1;
