@@ -21,6 +21,7 @@ export * from './agent/fs-browser';
 export * from './agent/terminal-host';
 export * from './agent/agent-format';
 export * from './agent/workflow-copilot';
+export * from './agent/task-session';
 export * from './server';
 export * from './logger';
 export * from './qa/midscene-runner';

@@ -358,6 +358,24 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 任务会话标记：极浅紫底微边框，不抢标题与时间的信息权重 */
+.taskTag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 4px;
+  margin: 0 4px 0 0;
+  border: 1px solid #d8d6fb;
+  border-radius: 4px;
+  background: #eeedfd;
+  color: #4f46e5;
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
 /* 运行中的会话：标题前置旋转小环 */
 .statusSlot {
   flex: none;
@@ -512,6 +530,13 @@
   line-height: 16px;
   color: #cfd3d6;
   word-break: break-all;
+}
+
+.hoverTask {
+  font-size: 12px;
+  line-height: 16px;
+  color: #cfd3d6;
+  overflow-wrap: break-word;
 }
 
 .hoverTime {
