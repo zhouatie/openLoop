@@ -975,6 +975,8 @@ export const SessionList = memo(function SessionList({
             ? sortedSessions.slice(0, watermark)
             : sortedSessions.slice(0, SESSION_VISIBLE_COUNT);
           const hiddenCount = sortedSessions.length - visibleSessions.length;
+          /** 已展开过（分批中或全展开）：随时可一键收起，不必等全部展开 */
+          const collapsible = !searching && isExpanded && sortedSessions.length > SESSION_VISIBLE_COUNT;
           const renamingProject = rename?.kind === 'project' && rename.key === group.key;
 
           return (
@@ -1129,31 +1131,42 @@ export const SessionList = memo(function SessionList({
                     />
                   ))}
 
-                  {(hiddenCount > 0 || (isExpanded && sortedSessions.length > SESSION_VISIBLE_COUNT)) && (
-                    <button
-                      type="button"
-                      className={styles.overflowButton}
-                      onClick={() => {
-                        if (hiddenCount > 0) {
-                          setExpandedGroups((prev) =>
-                            prev.includes(group.key) ? prev : [...prev, group.key]
-                          );
-                          setExpandedWatermarks((prev) => ({
-                            ...prev,
-                            [group.key]: (prev[group.key] || SESSION_VISIBLE_COUNT) + GROUP_WATERMARK_STEP,
-                          }));
-                        } else {
-                          toggleGroupSessions(group.key);
-                          setExpandedWatermarks((prev) => {
-                            const next = { ...prev };
-                            delete next[group.key];
-                            return next;
-                          });
-                        }
-                      }}
-                    >
-                      {hiddenCount > 0 ? `展开其余 ${hiddenCount} 个会话` : '收起会话'}
-                    </button>
+                  {(hiddenCount > 0 || collapsible) && (
+                    <div className={styles.overflowRow}>
+                      {hiddenCount > 0 && (
+                        <button
+                          type="button"
+                          className={styles.overflowButton}
+                          onClick={() => {
+                            setExpandedGroups((prev) =>
+                              prev.includes(group.key) ? prev : [...prev, group.key]
+                            );
+                            setExpandedWatermarks((prev) => ({
+                              ...prev,
+                              [group.key]: (prev[group.key] || SESSION_VISIBLE_COUNT) + GROUP_WATERMARK_STEP,
+                            }));
+                          }}
+                        >
+                          展开其余 {hiddenCount} 个会话
+                        </button>
+                      )}
+                      {collapsible && (
+                        <button
+                          type="button"
+                          className={`${styles.overflowButton} ${styles.overflowCollapse}`}
+                          onClick={() => {
+                            toggleGroupSessions(group.key);
+                            setExpandedWatermarks((prev) => {
+                              const next = { ...prev };
+                              delete next[group.key];
+                              return next;
+                            });
+                          }}
+                        >
+                          收起
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
