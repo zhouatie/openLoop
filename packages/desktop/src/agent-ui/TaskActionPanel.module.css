@@ -278,6 +278,11 @@
   color: var(--dsw-alias-state-business-primary);
 }
 
+.toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .toggleOn .toggleDot {
   opacity: 1;
 }

@@ -26,6 +26,11 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
 const CACHE_TTL_MS = 15_000;
 let cache: { at: number; items: TaskOption[] } | null = null;
 
+/** 新建任务后清缓存：下一次打开候选能看到刚建的任务与任务组 */
+export function invalidateTaskOptions(): void {
+  cache = null;
+}
+
 export async function loadTaskOptions(): Promise<TaskOption[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.items;
   const list = await api.getTasks();

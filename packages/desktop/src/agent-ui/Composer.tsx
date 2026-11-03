@@ -438,7 +438,7 @@ export const Composer = React.memo(function Composer({
           key: 'task',
           label: '任务',
           alias: 'task',
-          description: '把输入卡里的需求变成任务',
+          description: '把输入卡里的需求变成任务，可挂到任务组下',
           icon: <IconTask size={16} />,
           section: '任务与流水线',
         },
