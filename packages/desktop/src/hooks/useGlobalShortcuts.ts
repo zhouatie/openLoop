@@ -133,12 +133,12 @@ export const useGlobalShortcuts = (actions: ShortcutActions, enabled = true) => 
         return;
       }
 
-      // 3. Super + ,: 打开系统设置
+      // 3. Super + ,: 打开／关闭系统设置
       if (key === ',' || code === 'Comma') {
         e.preventDefault();
         e.stopPropagation();
         if (import.meta.env?.DEV) {
-          console.log('[Shortcut] 触发快捷键: Super + , -> 系统设置', { superKey: activeSuper });
+          console.log('[Shortcut] 触发快捷键: Super + , -> 切换系统设置', { superKey: activeSuper });
         }
         actionsRef.current.onNavigateSettings();
         return;

@@ -28,8 +28,13 @@ import { Puzzle } from 'lucide-react';
 import { BUILTIN_PLUGINS, BUILTIN_VIEW_TITLES } from './constants/builtinPlugins';
 import { getStoredSidebarOrder } from './utils/sidebarOrder';
 
+/** 设置类页面（含子页与插件管理）：Super + , 再次按下即退出 */
+const isSettingsView = (id: string) => id.startsWith('settings') || id === 'plugin-manager';
+
 export const AppContent: React.FC = () => {
   const [activePluginId, setActivePluginId] = useState<string>('kanban');
+  /** 进入设置前的视图，用于 Super + , 关闭设置时返回 */
+  const settingsReturnViewRef = useRef<string>('kanban');
   const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
   const [plugins, setPlugins] = useState<PluginManifest[]>(BUILTIN_PLUGINS);
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
@@ -148,6 +153,15 @@ export const AppContent: React.FC = () => {
       });
     },
     onNavigateSettings: () => {
+      if (isSettingsView(activePluginId)) {
+        const backView = settingsReturnViewRef.current;
+        if (import.meta.env?.DEV) {
+          console.log('[App] 关闭系统设置，返回上一视图:', backView);
+        }
+        setActivePluginId(backView);
+        return;
+      }
+      settingsReturnViewRef.current = activePluginId;
       setActivePluginId('settings-agent');
     },
     onOpenCreateTask: () => {
@@ -426,7 +440,7 @@ export const AppContent: React.FC = () => {
   }, [tasks]);
 
   const currentPlugin = plugins.find((p) => p.id === activePluginId);
-  const isSettings = activePluginId.startsWith('settings') || activePluginId === 'plugin-manager';
+  const isSettings = isSettingsView(activePluginId);
   const category = isSettings ? '设置' : '功能';
 
   let settingsSubTitle = '系统设置';
