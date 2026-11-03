@@ -923,6 +923,12 @@ export class DesktopApiService {
     });
   }
 
+  async stopTaskSession(taskId: string): Promise<{ success: boolean }> {
+    return requestJson<{ success: boolean }>(`${BASE_URL}/api/tasks/${taskId}/session/stop`, {
+      method: 'POST',
+    });
+  }
+
   async resumeTaskSession(taskId: string): Promise<{ success: boolean }> {
     return requestJson<{ success: boolean }>(`${BASE_URL}/api/tasks/${taskId}/session/resume`, {
       method: 'POST',

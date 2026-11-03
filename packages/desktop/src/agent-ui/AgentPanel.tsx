@@ -592,7 +592,7 @@ export function TaskAgentPanel({
       withdraw: (pendingId: string) => api.withdrawTaskPending(taskId, pendingId),
       pause: () => api.pauseTaskSession(taskId),
       resume: () => api.resumeTaskSession(taskId),
-      stop: () => api.pauseTaskSession(taskId),
+      stop: () => api.stopTaskSession(taskId),
     }),
     [taskId]
   );

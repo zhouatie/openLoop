@@ -1201,7 +1201,18 @@ export class OpenLoopServer {
           if (action === 'resume') {
             return this.sendJson(res, 200, { success: await agentSessionHost.resume(sessionKey) }, reqMeta);
           }
-          return this.sendJson(res, 200, { success: agentSessionHost.stop(sessionKey) }, reqMeta);
+          if (action === 'stop') {
+            const hostStopped = agentSessionHost.stop(sessionKey);
+            if (!hostStopped) {
+              const rpcSession = PiRpcSessionManager.getInstance().getSession(sessionKey);
+              if (rpcSession) {
+                rpcSession.terminate();
+                PiRpcSessionManager.getInstance().removeSession(sessionKey);
+                return this.sendJson(res, 200, { success: true }, reqMeta);
+              }
+            }
+            return this.sendJson(res, 200, { success: true }, reqMeta);
+          }
         } catch (err: any) {
           serverLogger.error(`[Agent:Session] ${action} 失败: ${err?.message || err}`);
           return this.sendJson(res, 500, { error: err?.message || 'Agent 会话操作失败' }, reqMeta);
@@ -2611,8 +2622,8 @@ ${existingSubSummary}
         return this.sendJson(res, 200, { success: true, message: 'Agent session resumed and running', active: true }, reqMeta);
       }
 
-      // Task session pause: /api/tasks/:id/session/pause
-      const taskPauseMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/pause$/);
+      // Task session pause / stop: /api/tasks/:id/session/(pause|stop)
+      const taskPauseMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/(pause|stop)$/);
       if (taskPauseMatch && method === 'POST') {
         const taskId = taskPauseMatch[1];
         const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
@@ -2620,7 +2631,7 @@ ${existingSubSummary}
           const paused = await rpcSession.pause();
           return this.sendJson(res, 200, { success: paused }, reqMeta);
         }
-        return this.sendJson(res, 400, { error: 'No active session to pause' }, reqMeta);
+        return this.sendJson(res, 200, { success: true }, reqMeta);
       }
 
       // Task session withdraw: /api/tasks/:id/session/withdraw

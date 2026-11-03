@@ -257,6 +257,7 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
    * 由事件驱动而不是靠渲染副作用，避免某次渲染被合并后运行指示一直不熄灭。
    */
   const [steadyBusy, setSteadyBusy] = useState(false);
+  const stoppedRef = useRef<number>(0);
   const idleTimerRef = useRef<number | null>(null);
   const clearIdleTimer = useCallback(() => {
     if (idleTimerRef.current === null) return;
@@ -267,9 +268,14 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
     if (import.meta.env?.DEV) console.log('[AgentStream] busy 同步:', busy);
     clearIdleTimer();
     if (busy) {
+      if (stoppedRef.current && Date.now() - stoppedRef.current < 3000) {
+        if (import.meta.env?.DEV) console.log('[AgentStream] 终止保护期内，忽略 busy: true');
+        return;
+      }
       setSteadyBusy(true);
       return;
     }
+    stoppedRef.current = 0;
     idleTimerRef.current = window.setTimeout(() => {
       idleTimerRef.current = null;
       setSteadyBusy(false);
@@ -383,14 +389,26 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   const sendMessage = useCallback(
     async (message: string, attachments?: TaskAttachment[], extra?: Record<string, unknown>) => {
       if (!transport || !message.trim()) return;
+      stoppedRef.current = 0;
       await transport.send(message.trim(), attachments, extra);
     },
     [transport]
   );
 
   const pause = useCallback(async () => {
-    await transport?.pause?.();
-  }, [transport]);
+    stoppedRef.current = Date.now();
+    clearIdleTimer();
+    setSteadyBusy(false);
+    if (stateRef.current) {
+      stateRef.current = { ...stateRef.current, isBusy: false };
+      scheduleRender();
+    }
+    try {
+      await transport?.pause?.();
+    } catch (err) {
+      if (import.meta.env?.DEV) console.warn('[AgentStream] 暂停会话失败:', err);
+    }
+  }, [transport, clearIdleTimer, scheduleRender]);
   const withdraw = useCallback(
     async (pendingId: string) => {
       if (import.meta.env?.DEV) console.log('[AgentStream] 撤回排队输入:', pendingId);
@@ -400,12 +418,24 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   );
 
   const resume = useCallback(async () => {
+    stoppedRef.current = 0;
     await transport?.resume?.();
   }, [transport]);
 
   const stop = useCallback(async () => {
-    await transport?.stop?.();
-  }, [transport]);
+    stoppedRef.current = Date.now();
+    clearIdleTimer();
+    setSteadyBusy(false);
+    if (stateRef.current) {
+      stateRef.current = { ...stateRef.current, isBusy: false };
+      scheduleRender();
+    }
+    try {
+      await transport?.stop?.();
+    } catch (err) {
+      if (import.meta.env?.DEV) console.warn('[AgentStream] 停止会话失败:', err);
+    }
+  }, [transport, clearIdleTimer, scheduleRender]);
 
   const state = stateRef.current;
   const overlapCache = useRef<OverlapCache>({ start: -1 });
