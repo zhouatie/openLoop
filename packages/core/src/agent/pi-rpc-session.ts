@@ -100,6 +100,18 @@ function composeMessage(message: string, attachments?: TaskAttachment[]): string
 const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_INLINE_IMAGES = 4;
 
+/** 规范化模型全标识（provider/modelId），避免丢失 provider 前缀导致输入框模型闪烁 */
+export function formatFullModel(model?: string, provider?: string, fallbackCurrent?: string): string | undefined {
+  if (!model) return fallbackCurrent;
+  if (provider && !model.startsWith(`${provider}/`)) {
+    return `${provider}/${model}`;
+  }
+  if (fallbackCurrent && fallbackCurrent.endsWith(`/${model}`)) {
+    return fallbackCurrent;
+  }
+  return model;
+}
+
 /** 工具结果里的图片块转成可渲染的 data URL（截图类工具的预览来源） */
 function resultImageUrls(result: any): string[] {
   const content = Array.isArray(result?.content) ? result.content : [];
@@ -635,7 +647,8 @@ export class PiRpcSessionInstance extends EventEmitter {
           this.notifyUpdate(true);
         } else if (msg.role === 'assistant') {
           // 会话没指定模型时模型由 pi 决定，只能从消息里得知：记下来供输入框显示与后续消息沿用
-          if (msg.model) this.model = msg.model;
+          const fullModel = formatFullModel(msg.model, msg.provider, this.model);
+          if (fullModel) this.model = fullModel;
           const newAssistantMsg: SessionChatMessage = {
             id: `msg_a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             role: 'assistant',
@@ -645,7 +658,7 @@ export class PiRpcSessionInstance extends EventEmitter {
             tools: [],
             timestamp: Date.now(),
             turn: this.turnSeq || undefined,
-            model: msg.model || this.model,
+            model: fullModel || this.model,
             source: 'live',
           };
           this.currentAssistantMessage = newAssistantMsg;
@@ -807,8 +820,11 @@ export class PiRpcSessionInstance extends EventEmitter {
           const usage = compactUsage(msg?.usage);
           if (usage) this.currentAssistantMessage.usage = usage;
           if (msg?.model) {
-            this.model = msg.model;
-            this.currentAssistantMessage.model = msg.model;
+            const fullModel = formatFullModel(msg.model, msg.provider, this.model);
+            if (fullModel) {
+              this.model = fullModel;
+              this.currentAssistantMessage.model = fullModel;
+            }
           }
           if (msg?.stopReason) this.currentAssistantMessage.stopReason = msg.stopReason;
           this.emitMessage(this.currentAssistantMessage);

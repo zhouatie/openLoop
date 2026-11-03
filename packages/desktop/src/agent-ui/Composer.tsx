@@ -413,7 +413,7 @@ export const Composer = React.memo(function Composer({
                 label: item.label,
                 icon: <IconChip size={16} />,
                 section: provider,
-                checked: item.id === model || item.id === (model ? model.split(':')[0] : ''),
+                checked: item.id === model || item.id === (model ? model.split(':')[0] : '') || (Boolean(model) && item.id.endsWith(`/${model}`)),
               };
             });
       // 没有对应回调时这行本就不出现，这里只做防御

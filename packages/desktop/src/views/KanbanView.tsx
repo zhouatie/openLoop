@@ -659,12 +659,16 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   }, []);
 
   const effectiveChatModel = useMemo(() => {
-    return (
+    const raw = (
       sessionState?.model?.trim() ||
       (activeTask?.context?.model as string)?.trim() ||
       defaultModel?.trim() ||
       '默认模型'
     );
+    if (defaultModel?.trim() && raw && defaultModel.trim().endsWith(`/${raw}`)) {
+      return defaultModel.trim();
+    }
+    return raw;
   }, [sessionState?.model, activeTask?.context?.model, defaultModel]);
 
   const uploadChatFiles = async (files: File[]) => {

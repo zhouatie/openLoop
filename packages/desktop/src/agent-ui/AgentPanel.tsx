@@ -690,7 +690,7 @@ export function TaskAgentPanel({
       turnStartedAt={state?.turnStartedAt}
       lastTurnDurationMs={state?.lastTurnDurationMs}
       awaitingInput={awaitingInput}
-      model={taskModel || state?.model || model}
+      model={canonicalModel(taskModel || state?.model || model || '', availableModels)}
       models={availableModels}
       onModelSelect={availableModels.length > 0 ? handleModelSelect : undefined}
       contentWidth={920}
@@ -730,6 +730,13 @@ export function TaskAgentPanel({
     />
     </OpenFileContext.Provider>
   );
+}
+
+/** 规范化模型标识为完整 ID（如 antigravity/gemini-3.8-flash 归一化为 magpie/antigravity/gemini-3.8-flash） */
+function canonicalModel(model: string, availableModels: Array<{ id: string }>): string {
+  if (!model) return '';
+  const match = availableModels.find((m) => m.id === model || m.id.endsWith(`/${model}`));
+  return match ? match.id : model;
 }
 
 /** 历史会话的模型：正文里最后一次 model_change 优先，其次摘要记录的 lastModel */
@@ -1255,7 +1262,8 @@ export function GlobalAgentPanel({
     });
 
   /** 输入框显示的模型：实时状态 > 历史最后一次 > 系统默认（新会话首轮之前） */
-  const modelHint = state?.model || sessionModel || defaultModel;
+  const modelPool = models.length > 0 ? models : globalModels;
+  const modelHint = canonicalModel(state?.model || sessionModel || defaultModel, modelPool);
   modelHintRef.current = modelHint;
 
   /** 编辑排队中的插话：先撤回，正文回到输入框 */
