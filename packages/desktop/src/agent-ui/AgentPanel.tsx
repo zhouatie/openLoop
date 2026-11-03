@@ -30,6 +30,8 @@ import { SessionTreePanel } from './SessionTreePanel';
 import { useAgentStream } from './useAgentStream';
 import { setViewingAgentSession, rememberAgentSessionTitles } from '../hooks/useAgentNotifications';
 import { QueuedInputs } from './QueuedInputs';
+import { TaskActionPanel, type TaskActionMode } from './TaskActionPanel';
+import { loadTaskOptions, TASK_STATUS_LABEL } from './task-options';
 import { Workflow } from 'lucide-react';
 import styles from './AgentPanel.module.css';
 
@@ -92,6 +94,23 @@ async function workspaceMentionItems(base: string, query: string): Promise<Compo
     /* 工作区不可读时只返回空候选 */
     return [];
   }
+}
+
+/** @ 菜单的任务候选：标题模糊匹配，当前任务自身不参与自引用 */
+async function taskMentionItems(query: string, excludeId?: string): Promise<ComposerMentionItem[]> {
+  const tasks = await loadTaskOptions().catch(() => []);
+  const keyword = query.toLowerCase();
+  return tasks
+    .filter((task) => task.id !== excludeId)
+    .filter((task) => !keyword || task.title.toLowerCase().includes(keyword))
+    .slice(0, 5)
+    .map((task) => ({
+      key: task.id,
+      label: task.title,
+      kind: 'task' as const,
+      refId: task.id,
+      description: `${TASK_STATUS_LABEL[task.status] || task.status}${task.isGroup ? ' · 任务组' : ''}`,
+    }));
 }
 
 /**
@@ -265,6 +284,8 @@ export function AgentPanelShell({
     setDraft(draftsRef.current[next] || '');
   }, [draftKey, draft]);
   const [sheetOpen, setSheetOpen] = useState(false);
+  /** ➕ 面板打开的任务面板：新建任务 / 新建任务组 / 执行流水线 */
+  const [taskAction, setTaskAction] = useState<TaskActionMode | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const lastEscRef = useRef(0);
 
@@ -328,28 +349,47 @@ export function AgentPanelShell({
   }, [isBusy, onStop, onClose]);
 
   const composer = (
-    <Composer
-      value={draft}
-      onChange={setDraft}
-      onSend={handleSend}
-      onAcceleratedSend={handleAcceleratedSend}
-      onStop={onStop}
-      busy={isBusy}
-      awaitingInput={awaitingInput}
-      disabled={composerDisabled || sending}
-      model={model}
-      thinking={thinking}
-      attachments={attachments}
-      onAddFiles={onAddFiles}
-      onRemoveAttachment={onRemoveAttachment}
-      commands={commands}
-      onRequestMentions={onRequestMentions}
-      permission={permission}
-      onPermissionSelect={onPermissionSelect}
-      models={models}
-      onModelSelect={onModelSelect}
-      toolsExtra={composerExtra}
-    />
+    <div className={styles.composerHost}>
+      {taskAction && (
+        <div className={styles.taskActionLayer}>
+          <TaskActionPanel
+            mode={taskAction}
+            workspace={cwd}
+            draft={draft}
+            onClose={() => setTaskAction(null)}
+            onOutcome={(outcome) => {
+              if (import.meta.env?.DEV) console.log('[AgentPanel] 任务面板结果:', outcome);
+            }}
+          />
+        </div>
+      )}
+      <Composer
+        value={draft}
+        onChange={setDraft}
+        onSend={handleSend}
+        onAcceleratedSend={handleAcceleratedSend}
+        onStop={onStop}
+        busy={isBusy}
+        awaitingInput={awaitingInput}
+        disabled={composerDisabled || sending}
+        model={model}
+        thinking={thinking}
+        attachments={attachments}
+        onAddFiles={onAddFiles}
+        onRemoveAttachment={onRemoveAttachment}
+        commands={commands}
+        onRequestMentions={onRequestMentions}
+        permission={permission}
+        onPermissionSelect={onPermissionSelect}
+        models={models}
+        onModelSelect={onModelSelect}
+        toolsExtra={composerExtra}
+        onTaskAction={(mode) => {
+          if (import.meta.env?.DEV) console.log('[AgentPanel] 打开任务面板:', mode);
+          setTaskAction(mode);
+        }}
+      />
+    </div>
   );
 
   // 消息已发出但实时状态还没回来时也算运行中，否则新会话首轮开头没有运行指示
@@ -530,11 +570,14 @@ export function TaskAgentPanel({
     [uiRequest, taskId]
   );
 
-  // @ 候选：任务工作区文件
+  // @ 候选：任务工作区文件 + 其他任务（当前任务自身不出现）
   const requestMentions = useCallback(
-    (query: string): Promise<ComposerMentionItem[]> =>
-      cwd ? workspaceMentionItems(cwd, query) : Promise.resolve([]),
-    [cwd]
+    async (query: string): Promise<ComposerMentionItem[]> => {
+      const items = cwd ? await workspaceMentionItems(cwd, query) : [];
+      items.push(...(await taskMentionItems(query, taskId)));
+      return items;
+    },
+    [cwd, taskId]
   );
 
   const transport = useMemo(
@@ -1776,7 +1819,7 @@ export function GlobalAgentPanel({
     [activeId, reload]
   );
 
-  // @ 候选：当前工作区文件 + 最近会话
+  // @ 候选：当前工作区文件 + 最近会话 + 任务
   const requestMentions = useCallback(
     async (query: string): Promise<ComposerMentionItem[]> => {
       const base = cwd || sessions.find((item) => item.id === activeId)?.cwd || '';
@@ -1799,6 +1842,9 @@ export function GlobalAgentPanel({
           description: item.cwd === base ? age : `${projectLabel(item.cwd)} · ${age}`,
         });
       }
+
+      // 任务候选：把看板里的任务作为背景资料带进这一轮对话
+      items.push(...(await taskMentionItems(query)));
 
       return items;
     },

@@ -12,19 +12,19 @@ import type {
   SerializedLexicalNode,
   Spread,
 } from 'lexical';
-import { IconFile, IconFolderClose, IconNewChat } from '../icons';
+import { IconFile, IconFolderClose, IconNewChat, IconTask } from '../icons';
 import styles from './composer-editor.module.css';
 
-export type ReferenceAppearance = 'file' | 'folder' | 'session';
+export type ReferenceAppearance = 'file' | 'folder' | 'session' | 'task';
 
 /** 一次引用插入的完整信息 */
 export interface ReferenceInsert {
-  /** 文件/目录的工作区相对路径（目录带结尾斜杠），会话的会话 id */
+  /** 文件/目录的工作区相对路径（目录带结尾斜杠），会话与任务的 id */
   ref: string;
   /** 行内展示的名字 */
   label: string;
   appearance: ReferenceAppearance;
-  /** 剪贴板与草稿里的文本形式：文件目录是 `@path`，会话是 `@[标题](openloop-session:<id>)` */
+  /** 剪贴板与草稿里的文本形式：文件目录是 `@path`，会话与任务是 `@[标题](openloop-session|task:<id>)` */
   clipboardText: string;
 }
 
@@ -132,7 +132,13 @@ export function $isReferenceChipNode(node: LexicalNode | null | undefined): node
 /** chip 的视觉本体：图标 + 名字，跟随正文基线 */
 function ReferenceChip({ label, appearance }: { label: string; appearance: ReferenceAppearance }) {
   const Icon =
-    appearance === 'session' ? IconNewChat : appearance === 'folder' ? IconFolderClose : IconFile;
+    appearance === 'session'
+      ? IconNewChat
+      : appearance === 'task'
+        ? IconTask
+        : appearance === 'folder'
+          ? IconFolderClose
+          : IconFile;
   return (
     <span className={styles.chip} title={label}>
       <Icon size={14} className={styles.chipIcon} />

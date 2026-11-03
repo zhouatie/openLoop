@@ -294,6 +294,9 @@
   border: 0;
   border-radius: var(--dsw-radius-lg);
   background: var(--dsw-specific-menu);
+  /* 候选菜单同样需要背景模糊：半透明填充在深色内容上会透出字形 */
+  -webkit-backdrop-filter: var(--dsw-menu-backdrop-filter);
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
   box-shadow: var(--dsw-elevation-prominent);
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
 }

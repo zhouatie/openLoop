@@ -505,3 +505,25 @@ export const IconClock = createIcon('IconClock', 16, () => (
     <path d="M8 4.31V8.46L11 10.08" stroke="currentColor" />
   </>
 ));
+
+/** 任务：勾选清单，➕ 面板的任务入口 */
+export const IconTask = createIcon('IconTask', 16, () => (
+  <>
+    <rect x="2.5" y="2.5" width="11" height="11" rx="2.5" stroke="currentColor" />
+    <path d="M5.4 8.1 7.1 9.8 10.7 6.1" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+  </>
+));
+
+/** 任务组：层叠多边形，与任务组的多工序语义一致 */
+export const IconGroup = createIcon('IconGroup', 16, () => (
+  <>
+    <path d="M8 2.2 13.6 5 8 7.8 2.4 5 8 2.2Z" stroke="currentColor" strokeLinejoin="round" />
+    <path d="M2.4 8 8 10.8 13.6 8" stroke="currentColor" strokeLinejoin="round" />
+    <path d="M2.4 11 8 13.8 13.6 11" stroke="currentColor" strokeLinejoin="round" />
+  </>
+));
+
+/** 执行：三角形播放键，流水线启动入口 */
+export const IconRun = createIcon('IconRun', 16, () => (
+  <path d="M5.6 3.4 12.4 8l-6.8 4.6V3.4Z" stroke="currentColor" strokeLinejoin="round" />
+));

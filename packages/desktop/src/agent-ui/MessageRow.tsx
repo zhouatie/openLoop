@@ -8,7 +8,7 @@ import { ReasoningRow } from './dsh/ReasoningRow';
 import { MessageActions, formatTokens } from './dsh/MessageActions';
 import { Tooltip } from './dsh/Tooltip';
 import { writeClipboard } from './dsh/clipboard';
-import { IconCopy, IconFile, IconFolderClose, IconNewChat } from './icons';
+import { IconCopy, IconFile, IconFolderClose, IconNewChat, IconTask } from './icons';
 import { splitMentions, stripReferenceContext } from './mentions';
 import styles from './MessageRow.module.css';
 
@@ -122,6 +122,8 @@ const MentionText = memo(function MentionText({ text }: { text: string }) {
           >
             {run.ref.kind === 'session' ? (
               <IconNewChat size={16} className={styles.mentionIcon} />
+            ) : run.ref.kind === 'task' ? (
+              <IconTask size={16} className={styles.mentionIcon} />
             ) : run.ref.kind === 'file' ? (
               <IconFile size={16} className={styles.mentionIcon} />
             ) : (

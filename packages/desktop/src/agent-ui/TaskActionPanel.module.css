@@ -1,0 +1,328 @@
+/* 任务面板：与输入卡同一套菜单表面（DSH MenuSurface 的圆角、投影与内边距） */
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-xl);
+  background: var(--dsw-specific-menu);
+  /* 菜单面是半透明的：与 DSH 菜单同一套背景模糊，背后内容不会透出字形 */
+  -webkit-backdrop-filter: var(--dsw-menu-backdrop-filter);
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  box-shadow: var(--dsw-elevation-prominent);
+  font-family: var(--dsw-font-family);
+  color: var(--dsw-alias-label-primary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 6px;
+}
+
+.headerIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.headerTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-caption);
+}
+
+.back,
+.close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out),
+    color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+@media (hover: hover) {
+  .back:hover,
+  .close:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  padding: 0 8px;
+  height: 30px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.searchIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.searchInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow: auto;
+  gap: 1px;
+}
+
+.row,
+.pickRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+@media (hover: hover) {
+  .row:hover,
+  .pickRow:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.rowIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rowTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rowMeta {
+  flex: none;
+  font-size: 11.5px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 项目目录的完整路径：跟在目录名后面，过长时自己截断 */
+.rowPath {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 58%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rowPlaceholder {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 浏览目录：列表末尾的入口，用业务色与候选项区分 */
+.rowAction .rowTitle {
+  flex: none;
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12.5px;
+}
+
+.rowRunning {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.rowCheck {
+  display: inline-flex;
+  flex: none;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.empty {
+  padding: 10px 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.titleInput,
+.linesInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  resize: none;
+}
+
+.titleInput::placeholder,
+.linesInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.titleInput:focus,
+.linesInput:focus {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.linesInput {
+  margin-bottom: 2px;
+  font-size: 12.5px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px 0;
+  margin-top: 2px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: color var(--ds-transition-duration-fast) var(--ds-ease-in-out),
+    border-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.toggleDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.4;
+}
+
+.toggleOn {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.toggleOn .toggleDot {
+  opacity: 1;
+}
+
+.hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  margin-left: auto;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--dsw-alias-state-business-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: #fff;
+  cursor: pointer;
+  transition: opacity var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.submit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.spin {
+  animation: taskActionSpin 0.9s linear infinite;
+}
+
+@keyframes taskActionSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
