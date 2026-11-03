@@ -38,6 +38,14 @@ export const SHORTCUT_COMMANDS: ShortcutCommand[] = [
     allowInInput: true,
   },
   {
+    id: 'composer.addMenu',
+    label: '➕ 面板',
+    description: '打开输入框的添加面板：任务、文件、权限与模型',
+    group: 'chat',
+    defaultBinding: 'super+j',
+    allowInInput: true,
+  },
+  {
     id: 'shortcuts.sheet',
     label: '快捷键速查',
     description: '打开面板内快捷键一览',
