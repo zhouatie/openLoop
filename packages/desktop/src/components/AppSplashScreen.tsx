@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BrandLogo } from './BrandLogo';
 import styles from './AppSplashScreen.module.css';
 
@@ -31,6 +31,9 @@ export const AppSplashScreen: React.FC<AppSplashScreenProps> = ({
   const [isExiting, setIsExiting] = useState<boolean>(false);
   const [minTimePassed, setMinTimePassed] = useState<boolean>(false);
   const [maxTimePassed, setMaxTimePassed] = useState<boolean>(false);
+  // 回调只用于退出完成通知，放进 ref 避免父级重渲染打断卸载计时
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   useEffect(() => {
     if (import.meta.env?.DEV) {
@@ -59,27 +62,29 @@ export const AppSplashScreen: React.FC<AppSplashScreenProps> = ({
 
     // 当满足最短播放时间且背景数据加载完成，或者触发最大安全上限兜底时，启动渐隐退出
     const canExit = (minTimePassed && !isLoading) || maxTimePassed;
-    if (canExit) {
-      if (import.meta.env?.DEV) {
-        console.log('[SplashScreen] 满足退出条件，启动优雅淡出过渡', {
-          minTimePassed,
-          isLoading,
-          maxTimePassed,
-        });
-      }
-      setIsExiting(true);
-
-      const exitTimer = setTimeout(() => {
-        setIsMounted(false);
-        if (import.meta.env?.DEV) {
-          console.log('[SplashScreen] 启动 Logo 动效彻底结束，已卸载 DOM');
-        }
-        onComplete?.();
-      }, 450);
-
-      return () => clearTimeout(exitTimer);
+    if (!canExit) return;
+    if (import.meta.env?.DEV) {
+      console.log('[SplashScreen] 满足退出条件，启动优雅淡出过渡', {
+        minTimePassed,
+        isLoading,
+        maxTimePassed,
+      });
     }
-  }, [minTimePassed, isLoading, maxTimePassed, isExiting, isMounted, onComplete]);
+    setIsExiting(true);
+  }, [minTimePassed, isLoading, maxTimePassed, isExiting, isMounted]);
+
+  // 淡出结束后卸载 DOM 并通知调用方；依赖只有稳定的状态值，父级重渲染不会重置计时
+  useEffect(() => {
+    if (!isExiting || !isMounted) return;
+    const exitTimer = setTimeout(() => {
+      setIsMounted(false);
+      if (import.meta.env?.DEV) {
+        console.log('[SplashScreen] 启动 Logo 动效彻底结束，已卸载 DOM');
+      }
+      onCompleteRef.current?.();
+    }, 450);
+    return () => clearTimeout(exitTimer);
+  }, [isExiting, isMounted]);
 
   if (!isMounted) return null;
 
