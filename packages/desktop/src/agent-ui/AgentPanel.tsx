@@ -534,23 +534,6 @@ export function TaskAgentPanel({
   const { models: availableModels } = useAgentModels();
   const [taskModel, setTaskModel] = useState<string>('');
 
-  useEffect(() => {
-    if (state?.model) setTaskModel(state.model);
-    else if (model) setTaskModel(model);
-  }, [state?.model, model]);
-
-  const handleModelSelect = useCallback(
-    async (modelId: string) => {
-      if (!taskId) return;
-      if (import.meta.env?.DEV) console.log('[AgentPanel] 切换任务会话模型:', { taskId, modelId });
-      setTaskModel(modelId);
-      await api.setTaskSessionModel(taskId, modelId).catch((err) => {
-        if (import.meta.env?.DEV) console.warn('[AgentPanel] 切换任务会话模型失败:', err);
-      });
-    },
-    [taskId]
-  );
-
   /** 打开工作台并切到某个页签；带路径就是把该文件作为预览页签打开 */
   const openDock = dock.openTab;
 
@@ -620,6 +603,23 @@ export function TaskAgentPanel({
       load,
       transport,
     });
+
+  useEffect(() => {
+    if (state?.model) setTaskModel(state.model);
+    else if (model) setTaskModel(model);
+  }, [state?.model, model]);
+
+  const handleModelSelect = useCallback(
+    async (modelId: string) => {
+      if (!taskId) return;
+      if (import.meta.env?.DEV) console.log('[AgentPanel] 切换任务会话模型:', { taskId, modelId });
+      setTaskModel(modelId);
+      await api.setTaskSessionModel(taskId, modelId).catch((err) => {
+        if (import.meta.env?.DEV) console.warn('[AgentPanel] 切换任务会话模型失败:', err);
+      });
+    },
+    [taskId]
+  );
 
   /** 编辑排队中的插话：先撤回，正文回到输入框 */
   const handleEditQueued = useCallback(
