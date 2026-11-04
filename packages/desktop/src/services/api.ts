@@ -25,6 +25,7 @@ import {
   StorageCleanResult,
   SessionChatMessage,
   TaskSessionRef,
+  TaskBackgroundProcess,
 } from '@openloop/core';
 import type { OpenInAppTarget, SessionTreeSnapshot } from '@openloop/core/types';
 
@@ -808,6 +809,28 @@ export class DesktopApiService {
     }
     return requestJson<{ success: boolean; status: string }>(
       `${BASE_URL}/api/tasks/${id}/sandbox/stop`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  async getTaskProcesses(id: string): Promise<{ taskId: string; processes: TaskBackgroundProcess[] }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 获取任务 [${id}] 后台进程名册`);
+    }
+    return requestJson<{ taskId: string; processes: TaskBackgroundProcess[] }>(
+      `${BASE_URL}/api/tasks/${id}/processes`
+    );
+  }
+
+  async stopTaskProcess(id: string, processId: string): Promise<{ success: boolean }> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 终止任务 [${id}] 后台进程 ${processId}`);
+    }
+    return requestJson<{ success: boolean }>(
+      `${BASE_URL}/api/tasks/${id}/processes/${encodeURIComponent(processId)}/stop`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -108,6 +108,7 @@ export class OpenLoopServer {
   private clients: Set<WebSocket> = new Set();
   private staticDir?: string;
   private unsubscribeDeviceLeases?: () => void;
+  private unsubscribeTaskProcesses?: () => void;
   private workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>();
   private skillsCache: { data: { commands: any[]; skills: any[] }; timestamp: number } | null = null;
 
@@ -222,6 +223,24 @@ export class OpenLoopServer {
     this.unsubscribeDeviceLeases = DeviceLeasePool.subscribe(() => {
       this.broadcast({ type: 'qa:device_leases', data: { leases: DeviceLeasePool.getSnapshots() } });
     });
+
+    // 任务后台进程名册推流：只在进程注册 / 退出 / 被终止时推一次整份名册
+    this.unsubscribeTaskProcesses = TaskProcessManager.getInstance().onProcessesChange((taskId) => {
+      this.broadcast({ type: 'process:changed', data: this.backgroundProcesses(taskId) });
+    });
+  }
+
+  /** 任务后台进程名册：靶机服务附带可直接打开的地址 */
+  private backgroundProcesses(taskId: string) {
+    const worktree = this.store.getTask(taskId)?.context?.worktree;
+    const webPort = worktree?.webPort || worktree?.ports?.webPort;
+    const rows = TaskProcessManager.getInstance().list(taskId);
+    return {
+      taskId,
+      processes: rows.map((row) => (row.port !== undefined && row.port === webPort
+        ? { ...row, url: worktree?.targetUrl || `http://localhost:${row.port}` }
+        : row)),
+    };
   }
 
   // 任务事件按摘要推流：剔除超大会话与 Diff 明细，避免每条实时事件都搬运数 MB 数据
@@ -320,6 +339,7 @@ export class OpenLoopServer {
   public async stop(): Promise<void> {
     this.scheduler.stop();
     this.unsubscribeDeviceLeases?.();
+    this.unsubscribeTaskProcesses?.();
     terminalHost.closeAll();
 
     for (const ws of this.clients) {
@@ -3078,6 +3098,21 @@ ${existingSubSummary}
           },
           reqMeta
         );
+      }
+
+      // 任务后台进程名册: /api/tasks/:id/processes
+      const taskProcessesMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/processes$/);
+      if (taskProcessesMatch && method === 'GET') {
+        return this.sendJson(res, 200, this.backgroundProcesses(taskProcessesMatch[1]), reqMeta);
+      }
+
+      // 终止单个后台进程: /api/tasks/:id/processes/:processId/stop
+      const taskProcessStopMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/processes\/([a-zA-Z0-9_-]+)\/stop$/);
+      if (taskProcessStopMatch && method === 'POST') {
+        const [, taskId, processId] = taskProcessStopMatch;
+        const stopped = TaskProcessManager.getInstance().stop(taskId, processId);
+        serverLogger.info(`[TaskProcess] 界面终止后台进程 (Task: ${taskId}, Process: ${processId}) 结果: ${stopped}`);
+        return this.sendJson(res, stopped ? 200 : 404, { success: stopped }, reqMeta);
       }
 
       // Sandbox start: /api/tasks/:id/sandbox/start

@@ -500,6 +500,20 @@ export interface WorktreeContextInfo {
   };
 }
 
+/** 任务维度正在运行的后台进程（沙箱核心服务、靶机服务、编排节点起的长驻服务） */
+export interface TaskBackgroundProcess {
+  id: string;
+  /** 进程来源名称，例如 sandbox-core-server / sandbox-dev-server / 编排节点名 */
+  name: string;
+  pid?: number;
+  /** 进程监听端口；无端口的进程省略 */
+  port?: number;
+  /** 进程注册时间（毫秒），用于展示已运行时长 */
+  startedAt: number;
+  /** 可在浏览器打开的地址，仅靶机服务提供 */
+  url?: string;
+}
+
 export interface FileDiffItem {
   file: string;
   oldPath?: string;

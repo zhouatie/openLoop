@@ -5,7 +5,7 @@ import net from 'net';
 import Database from 'better-sqlite3';
 import http from 'http';
 import { spawn, execSync, ChildProcess } from 'child_process';
-import { WorktreeContextInfo, FileDiffItem, TaskWorktreeDiffResult, Task } from '../types';
+import { WorktreeContextInfo, FileDiffItem, TaskWorktreeDiffResult, Task, TaskBackgroundProcess } from '../types';
 import { createLogger } from '../logger';
 import { PiSessionManager } from '../agent/pi-session';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
@@ -31,6 +31,15 @@ export function findRepoRoot(startDir?: string): string {
   return process.cwd();
 }
 
+/** 进程组内部记录：proc 句柄只在本进程内存里存在，不外发 */
+interface TaskProcessEntry {
+  id: string;
+  proc: ChildProcess;
+  name?: string;
+  port?: number;
+  startedAt: number;
+}
+
 /**
  * 通用任务后台进程生命周期管理器
  * 负责统一管理流水线执行过程中启动的任意后台守护进程（如开发服务、靶机进程等）
@@ -38,7 +47,8 @@ export function findRepoRoot(startDir?: string): string {
  */
 export class TaskProcessManager {
   private static instance: TaskProcessManager;
-  private processes: Map<string, Array<{ id: string; proc: ChildProcess; name?: string; port?: number }>> = new Map();
+  private processes: Map<string, TaskProcessEntry[]> = new Map();
+  private listeners = new Set<(taskId: string) => void>();
 
   public static getInstance(): TaskProcessManager {
     if (!TaskProcessManager.instance) {
@@ -51,27 +61,68 @@ export class TaskProcessManager {
     TaskProcessManager.getInstance().stopAll(taskId);
   }
 
+  /** 订阅进程组变化（注册 / 退出 / 终止）；回调只带任务 ID，调用方按需重取名册 */
+  public onProcessesChange(listener: (taskId: string) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** 任务当前在跑的后台进程快照 */
+  public list(taskId: string): TaskBackgroundProcess[] {
+    const list = this.processes.get(taskId);
+    if (!list) return [];
+    return list.map((item) => ({
+      id: item.id,
+      name: item.name || 'background-process',
+      pid: item.proc.pid,
+      ...(item.port !== undefined ? { port: item.port } : {}),
+      startedAt: item.startedAt,
+    }));
+  }
+
+  /** 终止任务下的单个进程；进程已退出或不存在时返回 false */
+  public stop(taskId: string, processId: string): boolean {
+    const list = this.processes.get(taskId);
+    const item = list?.find((entry) => entry.id === processId);
+    if (!list || !item) return false;
+    this.killEntry(item);
+    const remain = list.filter((entry) => entry !== item);
+    if (remain.length > 0) {
+      this.processes.set(taskId, remain);
+    } else {
+      this.processes.delete(taskId);
+    }
+    this.emitChange(taskId);
+    return true;
+  }
+
   public register(taskId: string, proc: ChildProcess, meta?: { name?: string; port?: number }) {
     const list = this.processes.get(taskId) || [];
-    const item = {
+    const item: TaskProcessEntry = {
       id: Math.random().toString(36).substring(2),
       proc,
       name: meta?.name,
       port: meta?.port,
+      startedAt: Date.now(),
     };
     list.push(item);
     this.processes.set(taskId, list);
+    this.emitChange(taskId);
 
     proc.once('exit', () => {
       const currentList = this.processes.get(taskId);
-      if (currentList) {
-        const filtered = currentList.filter((p) => p.proc !== proc);
-        if (filtered.length > 0) {
-          this.processes.set(taskId, filtered);
-        } else {
-          this.processes.delete(taskId);
-        }
+      if (!currentList) return;
+      const filtered = currentList.filter((p) => p.proc !== proc);
+      // 主动 stop 过的条目已被移除，退出事件不再重复推名册
+      if (filtered.length === currentList.length) return;
+      if (filtered.length > 0) {
+        this.processes.set(taskId, filtered);
+      } else {
+        this.processes.delete(taskId);
       }
+      this.emitChange(taskId);
     });
 
     logger.info(`[TaskProcess] 已注册后台进程 (Task: ${taskId}, PID: ${proc.pid}, Name: ${meta?.name || 'anonymous'})`);
@@ -82,25 +133,40 @@ export class TaskProcessManager {
     if (!list || list.length === 0) return;
 
     for (const item of list) {
-      if (item.proc && item.proc.pid) {
-        try {
-          if (process.platform !== 'win32') {
-            process.kill(-item.proc.pid, 'SIGKILL');
-          } else {
-            execSync(`taskkill /F /T /PID ${item.proc.pid}`, { stdio: 'ignore' });
-          }
-          logger.info(`[TaskProcess] 已安全终止后台进程 PID: ${item.proc.pid} (${item.name || ''})`);
-        } catch {
-          try {
-            item.proc.kill('SIGKILL');
-          } catch {}
-        }
-      }
-      if (item.port) {
-        WorktreeManager.getInstance().killPortIfBusy(item.port);
-      }
+      this.killEntry(item);
     }
     this.processes.delete(taskId);
+    this.emitChange(taskId);
+  }
+
+  /** 终止单个进程：先整组杀（沙箱里常带子进程），失败再退回单进程信号 */
+  private killEntry(item: TaskProcessEntry) {
+    const { proc, port, name } = item;
+    if (proc && proc.pid) {
+      try {
+        if (process.platform !== 'win32') {
+          process.kill(-proc.pid, 'SIGKILL');
+        } else {
+          execSync(`taskkill /F /T /PID ${proc.pid}`, { stdio: 'ignore' });
+        }
+        logger.info(`[TaskProcess] 已安全终止后台进程 PID: ${proc.pid} (${name || ''})`);
+      } catch {
+        try {
+          proc.kill('SIGKILL');
+        } catch {}
+      }
+    }
+    if (port) {
+      WorktreeManager.getInstance().killPortIfBusy(port);
+    }
+  }
+
+  private emitChange(taskId: string) {
+    for (const listener of this.listeners) {
+      try {
+        listener(taskId);
+      } catch {}
+    }
   }
 
   public hasRunningProcesses(taskId: string): boolean {
