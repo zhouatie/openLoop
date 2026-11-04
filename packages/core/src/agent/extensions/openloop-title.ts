@@ -125,7 +125,8 @@ async function requestTitle(ctx: TitleExtensionContext, source: string): Promise
   return '';
 }
 
-export = function openloopTitleExtension(pi: TitleExtensionApi): void {
+export = function openloopTitleExtension(raw: unknown): void {
+  const pi = raw as TitleExtensionApi;
   let generating = false;
 
   pi.on('before_agent_start', (event, ctx) => {

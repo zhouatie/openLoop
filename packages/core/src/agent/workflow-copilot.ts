@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { Store } from '../store';
 import { WorkflowDefinition, WorkflowSessionState, SessionChatMessage, WorkflowNode, WorkflowEdge } from '../types';
 import { composeMessageWithSessionReferences } from './session-reference';
-import { PiRpcSessionInstance } from './pi-rpc-session';
+import { PiSessionInstance } from './pi-session';
 import { getEffectivePrompt } from '../constants/prompts';
 import { createLogger } from '../logger';
 
@@ -10,7 +10,7 @@ const logger = createLogger('WorkflowCopilot');
 
 export class WorkflowCopilotManager extends EventEmitter {
   private static instance: WorkflowCopilotManager;
-  private sessions = new Map<string, PiRpcSessionInstance>();
+  private sessions = new Map<string, PiSessionInstance>();
   private store: Store;
 
   private constructor(store: Store) {
@@ -128,7 +128,7 @@ export class WorkflowCopilotManager extends EventEmitter {
     if (!rpcSession || !rpcSession.active) {
       const piSessionId = `workflow_copilot_${workflowId}`;
 
-      rpcSession = new PiRpcSessionInstance({
+      rpcSession = new PiSessionInstance({
         taskId: sessionKey,
         taskTitle: `Workflow Copilot: ${workflow?.name || workflowId}`,
         sessionId: piSessionId,

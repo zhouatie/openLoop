@@ -207,7 +207,6 @@ export interface TaskSessionState {
   sessionId?: string;
   piSessionId?: string; // 兼容字段
   resumeCommand?: string;
-  agentProvider?: string;
 }
 
 /** 运行时同步给活跃会话的模型/思考强度变更 */
@@ -420,8 +419,6 @@ export interface PluginManifest {
   }>;
 }
 
-export type AgentProviderType = 'pi' | 'claude-code' | 'codex' | 'opencode';
-
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high';
 
 export type ShortcutSuperKey = 'Control' | 'Meta' | 'Alt';
@@ -453,8 +450,7 @@ export interface StorageRetentionSettings {
 }
 
 export interface OpenLoopSettings {
-  agentProvider?: AgentProviderType;
-  // 代码智能体引擎的通用参数，对 pi / claude-code / codex / opencode 一致生效
+  // 代码智能体的通用参数
   defaultModel?: string;
   reasoningLevel?: ThinkingLevel;
   defaultCwd?: string;

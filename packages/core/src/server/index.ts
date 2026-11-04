@@ -24,7 +24,7 @@ import {
   RuntimeSettingsApplySummary,
 } from '../types';
 import { createLogger } from '../logger';
-import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
+import { PiSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-session';
 import { sanitizeChatMessages } from '../agent/agent-format';
 import { piSessionIndex } from '../agent/session-index';
 import { composeMessageWithSessionReferences } from '../agent/session-reference';
@@ -56,7 +56,7 @@ import { guessImageMimeType } from '../constants/media-mime';
 import { resolveArtifactPath } from '../qa/artifact-paths';
 import { WorktreeManager, TaskProcessManager, findRepoRoot } from '../worktree/worktree-manager';
 import { interpolateString } from '../executors';
-import { getAgentProviderMeta, resolveResumeCommand } from '../constants/agent-providers';
+import { resolveResumeCommand } from '../constants/pi-agent';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 import { AutomationScheduler } from '../automation/automation-scheduler';
 import { WorkflowRecommender } from '../engine/workflow-recommender';
@@ -138,7 +138,7 @@ export class OpenLoopServer {
    */
   private globalAgentAlias(taskId: string | undefined): string | undefined {
     if (!taskId) return undefined;
-    const session = PiRpcSessionManager.getInstance().getSession(taskId);
+    const session = PiSessionManager.getInstance().getSession(taskId);
     if (session?.sessionId) {
       return `${GLOBAL_AGENT_PREFIX}${session.sessionId}`;
     }
@@ -189,7 +189,7 @@ export class OpenLoopServer {
       this.broadcast({ type: 'agent:ui_request', data: request });
     });
     // 任务会话（流水线 agent 节点）的审批卡走同一条推流通道
-    PiRpcSessionManager.getInstance().on('uiRequest', (request) => {
+    PiSessionManager.getInstance().on('uiRequest', (request) => {
       this.broadcast({ type: 'agent:ui_request', data: request });
     });
 
@@ -868,7 +868,7 @@ export class OpenLoopServer {
           {
             sessions: agentSessionHost.listLive(),
             // 流水线 agent 节点也在跑 pi 会话，运行指示要一并统计
-            busy: [...agentSessionHost.listBusy(), ...PiRpcSessionManager.getInstance().listBusySessionIds()],
+            busy: [...agentSessionHost.listBusy(), ...PiSessionManager.getInstance().listBusySessionIds()],
           },
           reqMeta
         );
@@ -1063,7 +1063,7 @@ export class OpenLoopServer {
         const rawState =
           agentSessionHost.getState(sessionKey) ||
           // 流水线 agent 节点的会话不在全局宿主里，接上同一份实时状态
-          PiRpcSessionManager.getInstance().getStateBySessionId(sessionKey) ||
+          PiSessionManager.getInstance().getStateBySessionId(sessionKey) ||
           null;
         const state = rawState ? { ...rawState, taskId: `${GLOBAL_AGENT_PREFIX}${sessionKey}` } : null;
         return this.sendJson(res, 200, { state }, reqMeta);
@@ -1146,7 +1146,7 @@ export class OpenLoopServer {
               store: this.store,
             });
             // 流水线常驻会话持有同一份 pi 会话：消息直接转给它，否则两个进程会同时写同一个会话文件
-            const pipeline = PiRpcSessionManager.getInstance().findLiveBySessionId(sessionKey);
+            const pipeline = PiSessionManager.getInstance().findLiveBySessionId(sessionKey);
             if (pipeline) {
               await pipeline.sendUserMessage(
                 message,
@@ -1198,7 +1198,7 @@ export class OpenLoopServer {
           if (action === 'withdraw') {
             const pendingId = typeof body?.pendingId === 'string' ? body.pendingId.trim() : '';
             if (!pendingId) return this.sendJson(res, 400, { error: '缺少 pendingId' }, reqMeta);
-            const pipeline = PiRpcSessionManager.getInstance().findLiveBySessionId(sessionKey);
+            const pipeline = PiSessionManager.getInstance().findLiveBySessionId(sessionKey);
             const success = pipeline
               ? await pipeline.withdrawPending(pendingId)
               : await agentSessionHost.withdrawPending(sessionKey, pendingId);
@@ -1213,10 +1213,10 @@ export class OpenLoopServer {
           if (action === 'stop') {
             const hostStopped = agentSessionHost.stop(sessionKey);
             if (!hostStopped) {
-              const rpcSession = PiRpcSessionManager.getInstance().getSession(sessionKey);
+              const rpcSession = PiSessionManager.getInstance().getSession(sessionKey);
               if (rpcSession) {
                 rpcSession.terminate();
-                PiRpcSessionManager.getInstance().removeSession(sessionKey);
+                PiSessionManager.getInstance().removeSession(sessionKey);
                 return this.sendJson(res, 200, { success: true }, reqMeta);
               }
             }
@@ -1708,7 +1708,7 @@ export class OpenLoopServer {
         // 2. 级联释放所有目标任务的运行时资源（Pi 会话、Worktree 分支、靶机沙箱端口、磁盘产物）
         for (const target of allTargetTasks) {
           try {
-            PiRpcSessionManager.getInstance().removeSession(target.id);
+            PiSessionManager.getInstance().removeSession(target.id);
           } catch {}
 
           try {
@@ -2240,11 +2240,7 @@ export class OpenLoopServer {
           task.context?.sessionId ||
           task.context?.piSessionId ||
           `session_${task.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-        const provider = getAgentProviderMeta(
-          task.context?.agentProvider || settings.agentProvider
-        ).id;
-        const resumeCommand =
-          task.context?.resumeCommand || resolveResumeCommand(provider, sessionId);
+        const resumeCommand = task.context?.resumeCommand || resolveResumeCommand(sessionId);
 
         const workflow = this.store.getWorkflow(task.workflowId);
         const currentNode = workflow?.nodes.find((n) => n.id === task.currentNodeId);
@@ -2256,7 +2252,7 @@ export class OpenLoopServer {
           this.store.saveTask(task);
         }
 
-        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        const rpcSession = PiSessionManager.getInstance().getSession(taskId);
         if (rpcSession) {
           const state = rpcSession.getState();
           const effectiveAwaiting = isCurrentAgentRunning ? !!state.awaitingInput : false;
@@ -2295,7 +2291,6 @@ export class OpenLoopServer {
           sessionId,
           piSessionId: sessionId,
           resumeCommand,
-          agentProvider: provider,
         };
         return this.sendJson(res, 200, historicalState, reqMeta);
       }
@@ -2526,7 +2521,7 @@ ${existingSubSummary}
           }
         }
 
-        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        const rpcSession = PiSessionManager.getInstance().getSession(taskId);
         if (rpcSession && rpcSession.active) {
           rpcSession.sendUserMessage(promptToSend, safeAttachments).catch((err) => {
             serverLogger.error(`发送用户消息失败: ${err.message}`, undefined, { taskId });
@@ -2534,26 +2529,10 @@ ${existingSubSummary}
           return this.sendJson(res, 200, { success: true, message: 'Message sent to active session', active: true }, reqMeta);
         }
 
-        // 若当前无活跃会话，立即自动拉起/唤醒 Agent RPC 会话，响应用户追加指令
+        // 若当前无活跃会话，立即自动拉起/唤醒 Agent 会话，响应用户追加指令
+        const settings = this.store.getSettings() || {};
         const sessionId = ownSessionId;
         const cwd = task.context?.worktree?.worktreeDir || task.workspace || process.cwd();
-        const settings = this.store.getSettings() || {};
-        const provider = getAgentProviderMeta(
-          task.context?.agentProvider || settings.agentProvider
-        ).id;
-
-        // 非 pi 引擎属于单次 CLI 独立进程，不支持内置 RPC 长连接双向聊天
-        if (provider !== 'pi') {
-          return this.sendJson(
-            res,
-            400,
-            {
-              error: `当前任务运行引擎为 [${getAgentProviderMeta(provider).label}]。双向会话仅支持内置 Pi Agent，请在终端中使用接管命令调试。`,
-              provider,
-            },
-            reqMeta
-          );
-        }
 
         serverLogger.info(`[AgentChat:AutoWakeup] 唤醒并启动 Agent 会话: ${sessionId} (CWD: ${cwd})`, undefined, { taskId });
 
@@ -2576,7 +2555,7 @@ ${existingSubSummary}
         }
 
         // 启动 Pi RPC 进程并实时绑定广播
-        PiRpcSessionManager.getInstance().createSession({
+        PiSessionManager.getInstance().createSession({
           taskId: task.id,
           taskTitle: task.title,
           taskDescription: task.description,
@@ -2643,7 +2622,7 @@ ${existingSubSummary}
       const taskPauseMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/(pause|stop)$/);
       if (taskPauseMatch && method === 'POST') {
         const taskId = taskPauseMatch[1];
-        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        const rpcSession = PiSessionManager.getInstance().getSession(taskId);
         if (rpcSession) {
           const paused = await rpcSession.pause();
           return this.sendJson(res, 200, { success: paused }, reqMeta);
@@ -2657,7 +2636,7 @@ ${existingSubSummary}
         const taskId = taskWithdrawMatch[1];
         const body = await this.parseJsonBody(req).catch(() => ({}) as any);
         const pendingId = typeof body?.pendingId === 'string' ? body.pendingId.trim() : '';
-        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        const rpcSession = PiSessionManager.getInstance().getSession(taskId);
         if (!pendingId || !rpcSession) {
           return this.sendJson(res, 400, { error: '缺少 pendingId 或会话未启动' }, reqMeta);
         }
@@ -2668,7 +2647,7 @@ ${existingSubSummary}
       const taskSessionResumeMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/resume$/);
       if (taskSessionResumeMatch && method === 'POST') {
         const taskId = taskSessionResumeMatch[1];
-        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        const rpcSession = PiSessionManager.getInstance().getSession(taskId);
         if (rpcSession) {
           const resumed = await rpcSession.resume();
           return this.sendJson(res, 200, { success: resumed }, reqMeta);
@@ -2682,7 +2661,7 @@ ${existingSubSummary}
         const taskId = taskUiResponseMatch[1];
         const body = await this.parseJsonBody(req).catch(() => ({}) as any);
         const requestId = typeof body?.id === 'string' ? body.id : '';
-        const session = PiRpcSessionManager.getInstance().getSession(taskId);
+        const session = PiSessionManager.getInstance().getSession(taskId);
         if (!requestId || !session) {
           return this.sendJson(res, 400, { error: '缺少 id 或会话未启动' }, reqMeta);
         }
@@ -2698,7 +2677,7 @@ ${existingSubSummary}
       const taskRegenerateMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/session\/regenerate$/);
       if (taskRegenerateMatch && method === 'POST') {
         const taskId = taskRegenerateMatch[1];
-        const session = PiRpcSessionManager.getInstance().getSession(taskId);
+        const session = PiSessionManager.getInstance().getSession(taskId);
         if (!session) return this.sendJson(res, 400, { error: 'No active session to regenerate' }, reqMeta);
         const lastUser = [...session.messages].reverse().find((item) => item.role === 'user');
         if (!lastUser) return this.sendJson(res, 400, { error: '没有可重发的用户消息' }, reqMeta);
@@ -2719,7 +2698,7 @@ ${existingSubSummary}
         }
         this.store.saveTask(task);
 
-        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        const rpcSession = PiSessionManager.getInstance().getSession(taskId);
         if (rpcSession) {
           rpcSession.messages = [];
           rpcSession.clearPendingInputs();
@@ -2746,7 +2725,7 @@ ${existingSubSummary}
         if (thinking !== undefined) task.context.thinking = thinking;
         this.store.saveTask(task);
 
-        const rpcSession = PiRpcSessionManager.getInstance().getSession(taskId);
+        const rpcSession = PiSessionManager.getInstance().getSession(taskId);
         let applied = false;
         let queued = false;
         if (rpcSession && rpcSession.active) {
@@ -2883,7 +2862,7 @@ ${existingSubSummary}
         );
         try {
           // 先释放仍停留在等待回复的 RPC 会话，再放行节点，避免下游长节点阻塞用户操作反馈
-          PiRpcSessionManager.getInstance().removeSession(taskId);
+          PiSessionManager.getInstance().removeSession(taskId);
           const task = await this.engine.completeNode(taskId, nodeId);
           return this.sendJson(res, 200, task, reqMeta);
         } catch (err: any) {
@@ -3334,7 +3313,7 @@ ${existingSubSummary}
         const thinkingChanged = (previous.reasoningLevel || '') !== (updated.reasoningLevel || '');
         let runtime: RuntimeSettingsApplySummary | undefined;
         if (modelChanged || thinkingChanged) {
-          runtime = await PiRpcSessionManager.getInstance().applyRuntimeSettings({
+          runtime = await PiSessionManager.getInstance().applyRuntimeSettings({
             ...(modelChanged ? { model: updated.defaultModel || '' } : {}),
             ...(thinkingChanged ? { thinking: updated.reasoningLevel || '' } : {}),
           });
@@ -3381,10 +3360,10 @@ ${existingSubSummary}
 
             const cleanup = () => {
               clearTimeout(timeoutTimer);
-              PiRpcSessionManager.getInstance().removeSession(tempTaskId);
+              PiSessionManager.getInstance().removeSession(tempTaskId);
             };
 
-            const session = PiRpcSessionManager.getInstance().createSession({
+            const session = PiSessionManager.getInstance().createSession({
               taskId: tempTaskId,
               taskTitle: `[QA 快速规划] ${title}`,
               sessionId,
@@ -3666,17 +3645,12 @@ ${existingSubSummary}
         const task = this.store.getTask(taskId);
         if (!task) return this.sendJson(res, 404, { error: 'Task Not Found' }, reqMeta);
 
-        const settings = this.store.getSettings() || {};
         const sessionId =
           task.context?.sessionId ||
           task.context?.piSessionId ||
           `session_${task.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
         const workspace = task.context?.worktree?.worktreeDir || task.workspace || process.cwd();
-        const provider = getAgentProviderMeta(
-          task.context?.agentProvider || settings.agentProvider
-        ).id;
-
-        const cmd = task.context?.resumeCommand || resolveResumeCommand(provider, sessionId);
+        const cmd = task.context?.resumeCommand || resolveResumeCommand(sessionId);
 
         serverLogger.info(
           `[Tasks:ResumeTerminal] 唤起外部终端接管交互: ${taskId}, Session: ${sessionId}`,

@@ -27,6 +27,13 @@ interface ToolStatus {
 interface SystemStatus {
   platform: string;
   nodeVersion: string;
+  /** 真正驱动核心服务的宿主 Node（可能与 Electron 自带版本不同） */
+  nodeRuntime?: {
+    path: string;
+    version: string | null;
+    required: string;
+    supported: boolean;
+  };
   hasFullDiskAccess: boolean;
   tools: ToolStatus[];
 }
@@ -51,12 +58,17 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   const [status, setStatus] = useState<SystemStatus>({
     platform: 'darwin',
     nodeVersion: '',
+    nodeRuntime: undefined,
     hasFullDiskAccess: false,
     tools: [
       { name: 'Node.js', command: 'node', available: true },
       { name: 'Git', command: 'git', available: true },
     ],
   });
+
+  /** Node 版本不达标时任务会全部启动失败，向导需要把原因显式说出来 */
+  const nodeRuntime = status.nodeRuntime;
+  const nodeBlocked = Boolean(nodeRuntime && !nodeRuntime.supported);
 
   const checkStatus = useCallback(async () => {
     setLoading(true);
@@ -269,37 +281,66 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              {status.tools.map((tool) => (
-                <div
-                  key={tool.name}
-                  className="p-2.5 rounded-[7px] border border-[#f0f0f3] bg-[#fafafc] flex items-center justify-between hover:border-[#e4e4e7] transition-colors"
-                >
-                  <div className="min-w-0 pr-2">
-                    <div className="text-[11.5px] font-medium text-[#18181b] flex items-center gap-1.5">
-                      <span>{tool.name}</span>
-                      {tool.name === 'Node.js' && status.nodeVersion && (
-                        <span className="text-[9.5px] font-mono text-[#71717a] px-1 py-0.2 bg-[#f0f0f3] rounded">
-                          {status.nodeVersion}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] font-mono text-[#8c8c94] truncate mt-0.5">
-                      {tool.path || `$ which ${tool.command}`}
-                    </div>
-                  </div>
+              {status.tools.map((tool) => {
+                const isNode = tool.name === 'Node.js';
+                const runtime = isNode ? nodeRuntime : undefined;
+                const versionText = runtime ? (runtime.version ? `v${runtime.version}` : '未知版本') : '';
+                const pathText = runtime?.path || tool.path || `$ which ${tool.command}`;
+                const ready = runtime ? runtime.supported : tool.available;
 
-                  {tool.available ? (
-                    <span className="shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-[#ecfdf5] text-[#059669] border border-[#a7f3d0]/60">
-                      <Check size={10} strokeWidth={2.5} />
-                    </span>
-                  ) : (
-                    <span className="shrink-0 text-[10px] text-[#8c8c94] font-medium px-1.5 py-0.5 rounded bg-[#f4f4f6]">
-                      未检测到
-                    </span>
-                  )}
-                </div>
-              ))}
+                return (
+                  <div
+                    key={tool.name}
+                    className={`p-2.5 rounded-[7px] border bg-[#fafafc] flex items-center justify-between transition-colors ${
+                      isNode && nodeBlocked
+                        ? 'border-[#fecaca]/70 hover:border-[#fca5a5]'
+                        : 'border-[#f0f0f3] hover:border-[#e4e4e7]'
+                    }`}
+                  >
+                    <div className="min-w-0 pr-2">
+                      <div className="text-[11.5px] font-medium text-[#18181b] flex items-center gap-1.5">
+                        <span>{tool.name}</span>
+                        {isNode && versionText && (
+                          <span
+                            className={`text-[9.5px] font-mono px-1 py-0.2 rounded ${
+                              nodeBlocked ? 'text-[#dc2626] bg-[#fef2f2]' : 'text-[#71717a] bg-[#f0f0f3]'
+                            }`}
+                          >
+                            {versionText}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] font-mono text-[#8c8c94] truncate mt-0.5">{pathText}</div>
+                    </div>
+
+                    {ready ? (
+                      <span className="shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-[#ecfdf5] text-[#059669] border border-[#a7f3d0]/60">
+                        <Check size={10} strokeWidth={2.5} />
+                      </span>
+                    ) : runtime?.version ? (
+                      <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#fef2f2] text-[#dc2626] text-[10px] font-medium border border-[#fecaca]/60">
+                        <AlertCircle size={10} strokeWidth={2.2} />
+                        <span>需 ≥ {runtime.required}</span>
+                      </span>
+                    ) : (
+                      <span className="shrink-0 text-[10px] text-[#8c8c94] font-medium px-1.5 py-0.5 rounded bg-[#f4f4f6]">
+                        未检测到
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+
+            {nodeBlocked && nodeRuntime && (
+              <div className="mt-2 flex items-start gap-1.5 px-2.5 py-2 rounded-[7px] bg-[#fef2f2] border border-[#fecaca]/60">
+                <AlertCircle size={11} strokeWidth={2.2} className="text-[#dc2626] mt-[1px] shrink-0" />
+                <div className="text-[10.5px] leading-relaxed text-[#b91c1c]">
+                  核心服务由宿主 Node 驱动，任务会话需要 {nodeRuntime.required} 或更高版本。当前为{' '}
+                  {nodeRuntime.version || '未知'}，任务将无法启动。升级 Node.js 后重启应用即可生效。
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 3. 调度核心服务通信 */}

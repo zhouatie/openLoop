@@ -5,7 +5,7 @@ import { Store } from '../store';
 import { Task, WorkflowDefinition, WorkflowNode, WorkflowEdge, LogEntry, KanbanColumn, TaskSessionState, TaskNodeOverride } from '../types';
 import { ExecutorRegistry, ExecutionContext } from '../executors';
 import { createLogger } from '../logger';
-import { PiRpcSessionManager } from '../agent/pi-rpc-session';
+import { PiSessionManager } from '../agent/pi-session';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 
 const dagLogger = createLogger('Engine:DAG');
@@ -235,7 +235,7 @@ export class DagEngine extends EventEmitter {
     };
 
     const settings = this.store.getSettings();
-    if (node.type === 'agent' && (settings.agentProvider === 'pi' || !settings.agentProvider)) {
+    if (node.type === 'agent') {
       if (!task.context) task.context = {};
       if (!task.context.piSessionId) {
         task.context.piSessionId = `session_${task.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
@@ -1426,7 +1426,7 @@ export class DagEngine extends EventEmitter {
     if (controller) {
       controller.abort();
     }
-    PiRpcSessionManager.getInstance().removeSession(taskId);
+    PiSessionManager.getInstance().removeSession(taskId);
 
     // 2. 终止任务关联的所有后台守护进程与靶机进程 (通过 TaskProcessManager)
     TaskProcessManager.getInstance().stopAll(taskId);

@@ -71,7 +71,6 @@ import {
   sanitizeChatMessages,
 } from '@openloop/core/agent-format';
 import { guessImageMimeType } from '@openloop/core/media-mime';
-import { getAgentProviderMeta } from '@openloop/agent-providers';
 import { TaskAgentPanel } from '../agent-ui';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';

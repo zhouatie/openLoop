@@ -1101,7 +1101,6 @@ export class SqliteStore {
 
     const rows = this.db.prepare('SELECT key, value_json FROM settings').all() as any[];
     const result: OpenLoopSettings = {
-      agentProvider: 'pi',
       defaultModel: '',
       reasoningLevel: 'high',
       defaultCwd: '',
