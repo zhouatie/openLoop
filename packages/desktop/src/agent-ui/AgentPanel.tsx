@@ -24,6 +24,7 @@ import { useShortcuts } from '../context/ShortcutContext';
 import { IconCheck, IconChevronDown, IconFolderClose, IconFolderOpen, IconPlus } from './icons';
 import { useDismissOnOutsidePointer } from './dsh/useDismissOnOutsidePointer.ts';
 import { OpenInAppButton } from './dsh/OpenInAppButton';
+import { BackgroundProcessesAction } from './BackgroundProcessesAction';
 import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
 import { SessionTreePanel } from './SessionTreePanel';
@@ -2251,6 +2252,8 @@ export function GlobalAgentPanel({
                   )}
                 </div>
               ) : null}
+              {/* 任务启动的后台服务：有在跑的服务时出现，点开可看端口与终止 */}
+              {taskContext?.taskId ? <BackgroundProcessesAction taskId={taskContext.taskId} /> : null}
               {/* 工作区在当前目录打开：访达 / 编辑器 / 终端由核心服务探测本机安装；抽屉顶栏太窄不放 */}
               {mode !== 'drawer' && <OpenInAppButton path={activeCwd} />}
             </>
