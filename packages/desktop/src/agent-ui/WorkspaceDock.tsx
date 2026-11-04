@@ -55,16 +55,23 @@ interface FsEntry {
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg)$/i;
 const MARKDOWN_EXT = /\.(md|mdx)$/i;
 
-/** 面板固定页签：文件与终端，预览页签由打开的文件生成 */
-const PINNED_PANES: DockPane[] = [
-  { key: 'files', kind: 'files', title: '文件', seq: 0 },
-  { key: 'terminal', kind: 'terminal', title: '终端', seq: 0 },
-];
+/** 文件页签：唯一的固定页签，预览页签由打开的文件生成 */
+const FILES_PANE: DockPane = { key: 'files', kind: 'files', title: '文件', seq: 0 };
 
-/** 「+」菜单里能重新打开的页签 */
-const ADDABLE_KINDS: Array<{ kind: DockTab; title: string }> = [
-  { kind: 'files', title: '文件' },
-  { kind: 'terminal', title: '终端' },
+/** 终端页签的 key 带序号：新建一个终端就是再加一个页签，各自一个 PTY */
+const TERMINAL_PREFIX = 'terminal:';
+
+function terminalPane(index: number): DockPane {
+  return { key: `${TERMINAL_PREFIX}${index}`, kind: 'terminal', title: `终端 ${index}`, seq: 0 };
+}
+
+/** 默认页签：文件与第一个终端，页签全关掉后回到这里 */
+const DEFAULT_PANES: DockPane[] = [FILES_PANE, terminalPane(1)];
+
+/** 「+」菜单：文件只开一个，终端每点一次新建一个 */
+const ADDABLE_KINDS: Array<{ kind: DockTab; title: string; single?: boolean }> = [
+  { kind: 'files', title: '文件', single: true },
+  { kind: 'terminal', title: '新建终端' },
 ];
 
 /** 面板宽度：拖动左缘调整，双击复位，按工作区无关的界面偏好持久化 */
@@ -116,8 +123,15 @@ function diffKey(changeId: string): string {
   return `diff:${changeId}`;
 }
 
-function pinnedPane(kind: DockTab): DockPane {
-  return PINNED_PANES.find((pane) => pane.kind === kind) || PINNED_PANES[0];
+/** 下一个终端序号：取现有终端页签里最大的加一 */
+function nextTerminalIndex(panes: DockPane[]): number {
+  let max = 0;
+  for (const pane of panes) {
+    if (pane.kind !== 'terminal') continue;
+    const index = Number(pane.key.slice(TERMINAL_PREFIX.length));
+    if (Number.isFinite(index) && index > max) max = index;
+  }
+  return max + 1;
 }
 
 /** 一个会话的工作台：开合状态与它自己的一套页签 */
@@ -131,8 +145,8 @@ interface DockSurface {
 
 const INITIAL_SURFACE: DockSurface = {
   open: false,
-  panes: PINNED_PANES,
-  activeKey: PINNED_PANES[0].key,
+  panes: DEFAULT_PANES,
+  activeKey: DEFAULT_PANES[0].key,
   request: null,
 };
 
@@ -334,7 +348,7 @@ const TabStrip = memo(function TabStrip({
         {addOpen && (
           <div className={styles.addMenu} role="menu">
             {ADDABLE_KINDS.map((item) => {
-              const open = panes.some((pane) => pane.key === item.kind);
+              const open = item.single === true && panes.some((pane) => pane.key === item.kind);
               return (
                 <button
                   key={item.kind}
@@ -589,20 +603,24 @@ export const WorkspaceDock = memo(function WorkspaceDock({
   const asideRef = useRef<HTMLElement>(null);
   /** 面板常驻：收起时内容还留着，滑出动画才有东西可滑；首次打开前不挂内容，避免空跑一次目录请求 */
   const [everOpened, setEverOpened] = useState(open);
-  /** 终端首次被看到后才挂载：没点过终端页签就不提前起 shell 进程 */
-  const [terminalMounted, setTerminalMounted] = useState(false);
+  /** 终端页签首次被看到后才挂载：没切过的终端页签不提前起 shell 进程 */
+  const [mountedTerminals, setMountedTerminals] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) setEverOpened(true);
     if (import.meta.env?.DEV) console.log('[WorkspaceDock] 开合:', open ? '展开' : '收起');
   }, [open]);
 
+  // 切到哪个终端页签就挂哪个：多个终端各起一个 PTY，切回来仍留在原来的屏幕上
   useEffect(() => {
-    if (activeKey === 'terminal' && !terminalMounted) {
-      setTerminalMounted(true);
-      if (import.meta.env?.DEV) console.log('[WorkspaceDock] 首次挂载终端');
-    }
-  }, [activeKey, terminalMounted]);
+    const pane = panes.find((item) => item.key === activeKey);
+    if (pane?.kind !== 'terminal') return;
+    setMountedTerminals((prev) => {
+      if (prev.includes(pane.key)) return prev;
+      if (import.meta.env?.DEV) console.log('[WorkspaceDock] 挂载终端页签:', pane.key);
+      return [...prev, pane.key];
+    });
+  }, [panes, activeKey]);
 
   /** 面板最多占主行的 60%：窗口变窄时把持久化的大宽度收回，给会话列留位置 */
   useEffect(() => {
@@ -651,11 +669,17 @@ export const WorkspaceDock = memo(function WorkspaceDock({
     [panes, onPanesChange]
   );
 
-  /** 固定页签：「+」菜单与 files 请求都走这里 */
+  /** 「+」菜单与快捷键：文件页签去重重开，终端每按一次新增一个 */
   const addPane = useCallback(
     (kind: DockTab) => {
       setAddOpen(false);
-      onPanesChange(panes.some((pane) => pane.key === kind) ? panes : [...panes, pinnedPane(kind)], kind);
+      if (kind === 'terminal') {
+        const pane = terminalPane(nextTerminalIndex(panes));
+        if (import.meta.env?.DEV) console.log('[WorkspaceDock] 新建终端页签:', pane.key, '共', panes.length + 1, '个页签');
+        onPanesChange([...panes, pane], pane.key);
+        return;
+      }
+      onPanesChange(panes.some((pane) => pane.key === FILES_PANE.key) ? panes : [...panes, FILES_PANE], FILES_PANE.key);
     },
     [panes, onPanesChange]
   );
@@ -682,9 +706,9 @@ export const WorkspaceDock = memo(function WorkspaceDock({
       if (index < 0) return;
       if (import.meta.env?.DEV) console.log('[WorkspaceDock] 关闭页签:', key);
       const next = panes.filter((pane) => pane.key !== key);
-      // 页签全关掉就收起工作台，与 DSH 合并掉空面板一致；再打开时回到固定的文件页签
+      // 页签全关掉就收起工作台，与 DSH 合并掉空面板一致；再打开时回到默认页签
       if (next.length === 0) {
-        onPanesChange(PINNED_PANES, PINNED_PANES[0].key);
+        onPanesChange(DEFAULT_PANES, DEFAULT_PANES[0].key);
         onClose();
         return;
       }
@@ -812,7 +836,7 @@ export const WorkspaceDock = memo(function WorkspaceDock({
                   ) : (
                     <div className={styles.dockEmpty}>选一个工作区后，这里显示它的文件。</div>
                   ))}
-                {pane.kind === 'terminal' && terminalMounted && (
+                {pane.kind === 'terminal' && mountedTerminals.includes(pane.key) && (
                   <Suspense fallback={null}>
                     <TerminalPane cwd={root} active={pane.key === activeKey} />
                   </Suspense>
