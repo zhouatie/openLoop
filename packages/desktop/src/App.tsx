@@ -82,6 +82,8 @@ export const AppContent: React.FC = () => {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
   const [workflowSubTab, setWorkflowSubTab] = useState<'workflows' | 'runs'>('workflows');
   const [selectedRunTaskId, setSelectedRunTaskId] = useState<string | null>(null);
+  /** 从全局智能体跳回看板时要定位的任务：看板打开详情后清空 */
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
   const [filterWorkflowId, setFilterWorkflowId] = useState<string | null>(null);
   const [isDaemonConnected, setIsDaemonConnected] = useState<boolean>(api.getConnectionStatus());
   const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
@@ -530,6 +532,8 @@ export const AppContent: React.FC = () => {
               selectedWorkspaceFilter={selectedWorkspaceFilter}
               onWorkspaceFilterChange={handleWorkspaceFilterChange}
               onOpenAgentSession={handleOpenAgentSession}
+              focusTaskId={focusedTaskId}
+              onFocusHandled={() => setFocusedTaskId(null)}
             />
           )}
 
@@ -636,6 +640,12 @@ export const AppContent: React.FC = () => {
           mode="overlay"
           active={isAgentOverlayOpen}
           sessionRequest={agentSessionRequest}
+          onOpenTaskDetail={(taskId) => {
+            if (import.meta.env?.DEV) console.log('[App] 从全局智能体跳回看板任务:', taskId);
+            setIsAgentOverlayOpen(false);
+            setActivePluginId('kanban');
+            setFocusedTaskId(taskId);
+          }}
           onClose={() => {
             userInteractedAgentOverlayRef.current = true;
             setIsAgentOverlayOpen(false);

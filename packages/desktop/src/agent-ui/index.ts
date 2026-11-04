@@ -13,4 +13,6 @@ export { AgentMarkdown } from './Markdown';
 export { SessionList } from './SessionList';
 export { AgentSessionDrawerHost } from './AgentSessionDrawerHost';
 export type { AgentSessionDrawerHostProps } from './AgentSessionDrawerHost';
+export { TaskPipelineChip } from './TaskPipelineChip';
+export type { TaskPipelineChipProps } from './TaskPipelineChip';
 export { useAgentStream } from './useAgentStream';

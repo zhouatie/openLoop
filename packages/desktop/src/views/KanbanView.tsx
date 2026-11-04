@@ -131,6 +131,9 @@ interface KanbanViewProps {
     sessionId: string,
     context?: { taskId?: string; taskTitle?: string; cwd?: string }
   ) => void;
+  /** 外部请求定位的任务：挂载或刷新后直接打开它的详情 */
+  focusTaskId?: string | null;
+  onFocusHandled?: () => void;
 }
 
 interface ColumnDef {
@@ -312,6 +315,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   selectedWorkspaceFilter,
   onWorkspaceFilterChange,
   onOpenAgentSession,
+  focusTaskId,
+  onFocusHandled,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -356,6 +361,17 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       console.error('[KanbanView] 选择工程筛选失败:', err);
     }
   };
+
+  // 从全局智能体跳回：定位任务并直接打开它的详情工作台
+  useEffect(() => {
+    if (!focusTaskId) return;
+    const target = tasks.find((task) => task.id === focusTaskId);
+    if (target) {
+      if (import.meta.env?.DEV) console.log('[KanbanView:Workbench] 定位任务:', target.id);
+      setSelectedTask(target);
+    }
+    onFocusHandled?.();
+  }, [focusTaskId, tasks, onFocusHandled]);
 
   // 任务详情工作台：宽度拖拽（双击复位）与 Agent 协作流常驻开关，均本地记忆
   const [detailWidth, setDetailWidth] = useState<number>(() => readDetailWidth());
