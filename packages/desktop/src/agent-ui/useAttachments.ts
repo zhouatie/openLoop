@@ -3,9 +3,7 @@ import type { TaskAttachment } from '@openloop/core/types';
 import { api } from '../services/api';
 import type { ComposerAttachmentItem } from './Composer';
 
-export interface PendingAttachment extends ComposerAttachmentItem {
-  attachment?: TaskAttachment;
-}
+export type PendingAttachment = ComposerAttachmentItem;
 
 export interface UseAttachmentsResult {
   items: PendingAttachment[];

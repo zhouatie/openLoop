@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { TaskAttachment } from '@openloop/core';
 import { api } from '../services/api';
+import { clipboardImageFiles } from '../agent-ui/clipboard-images';
 import { ImageLightboxModal } from './ImageLightboxModal';
 
 interface PendingUploadItem {
@@ -160,30 +161,12 @@ export const TaskPromptArea = React.forwardRef<HTMLTextAreaElement, TaskPromptAr
 
   // 剪贴板监听 (粘贴截图 ⌘V / Ctrl+V)
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const clipboardItems = e.clipboardData?.items;
-    if (!clipboardItems) return;
-
-    const files: File[] = [];
-    for (let i = 0; i < clipboardItems.length; i++) {
-      const item = clipboardItems[i];
-      if (item.type.startsWith('image/')) {
-        const blob = item.getAsFile();
-        if (blob) {
-          const now = new Date();
-          const timestamp = `${now.getHours()}${now.getMinutes()}${now.getSeconds()}`;
-          const filename = blob.name && blob.name !== 'image.png' ? blob.name : `screenshot_${timestamp}.png`;
-          const file = new File([blob], filename, { type: blob.type });
-          files.push(file);
-        }
-      }
+    const files = clipboardImageFiles(e.clipboardData);
+    if (files.length === 0) return;
+    if (import.meta.env?.DEV) {
+      console.log('[TaskPromptArea:Paste] 识别到剪贴板包含截图，触发上传:', files);
     }
-
-    if (files.length > 0) {
-      if (import.meta.env?.DEV) {
-        console.log('[TaskPromptArea:Paste] 识别到剪贴板包含截图，触发上传:', files);
-      }
-      uploadFiles(files);
-    }
+    uploadFiles(files);
   };
 
   // 拖拽监听

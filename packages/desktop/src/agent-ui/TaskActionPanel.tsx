@@ -5,6 +5,7 @@
  * 因此会话页、全局面板和抽屉三种形态共用同一份实现。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Check,
   ChevronLeft,
@@ -18,9 +19,11 @@ import {
   Workflow,
 } from 'lucide-react';
 import type { WorkflowDefinition } from '@openloop/core';
+import type { TaskAttachment } from '@openloop/core/types';
 import { api } from '../services/api';
 import { useShortcuts } from '../context/ShortcutContext';
 import { toast } from '../components/Toast';
+import { ImageLightboxModal } from '../components/ImageLightboxModal';
 import { useDirectoryPicker } from '../components/useDirectoryPicker';
 import { formatCompactPath, getWorkspaceDirName } from '../components/workspace-path';
 import {
@@ -30,6 +33,9 @@ import {
 import { loadTaskOptions, invalidateTaskOptions, TASK_STATUS_LABEL, type TaskOption } from './task-options';
 import { readLastWorkflowId, rememberWorkflowId } from '../utils/workflowMemory';
 import { IconClose } from './icons';
+import { useAttachments } from './useAttachments';
+import { clipboardImageFiles } from './clipboard-images';
+import { imageSrc } from './local-image';
 import styles from './TaskActionPanel.module.css';
 
 export type TaskActionMode = 'task' | 'group' | 'pipeline';
@@ -47,6 +53,8 @@ export interface TaskActionPanelProps {
   workspace?: string;
   /** 输入卡草稿：新建任务时作为需求说明 */
   draft?: string;
+  /** 输入卡上已上传的图片：随新任务一起提交 */
+  attachments?: TaskAttachment[];
   onClose: () => void;
   onOutcome?: (outcome: TaskActionOutcome) => void;
 }
@@ -133,6 +141,7 @@ export function TaskActionPanel({
   mode,
   workspace,
   draft,
+  attachments,
   onClose,
   onOutcome,
 }: TaskActionPanelProps) {
@@ -153,6 +162,60 @@ export function TaskActionPanel({
   const [parentTaskId, setParentTaskId] = useState('');
   const [pickedTask, setPickedTask] = useState<TaskOption | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  /** 面板里直接粘贴的截图：与输入卡共用同一条上传管线 */
+  const pasted = useAttachments('task-action');
+  const addPasted = pasted.add;
+  const removePasted = pasted.remove;
+  const clearPasted = pasted.clear;
+  /** 一处列表：输入卡带进来的图只展示，面板里粘贴的图可移除 */
+  const panelAttachments = useMemo(
+    () => [
+      ...(attachments ?? []).map((item) => ({
+        id: `composer_${item.id}`,
+        name: item.name,
+        previewUrl: imageSrc(item.url),
+        status: 'ready' as const,
+        removable: false,
+        attachment: item,
+      })),
+      ...pasted.items.map((item) => ({ ...item, removable: true })),
+    ],
+    [attachments, pasted.items]
+  );
+  /** 随任务提交的图片：只取已落盘的那几张 */
+  const readyAttachments = useMemo(
+    () =>
+      panelAttachments
+        .filter((item) => item.status === 'ready' && item.attachment)
+        .map((item) => item.attachment as TaskAttachment),
+    [panelAttachments]
+  );
+  /** 大图预览：点缩略图看原图，本轮的全部图可左右翻 */
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const previewImages = useMemo(
+    () =>
+      panelAttachments
+        .filter((item) => Boolean(item.previewUrl))
+        .map((item) => ({
+          id: item.id,
+          name: item.name,
+          url: item.previewUrl as string,
+          size: item.attachment?.size,
+          path: item.attachment?.path,
+        })),
+    [panelAttachments]
+  );
+  const openPreview = useCallback(
+    (id: string) => {
+      const index = previewImages.findIndex((image) => image.id === id);
+      if (index < 0) return;
+      if (import.meta.env?.DEV) {
+        console.log('[TaskActionPanel:Preview] 打开大图:', { id, index, total: previewImages.length });
+      }
+      setPreviewIndex(index);
+    },
+    [previewImages]
+  );
 
   // 项目目录：优先用会话工作区，否则接上次选过的目录
   const [workspaceDir, setWorkspaceDir] = useState(
@@ -264,6 +327,21 @@ export function TaskActionPanel({
 
   const canSubmit = Boolean(workflowId) && !submitting && (mode === 'group' ? true : title.trim() !== '');
 
+  /** 粘贴截图：面板里任意位置都能贴，图片不落到输入框 */
+  const handlePaste = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      if (mode === 'pipeline') return;
+      const files = clipboardImageFiles(event.clipboardData);
+      if (files.length === 0) return;
+      event.preventDefault();
+      if (import.meta.env?.DEV) {
+        console.log('[TaskActionPanel:Paste] 剪贴板图片转附件:', files.map((file) => file.name));
+      }
+      addPasted(files);
+    },
+    [addPasted, mode]
+  );
+
   const createTask = useCallback(async () => {
     if (!canSubmit) return;
     setSubmitting(true);
@@ -274,6 +352,7 @@ export function TaskActionPanel({
         workflowId,
         subtasks: mode === 'group' ? subtaskLines.length : 0,
         parentTaskId: parentTaskId || undefined,
+        attachmentsCount: readyAttachments.length,
         autoRun,
         workspace: workspaceDir,
       });
@@ -281,17 +360,20 @@ export function TaskActionPanel({
     try {
       const description = (draft || '').trim();
       const taskWorkspace = workspaceDir || undefined;
+      const files = readyAttachments.length > 0 ? readyAttachments : undefined;
 
       if (underGroup) {
         const created = await api.addSubTask(parentTaskId, {
           title: title.trim(),
           workflowId,
           description,
+          attachments: files,
           workspace: taskWorkspace,
         });
         toast.success(`已加入任务组「${parentName || created.parent.title}」`);
         invalidateTaskOptions();
         rememberWorkflowId(workflowId);
+        clearPasted();
         onOutcome?.({ action: 'created', taskId: created.subtask.id, title: created.subtask.title });
         onClose();
         return;
@@ -307,6 +389,7 @@ export function TaskActionPanel({
               kind: 'group',
               executionMode: 'serial',
               subtasks: subtaskLines.map((line) => ({ title: line })),
+              attachments: files,
               kanbanColumn: 'backlog',
               autoRun,
               triggerSource: 'kanban',
@@ -317,6 +400,7 @@ export function TaskActionPanel({
               description,
               workspace: taskWorkspace,
               kind: 'single',
+              attachments: files,
               kanbanColumn: autoRun ? 'agent_executing' : 'backlog',
               autoRun,
               triggerSource: 'kanban',
@@ -324,6 +408,7 @@ export function TaskActionPanel({
       toast.success(`${mode === 'group' ? '已创建任务组' : '已创建任务'}「${task.title}」`);
       invalidateTaskOptions();
       rememberWorkflowId(workflowId);
+      clearPasted();
       onOutcome?.({ action: 'created', taskId: task.id, title: task.title });
       onClose();
     } catch (error: any) {
@@ -335,12 +420,14 @@ export function TaskActionPanel({
   }, [
     autoRun,
     canSubmit,
+    clearPasted,
     draft,
     mode,
     onClose,
     onOutcome,
     parentName,
     parentTaskId,
+    readyAttachments,
     subtaskLines,
     title,
     underGroup,
@@ -443,12 +530,14 @@ export function TaskActionPanel({
     const onPointerDown = (event: PointerEvent) => {
       // 目录选择弹层挂在 body 下，算面板自身的一部分，不算「点外面」
       if (pickingDirRef.current) return;
+      // 大图预览也挂在 body 下：点它不能把面板关掉
+      if (previewIndex !== null) return;
       if (rootRef.current?.contains(event.target as Node)) return;
       onClose();
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     return () => document.removeEventListener('pointerdown', onPointerDown, true);
-  }, [onClose]);
+  }, [onClose, previewIndex]);
 
   const header = (label: string, onBack?: () => void) => (
     <div className={styles.header}>
@@ -544,6 +633,7 @@ export function TaskActionPanel({
       aria-label={headerLabel}
       data-agent-transient
       onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
     >
       {header(headerLabel, back)}
 
@@ -745,6 +835,45 @@ export function TaskActionPanel({
             />
           )}
 
+          <div className={styles.attachments}>
+            {panelAttachments.map((item) => (
+              <div key={item.id} className={styles.attachment} title={item.name}>
+                {item.previewUrl ? (
+                  <button
+                    type="button"
+                    className={styles.attachmentThumb}
+                    onClick={() => openPreview(item.id)}
+                    title="查看大图"
+                    aria-label={`预览 ${item.name}`}
+                  >
+                    <img className={styles.attachmentImage} src={item.previewUrl} alt={item.name} />
+                  </button>
+                ) : (
+                  <span className={styles.attachmentIcon}>▤</span>
+                )}
+                {item.status === 'uploading' && (
+                  <span className={styles.attachmentBusy}>
+                    <Loader2 size={11} className={styles.spin} />
+                  </span>
+                )}
+                {item.removable && (
+                  <button
+                    type="button"
+                    className={styles.attachmentRemove}
+                    onClick={() => removePasted(item.id)}
+                    title="移除"
+                    aria-label={`移除 ${item.name}`}
+                  >
+                    <IconClose size={8} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {panelAttachments.length === 0 && (
+              <span className={styles.attachHint}>可粘贴截图，随任务一起提交</span>
+            )}
+          </div>
+
           <button type="button" className={styles.pickRow} onClick={() => setPickingWorkflow(true)}>
             <span className={styles.rowIcon}>
               <Workflow size={13} />
@@ -824,6 +953,18 @@ export function TaskActionPanel({
         </>
       )}
       {dialog}
+
+      {/* 面板自身是半透明表面，灯箱必须挂到 body 才能盖住整屏 */}
+      {previewIndex !== null &&
+        createPortal(
+          <ImageLightboxModal
+            isOpen
+            images={previewImages}
+            initialIndex={previewIndex}
+            onClose={() => setPreviewIndex(null)}
+          />,
+          document.body
+        )}
     </div>
   );
 }
