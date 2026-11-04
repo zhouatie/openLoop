@@ -113,8 +113,8 @@ export const SHORTCUT_COMMANDS: ShortcutCommand[] = [
   },
   {
     id: 'dock.terminal',
-    label: '工作台：终端',
-    description: '打开工作台的终端面板',
+    label: '工作台：新建终端',
+    description: '在工作台新建一个终端页签',
     group: 'panel',
     defaultBinding: 'super+t',
   },
