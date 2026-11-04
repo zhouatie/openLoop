@@ -414,6 +414,7 @@ export class DesktopApiService {
       dependencies?: string[];
       attachments?: TaskAttachment[];
       workspace?: string;
+      autoRun?: boolean;
     }
   ): Promise<{ success: boolean; subtask: Task; parent: Task }> {
     if (import.meta.env?.DEV) {
