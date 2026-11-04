@@ -197,7 +197,7 @@ function createdLabel(iso?: string): string {
 }
 
 /** 行内相对时间：紧凑写法（对齐 DSH 的「5分钟 / 13天 / 6个月」） */
-function relativeTime(iso: string, ms?: number): string {
+export function relativeTime(iso: string, ms?: number): string {
   const time = ms !== undefined ? ms : Date.parse(iso);
   if (!Number.isFinite(time)) return '';
   const diff = Math.max(0, Date.now() - time);

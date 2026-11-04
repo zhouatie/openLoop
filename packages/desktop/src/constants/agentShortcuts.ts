@@ -76,6 +76,14 @@ export const SHORTCUT_COMMANDS: ShortcutCommand[] = [
     defaultBinding: 'super+k',
   },
   {
+    id: 'session.switch',
+    label: '快速切换会话',
+    description: '唤起会话启动器：输入关键字，回车切到任意会话',
+    group: 'panel',
+    defaultBinding: 'super+s',
+    allowInInput: true,
+  },
+  {
     id: 'workspace.add',
     label: '添加工作区',
     description: '选择本地目录作为工作区',
