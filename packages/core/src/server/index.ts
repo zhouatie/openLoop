@@ -1812,7 +1812,7 @@ export class OpenLoopServer {
         if (!parent) return this.sendJson(res, 404, { error: 'Parent task not found' }, reqMeta);
 
         const body = await this.parseJsonBody(req);
-        const { title, workflowId, description, dependencies, attachments, workspace } = body;
+        const { title, workflowId, description, dependencies, attachments, workspace, autoRun } = body;
         const subId = `task_sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         
         // 解析子任务物理工作区：若传入相对路径，自动基于父任务工作区解析为绝对路径
@@ -1860,6 +1860,15 @@ export class OpenLoopServer {
 
         this.broadcastTaskNew(childTask);
         this.broadcastTaskUpdate(parent);
+
+        if (autoRun) {
+          serverLogger.info(`[Tasks:AddSubtask] 子任务创建后立即执行: ${childTask.id}`, undefined, { taskId: childTask.id });
+          setImmediate(() => {
+            this.engine.runTask(childTask.id).catch((err) => {
+              serverLogger.error(`[Tasks:AddSubtaskRunError] 子任务执行失败: ${err.message}`, err, { taskId: childTask.id });
+            });
+          });
+        }
 
         serverLogger.info(`[Tasks:AddSubtask] 成功为任务组 ${parent.id} 添加子任务: ${childTask.id} (${childTask.title})`);
         return this.sendJson(res, 201, { success: true, subtask: childTask, parent }, reqMeta);

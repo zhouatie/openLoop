@@ -259,7 +259,7 @@ export function TaskActionPanel({
     [groupLines]
   );
 
-  /** 选中任务组后新任务变为子工序，交由任务组调度，不再单独触发执行 */
+  /** 选中任务组后新任务变为子工序，执行与否由「创建后立即执行」决定 */
   const underGroup = mode === 'task' && parentTaskId !== '';
 
   const canSubmit = Boolean(workflowId) && !submitting && (mode === 'group' ? true : title.trim() !== '');
@@ -288,8 +288,10 @@ export function TaskActionPanel({
           workflowId,
           description,
           workspace: taskWorkspace,
+          autoRun,
         });
-        toast.success(`已加入任务组「${parentName || created.parent.title}」`);
+        const groupName = parentName || created.parent.title;
+        toast.success(autoRun ? `已加入任务组「${groupName}」并开始执行` : `已加入任务组「${groupName}」`);
         invalidateTaskOptions();
         rememberWorkflowId(workflowId);
         onOutcome?.({ action: 'created', taskId: created.subtask.id, title: created.subtask.title });
@@ -798,10 +800,9 @@ export function TaskActionPanel({
           <div className={styles.footer}>
             <button
               type="button"
-              className={`${styles.toggle} ${autoRun && !underGroup ? styles.toggleOn : ''}`}
+              className={`${styles.toggle} ${autoRun ? styles.toggleOn : ''}`}
               onClick={() => setAutoRun((prev) => !prev)}
-              disabled={underGroup}
-              title={underGroup ? '加入任务组后由任务组调度' : '创建后立即启动流水线'}
+              title="创建后立即启动流水线"
             >
               <span className={styles.toggleDot} />
               创建后立即执行
