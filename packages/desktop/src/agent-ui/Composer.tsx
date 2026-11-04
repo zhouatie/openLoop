@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { TaskAttachment } from '@openloop/core/types';
 import {
   IconPlus,
   IconSend,
@@ -22,6 +23,7 @@ import { ComposerEditor } from './composer-editor/ComposerEditor';
 import type { ComposerEditorHandle } from './composer-editor/ComposerEditor';
 import type { EditorProjection } from './composer-editor/projection';
 import { sessionMention, taskMention } from './mentions';
+import { clipboardImageFiles } from './clipboard-images';
 import type { TaskActionMode } from './TaskActionPanel';
 import { useShortcuts } from '../context/ShortcutContext';
 import { useShortcutBindings } from '../hooks/useShortcutBindings';
@@ -32,6 +34,8 @@ export interface ComposerAttachmentItem {
   previewUrl?: string;
   status: 'uploading' | 'ready' | 'error';
   errorMessage?: string;
+  /** 上传成功后的附件：外层可直接拿去建任务或发消息 */
+  attachment?: TaskAttachment;
 }
 
 export interface ComposerCommand {
@@ -668,12 +672,13 @@ export const Composer = React.memo(function Composer({
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
       if (!onAddFiles) return;
-      const picked = Array.from(event.clipboardData?.files || []).filter((item) =>
-        item.type.startsWith('image/')
-      );
+      const picked = clipboardImageFiles(event.clipboardData);
       if (picked.length === 0) return;
       // 图片走附件，其余文本交给编辑器自己插入
       event.preventDefault();
+      if (import.meta.env?.DEV) {
+        console.log('[Composer:Paste] 剪贴板图片转附件:', picked.map((file) => file.name));
+      }
       onAddFiles(picked);
     },
     [onAddFiles]

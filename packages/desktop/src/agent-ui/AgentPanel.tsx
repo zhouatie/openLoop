@@ -293,6 +293,14 @@ export function AgentPanelShell({
 
   // 会话树里选中一条提问：正文回到输入框，改完再发就是从那个点开新分支
   const fillSeqRef = useRef(draftFill?.seq);
+  /** 已上传完成的附件：➕ 面板建任务时随任务一起提交 */
+  const readyAttachments = useMemo(
+    () =>
+      (attachments ?? [])
+        .map((item) => item.attachment)
+        .filter((item): item is TaskAttachment => Boolean(item)),
+    [attachments]
+  );
   useEffect(() => {
     if (!draftFill || draftFill.seq === fillSeqRef.current) return;
     fillSeqRef.current = draftFill.seq;
@@ -358,6 +366,7 @@ export function AgentPanelShell({
             mode={taskAction}
             workspace={cwd}
             draft={draft}
+            attachments={readyAttachments}
             onClose={() => setTaskAction(null)}
             onOutcome={(outcome) => {
               if (import.meta.env?.DEV) console.log('[AgentPanel] 任务面板结果:', outcome);

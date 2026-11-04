@@ -238,6 +238,88 @@
   font-size: 12.5px;
 }
 
+/* 附件条：粘贴的截图与输入卡带过来的图共用一排缩略图 */
+.attachments {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 8px 6px;
+  min-height: 24px;
+}
+
+.attachHint {
+  font-size: 11.5px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.attachment {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.attachmentImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachmentIcon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.attachmentThumb {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.attachmentBusy {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+}
+
+.attachmentRemove {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+@media (hover: hover) {
+  .attachment:hover .attachmentRemove {
+    opacity: 1;
+  }
+}
+
 .footer {
   display: flex;
   align-items: center;
