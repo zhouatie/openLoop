@@ -33,8 +33,8 @@ import { useAgentModels } from '../hooks/useAgentModels';
 import { setViewingAgentSession, rememberAgentSessionTitles } from '../hooks/useAgentNotifications';
 import { QueuedInputs } from './QueuedInputs';
 import { TaskActionPanel, type TaskActionMode } from './TaskActionPanel';
+import { TaskPipelineChip } from './TaskPipelineChip';
 import { loadTaskOptions, TASK_STATUS_LABEL } from './task-options';
-import { Workflow } from 'lucide-react';
 import styles from './AgentPanel.module.css';
 
 /** @ 菜单里的会话时间：够用即可，不做本地化库 */
@@ -768,6 +768,8 @@ export interface GlobalAgentPanelProps {
   } | null;
   /** 不可见时关闭面板级快捷键 */
   active?: boolean;
+  /** 打开会话所属任务：挂载方决定跳转到看板还是其他任务视图 */
+  onOpenTaskDetail?: (taskId: string) => void;
 }
 
 interface ProjectGroup {
@@ -897,12 +899,16 @@ export function GlobalAgentPanel({
   onClose,
   sessionRequest,
   active = true,
+  onOpenTaskDetail,
 }: GlobalAgentPanelProps) {
   const initialSessionId = sessionRequest?.id || null;
   const { pick: pickDirectory, dialog: directoryDialog } = useDirectoryPicker();
   const [sessions, setSessions] = useState<SessionListItem[]>(loadCachedSessions);
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+  // selectSession 的回调依赖为空，用 ref 读取最新的外部请求，避免旧闭包把任务上下文清掉
+  const sessionRequestRef = useRef(sessionRequest);
+  sessionRequestRef.current = sessionRequest;
   const [liveIds, setLiveIds] = useState<string[]>([]);
   const [busyIds, setBusyIds] = useState<string[]>([]);
   /** 最近一次已知的运行集合（poll / refresh / 实时事件共同维护） */
@@ -1183,7 +1189,7 @@ export function GlobalAgentPanel({
     const sessionItem = sessionsRef.current.find((item) => item.id === id);
     if (sessionItem?.task) {
       setTaskContext({ taskId: sessionItem.task.id, taskTitle: sessionItem.task.title });
-    } else if (sessionRequest?.id !== id) {
+    } else if (sessionRequestRef.current?.id !== id) {
       setTaskContext(null);
     }
     try {
@@ -2243,23 +2249,8 @@ export function GlobalAgentPanel({
           shortcutPriority={1}
           headerExtra={
             <>
-              {taskContext?.taskTitle && mode === 'overlay' ? (
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-[#eeedfd] border border-[#d8d6fb] text-[#4f46e5] text-[10.5px] font-medium select-none shadow-2xs">
-                  <Workflow size={11} className="shrink-0" />
-                  <span className="truncate max-w-[200px]" title={taskContext.taskTitle}>
-                    看板任务: {taskContext.taskTitle}
-                  </span>
-                  {onClose && (
-                    <button
-                      type="button"
-                      onClick={onClose}
-                      className="ml-1 text-[10px] font-medium text-[#4f46e5] hover:text-[#3730a3] underline cursor-pointer"
-                      title="收起全局工作台，返回任务看板与详情"
-                    >
-                      返回详情
-                    </button>
-                  )}
-                </div>
+              {taskContext?.taskId && mode !== 'drawer' ? (
+                <TaskPipelineChip taskId={taskContext.taskId} onOpenTask={onOpenTaskDetail} />
               ) : null}
               {/* 任务启动的后台服务：有在跑的服务时出现，点开可看端口与终止 */}
               {taskContext?.taskId ? <BackgroundProcessesAction taskId={taskContext.taskId} /> : null}

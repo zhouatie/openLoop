@@ -1,0 +1,398 @@
+/* 顶栏任务条：24px 触发器贴合 headerActions 的按钮高度，弹层沿用 dsh 菜单表面，
+   节点行 28px 保持单行密度，右侧在悬浮时把状态文字换成单节点动作。 */
+
+.root {
+  position: relative;
+  display: inline-flex;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  max-width: 340px;
+  padding: 0 7px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm);
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--dsw-font-family);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.trigger:hover,
+.trigger[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.trigger:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color);
+  outline-offset: 1px;
+}
+
+/* 任务状态点：空闲灰、运行中呼吸、待确认琥珀、完成绿、失败红 */
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-idle-primary);
+}
+
+.dot[data-status='running'] {
+  background: var(--dsw-alias-state-business-primary);
+  animation: breathe 2s ease-in-out infinite;
+}
+
+.dot[data-status='waiting_approval'] {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.dot[data-status='completed'] {
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.dot[data-status='failed'] {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+  }
+}
+
+.title {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.activeNode {
+  flex: none;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.chevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 120ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.menu {
+  position: fixed;
+  z-index: 60;
+  width: 320px;
+  padding: 6px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+  box-shadow: var(--dsw-elevation-prominent);
+  font-family: var(--dsw-font-family);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 6px;
+}
+
+.workflowName {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  flex: none;
+  padding: 0 5px;
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.badge[data-status='running'] {
+  background: var(--dsw-alias-state-business-tertiary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.badge[data-status='waiting_approval'] {
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.badge[data-status='completed'] {
+  background: var(--dsw-alias-state-success-tertiary);
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.badge[data-status='failed'] {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-secondary) 16%, transparent);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 244px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 4px 0 4px;
+  border-radius: var(--dsw-radius-xs);
+}
+
+.node:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.nodeIndex {
+  flex: none;
+  width: 12px;
+  color: var(--dsw-alias-label-caption);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.nodeName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node[data-status='pending'] .nodeName {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.nodeTail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  flex: none;
+  min-width: 68px;
+}
+
+.nodeStatus {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.node[data-status='running'] .nodeStatus {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.node[data-status='waiting_approval'] .nodeStatus {
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.node[data-status='success'] .nodeStatus {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.node[data-status='failed'] .nodeStatus {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* 行级动作：悬浮或键盘聚焦时替换状态文字，不额外占位 */
+.nodeButton {
+  display: none;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 5px;
+  border: none;
+  border-radius: var(--dsw-radius-xs);
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 从该节点开始：只有图标，和状态文字共用同一块位置 */
+.nodeStart {
+  display: none;
+  align-items: center;
+  height: 20px;
+  padding: 0 5px;
+  margin-right: 3px;
+  border: none;
+  border-radius: var(--dsw-radius-xs);
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.nodeStart:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+  color: var(--dsw-alias-label-primary);
+}
+
+.nodeStart:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.node:hover .nodeStatus,
+.node:focus-within .nodeStatus {
+  display: none;
+}
+
+.node:hover .nodeStart,
+.node:focus-within .nodeStart,
+.node:hover .nodeButton,
+.node:focus-within .nodeButton {
+  display: inline-flex;
+}
+
+.nodeButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+  color: var(--dsw-alias-label-primary);
+}
+
+.nodeButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.empty {
+  margin: 0;
+  padding: 6px 4px 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11.5px;
+  line-height: 18px;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--dsw-alias-border-l3);
+}
+
+.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  gap: 4px;
+  height: 26px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.primary:hover {
+  background: var(--dsw-alias-button-primary-hover);
+}
+
+.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ghost {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm);
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.ghost:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
