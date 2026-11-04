@@ -136,6 +136,14 @@
   }
 }
 
+/* 列表是滚动容器，外侧焦点环会被裁掉：改为内描边，两侧不再缺口 */
+.row:focus-visible,
+.pickRow:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid
+    var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
+}
+
 .rowIcon {
   display: inline-flex;
   flex: none;
