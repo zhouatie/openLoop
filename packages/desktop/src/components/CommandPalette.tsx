@@ -153,7 +153,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         id: 'nav-settings',
         category: '导航',
         title: '系统设置',
-        description: '配置代码智能体驱动与工作区环境变量',
+        description: '配置代码智能体工作区与模型参数',
         icon: <Settings size={16} strokeWidth={1.8} className="text-[#d97706]" />,
         shortcutKeys: ['super', ','],
         action: () => {

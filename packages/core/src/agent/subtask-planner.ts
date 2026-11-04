@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Store } from '../store';
 import { Task, WorkflowDefinition, TaskExecutionMode } from '../types';
-import { PiRpcSessionInstance } from './pi-rpc-session';
+import { PiSessionInstance } from './pi-session';
 import { createLogger } from '../logger';
 
 const logger = createLogger('SubtaskPlanner');
@@ -74,7 +74,7 @@ export class SubtaskPlanner {
     const result = await new Promise<string | null>((resolve) => {
       let settled = false;
       let lastAssistantText = '';
-      let session: PiRpcSessionInstance | null = null;
+      let session: PiSessionInstance | null = null;
 
       const finish = (text: string | null, reason?: string) => {
         if (settled) return;
@@ -90,7 +90,7 @@ export class SubtaskPlanner {
         PLAN_TIMEOUT_MS
       );
 
-      session = new PiRpcSessionInstance({
+      session = new PiSessionInstance({
         taskId: `subtask_plan_${task.id}`,
         taskTitle: `工序规划: ${task.title}`,
         sessionId: `subtask_plan_${task.id}_${Date.now()}`,

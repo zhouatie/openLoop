@@ -7,7 +7,7 @@ import http from 'http';
 import { spawn, execSync, ChildProcess } from 'child_process';
 import { WorktreeContextInfo, FileDiffItem, TaskWorktreeDiffResult, Task } from '../types';
 import { createLogger } from '../logger';
-import { PiRpcSessionManager } from '../agent/pi-rpc-session';
+import { PiSessionManager } from '../agent/pi-session';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
 
 const logger = createLogger('WorktreeManager');
@@ -1122,7 +1122,7 @@ export class WorktreeManager {
       };
 
       try {
-        const session = PiRpcSessionManager.getInstance().createSession({
+        const session = PiSessionManager.getInstance().createSession({
           taskId,
           taskTitle: `[冲突协调] ${taskTitle}`,
           sessionId: effectiveSessionId,

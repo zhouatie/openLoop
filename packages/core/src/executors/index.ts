@@ -4,14 +4,10 @@ import path from 'path';
 import os from 'os';
 import { WorkflowNode, WorkflowDefinition, Task, LogEntry, NodeRun, TaskSessionState, QaSuite, QaStep, TaskAttachment } from '../types';
 import { createLogger } from '../logger';
-import { PiRpcSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-rpc-session';
+import { PiSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-session';
 import type { AgentStreamEvent } from '../agent/agent-events';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
-import {
-  getAgentProviderMeta,
-  resolveResumeCommand,
-  resolveRunCommand,
-} from '../constants/agent-providers';
+import { resolveResumeCommand } from '../constants/pi-agent';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { guessImageMimeType } from '../constants/media-mime';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
@@ -518,21 +514,18 @@ export function buildAgentPrompt(
   return prompt;
 }
 
-// 真实 AI Agent 节点执行器，支持通过 pi agent 或自定义 CLI 驱动
+// 真实 AI Agent 节点执行器：由进程内 pi 会话驱动
 export class AgentExecutor implements NodeExecutor {
-  private cliExecutor = new CliCommandExecutor();
-
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { node, task, emitLog, settings = {} } = ctx;
     const agentName = node.config.agentName || 'OpenLoop Agent';
-    const agentProvider = getAgentProviderMeta(settings.agentProvider).id;
 
     executorLogger.info(
-      `[Agent] 激活 Agent [${agentName}] (驱动: ${agentProvider})`,
+      `[Agent] 激活 Agent [${agentName}]`,
       { agentConfig: node.config },
       { taskId: task.id, nodeId: node.id }
     );
-    emitLog('system', `[Agent 节点] 激活: ${agentName} (驱动模式: ${agentProvider})`);
+    emitLog('system', `[Agent 节点] 激活: ${agentName}`);
 
     // 1. 获取或生成唯一的持久化会话标识
     const sessionId =
@@ -542,7 +535,6 @@ export class AgentExecutor implements NodeExecutor {
     if (!task.context) task.context = {};
     task.context.sessionId = sessionId;
     task.context.piSessionId = sessionId;
-    task.context.agentProvider = agentProvider;
 
     const resolvedCwd = resolveWorkingDir(node.config.cwd || task.workspace);
     const isSandbox = !resolvedCwd;
@@ -561,7 +553,7 @@ export class AgentExecutor implements NodeExecutor {
     }
 
     // 2. 系统内置的终端接管指令
-    const resumeCommand = resolveResumeCommand(agentProvider, sessionId);
+    const resumeCommand = resolveResumeCommand(sessionId);
     task.context.resumeCommand = resumeCommand;
 
     const model = settings.defaultModel;
@@ -578,151 +570,100 @@ export class AgentExecutor implements NodeExecutor {
     }
     emitLog('system', `[终端恢复提示] 如需在终端中交互式接管，可执行: ${resumeCommand}`);
 
-    // pi 引擎走内置 RPC 会话驱动
-    if (agentProvider === 'pi') {
-      const mergedAttachments: TaskAttachment[] = [];
-      const prompt = buildAgentPrompt(ctx, { awaitCompletion: true, mergedAttachments });
-
-      executorLogger.info(
-        `[Agent:Pi] 建立 Pi Agent RPC 会话，Session ID: ${sessionId} (工作区 CWD: ${cwd}, 附件数: ${mergedAttachments.length})`,
-        { promptPreview: prompt.length > 200 ? prompt.slice(0, 200) + '...' : prompt, workspace: task.workspace },
-        { taskId: task.id, nodeId: node.id }
-      );
-      emitLog('system', `[Pi Agent 会话] Session ID: ${sessionId}`);
-
-      return new Promise<ExecutionResult>((resolve) => {
-        let settled = false;
-        const finish = (result: ExecutionResult) => {
-          if (settled) return;
-          settled = true;
-          resolve(result);
-        };
-
-        const session = PiRpcSessionManager.getInstance().createSession({
-          taskId: task.id,
-          taskTitle: task.title,
-          taskDescription: task.description,
-          sessionId,
-          agentName,
-          model,
-          thinking,
-          cwd,
-          initialPrompt: prompt,
-          initialAttachments: mergedAttachments.length > 0 ? mergedAttachments : undefined,
-          awaitCompletionMarker: true,
-          env: buildWorktreeEnv(task),
-          onLog: emitLog,
-          onUpdate: (state) => {
-            if (ctx.onSessionUpdate) {
-              ctx.onSessionUpdate(state);
-            }
-          },
-          onEvent: (event) => {
-            if (ctx.onSessionEvent) {
-              ctx.onSessionEvent(event);
-            }
-          },
-          onFinished: (error) => {
-            const abortFile = path.join(os.tmpdir(), `openloop_abort_${task.id}`);
-            let abortReason: string | undefined;
-            if (fs.existsSync(abortFile)) {
-              try {
-                abortReason = fs.readFileSync(abortFile, 'utf-8').trim();
-                fs.unlinkSync(abortFile);
-              } catch {}
-            }
-
-            const finalError = error || abortReason;
-            if (finalError) {
-              finish({
-                status: 'failed',
-                exitCode: 1,
-                error: finalError,
-              });
-            } else {
-              finish({
-                status: 'success',
-                exitCode: 0,
-                output: {
-                  agentProvider,
-                  sessionId,
-                  piSessionId: sessionId,
-                  resumeCommand,
-                },
-              });
-            }
-          },
-        });
-
-        if (ctx.abortSignal) {
-          if (ctx.abortSignal.aborted) {
-            session.terminate();
-            finish({
-              status: 'failed',
-              exitCode: -1,
-              error: '任务已被用户手动终止',
-            });
-            return;
-          }
-          ctx.abortSignal.addEventListener('abort', () => {
-            session.terminate();
-            finish({
-              status: 'failed',
-              exitCode: -1,
-              error: '任务已被用户手动终止',
-            });
-          });
-        }
-      });
-    }
-
-    // 其他引擎：使用节点自定义命令，否则使用系统内置的引擎命令
+    // 内置 pi 会话驱动：提示词交给进程内 Agent，等它输出完成标记后结束本节点
     const mergedAttachments: TaskAttachment[] = [];
-    const promptForCommand = buildAgentPrompt(ctx, { mergedAttachments });
-    const resolvedCommand =
-      node.config.command || resolveRunCommand(agentProvider, promptForCommand, model);
+    const prompt = buildAgentPrompt(ctx, { awaitCompletion: true, mergedAttachments });
 
-    if (!resolvedCommand) {
-      const err = `[Agent 节点 ${node.id}] 引擎 [${agentProvider}] 没有内置执行命令，请在节点中填写自定义命令。`;
-      executorLogger.error(`[Agent] 缺少执行命令`, undefined, { taskId: task.id, nodeId: node.id });
-      emitLog('stderr', err);
-      return {
-        status: 'failed',
-        exitCode: 1,
-        error: err,
+    executorLogger.info(
+      `[Agent:Pi] 建立 Pi Agent 会话，Session ID: ${sessionId} (工作区 CWD: ${cwd}, 附件数: ${mergedAttachments.length})`,
+      { promptPreview: prompt.length > 200 ? prompt.slice(0, 200) + '...' : prompt, workspace: task.workspace },
+      { taskId: task.id, nodeId: node.id }
+    );
+    emitLog('system', `[Pi Agent 会话] Session ID: ${sessionId}`);
+
+    return new Promise<ExecutionResult>((resolve) => {
+      let settled = false;
+      const finish = (result: ExecutionResult) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
       };
-    }
 
-    emitLog('system', `[执行命令] ${resolvedCommand}`);
-
-    const proxyNode: WorkflowNode = {
-      ...node,
-      config: {
-        ...node.config,
-        command: resolvedCommand,
-        env: {
-          ...buildWorktreeEnv(task),
-          ...node.config.env,
-          OPENLOOP_SESSION_ID: sessionId,
-          OPENLOOP_TASK_ID: task.id,
+      const session = PiSessionManager.getInstance().createSession({
+        taskId: task.id,
+        taskTitle: task.title,
+        taskDescription: task.description,
+        sessionId,
+        agentName,
+        model,
+        thinking,
+        cwd,
+        initialPrompt: prompt,
+        initialAttachments: mergedAttachments.length > 0 ? mergedAttachments : undefined,
+        awaitCompletionMarker: true,
+        env: buildWorktreeEnv(task),
+        onLog: emitLog,
+        onUpdate: (state) => {
+          if (ctx.onSessionUpdate) {
+            ctx.onSessionUpdate(state);
+          }
         },
-      },
-    };
-
-    const cliResult = await this.cliExecutor.execute({ ...ctx, node: proxyNode });
-    if (cliResult.status === 'success') {
-      return {
-        ...cliResult,
-        output: {
-          ...(cliResult.output || {}),
-          agentProvider,
-          sessionId,
-          piSessionId: sessionId,
-          resumeCommand,
+        onEvent: (event) => {
+          if (ctx.onSessionEvent) {
+            ctx.onSessionEvent(event);
+          }
         },
-      };
-    }
-    return cliResult;
+        onFinished: (error) => {
+          const abortFile = path.join(os.tmpdir(), `openloop_abort_${task.id}`);
+          let abortReason: string | undefined;
+          if (fs.existsSync(abortFile)) {
+            try {
+              abortReason = fs.readFileSync(abortFile, 'utf-8').trim();
+              fs.unlinkSync(abortFile);
+            } catch {}
+          }
+
+          const finalError = error || abortReason;
+          if (finalError) {
+            finish({
+              status: 'failed',
+              exitCode: 1,
+              error: finalError,
+            });
+          } else {
+            finish({
+              status: 'success',
+              exitCode: 0,
+              output: {
+                sessionId,
+                piSessionId: sessionId,
+                resumeCommand,
+              },
+            });
+          }
+        },
+      });
+
+      if (ctx.abortSignal) {
+        if (ctx.abortSignal.aborted) {
+          session.terminate();
+          finish({
+            status: 'failed',
+            exitCode: -1,
+            error: '任务已被用户手动终止',
+          });
+          return;
+        }
+        ctx.abortSignal.addEventListener('abort', () => {
+          session.terminate();
+          finish({
+            status: 'failed',
+            exitCode: -1,
+            error: '任务已被用户手动终止',
+          });
+        });
+      }
+    });
   }
 }
 

@@ -6,12 +6,13 @@ export {
   renderPromptTemplate,
 } from './constants/prompts';
 export * from './constants/media-mime';
-export * from './constants/agent-providers';
+export * from './constants/pi-agent';
 export * from './store';
 export * from './executors';
 export * from './engine/dag-engine';
 export * from './engine/workflow-recommender';
-export * from './agent/pi-rpc-session';
+export * from './agent/pi-session';
+export * from './agent/pi-extension-ui';
 export * from './agent/pi-extensions';
 export * from './agent/agent-events';
 export * from './agent/session-index';

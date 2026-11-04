@@ -5,7 +5,7 @@ import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
 import type { SessionTreeSnapshot, TaskAttachment, TaskSessionState } from '../types';
 import type { AgentStreamEvent } from './agent-events';
-import { PiRpcSessionInstance, PiRpcSessionManager } from './pi-rpc-session';
+import { PiSessionInstance, PiSessionManager } from './pi-session';
 import { piSessionIndex } from './session-index';
 import { agentSessionMeta, resolveMetaDir } from './session-meta';
 import { readSessionTree } from './session-tree';
@@ -68,7 +68,7 @@ export interface AgentSessionSettings {
  */
 export class AgentSessionHost extends EventEmitter {
   private static instance: AgentSessionHost;
-  private sessions = new Map<string, PiRpcSessionInstance>();
+  private sessions = new Map<string, PiSessionInstance>();
   /** 记录每个会话最后一次已知的 cwd，重启进程时沿用 */
   private cwdBySession = new Map<string, string>();
   /** 记录每个会话的模型与权限设置，重启后沿用 */
@@ -85,14 +85,14 @@ export class AgentSessionHost extends EventEmitter {
    * 持有该 pi 会话的进程：本宿主的优先，其次是任务流水线节点的常驻进程。
    * 同一份会话文件只能有一个进程写，否则两侧的消息会互相覆盖。
    */
-  private holderOf(sessionId: string): PiRpcSessionInstance | undefined {
+  private holderOf(sessionId: string): PiSessionInstance | undefined {
     const own = this.sessions.get(sessionId);
     if (own && own.active) return own;
-    return PiRpcSessionManager.getInstance().findLiveBySessionId(sessionId);
+    return PiSessionManager.getInstance().findLiveBySessionId(sessionId);
   }
 
   /** 取（必要时拉起）会话的持有进程 */
-  private async ensureHolder(sessionId: string): Promise<PiRpcSessionInstance> {
+  private async ensureHolder(sessionId: string): Promise<PiSessionInstance> {
     if (!this.holderOf(sessionId)) await this.open(sessionId, {});
     const holder = this.holderOf(sessionId);
     if (!holder) throw new Error('Agent 会话启动失败');
@@ -117,7 +117,7 @@ export class AgentSessionHost extends EventEmitter {
     const model = options.model || previous?.model || meta.model;
     const thinking = options.thinking || previous?.thinking || meta.thinking;
 
-    const session = new PiRpcSessionInstance({
+    const session = new PiSessionInstance({
       taskId,
       // 不拿首条消息当会话名：续接会话的标题由 pi 会话名（自动命名）决定，
       // 这里再传一个会让每轮续接都把标题钉成原始的提示词
@@ -519,6 +519,6 @@ export class AgentSessionHost extends EventEmitter {
 
 export const agentSessionHost = AgentSessionHost.getInstance();
 
-PiRpcSessionInstance.onModelsDiscovered = (models) => {
+PiSessionInstance.onModelsDiscovered = (models) => {
   agentSessionHost.updateCachedModels(models);
 };

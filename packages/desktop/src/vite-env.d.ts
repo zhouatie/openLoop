@@ -10,6 +10,12 @@ interface Window {
     checkSystemStatus?: () => Promise<{
       platform: string;
       nodeVersion: string;
+      nodeRuntime?: {
+        path: string;
+        version: string | null;
+        required: string;
+        supported: boolean;
+      };
       hasFullDiskAccess: boolean;
       tools: { name: string; command: string; available: boolean; path?: string }[];
     }>;

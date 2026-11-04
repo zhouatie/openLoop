@@ -98,63 +98,106 @@ function checkUrlAlive(urlStr: string, defaultPath = '/api/status'): Promise<boo
   });
 }
 
-// 极速定位宿主 Node.js 运行时（严禁使用过时全局 Node 避免 C++ 模块 ABI 段错误）
-function findSystemNode(): string {
-  const home = os.homedir();
+// pi SDK 跑在核心进程内，要求宿主 Node >= 22.19（require(esm) 与 node:fs 新 API）
+const MIN_NODE_VERSION = '22.19.0';
 
-  // 1. 优先定位用户 NVM 中的默认/活跃版本（与项目编译环境 Node 22 严格对齐）
+function parseNodeVersion(raw: string | null): number[] | null {
+  if (!raw) return null;
+  const nums = raw
+    .replace(/^v/, '')
+    .split('.')
+    .slice(0, 3)
+    .map((n) => parseInt(n, 10));
+  return nums.some(Number.isNaN) ? null : nums;
+}
+
+function compareNodeVersion(a: number[], b: number[]): number {
+  for (let i = 0; i < 3; i++) {
+    const diff = (a[i] || 0) - (b[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+interface NodeRuntime {
+  path: string;
+  version: string | null;
+  required: string;
+  supported: boolean;
+}
+
+/** 读取某个 node 可执行文件的真实版本，读不到说明路径不可用 */
+function probeNodeVersion(bin: string): string | null {
+  try {
+    const out = execSync(`"${bin}" -p process.versions.node`, { encoding: 'utf-8', timeout: 1500 }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+function isNodeSupported(version: string | null): boolean {
+  const parsed = parseNodeVersion(version);
+  const floor = parseNodeVersion(MIN_NODE_VERSION);
+  if (!parsed || !floor) return false;
+  return compareNodeVersion(parsed, floor) >= 0;
+}
+
+/** 按优先级列出候选 node：nvm 默认版本优先，其次 nvm 里的其他版本，再退到各包管理器 */
+function listNodeCandidates(): string[] {
+  const home = os.homedir();
+  const candidates: string[] = [];
+
   const nvmDir = path.join(home, '.nvm/versions/node');
-  const aliasFile = path.join(home, '.nvm/alias/default');
   if (fs.existsSync(nvmDir)) {
     try {
-      let targetPrefix = '';
-      if (fs.existsSync(aliasFile)) {
-        targetPrefix = fs.readFileSync(aliasFile, 'utf-8').trim();
-      }
-      const versions = fs.readdirSync(nvmDir).filter((v) => v.startsWith('v'));
-      // 优先匹配 default alias（如 22）
-      if (targetPrefix) {
-        const matched = versions
-          .filter((v) => v.startsWith(`v${targetPrefix}`) || v === targetPrefix)
-          .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0];
-        if (matched) {
-          const fullNode = path.join(nvmDir, matched, 'bin/node');
-          if (fs.existsSync(fullNode)) return fullNode;
-        }
-      }
-      // 备选匹配 v22 或最高可用现代版本
-      const sorted = versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-      const v22 = sorted.find((v) => v.startsWith('v22.'));
-      if (v22) {
-        const fullNode = path.join(nvmDir, v22, 'bin/node');
-        if (fs.existsSync(fullNode)) return fullNode;
-      }
-      if (sorted.length > 0) {
-        const fullNode = path.join(nvmDir, sorted[0], 'bin/node');
-        if (fs.existsSync(fullNode)) return fullNode;
+      const aliasFile = path.join(home, '.nvm/alias/default');
+      const targetPrefix = fs.existsSync(aliasFile) ? fs.readFileSync(aliasFile, 'utf-8').trim() : '';
+      const versions = fs
+        .readdirSync(nvmDir)
+        .filter((v) => v.startsWith('v'))
+        .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+      const preferred = targetPrefix
+        ? versions.filter((v) => v.startsWith(`v${targetPrefix}`) || v === targetPrefix)
+        : [];
+      for (const v of [...preferred, ...versions.filter((v) => !preferred.includes(v))]) {
+        candidates.push(path.join(nvmDir, v, 'bin/node'));
       }
     } catch {}
   }
 
-  // 2. 探测 Homebrew Apple Silicon
-  if (fs.existsSync('/opt/homebrew/bin/node')) {
-    return '/opt/homebrew/bin/node';
-  }
+  candidates.push('/opt/homebrew/bin/node');
+  candidates.push(path.join(home, '.local/share/fnm/current/bin/node'));
+  candidates.push(path.join(home, '.volta/bin/node'));
+  candidates.push('/usr/local/bin/node');
+  candidates.push('/usr/bin/node');
+  candidates.push('node');
+  return candidates;
+}
 
-  // 3. 探测 fnm
-  const fnmNode = path.join(home, '.local/share/fnm/current/bin/node');
-  if (fs.existsSync(fnmNode)) return fnmNode;
+let cachedNodeRuntime: NodeRuntime | null = null;
 
-  // 4. 其余备用路径
-  const staticCandidates = [
-    path.join(home, '.volta/bin/node'),
-    '/usr/local/bin/node',
-    '/usr/bin/node',
-  ];
-  for (const c of staticCandidates) {
-    if (fs.existsSync(c)) return c;
+/**
+ * 选出真正能承载 pi SDK 的宿主 Node。
+ * 只判断文件存在是不够的：低版本 Node 能启动核心服务，但会话一建立就失败，
+ * 所以这里逐个探测真实版本，优先返回满足下限的第一个，都不满足时回落首个可用版本并标记 supported=false。
+ */
+function resolveNodeRuntime(force = false): NodeRuntime {
+  if (cachedNodeRuntime && !force) return cachedNodeRuntime;
+  let fallback: NodeRuntime | null = null;
+  for (const bin of listNodeCandidates()) {
+    const version = probeNodeVersion(bin);
+    if (!version) continue;
+    const supported = isNodeSupported(version);
+    const runtime: NodeRuntime = { path: bin, version, required: MIN_NODE_VERSION, supported };
+    if (supported) {
+      cachedNodeRuntime = runtime;
+      return runtime;
+    }
+    if (!fallback) fallback = runtime;
   }
-  return 'node';
+  cachedNodeRuntime = fallback || { path: 'node', version: null, required: MIN_NODE_VERSION, supported: false };
+  return cachedNodeRuntime;
 }
 
 // 智能探测 Core CLI 入口路径（必须是真实的操作系统文件，严禁指向 .asar 虚拟归档）
@@ -229,7 +272,13 @@ async function ensureCoreServer() {
   }
 
   // 1. 优先使用宿主系统的原生 Node 独立进程启动 Core CLI（消除原生 ABI 冲突并具备完整依赖）
-  const nodeBinary = findSystemNode();
+  const nodeRuntime = resolveNodeRuntime();
+  const nodeBinary = nodeRuntime.path;
+  if (!nodeRuntime.supported) {
+    console.warn(
+      `[Desktop Main] 宿主 Node 版本不满足要求: ${nodeRuntime.version || '未知'} (${nodeRuntime.path}, 需要 >= ${nodeRuntime.required})，任务会话将无法建立`
+    );
+  }
   const coreCli = resolveCoreCliPath();
 
   if (coreCli) {
@@ -584,6 +633,9 @@ ipcMain.handle('system:checkSystemStatus', async () => {
   return {
     platform: process.platform,
     nodeVersion: process.version,
+    // 真正驱动核心服务的宿主 Node（可能与 Electron 自带版本不同），依赖审核界面以此为准
+    // 依赖审核界面点刷新时重新探测，避免缓存挡住刚升级的 Node
+    nodeRuntime: resolveNodeRuntime(true),
     hasFullDiskAccess,
     tools: toolStatuses,
   };

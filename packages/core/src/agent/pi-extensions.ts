@@ -6,9 +6,9 @@ import { createLogger } from '../logger';
 const logger = createLogger('PiExtensions');
 
 /**
- * pi 扩展按包装载，每个包都会给进程启动加一份成本（实测：扩展管理器 +1.6s，
+ * pi 扩展按包装载，每个包都会给会话建立加一份成本（实测：扩展管理器 +1.6s，
  * 子代理 +1.0s，绝大多数交互式扩展对流水线节点无用）。
- * 因此会话进程统一用 --no-extensions 关掉自动发现，只显式装载下面这份名单。
+ * 因此会话统一关掉自动发现，只显式装载下面这份名单。
  */
 export const DEFAULT_PI_EXTENSION_PACKAGES = [
   'pi-observational-memory',
@@ -93,18 +93,18 @@ export function listInstalledPiExtensions(): InstalledPiExtension[] {
 }
 
 /**
- * 生成会话进程的扩展装载参数：先关掉自动发现，再逐个显式装载名单内的包。
+ * 生成会话的扩展装载路径：配合 noExtensions 关掉自动发现，再逐个显式装载名单内的包。
  * 包没装就跳过并记日志，不让一个缺失的扩展拖垮整条链路。
  */
-export function buildPiExtensionArgs(): string[] {
-  const args = ['--no-extensions'];
+export function resolveEnabledPiExtensionPaths(): string[] {
+  const paths: string[] = [];
   for (const name of enabledPackages) {
     const found = readPackageManifest(name);
     if (!found) {
       logger.debug(`pi 扩展包未安装，已跳过: ${name}`);
       continue;
     }
-    args.push('--extension', found.dir);
+    paths.push(found.dir);
   }
-  return args;
+  return paths;
 }

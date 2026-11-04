@@ -5,11 +5,12 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w",
+    "build": "tsc && node scripts/copy-assets.js",
+    "watch": "node scripts/copy-assets.js && tsc -w",
     "start": "node --watch dist/server-cli.js"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.0",
     "@midscene/android": "^1.16.0",
     "@midscene/ios": "^1.16.0",
     "better-sqlite3": "^13.0.3",

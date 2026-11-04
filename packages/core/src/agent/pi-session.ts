@@ -1,22 +1,31 @@
-import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {
+  type AgentSession,
+  type DefaultResourceLoader,
+  type ExtensionFactory,
+  type SessionManager,
+} from '@earendil-works/pi-coding-agent';
+import {
   PendingUserInput,
   SessionChatMessage,
   ToolExecutionRecord,
   TaskSessionState,
-  Task,
   TaskAttachment,
   RuntimeSettingsPatch,
   RuntimeSettingsApplyResult,
   RuntimeSettingsApplySummary,
 } from '../types';
 import { createLogger } from '../logger';
+import { resolveResumeCommand } from '../constants/pi-agent';
 import { compactToolResult } from './agent-format';
-import { buildPiExtensionArgs } from './pi-extensions';
+import { resolveEnabledPiExtensionPaths } from './pi-extensions';
+import { piSessionIndex } from './session-index';
+import { ExtensionUiBridge, type ExtensionUiResponse } from './pi-extension-ui';
+import captureExtension from './extensions/openloop-capture';
+import titleExtension from './extensions/openloop-title';
 import { changeCaptureDir, changeIdOf, finishTurnChanges, forgetSessionChanges, rememberTurnWrite } from './turn-changes';
 import {
   AgentStatusEvent,
@@ -26,7 +35,7 @@ import {
   compactUsage,
 } from './agent-events';
 
-const logger = createLogger('PiRpcSession');
+const logger = createLogger('PiSession');
 
 /** Agent 显式声明完成的标记：只有输出该标记，流水线才允许流转到下一个节点 */
 export const PIPELINE_DONE_MARKER = '[OPENLOOP_DONE]';
@@ -39,23 +48,16 @@ export const PIPELINE_DONE_MARKER = '[OPENLOOP_DONE]';
  */
 const PI_SNAPSHOT_INTERVAL_MS = 250;
 
-/**
- * 会话树导航桥：pi 的 RPC 协议没有暴露 navigateTree，只能通过扩展命令触发
- * 编译产物与本文件同目录树，跟着 dist 一起分发。
- */
-const TREE_EXTENSION_PATH = path.join(__dirname, 'extensions', 'openloop-tree.js');
-/** 内部命令名：与 extension 里 registerCommand 的名字一致 */
-const TREE_COMMAND = 'openloop-tree';
-/**
- * 会话自动命名桥：兜底标题即时落，模型提炼在会话内后台跑，不额外起进程。
- * 编译产物与本文件同目录树，跟着 dist 一起分发。
- */
-const TITLE_EXTENSION_PATH = path.join(__dirname, 'extensions', 'openloop-title.js');
-/**
- * 改动捕获桥：在 pi 进程内、写入类工具执行前存一份改动前内容。
- * 编译产物与本文件同目录树，跟着 dist 一起分发。
- */
-const CAPTURE_EXTENSION_PATH = path.join(__dirname, 'extensions', 'openloop-capture.js');
+/** pi SDK 是纯 ESM 包，CJS 宿主通过这份 ESM 桥加载（见 assets/pi-sdk.mjs） */
+const PI_SDK_BRIDGE = path.join(__dirname, 'assets', 'pi-sdk.mjs');
+type PiSdk = typeof import('@earendil-works/pi-coding-agent');
+let sdkCache: PiSdk | null = null;
+
+/** 惰性加载：没有 agent 会话时不为 SDK 付出加载成本 */
+function piSdk(): PiSdk {
+  if (!sdkCache) sdkCache = require(PI_SDK_BRIDGE) as PiSdk;
+  return sdkCache;
+}
 
 /** 工具入参摘要：只保留可展示的原始字段，供工具卡直接渲染 */
 function summarizeToolInput(args: any): Record<string, any> | undefined {
@@ -96,6 +98,16 @@ function composeMessage(message: string, attachments?: TaskAttachment[]): string
     : `【用户随附参考图片】\n${imagesPrompt}`;
 }
 
+/** 逗号分隔的工具名单转数组 */
+function splitList(value?: string): string[] | undefined {
+  if (!value || !value.trim()) return undefined;
+  const list = value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : undefined;
+}
+
 /** 单张内联图片上限，超过则不给工具卡内联，避免快照体积失控 */
 const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_INLINE_IMAGES = 4;
@@ -129,11 +141,11 @@ function resultImageUrls(result: any): string[] {
 /**
  * 解析可用的启动目录
  *
- * 工作区可能已被回收（沙箱 worktree 清理、目录改名），cwd 不存在时 spawn 直接报 ENOENT，
- * 会话从此发不出任何消息。这里补建空目录：pi 按 cwd 路径定位会话文件，路径不变，
- * 历史照常续接；实在建不了才退到 home，至少保住对话能力。
+ * 工作区可能已被回收（沙箱 worktree 清理、目录改名），cwd 不存在时工具路径全部失效。
+ * 这里补建空目录：pi 按 cwd 路径定位会话文件，路径不变，历史照常续接；
+ * 实在建不了才退到 home，至少保住对话能力。
  */
-function resolveSpawnCwd(dir: string): { cwd: string; recreated: boolean } {
+function resolveSessionCwd(dir: string): { cwd: string; recreated: boolean } {
   if (fs.existsSync(dir)) return { cwd: dir, recreated: false };
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -143,7 +155,7 @@ function resolveSpawnCwd(dir: string): { cwd: string; recreated: boolean } {
   }
 }
 
-export interface PiRpcSessionOptions {
+export interface PiSessionOptions {
   taskId: string;
   taskTitle: string;
   taskDescription?: string;
@@ -163,7 +175,7 @@ export interface PiRpcSessionOptions {
   /** 流水线节点场景：Agent 未输出完成标记时停留在本节点等待用户回复，不自动流转下游 */
   awaitCompletionMarker?: boolean;
   /**
-   * 是否在进程启动后自动发送 initialPrompt
+   * 是否在会话就绪后自动发送 initialPrompt
    * 历史会话浏览、纯面板打开场景传 false，等用户手动发消息再启动轮次
    */
   autoStart?: boolean;
@@ -174,7 +186,7 @@ export interface PiRpcSessionOptions {
   onFinished?: (error?: string) => void;
 }
 
-export class PiRpcSessionInstance extends EventEmitter {
+export class PiSessionInstance extends EventEmitter {
   public static onModelsDiscovered?: (models: Array<{ id: string; provider: string; label?: string }>) => void;
   public taskId: string;
   public sessionId: string;
@@ -192,27 +204,29 @@ export class PiRpcSessionInstance extends EventEmitter {
   public lastError?: string;
   /** 会话工作目录，工具记录直接带上，供命令卡显示提示符 */
   public cwd?: string;
-  /** 子进程实际启动目录：改动捕获解析相对路径用它，保证与 pi 进程内一致 */
-  private spawnCwd?: string;
+  /** 实际生效的工作目录：目录被回收时会重建或回退，改动捕获按它解析相对路径 */
+  private resolvedCwd?: string;
   /** 本轮（一次用户提交）开始时间，运行中用于显示用时 */
   public turnStartedAt?: number;
   /** 上一轮从开始到结束的用时（毫秒） */
   public lastTurnDurationMs?: number;
   /**
-   * 进程内导航后的叶子条目：pi 切换分支只改内存里的指针，不写文件，
-   * 因此必须由 openLoop 记住，否则读盘会读到被放弃的分支。
-   * undefined=跟文件末尾一致（pi 重启后的语义），null=已回退到会话起点。
+   * 进程内导航后的叶子条目：会话文件里的叶子可能被后续追加覆盖，
+   * 因此由 openLoop 记住，否则读盘会读到被放弃的分支。
+   * undefined=跟文件末尾一致，null=已回退到会话起点。
    */
   public leafEntryId?: string | null;
 
+  private options: PiSessionOptions;
+  /** SDK 会话：创建是异步的，所有对外方法先等它就绪 */
+  private ready: Promise<AgentSession>;
+  private session?: AgentSession;
+  /** 扩展装载策略：关掉自动发现，只装设置页选中的包与 openLoop 自己的桥 */
+  private resourceLoader?: DefaultResourceLoader;
   private modelPattern?: string;
   private pendingThinking?: string;
-  private modelsCache: Array<{ id: string; provider: string }> | null = null;
+  private modelsCache: Array<{ id: string; provider: string; label?: string }> | null = null;
   private switching = false;
-  private child: ChildProcess | null = null;
-  private cmdSeq = 0;
-  private pendingCommands = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>();
-  private stdoutBuffer = '';
   private onLog?: (stream: 'stdout' | 'stderr' | 'system', message: string) => void;
   private onUpdateCallback?: (state: TaskSessionState) => void;
   private onEventCallback?: (event: AgentStreamEvent) => void;
@@ -226,18 +240,20 @@ export class PiRpcSessionInstance extends EventEmitter {
   private doneMarkerSeen = false;
   /** 当前轮次序号（从 1 开始） */
   private turnSeq = 0;
-  /** 全量快照限频：首个事件立即发，之后最多每 120ms 一包 */
+  /** 全量快照限频：首个事件立即发，之后最多每 PI_SNAPSHOT_INTERVAL_MS 一包 */
   private snapshotTimer?: NodeJS.Timeout;
   private snapshotPending = false;
   /** 增量事件计数，仅供开发环境采样日志 */
   private eventSeq = 0;
-  /** 会话树桥最近一次报错，供 navigateTo / fork 判定成败 */
-  private treeBridgeError?: string;
-  /** 桥是否已随子进程装载：没装载时斜杠命令会被当成普通提问发给模型 */
-  private treeBridgeReady = false;
+  /** 扩展 UI 桥：对话框转成前端审批卡，会话销毁时统一取消 */
+  private readonly extensionUi = new ExtensionUiBridge(
+    (request) => this.emit('uiRequest', request),
+    (message) => this.emitLog('system', `[扩展提示] ${message}`)
+  );
 
-  constructor(options: PiRpcSessionOptions) {
+  constructor(options: PiSessionOptions) {
     super();
+    this.options = options;
     this.taskId = options.taskId;
     this.sessionId = options.sessionId;
     this.agentName = options.agentName || 'OpenLoop Agent';
@@ -251,151 +267,177 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.awaitCompletionMarker = options.awaitCompletionMarker === true;
     this.cwd = options.cwd;
 
-    this.spawnRpcProcess(options);
+    this.ready = this.bootstrap();
+    this.ready.catch((err) => this.handleFatal(err));
+    if (options.autoStart !== false) {
+      void this.sendInitialPrompt(options.initialPrompt, options.initialAttachments);
+    }
   }
 
-  private spawnRpcProcess(options: PiRpcSessionOptions) {
-    const args: string[] = ['--mode', 'rpc', '--session-id', options.sessionId];
-    // 有真实标题才写会话名：空标题会污染 pi 的 session_info，挡住后续 AI 命名
-    if (options.taskTitle && options.taskTitle.trim()) {
-      args.push('--name', `openLoop: ${options.taskTitle.trim().slice(0, 50)}`);
-    }
-
-    if (options.model && options.model.trim()) {
-      args.push('--model', options.model.trim());
-    }
-    if (options.thinking && options.thinking !== 'off') {
-      args.push('--thinking', options.thinking);
-    }
-    if (options.tools && options.tools.trim()) {
-      args.push('--tools', options.tools.trim());
-    }
-    if (options.excludeTools && options.excludeTools.trim()) {
-      args.push('--exclude-tools', options.excludeTools.trim());
-    }
-    if (options.disableTools) {
-      args.push('--no-tools');
-    }
-    // 扩展装载策略：关掉自动发现，只装设置页选中的包（默认白名单），
-    // 否则每个进程都要加载全部全局扩展，实测启动从 0.35s 涨到 3.2s 以上
-    args.push(...buildPiExtensionArgs());
-    // 会话树桥：只在脚本存在时装载，缺失时导航与分叉直接报错，不改发模型请求
-    this.treeBridgeReady = fs.existsSync(TREE_EXTENSION_PATH);
-    if (this.treeBridgeReady) {
-      args.push('--extension', TREE_EXTENSION_PATH);
-    }
-    // 会话自动命名桥：缺失时只是没有自动命名，不影响对话
-    if (fs.existsSync(TITLE_EXTENSION_PATH)) {
-      args.push('--extension', TITLE_EXTENSION_PATH);
-    }
-    // 改动捕获桥：数据目录未注入或脚本缺失时跳过，diff 页签退回源码预览
-    const captureDir = changeCaptureDir(this.sessionId);
-    const captureReady = Boolean(captureDir) && fs.existsSync(CAPTURE_EXTENSION_PATH);
-    if (captureReady) {
-      args.push('--extension', CAPTURE_EXTENSION_PATH);
-    }
-
-    const requestedCwd = options.cwd || os.tmpdir();
-    const { cwd, recreated } = resolveSpawnCwd(requestedCwd);
-    this.spawnCwd = cwd;
-    const nodeBinDir = path.dirname(process.execPath);
-    const extraPath = [
-      nodeBinDir,
-      path.join(os.homedir(), '.local', 'bin'),
-      '/opt/homebrew/bin',
-      '/usr/local/bin',
-    ].join(':');
-    const env = {
-      ...process.env,
-      PATH: `${extraPath}:${process.env.PATH || ''}`,
-      ...(options.env || {}),
-      ...(captureReady
-        ? {
-            OPENLOOP_CHANGE_DIR: captureDir as string,
-            OPENLOOP_CHANGE_SESSION: this.sessionId,
-            OPENLOOP_CHANGE_CWD: cwd,
-          }
-        : {}),
-    };
-
-    logger.info(`启动 Pi RPC 会话进程: pi ${args.join(' ')} (CWD: ${cwd})`, undefined, {
-      taskId: this.taskId,
-    });
-    this.emitLog('system', `[Pi RPC] 建立长连接 Agent 会话 (Session: ${this.sessionId})`);
+  /** 建立 SDK 会话：解析工作目录、打开或新建会话文件、装载扩展、订阅事件 */
+  private async bootstrap(): Promise<AgentSession> {
+    const requestedCwd = this.options.cwd || os.tmpdir();
+    const { cwd, recreated } = resolveSessionCwd(requestedCwd);
     if (recreated) {
       this.emitLog('system', `[工作目录] ${requestedCwd} 已不存在，已重建空目录，历史消息照常保留`);
     } else if (cwd !== requestedCwd) {
       this.emitLog('system', `[工作目录] ${requestedCwd} 不可用，本次会话改用 ${cwd}`);
     }
 
-    const isUnix = process.platform !== 'win32';
-    this.child = spawn('pi', args, {
-      cwd,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: isUnix,
-    });
+    logger.info(`建立 Pi SDK 会话 (Session: ${this.sessionId}, CWD: ${cwd})`, undefined, { taskId: this.taskId });
+    this.emitLog('system', `[Pi SDK] 建立进程内 Agent 会话 (Session: ${this.sessionId})`);
 
-    if (this.child.stdout) {
-      this.child.stdout.on('data', (chunk) => this.handleStdout(chunk));
+    this.resolvedCwd = cwd;
+    const session = await this.createSession(this.openSessionManager(cwd), cwd);
+    // 会话建好前就已被销毁（任务被取消）：直接释放，不留悬挂的订阅与扩展运行时
+    if (!this.active) {
+      session.dispose();
+      return session;
     }
-
-    if (this.child.stderr) {
-      this.child.stderr.on('data', (chunk) => {
-        const text = chunk.toString().trim();
-        if (text) {
-          // 过滤 pi CLI 初始分配新 session 时的正常初始化提示，避免在界面终端显示红色 Warning
-          if (text.includes('No project session found with id') && text.includes('creating a new session with that id')) {
-            logger.debug(`[Pi RPC] 首次会话初始化提示已静默: ${text}`);
-            return;
-          }
-          this.emitLog('stderr', text);
-        }
+    this.session = session;
+    await this.seedMessagesFromDisk(session);
+    // 有真实标题才写会话名：空标题会污染 pi 的 session_info，挡住后续 AI 命名
+    const title = this.options.taskTitle?.trim();
+    if (title) session.setSessionName(`openLoop: ${title.slice(0, 50)}`);
+    // 模型 / 思考强度解析失败不能拖死会话：降级用引擎默认值继续跑
+    await this.applyBootSettings(session).catch((error: any) => {
+      this.modelError = error?.message || '会话初始化模型失败';
+      logger.warn(`会话初始化模型失败，使用引擎默认模型: ${this.modelError}`, undefined, {
+        taskId: this.taskId,
       });
+      this.emitLog('system', `[模型] 初始化失败，本次会话使用引擎默认模型: ${this.modelError}`);
+    });
+    return session;
+  }
+
+  /**
+   * 预置既有会话的消息列表
+   * SDK 已把会话历史读进 session.messages，但那是 SDK 自己的形状；界面读的是这份消息列表。
+   * 不预置就会出现「会话写明了有历史，界面却空白」，直到本轮说出第一句话。
+   * 用 session-index 的解析结果，与全局面板的磁盘历史同源同 id，不会出现两套消息。
+   */
+  private async seedMessagesFromDisk(session: AgentSession): Promise<void> {
+    if (this.messages.length > 0) return;
+    const file = session.sessionFile;
+    // 文件还没落盘（新建会话）就直接跳过：否则 session-index 会退回全目录扫描
+    if (!file || !fs.existsSync(file)) return;
+    const detail = await piSessionIndex.read(file).catch(() => undefined);
+    const messages = detail?.messages;
+    if (!messages || messages.length === 0) return;
+    this.messages = messages;
+    logger.info(`恢复既有会话，预置历史消息 ${messages.length} 条`, undefined, { taskId: this.taskId });
+    if (process.env.NODE_ENV !== 'production') {
+      this.emitLog('system', `[Pi SDK] 已载入本会话的历史消息 ${messages.length} 条`);
+    }
+  }
+
+  /** 优先续接同名会话文件；不存在时按指定 id 新建，与 pi CLI 的 --session-id 语义一致 */
+  private openSessionManager(cwd: string): SessionManager {
+    const sessions = piSdk().SessionManager;
+    const existing = sessions.findById(cwd, this.sessionId);
+    if (existing) return sessions.open(existing, undefined, cwd);
+    return sessions.create(cwd, undefined, { id: this.sessionId });
+  }
+
+  private async createSession(sessionManager: SessionManager, cwd: string): Promise<AgentSession> {
+    const { session } = await piSdk().createAgentSession({
+      cwd,
+      resourceLoader: await this.getResourceLoader(cwd),
+      sessionManager,
+      tools: splitList(this.options.tools),
+      excludeTools: splitList(this.options.excludeTools),
+      noTools: this.options.disableTools ? 'all' : undefined,
+      customTools: this.shellEnv() ? [this.createBashToolDefinition(cwd)] : undefined,
+    });
+    await session.bindExtensions({
+      uiContext: this.extensionUi.createContext(),
+      // 沿用 rpc 模式：扩展里 ctx.mode === 'tui' 的终端专属能力依旧不启用
+      mode: 'rpc',
+      onError: (error: any) => {
+        const text = error?.message || String(error);
+        logger.warn(`扩展运行出错: ${text}`, undefined, { taskId: this.taskId });
+        this.emitLog('stderr', `[扩展错误] ${text}`);
+      },
+    });
+    session.subscribe((event) => this.handleSessionEvent(event));
+    return session;
+  }
+
+  /**
+   * 沙箱会话的附加环境变量（沙箱端口、数据目录）
+   * 进程内会话不能改子进程环境，只能由自带 spawnHook 的 bash 工具注入，
+   * 否则工具命令会回落到生产默认端口，误触生产库。
+   */
+  private shellEnv(): Record<string, string> | undefined {
+    const env = this.options.env;
+    return env && Object.keys(env).length > 0 ? env : undefined;
+  }
+
+  /**
+   * 自定义 bash 工具：只为把会话级环境变量注入到每条命令
+   * （SDK 的 ToolDefinition 在 details 泛型上是逆向变体，这里只能按 any 交回）
+   */
+  private createBashToolDefinition(cwd: string): any {
+    const env = this.shellEnv()!;
+    return piSdk().createBashToolDefinition(cwd, {
+      spawnHook: (ctx) => ({ ...ctx, env: { ...ctx.env, ...env } }),
+    });
+  }
+
+  /**
+   * 扩展装载：关掉自动发现，只装设置页选中的包；
+   * openLoop 自己的两个桥（改动捕获、会话自动命名）以进程内扩展形式注入，
+   * 配置走闭包而不是环境变量——同一进程里的多个会话互不影响。
+   */
+  private async getResourceLoader(cwd: string): Promise<DefaultResourceLoader> {
+    if (this.resourceLoader) return this.resourceLoader;
+    const captureDir = changeCaptureDir(this.sessionId);
+    const loader = new (piSdk().DefaultResourceLoader)({
+      cwd,
+      agentDir: piSdk().getAgentDir(),
+      noExtensions: true,
+      additionalExtensionPaths: resolveEnabledPiExtensionPaths(),
+      extensionFactories: [
+        // SDK 会话不自带 CLI 的内置扩展，需显式加载，否则 codemode / tool_search / MCP 工具全部缺失
+        piSdk().createCodemodeExtension(),
+        piSdk().createToolSearchExtension(),
+        piSdk().createMcpExtension(),
+        ...(captureDir
+          ? [captureExtension({ dir: captureDir, sessionId: this.sessionId, cwd }) as ExtensionFactory]
+          : []),
+        titleExtension as ExtensionFactory,
+      ],
+    });
+    await loader.reload();
+    this.resourceLoader = loader;
+    return loader;
+  }
+
+  /** 会话建立后的模型与思考强度：与运行时切换同一套解析逻辑 */
+  private async applyBootSettings(session: AgentSession) {
+    const pattern = this.options.model?.trim();
+    if (pattern) {
+      const resolved = this.resolveModel(session, pattern);
+      if (resolved) {
+        await session.setModel(resolved);
+        this.model = `${resolved.provider}/${resolved.id}`;
+      } else {
+        this.modelError = `未找到唯一匹配的模型: ${pattern}`;
+        logger.warn(`模型解析失败，使用引擎默认模型: ${this.modelError}`, undefined, { taskId: this.taskId });
+        this.emitLog('system', `[模型] ${this.modelError}，本次会话使用引擎默认模型`);
+      }
     }
 
-    this.child.on('error', (err) => {
-      logger.error(`Pi RPC 进程启动失败: ${err.message}`, undefined, { taskId: this.taskId });
-      this.emitLog('stderr', `[Pi RPC 异常] ${err.message}`);
-      this.active = false;
-      for (const [, deferred] of this.pendingCommands) {
-        deferred.reject(err);
-      }
-      this.pendingCommands.clear();
-      // 让界面能显示失败原因，而不是只留一条终端日志
-      this.lastError = err.message;
-      this.emitStatus({ active: false });
-      this.notifyUpdate(true);
-      if (this.onFinishedCallback && !this.executionCompleted) {
-        this.executionCompleted = true;
-        this.onFinishedCallback(err.message);
-      }
-    });
-
-    this.child.on('close', (code) => {
-      logger.info(`Pi RPC 进程退出，退出码: ${code}`, undefined, { taskId: this.taskId });
-      this.active = false;
-      this.isBusy = false;
-      for (const [, deferred] of this.pendingCommands) {
-        deferred.reject(new Error(`RPC 进程已退出 (${code})`));
-      }
-      this.pendingCommands.clear();
-      this.clearPendingInputs();
-      this.finishTurn();
-      this.emitStatus({ active: false, isBusy: false, turnStartedAt: this.turnStartedAt });
-      this.notifyUpdate(true);
-      if (this.onFinishedCallback && !this.executionCompleted) {
-        this.executionCompleted = true;
-        this.onFinishedCallback(code === 0 ? undefined : `Process exited with code ${code}`);
-      }
-    });
-
-    // 进程建立后立即发送初始 Prompt：stdin 是管道，pi 启动后自行读取已写入的命令，
-    // 无需等待进程就绪，否则每个节点的启动时间白等一段固定时长。
-    if (options.autoStart === false) {
-      return;
+    const thinking = this.options.thinking?.trim();
+    if (thinking && thinking !== 'off') {
+      session.setThinkingLevel(thinking as any);
+      this.thinking = thinking;
     }
-    this.sendInitialPrompt(options.initialPrompt, options.initialAttachments);
+  }
+
+  /** 宿主回传扩展 UI 结果 */
+  public respondExtensionUi(id: string, response: ExtensionUiResponse) {
+    this.extensionUi.respond(id, response);
   }
 
   public sendInitialPrompt(prompt: string, attachments?: TaskAttachment[]) {
@@ -412,6 +454,21 @@ export class PiRpcSessionInstance extends EventEmitter {
         this.onFinishedCallback(errMsg);
       }
     });
+  }
+
+  /** 会话建立失败：进程内没有子进程可等，直接把错误落到界面状态 */
+  private handleFatal(err: any) {
+    const message = err?.message || String(err);
+    logger.error(`Pi SDK 会话建立失败: ${message}`, undefined, { taskId: this.taskId });
+    this.emitLog('stderr', `[Pi SDK 异常] ${message}`);
+    this.active = false;
+    this.lastError = message;
+    this.emitStatus({ active: false });
+    this.notifyUpdate(true);
+    if (this.onFinishedCallback && !this.executionCompleted) {
+      this.executionCompleted = true;
+      this.onFinishedCallback(message);
+    }
   }
 
   /**
@@ -441,8 +498,8 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /** pi 已确认把这条输入放进等待队列：此后可以整条撤回 */
-  private markPendingQueued(id: string | null, result: any) {
-    if (!id || result?.disposition !== 'queued') return;
+  private markPendingQueued(id: string | null) {
+    if (!id) return;
     const index = this.pendingInputs.findIndex((item) => item.id === id);
     if (index < 0) return;
     const next = this.pendingInputs.slice();
@@ -465,9 +522,10 @@ export class PiRpcSessionInstance extends EventEmitter {
 
     const rest = this.pendingInputs.filter((item) => item.queued);
     try {
-      await this.sendCommand({ type: 'clear_queue' });
+      const session = await this.ready;
+      session.clearQueue();
       for (const item of rest) {
-        await this.sendCommand({ type: 'steer', message: composeMessage(item.content, item.attachments) });
+        await session.steer(composeMessage(item.content, item.attachments), undefined, { source: 'rpc' });
       }
     } catch (err: any) {
       this.emitLog('stderr', `[Agent 队列] 撤回排队输入失败: ${err?.message || err}`);
@@ -531,79 +589,23 @@ export class PiRpcSessionInstance extends EventEmitter {
     return text.split(PIPELINE_DONE_MARKER).join('').replace(/\n{3,}/g, '\n\n').trimEnd();
   }
 
-  private handleStdout(chunk: Buffer) {
-    this.stdoutBuffer += chunk.toString('utf-8');
-    const lines = this.stdoutBuffer.split('\n');
-    this.stdoutBuffer = lines.pop() || '';
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const record = JSON.parse(trimmed);
-        this.handleRpcRecord(record);
-      } catch (_) {
-        // 非 JSON 格式普通日志输出
-        this.emitLog('stdout', trimmed);
-      }
-    }
-  }
-
-  /** 扩展 UI 请求：approval 卡片等交互，由上层接管渲染与回应 */
-  public respondExtensionUi(id: string, response: { value?: string; confirmed?: boolean; cancelled?: boolean }) {
-    const payload: any = { type: 'extension_ui_response', id, ...response };
+  /**
+   * SDK 事件分发：处理出错只影响本次事件
+   * （进程内没有子进程隔离，这里抛出去会直接打死核心服务）
+   */
+  private handleSessionEvent(record: any) {
+    if (!record || typeof record.type !== 'string') return;
     try {
-      this.child?.stdin?.write(`${JSON.stringify(payload)}\n`);
-    } catch (err) {
-      this.emitLog('system', `[Pi RPC] 扩展 UI 回应失败: ${String(err)}`);
+      this.applySessionEvent(record);
+    } catch (error: any) {
+      logger.error(`处理会话事件失败 (${record.type}): ${error?.message || error}`, undefined, {
+        taskId: this.taskId,
+      });
     }
   }
 
-  private handleRpcRecord(record: any) {
-    // 0. 扩展报错：会话树导航桥的失败要能被上层感知，不能静默
-    if (record.type === 'extension_error') {
-      const source = String(record.extensionPath || '');
-      if (source.includes(TREE_COMMAND)) {
-        this.treeBridgeError = String(record.error || '会话树导航失败');
-        this.emitLog('stderr', `[会话树] ${this.treeBridgeError}`);
-        return;
-      }
-    }
-
-    // 0. 扩展 UI 请求（确认 / 选择 / 输入）
-    if (record.type === 'extension_ui_request') {
-      const method = String(record.method || '');
-      if (method === 'select' || method === 'confirm' || method === 'input' || method === 'editor') {
-        this.emit('uiRequest', {
-          id: record.id,
-          method,
-          title: record.title || '',
-          message: record.message || '',
-          options: Array.isArray(record.options) ? record.options : undefined,
-          placeholder: record.placeholder,
-          timeout: typeof record.timeout === 'number' ? record.timeout : undefined,
-        });
-      } else {
-        this.emitLog('system', `[Pi RPC] 扩展 UI: ${method} ${record.title || ''}`.trim());
-      }
-      return;
-    }
-
-    // 1. 命令响应匹配
-    if (record.type === 'response') {
-      if (record.id && this.pendingCommands.has(record.id)) {
-        const deferred = this.pendingCommands.get(record.id)!;
-        this.pendingCommands.delete(record.id);
-        if (record.success) {
-          deferred.resolve(record.data);
-        } else {
-          deferred.reject(new Error(record.error || 'Command failed'));
-        }
-      }
-      return;
-    }
-
-    // 2. 状态与会话生命周期事件
+  private applySessionEvent(record: any) {
+    // 1. 状态与会话生命周期事件
     switch (record.type) {
       case 'agent_start':
         this.isBusy = true;
@@ -720,18 +722,6 @@ export class PiRpcSessionInstance extends EventEmitter {
             content: this.currentAssistantMessage.content,
           });
           this.notifyUpdate();
-        } else if (ev.type === 'toolcall_start') {
-          if (!this.currentAssistantMessage.tools) this.currentAssistantMessage.tools = [];
-          const tool: ToolExecutionRecord = {
-            id: ev.id || `tool_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            name: ev.toolName,
-            status: 'running',
-            kind: classifyToolKind(ev.toolName),
-            cwd: this.cwd,
-          };
-          this.currentAssistantMessage.tools.push(tool);
-          this.emitTool(this.currentAssistantMessage.id, tool);
-          this.notifyUpdate();
         } else if (ev.type === 'error') {
           const errText = ev.error?.message || ev.error || ev.reason || '流式输出异常';
           const errMsg = typeof errText === 'string' ? errText : JSON.stringify(errText);
@@ -751,14 +741,14 @@ export class PiRpcSessionInstance extends EventEmitter {
       }
 
       case 'tool_execution_start': {
-        const owner = this.findToolOwner(record.toolCallId);
+        const owner = this.ensureTool(record);
         if (owner) {
           owner.tool.args = record.args;
           owner.tool.input = summarizeToolInput(record.args);
           if (!owner.tool.kind) owner.tool.kind = classifyToolKind(owner.tool.name);
           // 写入类工具：改动前内容已由捕获桥在工具执行前写盘，这里只记下本次改动的标识
           if (owner.tool.kind === 'write') {
-            const target = writeTargetOf(record.args, this.spawnCwd || this.cwd || process.cwd());
+            const target = writeTargetOf(record.args, this.resolvedCwd || this.cwd || process.cwd());
             if (target) {
               const changeId = changeIdOf(this.sessionId, record.toolCallId);
               rememberTurnWrite(this.sessionId, this.turnSeq, target, changeId);
@@ -778,7 +768,7 @@ export class PiRpcSessionInstance extends EventEmitter {
       }
 
       case 'tool_execution_end': {
-        const owner = this.findToolOwner(record.toolCallId);
+        const owner = this.ensureTool(record);
         let toolName = '';
         if (owner) {
           owner.tool.result = compactToolResult(record.result);
@@ -874,23 +864,6 @@ export class PiRpcSessionInstance extends EventEmitter {
         break;
       }
 
-      case 'error': {
-        const errorText = record.message || record.error || 'RPC 内部错误';
-        this.lastError = errorText;
-        this.emitLog('stderr', `[Pi RPC 错误] ${errorText}`);
-        const targetMsg =
-          this.currentAssistantMessage ||
-          this.messages.slice().reverse().find((m) => m.role === 'assistant');
-        if (targetMsg) {
-          targetMsg.errorMessage = errorText;
-          targetMsg.stopReason = 'error';
-          this.emitMessagePatch(targetMsg.id, { errorMessage: errorText, stopReason: 'error' });
-        }
-        this.emitStatus({ lastError: errorText });
-        this.notifyUpdate(true);
-        break;
-      }
-
       case 'agent_settled': {
         this.isBusy = false;
         // 轮末兜底：没收到 turn_end 时也把改动后内容补齐
@@ -952,41 +925,14 @@ export class PiRpcSessionInstance extends EventEmitter {
     }
   }
 
-  private sendCommand(command: any): Promise<any> {
-    return new Promise((resolve, reject) => {
-      if (!this.child || !this.child.stdin || !this.active) {
-        return reject(new Error('RPC session process is not active'));
-      }
-      const id = `cmd_${++this.cmdSeq}_${Date.now()}`;
-      command.id = id;
-      this.pendingCommands.set(id, { resolve, reject });
-      try {
-        this.child.stdin.write(JSON.stringify(command) + '\n');
-      } catch (err: any) {
-        this.pendingCommands.delete(id);
-        reject(err);
-      }
-    });
-  }
-
   /**
    * 在同一个会话文件内切换叶子（pi 的 /tree 语义）
-   * 走扩展命令，不产生模型调用，代价是一次进程内指针移动。
+   * 不产生模型调用，代价是一次进程内指针移动。
    */
   public async navigateTo(entryId: string): Promise<void> {
+    const session = await this.ready;
     if (!this.active) throw new Error('会话未启动，无法切换分支');
-    await this.runTreeBridge('nav', entryId);
-  }
-
-  /** 走扩展桥执行一次会话树操作：pi 没有对应 RPC 命令，只能靠内部斜杠命令触发 */
-  private async runTreeBridge(action: 'nav' | 'fork', entryId: string): Promise<void> {
-    if (!this.treeBridgeReady) throw new Error('会话树桥未装载，无法导航或分叉');
-    this.treeBridgeError = undefined;
-    try {
-      await this.sendCommand({ type: 'prompt', message: `/${TREE_COMMAND} ${action} ${entryId}` });
-    } finally {
-      if (this.treeBridgeError) throw new Error(this.treeBridgeError);
-    }
+    await session.navigateTree(entryId, { summarize: false });
   }
 
   /** 用指定分支的消息替换实时消息列表（导航后由上层按新分支重建） */
@@ -997,42 +943,46 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /**
-   * 从某条消息分叉出新会话：新会话以该条目为末尾（含这条回答），源会话一个字节都不动。
-   * pi 只会切换子进程的活动会话，所以这里跟着换掉本地 session id。
+   * 从某条消息分叉出新会话：新会话以该条目为末尾（含这条回答），源会话的消息不动。
+   * 分叉会换掉活跃会话，所以这里跟着换本地 session id 并重建会话实例。
    */
   public async fork(entryId: string): Promise<{
     cancelled?: boolean;
     sessionId: string;
   }> {
+    const session = await this.ready;
     if (!this.active) throw new Error('会话未启动，无法分叉');
-    await this.runTreeBridge('fork', entryId);
-    let nextSessionId = this.sessionId;
-    try {
-      const state = await this.sendCommand({ type: 'get_state' });
-      const sid = state?.sessionId;
-      if (typeof sid === 'string' && sid) nextSessionId = sid;
-    } catch (err: any) {
-      this.onLog?.('system', `分叉后读取状态失败: ${err?.message || err}`);
-    }
-    // 会话没换：pi 侧取消了这次分叉，保持原样
-    if (nextSessionId === this.sessionId) {
-      return { cancelled: true, sessionId: nextSessionId };
-    }
-    this.sessionId = nextSessionId;
-    // 分叉后当前上下文已被替换，清空本地消息，由前端重新加载历史
+    const sourceFile = session.sessionFile;
+    if (!sourceFile) throw new Error('当前会话没有会话文件，无法分叉');
+
+    // 另开一个管理器做分支，不动正在运行的会话
+    const sourceManager = piSdk().SessionManager.open(sourceFile);
+    const forkedFile = sourceManager.createBranchedSession(entryId);
+    if (!forkedFile) throw new Error('分叉失败：新会话文件未生成');
+    const forkCwd = this.resolvedCwd || this.cwd || process.cwd();
+    const next = await this.createSession(sourceManager, forkCwd);
+
+    session.dispose();
+    this.session = next;
+    this.sessionId = next.sessionId;
+    // 分叉后当前上下文已被替换：同步新会话的历史，由前端按新分支重新渲染
     this.messages = [];
+    await this.seedMessagesFromDisk(next);
     this.leafEntryId = undefined;
     this.clearPendingInputs();
     this.currentAssistantMessage = null;
     this.isBusy = false;
     this.isPaused = false;
     this.awaitingInput = false;
-    logger.info(`会话分叉: ${entryId} -> ${nextSessionId}`, undefined, { taskId: this.taskId });
-    return { cancelled: false, sessionId: nextSessionId };
+    const title = this.options.taskTitle?.trim();
+    if (title) next.setSessionName(`openLoop: ${title.slice(0, 50)}`);
+    logger.info(`会话分叉: ${entryId} -> ${next.sessionId}`, undefined, { taskId: this.taskId });
+    return { cancelled: false, sessionId: next.sessionId };
   }
 
   /**
    * 发送普通提示词（启动新轮次）
+   * prompt() 要等本轮跑完才 resolve，所以这里不 await：受理由 agent_settled 事件驱动完成判定。
    */
   public async sendPrompt(message: string, attachments?: TaskAttachment[]): Promise<any> {
     this.isPaused = false;
@@ -1053,12 +1003,42 @@ export class PiRpcSessionInstance extends EventEmitter {
       { taskId: this.taskId }
     );
 
-    const result = await this.sendCommand({
-      type: 'prompt',
-      message: composeMessage(message, attachments),
-    });
-    this.markPendingQueued(pendingId, result);
-    return result;
+    let session: AgentSession;
+    try {
+      session = await this.ready;
+    } catch (err) {
+      this.handlePromptFailure(err, pendingId);
+      return { disposition: 'failed' };
+    }
+    const streaming = session.isStreaming;
+    void session
+      .prompt(composeMessage(message, attachments), {
+        streamingBehavior: streaming ? 'steer' : undefined,
+        source: 'rpc',
+      })
+      .catch((err) => this.handlePromptFailure(err, pendingId));
+    if (streaming) this.markPendingQueued(pendingId);
+    return { disposition: streaming ? 'queued' : 'started' };
+  }
+
+  /** 提示词被拒绝（无模型、无凭证等）：错误落到会话状态，界面照常展示 */
+  private handlePromptFailure(err: any, pendingId: string | null) {
+    const errMsg = err?.message || '发送 Prompt 失败';
+    logger.error(`发送 Prompt 失败: ${errMsg}`, undefined, { taskId: this.taskId });
+    this.emitLog('stderr', `[Agent 报错] ${errMsg}`);
+    this.lastError = errMsg;
+    if (pendingId) {
+      this.pendingInputs = this.pendingInputs.filter((item) => item.id !== pendingId);
+      this.emitPending();
+    }
+    this.isBusy = false;
+    this.emitStatus({ isBusy: false, lastError: errMsg });
+    this.notifyUpdate(true);
+    if (this.onFinishedCallback && !this.executionCompleted) {
+      this.executionCompleted = true;
+      this.awaitingInput = false;
+      this.onFinishedCallback(errMsg);
+    }
   }
 
   /**
@@ -1079,12 +1059,16 @@ export class PiRpcSessionInstance extends EventEmitter {
       { taskId: this.taskId }
     );
 
-    const result = await this.sendCommand({
-      type: 'steer',
-      message: composeMessage(message, attachments),
-    });
-    this.markPendingQueued(pendingId, result);
-    return result;
+    let session: AgentSession;
+    try {
+      session = await this.ready;
+    } catch (err) {
+      this.handlePromptFailure(err, pendingId);
+      return { disposition: 'failed' };
+    }
+    const disposition = await session.steer(composeMessage(message, attachments), undefined, { source: 'rpc' });
+    if (disposition === 'queued') this.markPendingQueued(pendingId);
+    return { disposition };
   }
 
   /**
@@ -1099,7 +1083,7 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /**
-   * 暂停会话 (通过 abort 命令停止当前推理和工具执行，进入空闲待命)
+   * 暂停会话 (中止当前推理和工具执行，进入空闲待命)
    */
   public async pause(): Promise<boolean> {
     if (!this.active) return false;
@@ -1117,10 +1101,11 @@ export class PiRpcSessionInstance extends EventEmitter {
     this.notifyUpdate(true);
 
     try {
-      await this.sendCommandWithTimeout({ type: 'abort' }, 1500);
+      const session = await this.ready;
+      await withTimeout(session.abort(), 1500, 'abort');
       return true;
     } catch (e: any) {
-      logger.warn(`中止命令响应超时或失败 (${e.message})，强制终止底层进程以恢复待命`, undefined, {
+      logger.warn(`中止超时或失败 (${e.message})，销毁会话实例以恢复待命`, undefined, {
         taskId: this.taskId,
       });
       this.terminate();
@@ -1144,7 +1129,7 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /**
-   * 运行时同步模型 / 思考强度（不重启进程、不丢上下文）
+   * 运行时同步模型 / 思考强度（不重建会话、不丢上下文）
    * 忙碌中或正在切换时暂存，本轮结束后由 flushPendingSettings 自动应用
    */
   public async applyRuntimeSettings(patch: RuntimeSettingsPatch): Promise<RuntimeSettingsApplyResult> {
@@ -1153,7 +1138,7 @@ export class PiRpcSessionInstance extends EventEmitter {
 
     const modelChanged = modelPattern !== undefined && modelPattern !== this.modelPattern;
     const thinkingChanged = thinkingLevel !== undefined && thinkingLevel !== this.thinking;
-    // 未变化直接跳过，避免无谓的进程间命令
+    // 未变化直接跳过，避免无谓的会话内命令
     if (!modelChanged && !thinkingChanged) return 'applied';
 
     const effective: RuntimeSettingsPatch = {};
@@ -1168,7 +1153,7 @@ export class PiRpcSessionInstance extends EventEmitter {
     }
     if (thinkingChanged) effective.thinking = thinkingLevel;
 
-    // 仅剩下「继承默认模型」需求：不向进程下发任何命令，只标记待生效
+    // 仅剩下「继承默认模型」需求：不改会话模型，只标记待生效
     if (!effective.model && !effective.thinking) {
       this.pendingModel = '';
       this.modelError = undefined;
@@ -1215,21 +1200,24 @@ export class PiRpcSessionInstance extends EventEmitter {
   private async applySettingsPatch(patch: RuntimeSettingsPatch): Promise<RuntimeSettingsApplyResult> {
     this.switching = true;
     try {
+      const session = await this.ready;
       if (patch.model) {
-        const resolved = await this.resolveModel(patch.model);
+        const resolved = this.resolveModel(session, patch.model);
         if (!resolved) {
           this.modelError = `未找到唯一匹配的模型: ${patch.model}`;
           logger.warn(`模型切换失败，保留原模型: ${this.modelError}`, undefined, { taskId: this.taskId });
           this.notifyUpdate();
           return 'failed';
         }
-        await this.sendCommandWithTimeout({ type: 'set_model', provider: resolved.provider, modelId: resolved.id });
+        await withTimeout(session.setModel(resolved), 5000, 'set_model');
         this.model = `${resolved.provider}/${resolved.id}`;
         this.modelPattern = patch.model;
+        // 模型换了，模型清单可能随之变化，下次重新取
+        this.modelsCache = null;
       }
 
       if (patch.thinking) {
-        await this.sendCommandWithTimeout({ type: 'set_thinking_level', level: patch.thinking });
+        session.setThinkingLevel(patch.thinking as any);
         this.thinking = patch.thinking;
       }
 
@@ -1256,17 +1244,21 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /** 供上层列举可用模型（模型选择器） */
-  public async listModels(): Promise<Array<{ id: string; provider: string }>> {
+  public async listModels(): Promise<Array<{ id: string; provider: string; label?: string }>> {
     if (!this.active) return [];
-    return this.getAvailableModels().catch(() => []);
+    try {
+      const session = await this.ready;
+      return this.collectModels(session);
+    } catch {
+      return [];
+    }
   }
 
-  private async getAvailableModels(): Promise<Array<{ id: string; provider: string }>> {
+  private collectModels(session: AgentSession): Array<{ id: string; provider: string; label?: string }> {
     if (this.modelsCache) return this.modelsCache;
-    const data = await this.sendCommandWithTimeout({ type: 'get_available_models' }, 3000);
-    const models = Array.isArray(data?.models) ? data.models : [];
+    const models = session.modelRuntime.getAvailableSnapshot();
     const resolved = models
-      .filter((m: any) => m && typeof m.id === 'string' && typeof m.provider === 'string')
+      .filter((m) => m && typeof m.id === 'string' && typeof m.provider === 'string')
       .map((m: any) => ({
         id: m.id,
         provider: m.provider,
@@ -1274,48 +1266,29 @@ export class PiRpcSessionInstance extends EventEmitter {
       }));
     this.modelsCache = resolved;
     if (resolved.length > 0) {
-      PiRpcSessionInstance.onModelsDiscovered?.(resolved);
+      PiSessionInstance.onModelsDiscovered?.(resolved);
     }
     return resolved;
-  }
-
-  /** 带超时的命令下发，避免进程无响应时阻塞设置保存或终止链路 */
-  private async sendCommandWithTimeout(command: any, timeoutMs = 3000): Promise<any> {
-    let timer: any;
-    let cmdId: string | undefined;
-    const timeout = new Promise((_, reject) => {
-      timer = setTimeout(() => {
-        if (cmdId) this.pendingCommands.delete(cmdId);
-        reject(new Error(`命令响应超时 (${command.type})`));
-      }, timeoutMs);
-    });
-    try {
-      const sendPromise = this.sendCommand(command);
-      cmdId = command.id;
-      return await Promise.race([sendPromise, timeout]);
-    } finally {
-      clearTimeout(timer);
-    }
   }
 
   /**
    * 将设置页的自由文本模型描述解析为 provider + modelId
    * 匹配优先级：provider/id 精确 → id 精确 → 唯一模糊匹配；歧义时放弃，绝不猜测
    */
-  private async resolveModel(pattern: string): Promise<{ id: string; provider: string } | null> {
-    const models = await this.getAvailableModels();
-    if (models.length === 0) return null;
-
-    // 去掉 pi CLI 支持的 :thinking 后缀，思考强度走 set_thinking_level
+  private resolveModel(session: AgentSession, pattern: string): any | null {
+    // 去掉 pi CLI 支持的 :thinking 后缀，思考强度走 setThinkingLevel
     const target = pattern.split(':')[0].trim();
     if (!target) return null;
 
+    const models = session.modelRuntime.getAvailableSnapshot();
     const slashIndex = target.indexOf('/');
     if (slashIndex > 0) {
       const provider = target.slice(0, slashIndex);
       const id = target.slice(slashIndex + 1);
       const hit = models.find((m) => m.provider === provider && m.id === id);
       if (hit) return hit;
+      // 模型清单尚未就绪（凭证异步解析）时按 provider/id 直接取
+      return session.modelRuntime.getModel(provider, id) || null;
     }
 
     const exact = models.filter((m) => m.id === target);
@@ -1348,8 +1321,7 @@ export class PiRpcSessionInstance extends EventEmitter {
       lastError: this.lastError,
       sessionId: this.sessionId,
       piSessionId: this.sessionId,
-      resumeCommand: `pi --session ${this.sessionId}`,
-      agentProvider: 'pi',
+      resumeCommand: resolveResumeCommand(this.sessionId),
     };
   }
 
@@ -1359,7 +1331,7 @@ export class PiRpcSessionInstance extends EventEmitter {
   private emitEvent(event: AgentStreamEvent) {
     this.eventSeq += 1;
     if (process.env.NODE_ENV !== 'production' && this.eventSeq % 200 === 0) {
-      logger.debug(`[Pi RPC] 已推送 ${this.eventSeq} 个增量事件 (${event.kind})`, undefined, {
+      logger.debug(`[Pi SDK] 已推送 ${this.eventSeq} 个增量事件 (${event.kind})`, undefined, {
         taskId: this.taskId,
       });
     }
@@ -1381,6 +1353,30 @@ export class PiRpcSessionInstance extends EventEmitter {
       if (tool) return { messageId: message.id, tool };
     }
     return null;
+  }
+
+  /**
+   * 工具卡来源：SDK 的工具调用事件带 toolCallId / toolName，流式增量里没有，
+   * 所以工具卡统一在工具开始执行时建，同一个调用 id 只建一张。
+   */
+  private ensureTool(record: any): { messageId: string; tool: ToolExecutionRecord } | null {
+    const existing = this.findToolOwner(record?.toolCallId);
+    if (existing) return existing;
+    if (!record?.toolCallId) return null;
+    const message =
+      this.currentAssistantMessage ||
+      this.messages.slice().reverse().find((item) => item.role === 'assistant');
+    if (!message) return null;
+    if (!message.tools) message.tools = [];
+    const tool: ToolExecutionRecord = {
+      id: record.toolCallId,
+      name: record.toolName,
+      status: 'running',
+      kind: classifyToolKind(record.toolName),
+      cwd: this.cwd,
+    };
+    message.tools.push(tool);
+    return { messageId: message.id, tool };
   }
 
   /** 流式文本增量：只在消息已存在时推送，避免半截消息污染状态 */
@@ -1420,8 +1416,8 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /**
-   * 全量快照：限频推送，首包立即发出，之后最多 120ms 一包
-   * @param immediate 强制立即推送（消息边界、错误、结束、进程退出等）
+   * 全量快照：限频推送，首包立即发出，之后最多每 PI_SNAPSHOT_INTERVAL_MS 一包
+   * @param immediate 强制立即推送（消息边界、错误、结束、会话销毁等）
    */
   private notifyUpdate(immediate = false) {
     if (this.snapshotTimer) {
@@ -1452,52 +1448,54 @@ export class PiRpcSessionInstance extends EventEmitter {
   }
 
   /**
-   * 彻底停止并销毁子进程
+   * 彻底停止并销毁会话
    */
   public terminate() {
     this.active = false;
     this.isBusy = false;
-    for (const [, deferred] of this.pendingCommands) {
-      deferred.reject(new Error('RPC session terminated'));
-    }
-    this.pendingCommands.clear();
+    this.extensionUi.cancelAll();
     // 会话销毁：连同本轮改动的捕获记录与内容副本一起清理
     forgetSessionChanges(this.sessionId);
-    if (this.child) {
-      try {
-        if (this.child.stdin && !this.child.stdin.destroyed) {
-          this.child.stdin.end();
-        }
-        if (this.child.pid) {
-          if (process.platform !== 'win32') {
-            process.kill(-this.child.pid, 'SIGKILL');
-          } else {
-            this.child.kill('SIGKILL');
-          }
-        }
-      } catch (_) {}
-      this.child = null;
-    }
+    this.session?.dispose();
+    this.session = undefined;
     this.emitStatus({ active: false, isBusy: false });
     this.notifyUpdate(true);
   }
 }
 
-/**
- * 全局 Pi RPC 会话管理器
- */
-export class PiRpcSessionManager extends EventEmitter {
-  private static instance: PiRpcSessionManager;
-  private sessions = new Map<string, PiRpcSessionInstance>();
+/** 小工具：把 Promise 套上超时，避免会话无响应时阻塞设置保存或终止链路 */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`会话操作超时 (${label})`)), timeoutMs);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
 
-  public static getInstance(): PiRpcSessionManager {
-    if (!PiRpcSessionManager.instance) {
-      PiRpcSessionManager.instance = new PiRpcSessionManager();
+/**
+ * 全局 Pi 会话管理器
+ */
+export class PiSessionManager extends EventEmitter {
+  private static instance: PiSessionManager;
+  private sessions = new Map<string, PiSessionInstance>();
+
+  public static getInstance(): PiSessionManager {
+    if (!PiSessionManager.instance) {
+      PiSessionManager.instance = new PiSessionManager();
     }
-    return PiRpcSessionManager.instance;
+    return PiSessionManager.instance;
   }
 
-  public createSession(options: PiRpcSessionOptions): PiRpcSessionInstance {
+  public createSession(options: PiSessionOptions): PiSessionInstance {
     // 若已存在相同任务的活跃会话，先安全终止
     const existing = this.sessions.get(options.taskId);
     if (existing) {
@@ -1506,12 +1504,9 @@ export class PiRpcSessionManager extends EventEmitter {
     }
 
     const shouldAutoStart = options.autoStart !== false && Boolean(options.initialPrompt);
-    const session = new PiRpcSessionInstance({ ...options, autoStart: false });
+    const session = new PiSessionInstance({ ...options, autoStart: false });
     this.sessions.set(options.taskId, session);
 
-    session.on('update', () => {
-      // 保持活跃会话引用
-    });
     // 扩展 UI 请求（审批卡）转给上层：带上任务路由键，界面据此过滤
     session.on('uiRequest', (request) => {
       this.emit('uiRequest', { ...request, taskId: options.taskId, sessionId: session.sessionId });
@@ -1524,11 +1519,11 @@ export class PiRpcSessionManager extends EventEmitter {
     return session;
   }
 
-  public getSession(taskId: string): PiRpcSessionInstance | undefined {
+  public getSession(taskId: string): PiSessionInstance | undefined {
     return this.sessions.get(taskId);
   }
 
-  /** 正在跑一轮回复的 pi 会话 id：「智能体开发」面板据此显示运行指示 */
+  /** 正在跑一轮回复的会话 id：「智能体开发」面板据此显示运行指示 */
   public listBusySessionIds(): string[] {
     return [...this.sessions.values()]
       .filter((session) => session.active && session.isBusy)
@@ -1543,8 +1538,8 @@ export class PiRpcSessionManager extends EventEmitter {
     return undefined;
   }
 
-  /** 按 pi 会话 id 取仍在运行的流水线会话：全局面板接管这类会话时复用同一个进程 */
-  public findLiveBySessionId(sessionId: string): PiRpcSessionInstance | undefined {
+  /** 按 pi 会话 id 取仍在运行的流水线会话：全局面板接管这类会话时复用同一个实例 */
+  public findLiveBySessionId(sessionId: string): PiSessionInstance | undefined {
     for (const session of this.sessions.values()) {
       if (session.sessionId === sessionId && session.active) return session;
     }
@@ -1553,7 +1548,7 @@ export class PiRpcSessionManager extends EventEmitter {
 
   /**
    * 将模型 / 思考强度变更同步到所有活跃会话
-   * 并行下发，不重启进程，不阻塞设置保存
+   * 并行下发，不重建会话，不阻塞设置保存
    */
   public async applyRuntimeSettings(patch: RuntimeSettingsPatch): Promise<RuntimeSettingsApplySummary> {
     const sessions = [...this.sessions.values()];

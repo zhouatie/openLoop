@@ -39,7 +39,6 @@ import {
 import { api } from '../services/api';
 import {
   OpenLoopSettings,
-  AgentProviderType,
   ThinkingLevel,
   ShortcutSuperKey,
   PluginManifest,
@@ -52,10 +51,6 @@ import {
   StorageRetentionSettings,
 } from '@openloop/core';
 import { ConfirmModal } from '../components/ConfirmModal';
-import {
-  AGENT_PROVIDERS,
-  getAgentProviderMeta,
-} from '@openloop/agent-providers';
 import { PROMPT_METAS, DEFAULT_PROMPT_TEMPLATES } from '../constants/prompts';
 import { useShortcuts } from '../context/ShortcutContext';
 import { Kbd } from '../components/Kbd';
@@ -234,7 +229,7 @@ const ModelInput: React.FC<{
             type="button"
             onClick={handleClear}
             className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full text-[#a1a1aa] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-all cursor-pointer"
-            title="清空并继承引擎默认模型"
+            title="清空并继承默认模型"
           >
             <X size={10} strokeWidth={2.4} />
           </button>
@@ -316,7 +311,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   } = useShortcuts();
 
   // 表单状态
-  const [agentProvider, setAgentProvider] = useState<AgentProviderType>('pi');
   const [model, setModel] = useState('');
   // 最近三次使用过的模型（供快速 select 选择）
   const [recentModels, setRecentModels] = useState<string[]>([]);
@@ -496,7 +490,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setLoading(true);
       const settings = await api.getSettings();
       if (settings) {
-        if (settings.agentProvider) setAgentProvider(getAgentProviderMeta(settings.agentProvider).id);
         if (settings.defaultModel) setModel(settings.defaultModel);
         if (Array.isArray(settings.recentModels)) setRecentModels(settings.recentModels.filter(Boolean));
         if (settings.reasoningLevel) setThinking(settings.reasoningLevel);
@@ -616,7 +609,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSave = async (override?: Partial<OpenLoopSettings>) => {
     const payload: OpenLoopSettings = {
-      agentProvider,
       defaultModel: model.trim(),
       reasoningLevel: thinking,
       defaultCwd,
@@ -694,7 +686,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       const configToExport: OpenLoopSettings = {
         ...baseSettings,
-        agentProvider,
         defaultModel: model.trim(),
         reasoningLevel: thinking,
         defaultCwd,
@@ -750,14 +741,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  const handleSelectProvider = (providerId: AgentProviderType) => {
-    if (import.meta.env?.DEV) {
-      console.log('[Settings:Agent] 切换代码智能体:', { from: agentProvider, to: providerId });
-    }
-    setAgentProvider(providerId);
-    handleSave({ agentProvider: providerId });
   };
 
   // 计算当前排好序的侧边栏插件清单
@@ -1063,40 +1046,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         {activeTab === 'agent' && (
           <div className="space-y-5 animate-in fade-in duration-150">
             <div className="bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-              {/* 代码智能体 */}
-              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-medium text-[#1c1c21]">代码智能体</div>
-                  <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                    执行任务的代码智能体引擎，模型与思考强度对所有引擎共用
-                  </div>
-                </div>
-
-                <div className="relative shrink-0 self-center">
-                  <select
-                    value={agentProvider}
-                    onChange={(e) => handleSelectProvider(e.target.value as AgentProviderType)}
-                    className="appearance-none h-[26px] pl-2.5 pr-6 rounded-[6px] border border-[#e3e3e8] bg-white text-[11.5px] font-medium text-[#1c1c21] outline-none shadow-2xs cursor-pointer transition-all hover:border-[#d0d0d7] focus:border-[#4f46e5] focus:ring-2 focus:ring-[#4f46e5]/10"
-                  >
-                    {AGENT_PROVIDERS.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={11}
-                    className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[#85858d]"
-                  />
-                </div>
-              </div>
-
               {/* 模型 */}
               <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-b border-[#ececf0]">
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium text-[#1c1c21]">模型</div>
                   <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                    所有引擎共用同一个模型配置，留空则继承引擎自身默认模型，保留最近三次记录
+                    所有会话共用，留空则继承引擎默认模型，保留最近三次记录
                   </div>
                 </div>
 
