@@ -27,6 +27,7 @@ import { OpenInAppButton } from './dsh/OpenInAppButton';
 import { BackgroundProcessesAction } from './BackgroundProcessesAction';
 import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
+import { SessionSwitcher } from './SessionSwitcher';
 import { SessionTreePanel } from './SessionTreePanel';
 import { useAgentStream } from './useAgentStream';
 import { useAgentModels } from '../hooks/useAgentModels';
@@ -1430,6 +1431,12 @@ export function GlobalAgentPanel({
     );
   }, [listedSessions, keyword]);
 
+  /** 启动器候选：延续最近更新顺序，已归档会话不参与快速切换 */
+  const switcherSessions = useMemo(
+    () => listedSessions.filter((item) => !item.archived),
+    [listedSessions]
+  );
+
   const groups = useMemo<ProjectGroup[]>(() => {
     const map = new Map<string, ProjectGroup>();
     const ensure = (projectCwd: string): ProjectGroup => {
@@ -1939,14 +1946,22 @@ export function GlobalAgentPanel({
   const activeSession = sessions.find((item) => item.id === activeId);
   const [searchSignal, setSearchSignal] = useState(0);
   const [renameSignal, setRenameSignal] = useState(0);
+  /** 会话启动器（对齐 Alfred：唤起即打字，↑↓ 选，回车切） */
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   /** 侧边栏展开状态：收起后不留图标轨道，展开入口交给顶栏（对齐 DSH） */
   const [listOpen, setListOpen] = useState(true);
+
+  // 面板不可见时收起启动器：下次打开浮层不应先看到一层弹窗
+  useEffect(() => {
+    if (!active) setSwitcherOpen(false);
+  }, [active]);
 
   // 面板导航快捷键：命令表在 constants/agentShortcuts.ts，可在设置页改键
   useShortcutBindings(
     {
       'session.new': () => startNewSession(activeCwd),
       'session.search': () => setSearchSignal((prev) => prev + 1),
+      'session.switch': () => setSwitcherOpen((prev) => !prev),
       'workspace.add': () => void handleAddProject(),
       'session.rename': () => {
         // 快捷键触发页内搜索/重命名入口时，交给列表行内编辑
@@ -2321,6 +2336,15 @@ export function GlobalAgentPanel({
           emptyHint="会话直接跑在本机 pi 上，拥有读写文件与执行命令的能力。"
         />
       </div>
+
+      {switcherOpen && (
+        <SessionSwitcher
+          sessions={switcherSessions}
+          activeId={activeId}
+          onSelect={(id) => void selectSession(id)}
+          onClose={() => setSwitcherOpen(false)}
+        />
+      )}
 
       {directoryDialog}
     </div>
