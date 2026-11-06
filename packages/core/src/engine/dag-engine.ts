@@ -7,6 +7,7 @@ import { ExecutorRegistry, ExecutionContext } from '../executors';
 import { createLogger } from '../logger';
 import { PiSessionManager } from '../agent/pi-session';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
+import { ScriptRuntime } from '../pipeline/script-runtime';
 
 const dagLogger = createLogger('Engine:DAG');
 
@@ -72,11 +73,22 @@ export class DagEngine extends EventEmitter {
   private runningTasks: Set<string> = new Set();
   private abortControllers: Map<string, AbortController> = new Map();
   private activeProcesses: Map<string, Set<ChildProcess>> = new Map();
+  private scriptRuntime: ScriptRuntime;
 
   constructor(store: Store, registry?: ExecutorRegistry) {
     super();
     this.store = store;
     this.registry = registry || new ExecutorRegistry();
+    this.scriptRuntime = new ScriptRuntime(store, this.registry, {
+      emit: (event, payload) => this.emit(event, payload),
+      log: (taskId, nodeId, stream, message) => this.log(taskId, nodeId, stream, message),
+      registerChildProcess: (taskId, child) => {
+        const procSet = this.activeProcesses.get(taskId);
+        if (!procSet) return;
+        procSet.add(child);
+        child.on('exit', () => procSet.delete(child));
+      },
+    });
   }
 
   public getRegistry(): ExecutorRegistry {
@@ -120,6 +132,28 @@ export class DagEngine extends EventEmitter {
     const abortController = new AbortController();
     this.abortControllers.set(taskId, abortController);
     this.activeProcesses.set(taskId, new Set());
+
+    // 脚本流水线：一条流水线 = 一段 JS，逻辑分支由脚本自身表达
+    if ((workflow.script || '').trim()) {
+      try {
+        await this.scriptRuntime.run(task, workflow);
+      } catch (err: any) {
+        dagLogger.error(`脚本流水线运行异常: ${err.message}`, err, { taskId });
+        this.log(taskId, 'SCRIPT', 'stderr', `脚本流水线异常: ${err.message}`);
+        const latest = this.store.getTask(taskId);
+        if (latest && latest.status !== 'cancelled') {
+          latest.status = 'failed';
+          latest.kanbanColumn = 'backlog';
+          this.store.saveTask(latest);
+          this.emit('task:update', latest);
+        }
+      } finally {
+        this.runningTasks.delete(taskId);
+        this.abortControllers.delete(taskId);
+        this.activeProcesses.delete(taskId);
+      }
+      return;
+    }
 
     task.status = 'running';
     task.nodeRuns = {}; // 重新运行时清空历史节点状态，确保整条流水线干净重跑
@@ -765,8 +799,50 @@ export class DagEngine extends EventEmitter {
 
     const workflow = this.store.getWorkflow(task.workflowId);
     if (!workflow) {
-      dagLogger.error(`唤醒任务失败: Workflow ${task.workflowId} 未找到`, undefined, { taskId });
-      throw new Error(`Workflow ${task.workflowId} not found`);
+      // 工作流已被删除（历史任务）：没有节点可调度，验收即收尾、驳回即打回，不能卡死验收入口
+      dagLogger.warn(
+        `工作流 ${task.workflowId} 已不存在，直接按人工验收结果收尾: ${taskId}`,
+        undefined,
+        { taskId, nodeId: task.currentNodeId }
+      );
+      if (task.currentNodeId) {
+        this.log(
+          task.id,
+          task.currentNodeId,
+          approved ? 'system' : 'stderr',
+          approved
+            ? '[QA 审核通过]: 工作流已删除，任务直接完成'
+            : `[QA 审核驳回]: ${feedback || '未通过验收指标'}`
+        );
+      }
+      if (approved) {
+        task.status = 'completed';
+        task.kanbanColumn = 'done';
+        task.currentNodeId = undefined;
+      } else {
+        task.status = 'failed';
+        task.kanbanColumn = 'backlog';
+      }
+      this.runningTasks.delete(taskId);
+      this.abortControllers.delete(taskId);
+      this.activeProcesses.delete(taskId);
+      this.store.saveTask(task);
+      this.emit('task:update', task);
+      return task;
+    }
+
+    // 脚本流水线的人工卡点由脚本运行期接管，无需按节点重跑
+    if ((workflow.script || '').trim()) {
+      if (this.scriptRuntime.resolveApproval(taskId, approved, feedback)) {
+        return this.store.getTask(taskId) || task;
+      }
+      // 运行期没有待处理卡点（服务重启后状态丢失，或流水线脚本化之前遗留的节点任务），
+      // 继续按节点级审批处理，不能直接报错卡死验收入口
+      dagLogger.warn(
+        `脚本运行期无待处理审批，回退到节点级审批: ${taskId}`,
+        undefined,
+        { taskId }
+      );
     }
 
     const currentNodeId = task.currentNodeId;
@@ -836,13 +912,70 @@ export class DagEngine extends EventEmitter {
       nodeRun.status = 'success';
       nodeRun.finishedAt = Date.now();
     }
+    // 画布节点已被清空（流水线脚本化），没有节点数据也没有下游可调度，人工验收通过即完成
+    if (!node && !nodeRun && workflow.nodes.length === 0) {
+      task.status = 'completed';
+      task.kanbanColumn = 'done';
+      task.currentNodeId = undefined;
+      this.runningTasks.delete(taskId);
+      this.abortControllers.delete(taskId);
+      this.activeProcesses.delete(taskId);
+
+      // 原本由「合并 / 清理」节点承担的收尾动作在这里补齐，避免验收通过后代码留在沙箱里
+      const worktreeDir = task.context?.worktree?.worktreeDir;
+      if (worktreeDir) {
+        try {
+          const repoRoot = path.dirname(path.dirname(worktreeDir));
+          const mergeResult = await WorktreeManager.getInstance().approveAndMerge(
+            repoRoot,
+            task.id,
+            task.title,
+            (msg) => this.log(task.id, currentNodeId, 'system', msg)
+          );
+          this.log(
+            task.id,
+            currentNodeId,
+            mergeResult.success ? 'system' : 'stderr',
+            mergeResult.success
+              ? `[自动合并] ✔ ${mergeResult.message}`
+              : `[自动合并失败] ${mergeResult.message}`
+          );
+          if (mergeResult.success) task.workspace = repoRoot;
+        } catch (e: any) {
+          this.log(task.id, currentNodeId, 'stderr', `[自动合并异常] ${e.message}`);
+        }
+      }
+
+      this.store.saveTask(task);
+      this.emit('task:update', task);
+      return task;
+    }
+
     task.status = 'running';
     this.store.saveTask(task);
     this.emit('task:update', task);
 
     // 继续调度下游
     await this.triggerNextNodes(task, workflow, currentNodeId);
-    return task;
+
+    // 审批节点本就是最后一个节点时没有下游可调度，直接收尾，否则任务会一直停在 running
+    const latest = this.store.getTask(taskId) || task;
+    const hasPendingNode = workflow.nodes.some((n) => {
+      const run = latest.nodeRuns[n.id];
+      return !run || (run.status !== 'success' && run.status !== 'skipped');
+    });
+    if (!hasPendingNode && latest.status === 'running') {
+      latest.status = 'completed';
+      latest.kanbanColumn = 'done';
+      latest.currentNodeId = undefined;
+      this.runningTasks.delete(taskId);
+      this.abortControllers.delete(taskId);
+      this.activeProcesses.delete(taskId);
+      this.store.saveTask(latest);
+      this.emit('task:update', latest);
+      return latest;
+    }
+    return latest;
   }
 
   /**
@@ -1406,6 +1539,9 @@ export class DagEngine extends EventEmitter {
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
+
+    // 脚本流水线：直接终止脚本子进程与进程组
+    this.scriptRuntime.cancel(taskId);
 
     // 0. 若为任务组，级联取消其所有正在运行的子任务
     if (task.kind === 'group' && Array.isArray(task.subTaskIds)) {

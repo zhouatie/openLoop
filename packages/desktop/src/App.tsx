@@ -14,7 +14,7 @@ import { useAgentNotifications } from './hooks/useAgentNotifications';
 import { ToastProvider } from './components/Toast';
 import { KanbanView } from './views/KanbanView';
 import { WorkflowListView } from './views/WorkflowListView';
-import { WorkflowEditorView } from './views/WorkflowEditorView';
+import { WorkflowScriptView } from './views/WorkflowScriptView';
 import { AutomationListView } from './views/AutomationListView';
 import { QaAutomationView } from './views/QaAutomationView';
 import { GlobalAgentPanel } from './agent-ui';
@@ -552,13 +552,13 @@ export const AppContent: React.FC = () => {
           )}
 
           {activePluginId === 'workflow-editor' && editingWorkflowId && (
-            <WorkflowEditorView
+            <WorkflowScriptView
               workflowId={editingWorkflowId}
               workflows={workflows}
+              tasks={tasks}
               onBack={() => setEditingWorkflowId(null)}
               onRefresh={refreshData}
               onOpenTaskLogs={handleOpenTaskLogs}
-              onSelectWorkflow={(id) => setEditingWorkflowId(id)}
             />
           )}
 
