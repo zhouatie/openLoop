@@ -106,6 +106,7 @@ export class SqliteStore {
         variables_json TEXT,
         tags_json TEXT,
         task_template_json TEXT,
+        script TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
@@ -266,6 +267,13 @@ export class SqliteStore {
     // 增量表结构平滑迁移：为历史已有数据库的 workflows 表补齐 task_template_json 字段
     try {
       this.db.exec('ALTER TABLE workflows ADD COLUMN task_template_json TEXT');
+    } catch {
+      // 字段已存在，忽略
+    }
+
+    // 增量表结构平滑迁移：为历史已有数据库的 workflows 表补齐 script 字段（脚本流水线）
+    try {
+      this.db.exec('ALTER TABLE workflows ADD COLUMN script TEXT');
     } catch {
       // 字段已存在，忽略
     }
@@ -578,6 +586,7 @@ export class SqliteStore {
         variables,
         requireWorkspace: variables?.requireWorkspace,
         defaultWorkspace: variables?.defaultWorkspace,
+        script: r.script || undefined,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
       };
@@ -612,6 +621,7 @@ export class SqliteStore {
       variables,
       requireWorkspace: variables?.requireWorkspace,
       defaultWorkspace: variables?.defaultWorkspace,
+      script: row.script || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -637,8 +647,8 @@ export class SqliteStore {
     const hasVariables = Object.keys(variablesObj).length > 0;
 
     const stmt = this.db.prepare(`
-      INSERT INTO workflows (id, name, description, nodes_json, edges_json, variables_json, tags_json, task_template_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO workflows (id, name, description, nodes_json, edges_json, variables_json, tags_json, task_template_json, script, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
@@ -647,6 +657,7 @@ export class SqliteStore {
         variables_json = excluded.variables_json,
         tags_json = excluded.tags_json,
         task_template_json = excluded.task_template_json,
+        script = excluded.script,
         updated_at = excluded.updated_at
     `);
 
@@ -659,6 +670,7 @@ export class SqliteStore {
       hasVariables ? JSON.stringify(variablesObj) : null,
       JSON.stringify(tagsList),
       taskTemplateJson,
+      wf.script && wf.script.trim() ? wf.script : null,
       wf.createdAt,
       wf.updatedAt
     );

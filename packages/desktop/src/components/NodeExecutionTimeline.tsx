@@ -262,7 +262,12 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
       if (visitedNodeIds.has(nid)) return;
       visitedNodeIds.add(nid);
 
-      const meta = resolveNodeMeta(nid, workflow, allWorkflows);
+      const baseMeta = resolveNodeMeta(nid, workflow, allWorkflows);
+      // 脚本流水线的步骤自报名字与类型，直接用步骤记录里的元信息覆盖推断结果
+      const stepOutput = run?.output && typeof run.output === 'object' ? (run.output as any) : null;
+      const meta = stepOutput?.stepName
+        ? { ...baseMeta, name: stepOutput.stepName, type: (stepOutput.stepType as any) || baseMeta.type }
+        : baseMeta;
       let durationSec: number | undefined;
       let timeRangeStr: string | undefined;
 
@@ -670,6 +675,13 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
           const isEditingParams = editingNodeId === item.id;
           const isCurrentApprovalNode =
             item.status === 'waiting_approval' && task.status === 'waiting_approval';
+          // 人工卡点清单：脚本流水线写在步骤输出的 checklist，编排流水线写在节点配置
+          const renderChecklist = (): any[] | null => {
+            const fromNode = item.wfNode?.config?.checklist;
+            if (Array.isArray(fromNode) && fromNode.length > 0) return fromNode;
+            const fromStep = (item.run?.output as any)?.checklist;
+            return Array.isArray(fromStep) && fromStep.length > 0 ? fromStep : null;
+          };
 
           return (
             <div key={item.id} className="relative group">
@@ -1140,13 +1152,13 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                     )}
 
                     {/* QA Checklist 核验清单 */}
-                    {item.wfNode?.config?.checklist && item.wfNode.config.checklist.length > 0 && (
+                    {renderChecklist() && (
                       <div>
                         <div className="text-[10px] text-[#85858d] mb-1 font-medium">
                           QA 验收检查项 Checklist:
                         </div>
                         <div className="space-y-1 bg-[#fbfbfd] p-2 rounded-[5px] border border-[#ececf0]">
-                          {item.wfNode.config.checklist.map((chk, cIdx) => (
+                          {renderChecklist()!.map((chk, cIdx) => (
                             <div key={cIdx} className="flex items-start gap-1.5 text-[11px] text-[#4b4b53]">
                               <CheckSquare size={12} className="text-[#189a58] shrink-0 mt-0.5" />
                               <span>{chk}</span>
