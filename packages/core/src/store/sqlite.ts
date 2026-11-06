@@ -107,6 +107,7 @@ export class SqliteStore {
         tags_json TEXT,
         task_template_json TEXT,
         script TEXT,
+        markdown TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
@@ -274,6 +275,13 @@ export class SqliteStore {
     // 增量表结构平滑迁移：为历史已有数据库的 workflows 表补齐 script 字段（脚本流水线）
     try {
       this.db.exec('ALTER TABLE workflows ADD COLUMN script TEXT');
+    } catch {
+      // 字段已存在，忽略
+    }
+
+    // 增量表结构平滑迁移：为历史已有数据库的 workflows 表补齐 markdown 字段（Markdown 流水线）
+    try {
+      this.db.exec('ALTER TABLE workflows ADD COLUMN markdown TEXT');
     } catch {
       // 字段已存在，忽略
     }
@@ -587,6 +595,7 @@ export class SqliteStore {
         requireWorkspace: variables?.requireWorkspace,
         defaultWorkspace: variables?.defaultWorkspace,
         script: r.script || undefined,
+        markdown: r.markdown || undefined,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
       };
@@ -622,6 +631,7 @@ export class SqliteStore {
       requireWorkspace: variables?.requireWorkspace,
       defaultWorkspace: variables?.defaultWorkspace,
       script: row.script || undefined,
+      markdown: row.markdown || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -647,8 +657,8 @@ export class SqliteStore {
     const hasVariables = Object.keys(variablesObj).length > 0;
 
     const stmt = this.db.prepare(`
-      INSERT INTO workflows (id, name, description, nodes_json, edges_json, variables_json, tags_json, task_template_json, script, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO workflows (id, name, description, nodes_json, edges_json, variables_json, tags_json, task_template_json, script, markdown, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
@@ -658,6 +668,7 @@ export class SqliteStore {
         tags_json = excluded.tags_json,
         task_template_json = excluded.task_template_json,
         script = excluded.script,
+        markdown = excluded.markdown,
         updated_at = excluded.updated_at
     `);
 
@@ -671,6 +682,7 @@ export class SqliteStore {
       JSON.stringify(tagsList),
       taskTemplateJson,
       wf.script && wf.script.trim() ? wf.script : null,
+      wf.markdown && wf.markdown.trim() ? wf.markdown : null,
       wf.createdAt,
       wf.updatedAt
     );

@@ -8,6 +8,7 @@ import { createLogger } from '../logger';
 import { PiSessionManager } from '../agent/pi-session';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 import { ScriptRuntime } from '../pipeline/script-runtime';
+import { MarkdownRuntime } from '../pipeline/markdown-runtime';
 
 const dagLogger = createLogger('Engine:DAG');
 
@@ -74,21 +75,25 @@ export class DagEngine extends EventEmitter {
   private abortControllers: Map<string, AbortController> = new Map();
   private activeProcesses: Map<string, Set<ChildProcess>> = new Map();
   private scriptRuntime: ScriptRuntime;
+  private markdownRuntime: MarkdownRuntime;
 
   constructor(store: Store, registry?: ExecutorRegistry) {
     super();
     this.store = store;
     this.registry = registry || new ExecutorRegistry();
-    this.scriptRuntime = new ScriptRuntime(store, this.registry, {
-      emit: (event, payload) => this.emit(event, payload),
-      log: (taskId, nodeId, stream, message) => this.log(taskId, nodeId, stream, message),
-      registerChildProcess: (taskId, child) => {
+    const host = {
+      emit: (event: string, payload: any) => this.emit(event, payload),
+      log: (taskId: string, nodeId: string, stream: 'stdout' | 'stderr' | 'system', message: string) =>
+        this.log(taskId, nodeId, stream, message),
+      registerChildProcess: (taskId: string, child: ChildProcess) => {
         const procSet = this.activeProcesses.get(taskId);
         if (!procSet) return;
         procSet.add(child);
         child.on('exit', () => procSet.delete(child));
       },
-    });
+    };
+    this.scriptRuntime = new ScriptRuntime(store, this.registry, host);
+    this.markdownRuntime = new MarkdownRuntime(store, this.registry, host);
   }
 
   public getRegistry(): ExecutorRegistry {
@@ -132,6 +137,28 @@ export class DagEngine extends EventEmitter {
     const abortController = new AbortController();
     this.abortControllers.set(taskId, abortController);
     this.activeProcesses.set(taskId, new Set());
+
+    // Markdown 流水线：一份人工说明的流程文档，编排 Agent 调工具执行
+    if ((workflow.markdown || '').trim()) {
+      try {
+        await this.markdownRuntime.run(task, workflow);
+      } catch (err: any) {
+        dagLogger.error(`Markdown 流水线运行异常: ${err.message}`, err, { taskId });
+        this.log(taskId, 'SCRIPT', 'stderr', `Markdown 流水线异常: ${err.message}`);
+        const latest = this.store.getTask(taskId);
+        if (latest && latest.status !== 'cancelled') {
+          latest.status = 'failed';
+          latest.kanbanColumn = 'backlog';
+          this.store.saveTask(latest);
+          this.emit('task:update', latest);
+        }
+      } finally {
+        this.runningTasks.delete(taskId);
+        this.abortControllers.delete(taskId);
+        this.activeProcesses.delete(taskId);
+      }
+      return;
+    }
 
     // 脚本流水线：一条流水线 = 一段 JS，逻辑分支由脚本自身表达
     if ((workflow.script || '').trim()) {
@@ -829,6 +856,14 @@ export class DagEngine extends EventEmitter {
       this.store.saveTask(task);
       this.emit('task:update', task);
       return task;
+    }
+
+    // Markdown 流水线的人工卡点由编排 Agent 的工具接管
+    if ((workflow.markdown || '').trim()) {
+      if (this.markdownRuntime.resolveApproval(taskId, approved, feedback)) {
+        return this.store.getTask(taskId) || task;
+      }
+      dagLogger.warn(`Markdown 运行期无待处理审批，回退到节点级审批: ${taskId}`, undefined, { taskId });
     }
 
     // 脚本流水线的人工卡点由脚本运行期接管，无需按节点重跑
@@ -1540,8 +1575,9 @@ export class DagEngine extends EventEmitter {
       throw new Error(`Task ${taskId} not found`);
     }
 
-    // 脚本流水线：直接终止脚本子进程与进程组
+    // 脚本 / Markdown 流水线：直接终止子进程、进程组与会话
     this.scriptRuntime.cancel(taskId);
+    this.markdownRuntime.cancel(taskId);
 
     // 0. 若为任务组，级联取消其所有正在运行的子任务
     if (task.kind === 'group' && Array.isArray(task.subTaskIds)) {

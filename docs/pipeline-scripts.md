@@ -1,10 +1,13 @@
 # 脚本流水线
 
+流水线有两种承载方式：Markdown 文档（见 `docs/pipeline-markdown.md`）与脚本。本篇只讲脚本。
+
 一条流水线 = 一段 JS。逻辑用 `if-else` 编排，交互与卡点走系统方法。
 
 编排画布已下线：脚本保存在数据库 `workflows.script` 字段，脚本存在时以脚本为准，节点与连线不再生效。
 
 编辑入口是独立页面（`流程编排` -> 点击流水线），默认以步骤卡片呈现，右侧是流水线信息、任务模板与最近运行。
+编辑器顶部可以切换承载方式：`Markdown` 写流程文档（见 `docs/pipeline-markdown.md`），`步骤` 配卡片。
 
 ## 步骤卡片
 
@@ -87,6 +90,8 @@ export default async function ({ task, sandbox, agent, cli, approve, node, log }
 ## 维护：仓库存源码，数据库跑运行时
 
 脚本以 `pipelines/*.mjs` 为准，数据库是运行时副本。git 承担版本历史。
+
+Markdown 流水线走 `.md`，脚本流水线走 `.mjs`，两种文件同一套命令。
 
 ```bash
 pnpm pipeline:pull     # 数据库 -> 文件（补齐历史流水线）

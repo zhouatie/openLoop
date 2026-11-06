@@ -4,7 +4,8 @@
  *
  * 用法:
  *   node scripts/run-pipeline.js pipelines/dev-pipeline.mjs
- *   node scripts/run-pipeline.js pipelines/dev-pipeline.mjs --workspace ~/My/openLoop --yes
+ *   node scripts/run-pipeline.js pipelines/dev-pipeline.md
+ *   node scripts/run-pipeline.js pipelines/dev-pipeline.md --workspace ~/My/openLoop --yes
  *
  * 选项:
  *   --workspace <dir>  脚本工作目录，默认当前目录
@@ -56,8 +57,9 @@ function readScript(target) {
   return body;
 }
 
-const script = readScript(scriptPath);
-const taskTitle = single('--title', path.basename(scriptPath).replace(/\.m?js$/, ''));
+const isMarkdown = scriptPath.endsWith('.md');
+const source = isMarkdown ? fs.readFileSync(scriptPath, 'utf8') : readScript(scriptPath);
+const taskTitle = single('--title', path.basename(scriptPath).replace(/\.(m?js|md)$/, ''));
 const dataDir = dataDirArg
   ? path.resolve(dataDirArg.replace(/^~/, os.homedir()))
   : fs.mkdtempSync(path.join(os.tmpdir(), 'openloop-run-'));
@@ -89,14 +91,15 @@ async function main() {
     },
   };
 
-  const runtime = new core.ScriptRuntime(store, registry, host);
+  const Runtime = isMarkdown ? core.MarkdownRuntime : core.ScriptRuntime;
+  const runtime = new Runtime(store, registry, host);
   const workflow = store.saveWorkflow({
     id: 'wf_local_run',
     name: taskTitle,
     description: '本地试跑',
     nodes: [],
     edges: [],
-    script,
+    ...(isMarkdown ? { markdown: source } : { script: source }),
   });
   store.saveTask({
     id: 'task_local_run',
