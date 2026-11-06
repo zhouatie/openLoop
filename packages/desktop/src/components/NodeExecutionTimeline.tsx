@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Task, WorkflowDefinition, NodeRun, NodeStatus } from '@openloop/core';
+import { parseMarkdownSteps } from '@openloop/core/markdown-format';
 import {
   resolveNodeMeta,
   formatDurationHuman,
@@ -54,7 +55,16 @@ interface TimelineItem {
   durationSec?: number;
   timeRangeStr?: string;
   order: number;
+  /** 流程文档声明但还没执行到的步骤占位 */
+  planned?: boolean;
 }
+
+/** 步骤名比对键：去掉行首序号与全部空白，忽略大小写 */
+const stepKey = (name: string) =>
+  String(name || '')
+    .replace(/^\s*\d+\s*[.、)]\s*/, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
 
 // 步骤类型标识：中性灰文字 + 语义微图标着色，替代高饱和彩色胶囊
 const NODE_TYPE_LABELS: Record<string, { label: string; Icon: LucideIcon; tint: string }> = {
@@ -83,7 +93,13 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // 时间线全部步骤：只按步骤执行记录还原，顺序取开始时间
+  // 流程文档声明的全部步骤：二级标题即一个步骤
+  const declaredSteps = useMemo(
+    () => parseMarkdownSteps(workflow?.markdown || ''),
+    [workflow?.markdown]
+  );
+
+  // 时间线全部步骤：文档顺序为主，执行记录按步骤名对齐，未执行到的补待执行占位
   const timelineItems: TimelineItem[] = useMemo(() => {
     const runs = task.nodeRuns || {};
 
@@ -124,11 +140,52 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
     });
 
     items.sort((a, b) => (a.run?.startedAt || 0) - (b.run?.startedAt || 0));
-    items.forEach((item, idx) => {
+
+    // 步骤名按文档标题对齐：先精确匹配，再容忍省略标题尾部注释的前缀匹配
+    const claimed = new Set<string>();
+    const matchExecuted = (title: string, fuzzy: boolean) => {
+      const key = stepKey(title);
+      if (key.length < 2) return undefined;
+      const hit = items.find((item) => {
+        if (claimed.has(item.id)) return false;
+        const other = stepKey(item.name);
+        if (!other) return false;
+        return fuzzy ? other.startsWith(key) || key.startsWith(other) : other === key;
+      });
+      if (hit) claimed.add(hit.id);
+      return hit;
+    };
+
+    let merged = items;
+    if (declaredSteps.length > 0) {
+      const exactHits = new Map<string, TimelineItem>();
+      declaredSteps.forEach((title) => {
+        const hit = matchExecuted(title, false);
+        if (hit) exactHits.set(stepKey(title), hit);
+      });
+      merged = declaredSteps.map((title, index) => {
+        const hit = exactHits.get(stepKey(title)) || matchExecuted(title, true);
+        if (hit) return hit;
+        return {
+          id: `plan-${index}`,
+          // 文档标题带着「1. 」这类序号，卡片已有步骤序号，不重复
+          name: title.replace(/^\s*\d+\s*[.、)]\s*/, ''),
+          description: '',
+          type: '',
+          status: 'pending' as NodeStatus,
+          order: 0,
+          planned: true,
+        };
+      });
+      // 文档里没有对应标题的执行记录（重跑或文档改动）按时间顺序追加在末尾
+      merged.push(...items.filter((item) => !claimed.has(item.id)));
+    }
+
+    merged.forEach((item, idx) => {
       item.order = idx + 1;
     });
-    return items;
-  }, [task]);
+    return merged;
+  }, [task, declaredSteps]);
 
   // 统计概览指标
   const metrics = useMemo(() => {
@@ -169,6 +226,9 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
   };
 
   const renderTypeBadge = (item: TimelineItem) => {
+    // 未执行到的步骤还不知道执行类型，不猜类型
+    if (item.planned) return null;
+
     const { label, Icon, tint } = item.isGit
       ? { label: 'Git 提交', Icon: GitCommit, tint: 'text-[#52525b]' }
       : item.isDeploy
@@ -343,8 +403,11 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
               >
                 {/* 卡片头部概要区 */}
                 <div
-                  onClick={() => toggleExpand(item.id)}
-                  className="p-2.5 cursor-pointer select-none space-y-1.5"
+                  onClick={() => {
+                    if (item.planned) return;
+                    toggleExpand(item.id);
+                  }}
+                  className={`p-2.5 select-none space-y-1.5 ${item.planned ? '' : 'cursor-pointer'}`}
                 >
                   {/* 第一行：序号、中文主标题、类型胶囊与状态徽标 */}
                   <div className="flex items-center justify-between gap-2">
@@ -364,20 +427,24 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                   </div>
 
                   {/* 第二行：一句话中文功能释义 */}
-                  <div className="text-[11px] text-[#63636b] leading-tight">
-                    {item.description}
-                  </div>
+                  {item.description && (
+                    <div className="text-[11px] text-[#63636b] leading-tight">
+                      {item.description}
+                    </div>
+                  )}
 
                   {/* 第三行：底层英文字符标识、耗时统计与快速动作区 */}
                   <div className="pt-0.5 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0 flex-wrap">
                       {/* 英文标识采用浅色等宽字体显示，便于对账但不干扰中文理解 */}
-                      <span
-                        className="font-mono text-[9.5px] text-[#85858d] bg-white px-1.5 py-[0.5px] rounded border border-[#e3e3e8] shrink-0"
-                        title="底层步骤标识 (Step ID)"
-                      >
-                        {item.id}
-                      </span>
+                      {!item.planned && (
+                        <span
+                          className="font-mono text-[9.5px] text-[#85858d] bg-white px-1.5 py-[0.5px] rounded border border-[#e3e3e8] shrink-0"
+                          title="底层步骤标识 (Step ID)"
+                        >
+                          {item.id}
+                        </span>
+                      )}
 
                       {/* 耗时与时刻 */}
                       {item.durationSec !== undefined ? (
@@ -388,7 +455,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                         <span className="text-[10.5px] font-medium text-[#4f46e5]">
                           正在执行中...
                         </span>
-                      ) : (
+                      ) : item.planned ? null : (
                         <span className="text-[10.5px] text-[#a5a5b0]">未启动</span>
                       )}
 
@@ -401,7 +468,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
 
                     {/* 操作区：默认只留展开箭头，次级动作在悬浮/聚焦时以微图标淡入，避免按钮堆满卡片 */}
                     <div
-                      className="flex items-center gap-0.5 shrink-0"
+                      className={`flex items-center gap-0.5 shrink-0 ${item.planned ? 'hidden' : ''}`}
                       onClick={(e) => e.stopPropagation()}
                     >
                       {/* 次级动作：悬浮卡片或键盘聚焦时浮现，非悬浮态只留展开箭头 */}
@@ -470,7 +537,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                 </div>
 
                 {/* 展开的详情面板 */}
-                {isExpanded && (
+                {isExpanded && !item.planned && (
                   <div className="border-t border-[#ececf0] bg-white p-2.5 rounded-b-[8px] space-y-2 text-[11px] animate-in fade-in-50 duration-150">
                     {/* 错误提示卡片 */}
                     {hasError && (
