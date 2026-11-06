@@ -105,6 +105,13 @@ export class OpenLoopClient {
     });
   }
 
+  async skipNode(taskId: string, stepId?: string): Promise<Task> {
+    return this.request(`/api/tasks/${taskId}/skip-node`, {
+      method: 'POST',
+      body: { stepId },
+    });
+  }
+
   async getTaskLogs(taskId: string): Promise<LogEntry[]> {
     return this.request(`/api/tasks/${taskId}/logs`);
   }

@@ -2816,6 +2816,26 @@ ${existingSubSummary}
         return this.sendJson(res, 200, task, reqMeta);
       }
 
+      // Task skip step: /api/tasks/:id/skip-node
+      const taskSkipStepMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/skip-node$/);
+      if (taskSkipStepMatch && method === 'POST') {
+        const taskId = taskSkipStepMatch[1];
+        const body = await this.parseJsonBody(req);
+        const { stepId } = body;
+        serverLogger.info(
+          `[Tasks:SkipStep] 接收到跳过步骤指令: ${taskId}, Step: ${stepId || '自动判定'}`,
+          { stepId },
+          { taskId }
+        );
+        try {
+          const task = await this.engine.skipNode(taskId, stepId);
+          return this.sendJson(res, 200, task, reqMeta);
+        } catch (err: any) {
+          serverLogger.error(`[Tasks:SkipStep] 跳过步骤失败: ${err.message}`, err, { taskId });
+          return this.sendJson(res, 400, { error: err.message }, reqMeta);
+        }
+      }
+
       // Task diff: /api/tasks/:id/diff
       const taskDiffMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/diff$/);
       if (taskDiffMatch && method === 'GET') {

@@ -151,6 +151,29 @@ export class PipelineEngine extends EventEmitter {
   }
 
   /**
+   * 跳过失败的步骤：把该步骤记为已跳过，并让编排 Agent 从文档里它之后的步骤续跑
+   */
+  async skipNode(taskId: string, targetStepId?: string): Promise<Task> {
+    const task = this.store.getTask(taskId);
+    if (!task) {
+      engineLogger.error(`跳过步骤失败: Task ${taskId} 未找到`, undefined, { taskId });
+      throw new Error(`Task ${taskId} not found`);
+    }
+    const workflow = this.store.getWorkflow(task.workflowId);
+    if (!workflow) {
+      engineLogger.error(`跳过步骤失败: Workflow ${task.workflowId} 未找到`, undefined, { taskId });
+      throw new Error(`Workflow ${task.workflowId} not found`);
+    }
+
+    const stepId = this.markdownRuntime.skipStep(task, targetStepId);
+    this.markdownRuntime.run(task, workflow, { skippedStepId: stepId }).catch((err: any) => {
+      engineLogger.error(`跳过步骤后续跑失败: ${err?.message}`, err, { taskId, nodeId: stepId });
+      this.log(taskId, stepId, 'stderr', `跳过步骤后续跑失败: ${err?.message}`);
+    });
+    return this.store.getTask(taskId) || task;
+  }
+
+  /**
    * 启动任务组 (Task Group) 执行：支持串行、并行与 DAG 依赖拓扑调度
    */
   async runTaskGroup(taskGroup: Task): Promise<void> {

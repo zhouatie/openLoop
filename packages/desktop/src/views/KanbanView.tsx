@@ -433,6 +433,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+  const [skippingStepTaskId, setSkippingStepTaskId] = useState<string | null>(null);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
 
   const handleCancelTask = async (taskId: string) => {
@@ -1234,6 +1235,25 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       toast.error(`启动任务失败: ${e?.message || '未知错误'}`);
     } finally {
       setRunningTaskId(null);
+    }
+  };
+
+  const handleSkipStep = async (taskId: string) => {
+    setSkippingStepTaskId(taskId);
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanView] 跳过失败步骤并从后续步骤续跑:', taskId);
+    }
+    try {
+      await api.skipNode(taskId);
+      toast.success('已跳过失败步骤，流水线从后续步骤续跑');
+      onRefresh();
+    } catch (e: any) {
+      if (import.meta.env?.DEV) {
+        console.error('[KanbanView] 跳过步骤失败:', e);
+      }
+      toast.error(`跳过步骤失败: ${e?.message || '未知错误'}`);
+    } finally {
+      setSkippingStepTaskId(null);
     }
   };
 
@@ -2371,6 +2391,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         movingTaskId={movingTaskId}
                         runningTaskId={runningTaskId}
                         approvingId={approvingId}
+                        skippingStepTaskId={skippingStepTaskId}
                         onSelectTask={setSelectedTask}
                         onCancelTask={handleCancelTask}
                         onMoveTaskColumn={handleMoveTaskColumn}
@@ -2378,6 +2399,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         onOpenTaskLogs={onOpenTaskLogs}
                         onDeleteTask={setTaskToDelete}
                         onRunTask={handleRunTask}
+                        onSkipStepTask={handleSkipStep}
                         onArchiveTask={handleArchiveTask}
                         onVisualAcceptance={setVisualAcceptanceTask}
                         onApprove={handleApprove}

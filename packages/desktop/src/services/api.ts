@@ -671,6 +671,17 @@ export class DesktopApiService {
     });
   }
 
+  async skipNode(id: string, stepId?: string): Promise<Task> {
+    if (import.meta.env?.DEV) {
+      console.log(`[UI:API] 请求跳过任务 [${id}] 的步骤:`, stepId || '自动判定');
+    }
+    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/skip-node`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stepId }),
+    });
+  }
+
   async getTaskSandboxStatus(id: string): Promise<{
     status: 'running' | 'stopped' | 'none';
     port?: number;

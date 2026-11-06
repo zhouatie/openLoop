@@ -7,6 +7,7 @@ import {
   Trash2,
   Play,
   RotateCcw,
+  SkipForward,
   ArrowRight,
   Edit3,
   AlertCircle,
@@ -178,6 +179,7 @@ export interface KanbanCardProps {
   isMoving?: boolean;
   isRunning?: boolean;
   isApproving?: boolean;
+  isSkipping?: boolean;
   onSelect: (task: Task) => void;
   onCancel: (taskId: string) => void;
   onMoveColumn: (taskId: string, targetCol: KanbanColumn) => void;
@@ -185,6 +187,7 @@ export interface KanbanCardProps {
   onOpenLogs: (taskId: string, nodeId?: string) => void;
   onDelete: (task: Task) => void;
   onRun: (taskId: string) => void;
+  onSkipStep: (taskId: string) => void;
   onArchive?: (taskId: string) => void;
   onVisualAcceptance: (task: Task) => void;
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
@@ -209,6 +212,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   isMoving,
   isRunning,
   isApproving,
+  isSkipping,
   onSelect,
   onCancel,
   onMoveColumn,
@@ -216,6 +220,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   onOpenLogs,
   onDelete,
   onRun,
+  onSkipStep,
   onArchive,
   onVisualAcceptance,
   onApprove,
@@ -1008,6 +1013,18 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
             </div>
             <div className="shrink-0 flex items-center gap-1">
               <button
+                disabled={isRunning || isSkipping}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSkipStep(task.id);
+                }}
+                className="h-[20px] px-2 rounded-[4px] bg-white hover:bg-[#f7f7fa] text-[#52525b] text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 border border-[#e3e3e8] disabled:opacity-50 cursor-pointer"
+                title="跳过失败的步骤，从流程文档里它之后的步骤续跑"
+              >
+                <SkipForward size={9.5} />
+                <span>{isSkipping ? '跳过中' : '跳过这步'}</span>
+              </button>
+              <button
                 disabled={isRunning}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1326,6 +1343,7 @@ export const KanbanCard = memo(KanbanCardComponent, (prev, next) => {
     prev.isCancelling === next.isCancelling &&
     prev.isMoving === next.isMoving &&
     prev.isRunning === next.isRunning &&
-    prev.isApproving === next.isApproving
+    prev.isApproving === next.isApproving &&
+    prev.isSkipping === next.isSkipping
   );
 });

@@ -335,6 +335,26 @@ taskCmd
     }
   });
 
+taskCmd
+  .command('skip <id> [stepId]')
+  .description('跳过失败的步骤（默认自动匹配最近失败的步骤），并从文档里它之后的步骤续跑')
+  .action(async (id, stepId) => {
+    try {
+      let task;
+      try {
+        task = await client.skipNode(id, stepId);
+      } catch {
+        const store = new Store();
+        const engine = new PipelineEngine(store);
+        task = await engine.skipNode(id, stepId);
+      }
+      console.log(`\x1b[32m✔\x1b[0m 任务 ${id} 步骤跳过成功`);
+      console.log(`当前任务状态: ${task.status}, 看板泳道: ${task.kanbanColumn}`);
+    } catch (err: any) {
+      console.error(`\x1b[31m跳过步骤失败:\x1b[0m ${err.message}`);
+    }
+  });
+
 // 插件管理
 const pluginCmd = program.command('plugin').description('插件扩展管理');
 

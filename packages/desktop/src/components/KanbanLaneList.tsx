@@ -16,6 +16,7 @@ export interface KanbanLaneListProps {
   movingTaskId: string | null;
   runningTaskId: string | null;
   approvingId: string | null;
+  skippingStepTaskId: string | null;
   onSelectTask: (task: Task) => void;
   onCancelTask: (taskId: string) => void;
   onMoveTaskColumn: (taskId: string, targetCol: KanbanColumn) => void;
@@ -23,6 +24,7 @@ export interface KanbanLaneListProps {
   onOpenTaskLogs: (taskId: string, nodeId?: string) => void;
   onDeleteTask: (task: Task) => void;
   onRunTask: (taskId: string) => void;
+  onSkipStepTask: (taskId: string) => void;
   onArchiveTask: (taskId: string) => void;
   onVisualAcceptance: (task: Task) => void;
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
@@ -47,6 +49,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
   movingTaskId,
   runningTaskId,
   approvingId,
+  skippingStepTaskId,
   onSelectTask,
   onCancelTask,
   onMoveTaskColumn,
@@ -54,6 +57,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
   onOpenTaskLogs,
   onDeleteTask,
   onRunTask,
+  onSkipStepTask,
   onArchiveTask,
   onVisualAcceptance,
   onApprove,
@@ -111,6 +115,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
           isMoving={movingTaskId === task.id}
           isRunning={runningTaskId === task.id}
           isApproving={approvingId === task.id}
+          isSkipping={skippingStepTaskId === task.id}
           onSelect={onSelectTask}
           onCancel={onCancelTask}
           onMoveColumn={onMoveTaskColumn}
@@ -118,6 +123,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
           onOpenLogs={onOpenTaskLogs}
           onDelete={onDeleteTask}
           onRun={onRunTask}
+          onSkipStep={onSkipStepTask}
           onArchive={onArchiveTask}
           onVisualAcceptance={onVisualAcceptance}
           onApprove={onApprove}
@@ -155,6 +161,7 @@ export const KanbanLaneList = memo(KanbanLaneListComponent, (prev, next) => {
     prev.movingTaskId === next.movingTaskId &&
     prev.runningTaskId === next.runningTaskId &&
     prev.approvingId === next.approvingId &&
+    prev.skippingStepTaskId === next.skippingStepTaskId &&
     prev.wfMap === next.wfMap
   );
 });
