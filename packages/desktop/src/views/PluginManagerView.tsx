@@ -143,7 +143,7 @@ const CATALOG_PLUGINS: CatalogPlugin[] = [
     name: '动图多帧合成器',
     version: '1.1.0',
     category: 'node',
-    categoryLabel: 'DAG 节点',
+    categoryLabel: '流水线执行器',
     author: 'openLoop 官方',
     isOfficial: true,
     description: '自动将各环节的测试结果与步骤截图合成为动图，供 QA 在看板上一键快速验收。',
@@ -372,7 +372,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
           </div>
 
           <p className="text-[12px] text-[#4b4b53] leading-relaxed max-w-[620px]">
-            插件负责接入工作流自定义 DAG 节点、侧边栏独立视图或 CLI 工具链，无缝扩展流水线的自动化能力与可观测性。
+            插件负责接入自定义执行器、侧边栏独立视图或 CLI 工具链，无缝扩展流水线的自动化能力与可观测性。
           </p>
 
           <p className="text-[12px] text-[#4b4b53] leading-relaxed max-w-[620px] mt-1">

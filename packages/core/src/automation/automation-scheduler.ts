@@ -228,7 +228,7 @@ export class AutomationScheduler extends EventEmitter {
     };
     this.store.addAutomationLog(logRecord);
 
-    // 5. 流水线型任务在流水线结束后回写真实终态（结果通知由流水线自身的节点编排负责）
+    // 5. 流水线型任务在流水线结束后回写真实终态（结果通知由流水线自身负责）
     if (pipelineRun && createdTaskId) {
       const runTaskId = createdTaskId;
       this.pipelineRunningSet.add(taskId);
