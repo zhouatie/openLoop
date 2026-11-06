@@ -79,7 +79,7 @@ tags: 开发,QA
 | `sandbox_cleanup` | 释放端口与沙箱目录 |
 | `finish_pipeline` | 声明整条流水线结束，带成功或失败原因 |
 
-每次工具调用落一条步骤记录，含状态、耗时、退出码与输出。界面时间轴、节点日志、人工卡点 Diff 与脚本流水线共用同一套视图。
+每次工具调用落一条步骤记录，含状态、耗时、退出码与输出。界面时间轴、节点日志、人工卡点 Diff 与节点执行共用同一套视图。
 
 ## 表达精度
 
@@ -88,24 +88,18 @@ tags: 开发,QA
 - 硬门禁靠措辞与 `ask_human`：写「失败就停」，Agent 必须调 `finish_pipeline` 报失败，不能继续下一步。
 - 人工驳回会直接终止流水线，任务回到 `backlog`。
 
-## 与脚本流水线的关系
+## 唯一承载方式
 
-两种承载方式并存，同一条流水线只用一种：
-
-| 承载方式 | 存储字段 | 适合 |
-| :--- | :--- | :--- |
-| Markdown | `workflow.markdown` | 流程按人的语言变化，需要判断与解释 |
-| 脚本 | `workflow.script` | 需要精确参数、分支、循环 |
-
-编辑器顶部切换承载方式：`Markdown` 写文档，`步骤` 配卡片。
+流水线只有 Markdown 一种承载方式，正文存在 `workflow.markdown`。
+编辑器只有一个流程文档输入框，没有步骤卡片，也没有脚本。
 
 ## 仓库同步
 
 ```bash
-pnpm pipeline:pull     # 数据库 -> pipelines/*（Markdown 落 .md，脚本落 .mjs）
-pnpm pipeline:push     # pipelines/* -> 数据库
+pnpm pipeline:pull     # 数据库 -> pipelines/*.md
+pnpm pipeline:push     # pipelines/*.md -> 数据库
 pnpm pipeline:check    # 只比对，有漂移退出码 1
-pnpm pipeline:run pipelines/openLoop-开发专用.md --workspace ~/My/openLoop --yes
+pnpm pipeline:run pipelines/openLoop-开发专用流水线.md --workspace ~/My/openLoop --yes
 ```
 
 `push` 会把解析出的 id 写回文件头：
@@ -120,7 +114,7 @@ tags: 开发,QA
 
 ## 本地试跑
 
-`run-pipeline.js` 接受 `.md` 与 `.mjs`。用临时数据目录启动宿主，不建看板任务。
+`run-pipeline.js` 只接受 `.md`。用临时数据目录启动宿主，不建看板任务。
 
 - 遇到人工卡点在终端询问，`--yes` 自动通过。
 - `--workspace` 决定真实工作目录，默认当前目录。

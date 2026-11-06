@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 /**
- * 本地试跑一条脚本流水线，不建看板任务。
+ * 本地试跑一条 Markdown 流水线，不建看板任务。
  *
  * 用法:
- *   node scripts/run-pipeline.js pipelines/dev-pipeline.mjs
  *   node scripts/run-pipeline.js pipelines/dev-pipeline.md
  *   node scripts/run-pipeline.js pipelines/dev-pipeline.md --workspace ~/My/openLoop --yes
  *
  * 选项:
- *   --workspace <dir>  脚本工作目录，默认当前目录
- *   --title <text>     注入的 task.title，默认脚本文件名
+ *   --workspace <dir>  流水线工作目录，默认当前目录
+ *   --title <text>     注入的 task.title，默认文件名
  *   --yes              遇到验收卡点自动通过
  *   --data-dir <dir>   指定数据目录（默认临时目录，跑完删除）
  *   --keep             保留临时数据目录，便于查看步骤与日志
  *
- * 注意: 脚本会真实执行 cli 与沙箱操作，请先确认 --workspace 指向正确的仓库。
+ * 注意: 流水线会真实执行命令与沙箱操作，请先确认 --workspace 指向正确的仓库。
  */
 const fs = require('fs');
 const os = require('os');
@@ -37,29 +36,22 @@ const dataDirArg = single('--data-dir', '');
 const workspace = path.resolve(single('--workspace', process.cwd()));
 
 if (!file) {
-  console.error('用法: node scripts/run-pipeline.js <脚本文件> [--workspace <dir>] [--yes]');
+  console.error('用法: node scripts/run-pipeline.js <流程文档.md> [--workspace <dir>] [--yes]');
   process.exit(1);
 }
 
-const scriptPath = path.resolve(process.cwd(), file);
-if (!fs.existsSync(scriptPath)) {
-  console.error(`脚本不存在: ${scriptPath}`);
+const pipelinePath = path.resolve(process.cwd(), file);
+if (!fs.existsSync(pipelinePath)) {
+  console.error(`流程文档不存在: ${pipelinePath}`);
+  process.exit(1);
+}
+if (!pipelinePath.endsWith('.md')) {
+  console.error('只支持 Markdown 流水线（.md）');
   process.exit(1);
 }
 
-/** 去掉文件头部的 @ 元数据注释 */
-function readScript(target) {
-  const lines = fs.readFileSync(target, 'utf8').split('\n');
-  let cursor = 0;
-  while (cursor < lines.length && /^\s*\/\/\s*@/.test(lines[cursor])) cursor += 1;
-  const body = lines.slice(cursor).join('\n').replace(/^\n+/, '');
-  if (!body.trim()) throw new Error('脚本内容为空');
-  return body;
-}
-
-const isMarkdown = scriptPath.endsWith('.md');
-const source = isMarkdown ? fs.readFileSync(scriptPath, 'utf8') : readScript(scriptPath);
-const taskTitle = single('--title', path.basename(scriptPath).replace(/\.(m?js|md)$/, ''));
+const source = fs.readFileSync(pipelinePath, 'utf8');
+const taskTitle = single('--title', path.basename(pipelinePath).replace(/\.md$/, ''));
 const dataDir = dataDirArg
   ? path.resolve(dataDirArg.replace(/^~/, os.homedir()))
   : fs.mkdtempSync(path.join(os.tmpdir(), 'openloop-run-'));
@@ -74,7 +66,7 @@ async function main() {
   const store = new core.Store(dataDir);
   const registry = new core.ExecutorRegistry();
 
-  console.log(cyan(`\n▶ 试跑脚本: ${path.relative(process.cwd(), scriptPath)}`));
+  console.log(cyan(`\n▶ 试跑流水线: ${path.relative(process.cwd(), pipelinePath)}`));
   console.log(dim(`  工作目录: ${workspace}`));
   console.log(dim(`  数据目录: ${dataDir}${keep ? '（保留）' : '（临时，结束后删除）'}\n`));
 
@@ -91,15 +83,14 @@ async function main() {
     },
   };
 
-  const Runtime = isMarkdown ? core.MarkdownRuntime : core.ScriptRuntime;
-  const runtime = new Runtime(store, registry, host);
+  const runtime = new core.MarkdownRuntime(store, registry, host);
   const workflow = store.saveWorkflow({
     id: 'wf_local_run',
     name: taskTitle,
     description: '本地试跑',
     nodes: [],
     edges: [],
-    ...(isMarkdown ? { markdown: source } : { script: source }),
+    markdown: source,
   });
   store.saveTask({
     id: 'task_local_run',
@@ -120,7 +111,7 @@ async function main() {
   let interrupted = false;
   const onSigint = () => {
     interrupted = true;
-    console.log(yellow('\n收到中断，正在终止脚本...'));
+    console.log(yellow('\n收到中断，正在终止流水线...'));
     runtime.cancel('task_local_run');
   };
   process.on('SIGINT', onSigint);

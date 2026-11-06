@@ -14,7 +14,7 @@ export interface PipelineHost {
 
 /**
  * 步骤记录器：一次系统调用落一条记录，界面时间轴与节点日志共用同一份数据。
- * 脚本流水线与 Markdown 流水线共用。
+ * Markdown 流水线与节点执行共用。
  */
 export class StepLog {
   /** 最近开始的步骤 id，日志按它归档 */

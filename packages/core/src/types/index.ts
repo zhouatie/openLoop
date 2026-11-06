@@ -327,7 +327,6 @@ export interface WorkflowDefinition {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   tags?: string[]; // 流水线标签列表，用于归类、筛选与过滤 (例如: '工作', '部署', 'QA', '日常')
-  script?: string; // 脚本流水线：一段 JS，导出 default 函数，逻辑编排由脚本自身表达
   markdown?: string; // Markdown 流水线：人工用自然语言说明流程，由编排 Agent 调工具执行
   taskTemplate?: WorkflowTaskTemplate; // 流水线关联的创建任务输入模板
   variables?: Record<string, any>;
