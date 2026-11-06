@@ -51,7 +51,6 @@ import {
   GitMerge,
   Unlink,
   Link2,
-  PanelRight,
   Maximize2,
   Archive,
 } from 'lucide-react';
@@ -102,9 +101,7 @@ import { orderSubTasksForDisplay } from '../utils/subtaskOrder';
 import {
   DEFAULT_DETAIL_WIDTH,
   clampDetailWidth,
-  readAgentPaneOpen,
   readDetailWidth,
-  saveAgentPaneOpen,
   saveDetailWidth,
 } from '../utils/taskWorkbench';
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll';
@@ -374,9 +371,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     onFocusHandled?.();
   }, [focusTaskId, tasks, onFocusHandled]);
 
-  // 任务详情工作台：宽度拖拽（双击复位）与 Agent 协作流常驻开关，均本地记忆
+  // 任务详情工作台：宽度拖拽（双击复位），本地记忆
   const [detailWidth, setDetailWidth] = useState<number>(() => readDetailWidth());
-  const [isAgentPaneOpen, setIsAgentPaneOpen] = useState<boolean>(() => readAgentPaneOpen());
   const [isResizingDetail, setIsResizingDetail] = useState(false);
   const detailPanelRef = useRef<HTMLDivElement | null>(null);
   const detailDragWidthRef = useRef<number>(DEFAULT_DETAIL_WIDTH);
@@ -421,15 +417,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     setDetailWidth(next);
     saveDetailWidth(next);
     if (import.meta.env?.DEV) console.log('[KanbanView:Workbench] 双击复位工作台宽度:', next);
-  };
-
-  const handleToggleAgentPane = () => {
-    setIsAgentPaneOpen((prev) => {
-      const next = !prev;
-      saveAgentPaneOpen(next);
-      if (import.meta.env?.DEV) console.log('[KanbanView:Workbench] 切换 Agent 协作流常驻栏:', next);
-      return next;
-    });
   };
 
   const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -507,7 +494,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     scrollToBottom: scrollChatToBottom,
   } = useChatAutoScroll({
     dataKey: sessionState,
-    isActive: !!selectedTask && isAgentPaneOpen,
+    isActive: !!selectedTask,
     resetKey: selectedTask?.id,
   });
 
@@ -2624,18 +2611,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         <Trash2 size={12} />
                       </button>
                       <button
-                        onClick={handleToggleAgentPane}
-                        className={`h-[26px] px-2 rounded-[5px] border text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0 ${
-                          isAgentPaneOpen
-                            ? 'border-[#d8d6fb] bg-[#eeedfd] text-[#4f46e5]'
-                            : 'border-[#e3e3e8] bg-white text-[#4b4b53] hover:text-[#1c1c21] hover:bg-[#f4f4f6]'
-                        }`}
-                        title={isAgentPaneOpen ? '收起 Agent 协作流，专注任务档案' : '展开 Agent 协作流，与任务同屏对话'}
-                      >
-                        <PanelRight size={11} />
-                        <span>Agent</span>
-                      </button>
-                      <button
                         onClick={() => {
                           if (import.meta.env?.DEV) console.log('[KanbanView:Drawer] 点击关闭工作台:', curTask.id);
                           setSelectedTask(null);
@@ -2752,17 +2727,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                             />
                           </div>
                         </div>
-                        {!isAgentPaneOpen && (
-                          <button
-                            type="button"
-                            onClick={handleToggleAgentPane}
-                            className="h-[24px] px-2 rounded-[5px] border border-[#d8d6fb] bg-[#f5f5ff] hover:bg-[#eceaff] text-[#4f46e5] text-[10.5px] font-medium flex items-center gap-1 transition-all cursor-pointer shrink-0"
-                            title="展开 Agent 协作流"
-                          >
-                            <Bot size={11} />
-                            <span>Agent</span>
-                          </button>
-                        )}
                       </div>
                     </div>
 
@@ -3186,7 +3150,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setIsAgentPaneOpen(true);
                                     handleSendSuggestedPrompt(
                                       '请分析当前需求与工作区目录结构，帮我规划并拆解为可独立闭环执行的子任务。'
                                     );
@@ -3788,73 +3751,68 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   </main>
 
                   {/* 右栏：Agent 协作流，任务详情内常驻同屏 */}
-                  {isAgentPaneOpen && (
-                    <>
-                      <div className="w-px shrink-0 bg-[#ececf0]" />
-                      <aside className="w-[clamp(360px,42%,640px)] shrink-0 flex flex-col min-h-0 overflow-hidden">
-                        <TaskAgentPanel
-                          taskId={curTask.id}
-                          taskTitle={curTask.kind === 'group' ? '任务组架构师' : curTask.title}
-                          mode="inline"
-                          model={sessionState?.model}
-                          cwd={curTask.workspace}
-                          sendExtra={buildChatSendExtra}
-                          headerExtra={
-                            <div className="flex items-center gap-1.5">
-                              <AgentChatChangedFiles
-                                taskId={curTask.id}
-                                taskTitle={curTask.title}
-                                isBusy={sessionState?.isBusy}
-                                sessionMessagesCount={sessionState?.messages?.length || 0}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setIsQaSelectorOpen(true)}
-                                className="h-[22px] px-2 rounded-[4px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] hover:border-[#d4d4d8] text-[10.5px] font-medium text-[#4b4b53] transition-colors cursor-pointer select-none"
-                                title="选择要随消息发送的 QA 测试产物"
-                              >
-                                {selectedQaTotalCount > 0
-                                  ? `测试产物 · ${selectedQaTotalCount}`
-                                  : '测试产物'}
-                              </button>
-                              {sessionState?.isPaused && (
-                                <button
-                                  type="button"
-                                  disabled={isPausingSession}
-                                  onClick={handleTogglePauseSession}
-                                  className="h-[22px] px-2 rounded-[4px] bg-[#1c1c21] text-white text-[10.5px] font-medium hover:bg-[#2e2f36] transition-colors cursor-pointer select-none"
-                                >
-                                  {isPausingSession ? '恢复中' : '继续'}
-                                </button>
-                              )}
+                  <aside className="w-[clamp(360px,42%,640px)] shrink-0 flex flex-col min-h-0 overflow-hidden border-l border-[#ececf0]">
+                    <TaskAgentPanel
+                      taskId={curTask.id}
+                      taskTitle={curTask.kind === 'group' ? '任务组架构师' : curTask.title}
+                      mode="inline"
+                      model={sessionState?.model}
+                      cwd={curTask.workspace}
+                      sendExtra={buildChatSendExtra}
+                      headerExtra={
+                        <div className="flex items-center gap-1.5">
+                          <AgentChatChangedFiles
+                            taskId={curTask.id}
+                            taskTitle={curTask.title}
+                            isBusy={sessionState?.isBusy}
+                            sessionMessagesCount={sessionState?.messages?.length || 0}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setIsQaSelectorOpen(true)}
+                            className="h-[22px] px-2 rounded-[4px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f7] hover:border-[#d4d4d8] text-[10.5px] font-medium text-[#4b4b53] transition-colors cursor-pointer select-none"
+                            title="选择要随消息发送的 QA 测试产物"
+                          >
+                            {selectedQaTotalCount > 0
+                              ? `测试产物 · ${selectedQaTotalCount}`
+                              : '测试产物'}
+                          </button>
+                          {sessionState?.isPaused && (
+                            <button
+                              type="button"
+                              disabled={isPausingSession}
+                              onClick={handleTogglePauseSession}
+                              className="h-[22px] px-2 rounded-[4px] bg-[#1c1c21] text-white text-[10.5px] font-medium hover:bg-[#2e2f36] transition-colors cursor-pointer select-none"
+                            >
+                              {isPausingSession ? '恢复中' : '继续'}
+                            </button>
+                          )}
 
-                              <div className="h-3.5 w-px bg-[#e3e3e8] mx-0.5 shrink-0" />
+                          <div className="h-3.5 w-px bg-[#e3e3e8] mx-0.5 shrink-0" />
 
-                              {/* 视窗模式：展开至全局工作台（沉浸全屏） */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const targetSessionId =
-                                    curTaskSessionId ||
-                                    `session_${curTask.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-                                  handleOpenAgentSession(targetSessionId, {
-                                    taskId: curTask.id,
-                                    taskTitle: curTask.kind === 'group' ? '任务组架构师' : curTask.title,
-                                    cwd: curTask.workspace,
-                                  });
-                                }}
-                                className="h-[22px] w-[22px] rounded-[4px] border border-[#e3e3e8] bg-white hover:border-[#d8d6fb] hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] flex items-center justify-center transition-all shadow-2xs cursor-pointer select-none shrink-0"
-                                title="展开至全局工作台（沉浸模式：全屏视窗、多终端与完整 Diff）"
-                                aria-label="展开至全局工作台"
-                              >
-                                <Maximize2 size={11} strokeWidth={2.2} />
-                              </button>
-                            </div>
-                          }
-                        />
-                      </aside>
-                    </>
-                  )}
+                          {/* 视窗模式：展开至全局工作台（沉浸全屏） */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetSessionId =
+                                curTaskSessionId ||
+                                `session_${curTask.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                              handleOpenAgentSession(targetSessionId, {
+                                taskId: curTask.id,
+                                taskTitle: curTask.kind === 'group' ? '任务组架构师' : curTask.title,
+                                cwd: curTask.workspace,
+                              });
+                            }}
+                            className="h-[22px] w-[22px] rounded-[4px] border border-[#e3e3e8] bg-white hover:border-[#d8d6fb] hover:bg-[#eeedfd] text-[#63636b] hover:text-[#4f46e5] flex items-center justify-center transition-all shadow-2xs cursor-pointer select-none shrink-0"
+                            title="展开至全局工作台（沉浸模式：全屏视窗、多终端与完整 Diff）"
+                            aria-label="展开至全局工作台"
+                          >
+                            <Maximize2 size={11} strokeWidth={2.2} />
+                          </button>
+                        </div>
+                      }
+                    />
+                  </aside>
                 </div>
               </div>
         );
