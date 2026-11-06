@@ -229,10 +229,14 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
     }
   }, [workflow, saving, name, description, tags, code, cards.length, editingMarkdown, markdown, onRefresh]);
 
-  /** 切换承载方式：Markdown 首次进入时给一份可跑的骨架 */
+  /** 切换承载方式：Markdown 首次进入时给一份可跑的骨架，骨架不算用户改动 */
   const switchMode = useCallback(
     (next: 'markdown' | 'cards') => {
-      if (next === 'markdown' && !markdown.trim()) setMarkdown(markdownTemplate(name || '未命名流水线'));
+      if (next === 'markdown' && !markdown.trim()) {
+        const draft = markdownTemplate(name || '未命名流水线');
+        setMarkdown(draft);
+        setSavedMarkdown(draft);
+      }
       setMode(next);
       if (import.meta.env?.DEV) {
         console.log('[WorkflowScriptView] 切换承载方式:', next);
