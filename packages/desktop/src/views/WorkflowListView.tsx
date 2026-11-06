@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Workflow,
   Plus,
@@ -47,6 +48,8 @@ import { WorkflowExecutionHistoryView } from './workflow/WorkflowExecutionHistor
 const STORAGE_KEY_PINNED_WORKFLOWS = 'openloop_pinned_workflow_ids';
 const STORAGE_KEY_VIEW_MODE = 'openloop_workflow_view_mode';
 const STORAGE_KEY_SUBTAB = 'openloop_workflow_subtab';
+// 行级操作浮层高度，用于判断向下或向上展开
+const ACTION_MENU_HEIGHT = 112;
 
 interface WorkflowListViewProps {
   workflows: WorkflowDefinition[];
@@ -136,9 +139,12 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   const [isSortOpen, setIsSortOpen] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
-  // 更多操作下拉菜单状态
-  const [activeMenuWfId, setActiveMenuWfId] = useState<string | null>(null);
+  // 更多操作下拉菜单状态（浮层挂载到 body，避免被列表滚动容器裁剪）
+  const [actionMenu, setActionMenu] = useState<{ wfId: string; right: number; top: number } | null>(
+    null
+  );
   const actionMenuRef = useRef<HTMLDivElement>(null);
+  const actionMenuPanelRef = useRef<HTMLDivElement>(null);
 
   // 视图模式与分类过滤状态
   const [viewMode, setViewMode] = useState<'list' | 'grid'>(() => {
@@ -202,19 +208,26 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     };
   }, [isSortOpen, isTagMenuOpen]);
 
-  // 点击外部关闭行级操作下拉菜单
+  // 点击外部或滚动、缩放时关闭行级操作下拉菜单
   useEffect(() => {
-    if (!activeMenuWfId) return;
+    if (!actionMenu) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
-        setActiveMenuWfId(null);
+      const target = e.target as Node;
+      if (actionMenuRef.current?.contains(target) || actionMenuPanelRef.current?.contains(target)) {
+        return;
       }
+      setActionMenu(null);
     };
+    const close = () => setActionMenu(null);
     document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
     };
-  }, [activeMenuWfId]);
+  }, [actionMenu]);
 
   // 格式化友好时间显示
   const formatFriendlyTime = (timestamp: number) => {
@@ -1286,70 +1299,95 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                       </button>
 
                       {/* 更多管理操作下拉菜单 */}
-                      <div className="relative" ref={activeMenuWfId === wf.id ? actionMenuRef : null}>
+                      <div
+                        className="relative"
+                        ref={actionMenu?.wfId === wf.id ? actionMenuRef : null}
+                      >
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setActiveMenuWfId(activeMenuWfId === wf.id ? null : wf.id);
+                            if (actionMenu?.wfId === wf.id) {
+                              setActionMenu(null);
+                              return;
+                            }
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const openUp =
+                              rect.bottom + ACTION_MENU_HEIGHT + 4 > window.innerHeight;
+                            setActionMenu({
+                              wfId: wf.id,
+                              right: window.innerWidth - rect.right,
+                              top: openUp
+                                ? rect.top - ACTION_MENU_HEIGHT - 4
+                                : rect.bottom + 4,
+                            });
                           }}
                           title="更多操作"
                           className={`w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#ececf0] flex items-center justify-center transition-all cursor-pointer ${
-                            activeMenuWfId === wf.id ? 'bg-[#ececf0] text-[#1c1c21]' : ''
+                            actionMenu?.wfId === wf.id ? 'bg-[#ececf0] text-[#1c1c21]' : ''
                           }`}
                         >
                           <MoreHorizontal size={12} />
                         </button>
 
-                        {activeMenuWfId === wf.id && (
-                          <div
-                            className="absolute right-0 top-[28px] z-50 w-[120px] bg-white border border-[#e3e3e8] rounded-[6px] shadow-[0_8px_20px_rgba(0,0,0,0.08)] py-1 text-[11.5px] animate-in fade-in zoom-in-95 duration-100"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                handleTogglePin(e, wf);
-                                setActiveMenuWfId(null);
-                              }}
-                              className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[#52525b] hover:text-[#1c1c21] hover:bg-[#f4f4f5] text-left transition-colors cursor-pointer"
+                        {actionMenu?.wfId === wf.id &&
+                          createPortal(
+                            <div
+                              ref={actionMenuPanelRef}
+                              style={{ right: actionMenu.right, top: actionMenu.top }}
+                              className="fixed z-[90] w-[120px] bg-white border border-[#e3e3e8] rounded-[6px] shadow-[0_8px_20px_rgba(0,0,0,0.08)] py-1 text-[11.5px] animate-in fade-in zoom-in-95 duration-100"
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              <Pin size={11.5} className={isPinned ? 'rotate-45 text-[#3b82f6] fill-current' : ''} />
-                              <span>{isPinned ? '取消置顶' : '固定置顶'}</span>
-                            </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  handleTogglePin(e, wf);
+                                  setActionMenu(null);
+                                }}
+                                className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[#52525b] hover:text-[#1c1c21] hover:bg-[#f4f4f5] text-left transition-colors cursor-pointer"
+                              >
+                                <Pin
+                                  size={11.5}
+                                  className={
+                                    isPinned ? 'rotate-45 text-[#3b82f6] fill-current' : ''
+                                  }
+                                />
+                                <span>{isPinned ? '取消置顶' : '固定置顶'}</span>
+                              </button>
 
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                handleDuplicateWorkflow(e, wf);
-                                setActiveMenuWfId(null);
-                              }}
-                              disabled={duplicatingId === wf.id}
-                              className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[#52525b] hover:text-[#18181b] hover:bg-[#f4f4f5] text-left transition-colors cursor-pointer"
-                            >
-                              {duplicatingId === wf.id ? (
-                                <Loader2 size={11.5} className="animate-spin text-[#4f46e5]" />
-                              ) : (
-                                <Copy size={11.5} />
-                              )}
-                              <span>克隆流程</span>
-                            </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  handleDuplicateWorkflow(e, wf);
+                                  setActionMenu(null);
+                                }}
+                                disabled={duplicatingId === wf.id}
+                                className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[#52525b] hover:text-[#18181b] hover:bg-[#f4f4f5] text-left transition-colors cursor-pointer"
+                              >
+                                {duplicatingId === wf.id ? (
+                                  <Loader2 size={11.5} className="animate-spin text-[#4f46e5]" />
+                                ) : (
+                                  <Copy size={11.5} />
+                                )}
+                                <span>克隆流程</span>
+                              </button>
 
-                            <div className="h-[1px] bg-[#f4f4f5] my-1" />
+                              <div className="h-[1px] bg-[#f4f4f5] my-1" />
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDeleteTargetWf(wf);
-                                setActiveMenuWfId(null);
-                              }}
-                              className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[#dc2626] hover:bg-[#fef2f2] text-left transition-colors cursor-pointer"
-                            >
-                              <Trash2 size={11.5} />
-                              <span>删除流程</span>
-                            </button>
-                          </div>
-                        )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDeleteTargetWf(wf);
+                                  setActionMenu(null);
+                                }}
+                                className="w-full px-2.5 py-1.5 flex items-center gap-2 text-[#dc2626] hover:bg-[#fef2f2] text-left transition-colors cursor-pointer"
+                              >
+                                <Trash2 size={11.5} />
+                                <span>删除流程</span>
+                              </button>
+                            </div>,
+                            document.body
+                          )}
                       </div>
 
                       {/* 进入画布 */}
