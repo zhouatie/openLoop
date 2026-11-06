@@ -71,6 +71,7 @@ import {
   sanitizeChatMessages,
 } from '@openloop/core/agent-format';
 import { guessImageMimeType } from '@openloop/core/media-mime';
+import { parseMarkdownSteps } from '@openloop/core/markdown-format';
 import { TaskAgentPanel } from '../agent-ui';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';
@@ -2492,11 +2493,12 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
             // 档案视图切换：懒加载首帧 + 常驻隐藏，切换不丢失滚动位置与展开状态
             const paneClass = (active: boolean) =>
               `flex-1 min-h-0 p-5 overflow-y-auto space-y-3.5 text-[12px]${active ? '' : ' hidden'}`;
-            // 步骤在执行时才产生，进度按已记录步骤统计
+            // 步骤在执行时才产生，进度按流程文档声明的全部步骤统计
             const runList = Object.values(curTask.nodeRuns || {});
             const isFinishedRun = (status?: string) => status === 'success' || status === 'skipped';
             const finishedNodeCount = runList.filter((run) => isFinishedRun(run.status)).length;
-            const nodeTotal = runList.length;
+            const declaredStepCount = parseMarkdownSteps(wfDef?.markdown || '').length;
+            const nodeTotal = Math.max(runList.length, declaredStepCount);
             const nodePercent = nodeTotal > 0 ? Math.round((finishedNodeCount / nodeTotal) * 100) : 0;
             const currentNodeMeta = curTask.currentNodeId
               ? resolveNodeMeta(curTask.currentNodeId, curTask.nodeRuns?.[curTask.currentNodeId])

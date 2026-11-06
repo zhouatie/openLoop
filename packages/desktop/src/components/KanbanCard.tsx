@@ -39,6 +39,7 @@ import {
   Archive,
 } from 'lucide-react';
 import { Task, KanbanColumn, TaskAttachment, WorkflowDefinition } from '@openloop/core';
+import { parseMarkdownSteps } from '@openloop/core/markdown-format';
 import { api } from '../services/api';
 import { toast } from './Toast';
 import { openInDefaultBrowser } from '../utils/openExternalBrowser';
@@ -433,7 +434,9 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   const nodeRuns = Object.values(task.nodeRuns || {});
   const isCompleted = task.status === 'completed';
   const completedCount = nodeRuns.filter((r) => r.status === 'success' || r.status === 'skipped').length;
-  const displayTotal = Math.max(completedCount, nodeRuns.length, 1);
+  // 总数按流程文档声明的全部步骤算，未执行到的步骤也计入
+  const declaredStepCount = parseMarkdownSteps(workflow?.markdown || '').length;
+  const displayTotal = Math.max(completedCount, nodeRuns.length, declaredStepCount, 1);
   const displayCompleted = isCompleted ? displayTotal : completedCount;
   const progressPct = isCompleted ? 100 : Math.round((displayCompleted / displayTotal) * 100);
   const lastFailedRun = nodeRuns.slice().reverse().find((r) => r.status === 'failed');
