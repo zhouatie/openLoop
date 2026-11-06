@@ -1171,7 +1171,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
             {/* 表头 */}
             <div className="h-[34px] bg-[#fafafc] border-b border-[#e3e3e8] px-4 flex items-center text-[11px] font-medium text-[#85858d] select-none">
               <div className="flex-1 min-w-0">流水线名称</div>
-              <div className="w-[140px] shrink-0">标签</div>
+              <div className="w-[200px] shrink-0">标签</div>
               <div className="w-[90px] shrink-0 text-right">更新时间</div>
               <div className="w-[110px] shrink-0 text-center">操作</div>
             </div>
@@ -1226,9 +1226,9 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     </div>
 
                     {/* 分类标签微徽章 */}
-                    <div className="w-[140px] shrink-0 flex items-center gap-1 overflow-hidden pr-2">
+                    <div className="w-[200px] shrink-0 flex items-center gap-1 overflow-hidden pr-2">
                       {wf.tags && wf.tags.length > 0 ? (
-                        <div className="flex items-center gap-1 flex-nowrap overflow-hidden">
+                        <div className="flex items-center gap-1 flex-nowrap min-w-0 overflow-hidden">
                           {wf.tags.slice(0, 2).map((tag) => (
                             <span
                               key={tag}
@@ -1240,15 +1240,15 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                                   console.log('[WorkflowListView] 点击微标切换标签筛选:', next);
                                 }
                               }}
-                              className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[4px] text-[10px] font-medium border transition-colors cursor-pointer shrink-0 ${
+                              className={`inline-flex items-center gap-0.5 min-w-0 px-1.5 py-0.5 rounded-[4px] text-[10px] font-medium border transition-colors cursor-pointer ${
                                 selectedTag === tag
                                   ? 'bg-[#eeedfd] text-[#4f46e5] border-[#d8d6fb]'
                                   : 'bg-[#f4f4f6] text-[#52525b] border-[#e3e3e8]/70 hover:bg-[#ececf0] hover:text-[#1c1c21]'
                               }`}
                               title={`点击筛选标签: #${tag}`}
                             >
-                              <TagIcon size={9} className="opacity-70" />
-                              <span className="truncate max-w-[55px]">{tag}</span>
+                              <TagIcon size={9} className="shrink-0 opacity-70" />
+                              <span className="truncate max-w-[56px]">{tag}</span>
                             </span>
                           ))}
                           {wf.tags.length > 2 && (
