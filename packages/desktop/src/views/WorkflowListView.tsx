@@ -460,35 +460,28 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     }
   };
 
-  // 工作流视觉主题配置 (高质感中性极简，彻底消除五彩大色块带来的花里胡哨感)
+  // 工作流图标配置 (Markdown 流水线统一使用文档图标)
   const getWorkflowVisual = (wf: WorkflowDefinition) => {
     const nodeTypes = new Set(wf.nodes.map((n) => n.type));
-    let icon = <Workflow size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
-    let tag = '通用编排';
+    const iconClass = 'text-[#52525b] group-hover:text-[#18181b] transition-colors';
+    let icon = <Workflow size={15} strokeWidth={1.8} className={iconClass} />;
 
     if (wf.markdown) {
-      icon = <FileText size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
-      tag = 'Markdown 流水线';
+      icon = <FileText size={15} strokeWidth={1.8} className={iconClass} />;
     } else if (nodeTypes.has('agent')) {
-      icon = <Bot size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
-      tag = 'AI Agent';
+      icon = <Bot size={15} strokeWidth={1.8} className={iconClass} />;
     } else if (nodeTypes.has('midscene')) {
-      icon = <Target size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
-      tag = '视觉测试';
+      icon = <Target size={15} strokeWidth={1.8} className={iconClass} />;
     } else if (wf.name.includes('部署') || wf.id.includes('deploy')) {
-      icon = <Rocket size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
-      tag = '持续交付';
+      icon = <Rocket size={15} strokeWidth={1.8} className={iconClass} />;
     } else if (nodeTypes.has('qa-approval')) {
-      icon = <CheckSquare size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
-      tag = '质量门禁';
+      icon = <CheckSquare size={15} strokeWidth={1.8} className={iconClass} />;
     }
 
     return {
       icon,
       bg: 'bg-[#f4f4f5] group-hover:bg-[#ebebee]',
       border: 'border-[#e4e4e7]',
-      glow: 'group-hover:border-[#d4d4d8]',
-      tag,
     };
   };
 
@@ -1164,11 +1157,8 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           <div className="bg-white border border-[#e3e3e8] rounded-[8px] shadow-sm overflow-hidden flex flex-col">
             {/* 表头 */}
             <div className="h-[34px] bg-[#fafafc] border-b border-[#e3e3e8] px-4 flex items-center text-[11px] font-medium text-[#85858d] select-none">
-              <div className="w-[320px] shrink-0">流水线名称</div>
-              <div className="w-[80px] shrink-0">类型</div>
+              <div className="flex-1 min-w-0">流水线名称</div>
               <div className="w-[140px] shrink-0">标签</div>
-              <div className="flex-1 min-w-0 px-3">环节构成</div>
-              <div className="w-[75px] shrink-0 text-center">节点规模</div>
               <div className="w-[90px] shrink-0 text-right">更新时间</div>
               <div className="w-[110px] shrink-0 text-center">操作</div>
             </div>
@@ -1178,8 +1168,9 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
               {filteredWorkflows.map((wf) => {
                 const isPinned = pinnedIds.includes(wf.id);
                 const friendlyTime = formatFriendlyTime(wf.updatedAt || wf.createdAt);
-                const visual = getWorkflowVisual(wf);
-                const pipelineSteps = getPipelineSteps(wf.nodes, wf.edges);
+                const hasTemplate = Boolean(
+                  wf.taskTemplate?.descriptionTemplate || wf.taskTemplate?.acceptanceTemplate
+                );
 
                 return (
                   <div
@@ -1193,7 +1184,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     className="group px-4 py-2.5 flex items-center text-[12px] transition-colors cursor-pointer hover:bg-[#fafafc]"
                   >
                     {/* 流水线名称 */}
-                    <div className="w-[320px] shrink-0 flex items-center gap-2 pr-2">
+                    <div className="flex-1 min-w-0 flex items-center gap-2 pr-3">
                       <div className="w-5 h-5 rounded-[4px] bg-[#f4f4f6] group-hover:bg-white flex items-center justify-center text-[#63636b] shrink-0 border border-[#e3e3e8]/60 transition-colors">
                         <Workflow size={11} />
                       </div>
@@ -1211,13 +1202,14 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                       >
                         {wf.name}
                       </span>
-                    </div>
-
-                    {/* 类型 */}
-                    <div className="w-[80px] shrink-0">
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#63636b] text-[10.5px] font-medium border border-[#e3e3e8]/50">
-                        {visual.tag}
-                      </span>
+                      {hasTemplate && (
+                        <span
+                          className="w-4 h-4 rounded-[3px] bg-[#eeedfd] text-[#4f46e5] flex items-center justify-center shrink-0 border border-[#d8d6fb]/60"
+                          title="已自定义配置任务说明与提示词模板"
+                        >
+                          <FileText size={9} />
+                        </span>
+                      )}
                     </div>
 
                     {/* 分类标签微徽章 */}
@@ -1257,47 +1249,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                         </div>
                       ) : (
                         <span className="text-[11px] text-[#b9b9c2] select-none">-</span>
-                      )}
-                    </div>
-
-                    {/* 环节构成 */}
-                    <div className="flex-1 min-w-0 px-3 flex items-center gap-1 overflow-hidden font-sans">
-                      {pipelineSteps.slice(0, 4).map((step, idx) => {
-                        const meta = getNodeMeta(step.type, step);
-                        return (
-                          <React.Fragment key={step.id}>
-                            {idx > 0 && <span className="text-[#d4d4d8] text-[9.5px]">→</span>}
-                            <span
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f6] text-[#52525b] text-[10.5px] font-medium shrink-0"
-                              title={`${step.name} (${meta.label})`}
-                            >
-                              {meta.label}
-                            </span>
-                          </React.Fragment>
-                        );
-                      })}
-                      {pipelineSteps.length > 4 && (
-                        <span
-                          className="text-[9.5px] font-mono text-[#85858d] bg-[#f4f4f6] px-1 py-0.5 rounded shrink-0"
-                          title={`剩余 ${pipelineSteps.length - 4} 个环节`}
-                        >
-                          +{pipelineSteps.length - 4}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* 节点规模与模板微标 */}
-                    <div className="w-[85px] shrink-0 text-center flex items-center justify-center gap-1">
-                      <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded shrink-0">
-                        {wf.markdown ? 'Markdown' : `${wf.nodes.length} 节点`}
-                      </span>
-                      {(wf.taskTemplate?.descriptionTemplate || wf.taskTemplate?.acceptanceTemplate) && (
-                        <span
-                          className="w-4 h-4 rounded-[3px] bg-[#eeedfd] text-[#4f46e5] flex items-center justify-center shrink-0 border border-[#d8d6fb]/60"
-                          title="已自定义配置任务说明与提示词模板"
-                        >
-                          <FileText size={9} />
-                        </span>
                       )}
                     </div>
 
@@ -1523,12 +1474,8 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
                     {/* 元数据行 */}
                     <div className="flex items-center gap-1.5 mt-1 text-[11px] text-[#71717a] font-sans">
-                      <span>
-                        {wf.markdown ? 'Markdown 流水线' : `${wf.nodes.length} 节点`}
-                      </span>
                       {(wf.taskTemplate?.descriptionTemplate || wf.taskTemplate?.acceptanceTemplate) && (
                         <>
-                          <span className="text-[#d4d4d8]">·</span>
                           <span
                             className="inline-flex items-center gap-0.5 text-[10px] text-[#4f46e5] bg-[#eeedfd] px-1.5 py-[0.5px] rounded-[3px] border border-[#d8d6fb]/60 font-medium"
                             title="已自定义配置任务说明与提示词模板"
@@ -1536,9 +1483,9 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                             <FileText size={8.5} />
                             <span>已设模板</span>
                           </span>
+                          <span className="text-[#d4d4d8]">·</span>
                         </>
                       )}
-                      <span className="text-[#d4d4d8]">·</span>
                       <span className="flex items-center gap-1 whitespace-nowrap" title={new Date(wf.updatedAt || wf.createdAt).toLocaleString()}>
                         {friendlyTime}
                       </span>
