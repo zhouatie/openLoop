@@ -1,5 +1,5 @@
 import { Store } from '../store';
-import { Task, WorkflowDefinition, WorkflowNode } from '../types';
+import { NodeRun, Task, WorkflowDefinition, WorkflowNode } from '../types';
 import { ExecutorRegistry, ExecutionResult } from '../executors';
 import { PiSessionInstance } from '../agent/pi-session';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
@@ -70,6 +70,8 @@ interface MarkdownRun {
   /** 流程文档声明的步骤标题，编排 Agent 只能在它们之内推进 */
   stepTitles: string[];
   seq: number;
+  /** 续跑说明：用户跳过失败步骤后追加给编排 Agent */
+  note: string;
   session?: PiSessionInstance;
   approval?: { stepId: string; deliver: (value: any) => void };
   finish?: () => void;
@@ -89,6 +91,18 @@ function extractStepTitles(body: string): string[] {
   return titles;
 }
 
+/** 步骤序号：步骤 id 形如 s3 */
+function stepSeq(id: string): number {
+  const seq = Number(String(id).replace(/\D/g, ''));
+  return Number.isFinite(seq) ? seq : 0;
+}
+
+/** 步骤自报名，缺省回落到 id */
+function stepName(record?: NodeRun): string {
+  const output = record?.output as any;
+  return output?.stepName || record?.nodeId || '';
+}
+
 /** 步骤名比对键：去掉行首序号与全部空白，忽略大小写 */
 function stepKey(name: string): string {
   return String(name || '')
@@ -106,6 +120,30 @@ function isDeclaredStep(titles: string[], name: string): boolean {
     if (!declared) return false;
     return declared === key || declared.startsWith(key) || key.startsWith(declared);
   });
+}
+
+/** 跳过步骤之后剩余的文档步骤；匹配不到时退回全文 */
+function titlesAfter(titles: string[], name: string): string[] {
+  const index = titles.findIndex((title) => isDeclaredStep([title], name));
+  return index >= 0 ? titles.slice(index + 1) : titles;
+}
+
+/**
+ * 续跑说明：告知编排 Agent 已完成与被跳过的步骤，避免重复执行或为跳过步骤补动作。
+ */
+function resumeNote(task: Task, skippedStepId: string): string {
+  const skipped = stepName(task.nodeRuns[skippedStepId]);
+  const done = Object.keys(task.nodeRuns)
+    .sort((a, b) => stepSeq(a) - stepSeq(b))
+    .map((id) => ({ name: stepName(task.nodeRuns[id]), status: task.nodeRuns[id].status }))
+    .filter((item) => item.name !== skipped && (item.status === 'success' || item.status === 'skipped'))
+    .map((item) => `- ${item.name}（${item.status === 'skipped' ? '已跳过' : '已完成'}）`);
+  return [
+    '【续跑】',
+    `用户手动跳过了失败的步骤「${skipped}」：该步骤结果作废，不要重试，也不要为它补做任何动作。`,
+    done.length ? `已推进的步骤：\n${done.join('\n')}` : '此前没有完成的步骤。',
+    `请按流程文档继续执行「${skipped}」之后的剩余步骤，已完成与已跳过的步骤不要重复执行。`,
+  ].join('\n');
 }
 
 /**
@@ -170,7 +208,11 @@ export class MarkdownRuntime {
     private host: PipelineHost
   ) {}
 
-  async run(task: Task, workflow: WorkflowDefinition): Promise<void> {
+  async run(
+    task: Task,
+    workflow: WorkflowDefinition,
+    resume?: { skippedStepId: string }
+  ): Promise<void> {
     const raw = (workflow.markdown || '').trim();
     if (!raw) throw new Error('Markdown 流水线缺少流程内容');
     if (this.runs.has(task.id)) {
@@ -179,22 +221,52 @@ export class MarkdownRuntime {
     }
 
     const meta = parseMarkdownPipeline(raw, workflow.name);
+    const titles = extractStepTitles(meta.body);
+    // 续跑只允许推进跳过步骤之后的步骤，前序步骤由工具白名单直接拒绝
+    const remaining = resume ? titlesAfter(titles, stepName(task.nodeRuns[resume.skippedStepId])) : titles;
+    if (resume && remaining.length === 0) {
+      // 跳过的就是最后一个步骤，没有后续步骤可跑，直接收尾
+      task.status = 'completed';
+      task.kanbanColumn = 'done';
+      task.currentNodeId = undefined;
+      delete task.context?.markdownError;
+      this.store.saveTask(task);
+      this.host.emit('task:update', task);
+      this.host.log(task.id, 'SCRIPT', 'system', `========== Markdown 流水线 [${workflow.name}] 执行完成（末步已跳过）==========`);
+      return;
+    }
+
     task.status = 'running';
-    task.nodeRuns = {};
     task.kanbanColumn = 'in_progress';
+    task.currentNodeId = undefined;
+    if (resume) {
+      delete task.context?.markdownError;
+    } else {
+      task.nodeRuns = {};
+    }
     this.store.saveTask(task);
     this.host.emit('task:update', task);
-    this.host.log(task.id, 'SCRIPT', 'system', `========== 启动 Markdown 流水线 [${workflow.name}] ==========`);
+    this.host.log(
+      task.id,
+      'SCRIPT',
+      'system',
+      `========== ${resume ? '续跑' : '启动'} Markdown 流水线 [${workflow.name}] ==========`
+    );
     this.host.log(task.id, 'SCRIPT', 'system', `[流程文档] ${meta.body.split('\n').length} 行，${meta.body.length} 字符`);
-    markdownLogger.info(`启动 Markdown 流水线 [${workflow.name}]`, { chars: meta.body.length }, { taskId: task.id });
+    markdownLogger.info(
+      `${resume ? '续跑' : '启动'} Markdown 流水线 [${workflow.name}]`,
+      { chars: meta.body.length, skippedStepId: resume?.skippedStepId },
+      { taskId: task.id }
+    );
 
     const run: MarkdownRun = {
       task,
       workflow,
       abort: new AbortController(),
       steps: new StepLog(this.store, this.host),
-      stepTitles: extractStepTitles(meta.body),
-      seq: 0,
+      stepTitles: remaining,
+      seq: Object.keys(task.nodeRuns || {}).reduce((max, id) => Math.max(max, stepSeq(id)), 0),
+      note: resume ? resumeNote(task, resume.skippedStepId) : '',
       done: false,
     };
     this.runs.set(task.id, run);
@@ -238,7 +310,7 @@ export class MarkdownRuntime {
       cwd: task.workspace || workflow.defaultWorkspace || process.cwd(),
       tools: TOOL_NAMES.join(','),
       customTools: this.buildTools(run),
-      initialPrompt: composePrompt(task, renderDoc(body, variables)),
+      initialPrompt: composePrompt(task, renderDoc(body, variables)) + (run.note ? `\n\n${run.note}` : ''),
       awaitCompletionMarker: false,
       onLog: (stream, message) => this.host.log(task.id, run.steps.current || 'SCRIPT', stream, message),
       onFinished: (error) => {
@@ -308,6 +380,43 @@ export class MarkdownRuntime {
 
     run.steps.end(task, stepId, type, name, result);
     return result;
+  }
+
+  /**
+   * 跳过失败步骤：标记 skipped 并返回步骤 id，由调用方接着续跑后续步骤。
+   * Markdown 流水线没有画布节点，跳过只是让编排 Agent 从后续步骤继续。
+   */
+  skipStep(task: Task, stepId?: string): string {
+    if (this.runs.has(task.id)) throw new Error('流水线仍在执行，无需跳过步骤');
+
+    const runs = task.nodeRuns || {};
+    const target =
+      stepId ||
+      Object.keys(runs)
+        .sort((a, b) => stepSeq(b) - stepSeq(a))
+        .find((id) => runs[id].status === 'failed');
+    if (!target) throw new Error(`没有可跳过的失败步骤 (Task: ${task.id})`);
+    const record = runs[target];
+    if (!record) throw new Error(`未找到要跳过的步骤 [${target}]`);
+
+    record.status = 'skipped';
+    record.finishedAt = Date.now();
+    delete record.error;
+    task.currentNodeId = undefined;
+    this.store.saveTask(task);
+    this.host.emit('task:update', task);
+    this.host.emit('node:status', { taskId: task.id, nodeId: target, status: 'skipped' });
+    this.host.log(
+      task.id,
+      target,
+      'system',
+      `[系统干预] 用户跳过了步骤「${stepName(record)}」，流水线从后续步骤续跑`
+    );
+    markdownLogger.warn(`用户跳过步骤 [${stepName(record)}]，任务: ${task.id}`, undefined, {
+      taskId: task.id,
+      nodeId: target,
+    });
+    return target;
   }
 
   /** 人工卡点：挂起工具调用，等界面作出决策 */

@@ -978,6 +978,27 @@ export class DagEngine extends EventEmitter {
    * 手动跳过指定节点并继续执行下游
    */
   async skipNode(taskId: string, targetNodeId?: string): Promise<Task> {
+    const task = this.store.getTask(taskId);
+    if (!task) {
+      dagLogger.error(`跳过节点失败: Task ${taskId} 未找到`, undefined, { taskId });
+      throw new Error(`Task ${taskId} not found`);
+    }
+    const workflow = this.store.getWorkflow(task.workflowId);
+    if (!workflow) {
+      dagLogger.error(`跳过节点失败: Workflow ${task.workflowId} 未找到`, undefined, { taskId });
+      throw new Error(`Workflow ${task.workflowId} not found`);
+    }
+
+    // Markdown 流水线没有画布节点：跳过失败步骤后由编排 Agent 从后续步骤续跑
+    if ((workflow.markdown || '').trim()) {
+      const stepId = this.markdownRuntime.skipStep(task, targetNodeId);
+      this.markdownRuntime.run(task, workflow, { skippedStepId: stepId }).catch((err: any) => {
+        dagLogger.error(`跳过步骤后续跑失败: ${err?.message}`, err, { taskId, nodeId: stepId });
+        this.log(taskId, stepId, 'stderr', `跳过步骤后续跑失败: ${err?.message}`);
+      });
+      return this.store.getTask(taskId) || task;
+    }
+
     return this.finishNodeManually(taskId, targetNodeId, 'skipped');
   }
 
