@@ -271,6 +271,12 @@ export class PiSessionInstance extends EventEmitter {
   private doneMarkerSeen = false;
   /** 当前轮次序号（从 1 开始） */
   private turnSeq = 0;
+  /** 实时消息对应的 pi 消息对象：pi 落盘用同一个对象引用，据此补条目 id */
+  private readonly liveByPiMessage = new WeakMap<object, SessionChatMessage>();
+  /** 最近一条 message_start 登记的消息：助手消息在 message_end 派的是另一个对象，按角色找回来 */
+  private lastStarted?: { role: string; message: SessionChatMessage };
+  /** 还没取到条目 id 的实时消息：pi 先派发 message_end 再写盘，轮末再补一次 */
+  private readonly pendingEntryIds: Array<{ piMessage: any; message: SessionChatMessage }> = [];
   /** 全量快照限频：首个事件立即发，之后最多每 PI_SNAPSHOT_INTERVAL_MS 一包 */
   private snapshotTimer?: NodeJS.Timeout;
   private snapshotPending = false;
@@ -624,6 +630,70 @@ export class PiSessionInstance extends EventEmitter {
     return text.split(PIPELINE_DONE_MARKER).join('').replace(/\n{3,}/g, '\n\n').trimEnd();
   }
 
+  /** 记住实时消息对应的 pi 消息对象，落盘后按对象引用补条目 id */
+  private rememberLiveMessage(piMessage: any, message: SessionChatMessage) {
+    if (!piMessage || typeof piMessage !== 'object') return;
+    this.liveByPiMessage.set(piMessage, message);
+    this.lastStarted = { role: piMessage.role, message };
+  }
+
+  /**
+   * 给实时消息补上 pi 条目 id
+   *
+   * 界面把磁盘历史与实时段按条目归并：同一条消息两侧必须同一个 key。
+   * 缺了条目 id 就只能比内容，而内容会重复（「好的」「继续」这类短句），判不出谁是谁，
+   * 同一段对话会在列表里出现两遍。
+   */
+  private bindEntryId(piMessage: any) {
+    if (!piMessage) return;
+    // 用户消息两侧是同一个对象；助手消息 message_start 派的是拷贝、message_end 派的是落盘对象
+    const started = this.lastStarted;
+    const fallback = started && started.role === piMessage.role ? started.message : undefined;
+    const message = this.liveByPiMessage.get(piMessage) || fallback;
+    if (!message || message.entryId) return;
+    this.pendingEntryIds.push({ piMessage, message });
+    // pi 先派发 message_end 再落盘：等本次事件处理完再按对象引用找回条目 id
+    queueMicrotask(() => {
+      try {
+        this.flushEntryIds();
+      } catch (error: any) {
+        logger.warn(`补条目 id 失败: ${error?.message || error}`, undefined, { taskId: this.taskId });
+      }
+    });
+  }
+
+  /** 取回待补消息的条目 id：还没落盘的留到下一拍，轮末兜底再试 */
+  private flushEntryIds() {
+    if (this.pendingEntryIds.length === 0) return;
+    const rest: Array<{ piMessage: any; message: SessionChatMessage }> = [];
+    for (const item of this.pendingEntryIds) {
+      const entryId = this.findEntryId(item.piMessage);
+      if (!entryId) {
+        rest.push(item);
+        continue;
+      }
+      item.message.entryId = entryId;
+      logger.debug(`绑定会话条目 id: ${item.message.id} → ${entryId}`, undefined, { taskId: this.taskId });
+      this.emitMessagePatch(item.message.id, { entryId });
+    }
+    this.pendingEntryIds.length = 0;
+    this.pendingEntryIds.push(...rest);
+  }
+
+  /** 按对象引用在会话分支里找回条目 id */
+  private findEntryId(piMessage: any): string | undefined {
+    const manager = this.session?.sessionManager;
+    if (!manager) return undefined;
+    const leaf = manager.getLeafEntry();
+    if (leaf?.type === 'message' && leaf.message === piMessage) return leaf.id;
+    const branch = manager.getBranch();
+    for (let index = branch.length - 1; index >= 0; index -= 1) {
+      const entry = branch[index];
+      if (entry.type === 'message' && entry.message === piMessage) return entry.id;
+    }
+    return undefined;
+  }
+
   /**
    * SDK 事件分发：处理出错只影响本次事件
    * （进程内没有子进程隔离，这里抛出去会直接打死核心服务）
@@ -693,6 +763,7 @@ export class PiSessionInstance extends EventEmitter {
           };
           this.messages.push(userMessage);
           this.emitMessage(userMessage);
+          this.rememberLiveMessage(msg, userMessage);
           if (taken) this.emitPending();
           this.notifyUpdate(true);
         } else if (msg.role === 'assistant') {
@@ -714,6 +785,7 @@ export class PiSessionInstance extends EventEmitter {
           this.currentAssistantMessage = newAssistantMsg;
           this.messages.push(newAssistantMsg);
           this.emitMessage(newAssistantMsg);
+          this.rememberLiveMessage(msg, newAssistantMsg);
           this.notifyUpdate(true);
         }
         break;
@@ -826,7 +898,9 @@ export class PiSessionInstance extends EventEmitter {
 
       case 'message_end': {
         const msg = record.message;
-        if (!msg || msg.role !== 'assistant') break;
+        if (!msg) break;
+        this.bindEntryId(msg);
+        if (msg.role !== 'assistant') break;
 
         const rawContent = msg?.content;
         const contentText = typeof rawContent === 'string'
@@ -879,6 +953,7 @@ export class PiSessionInstance extends EventEmitter {
       case 'turn_end': {
         // 轮末补齐改动后内容：之后再打开 diff 页签就不用等
         finishTurnChanges(this.sessionId, this.turnSeq);
+        this.flushEntryIds();
         const msg = record.message;
         if (msg?.errorMessage || msg?.stopReason === 'error') {
           const errorText = msg.errorMessage || '模型调用失败';
@@ -903,6 +978,8 @@ export class PiSessionInstance extends EventEmitter {
         this.isBusy = false;
         // 轮末兜底：没收到 turn_end 时也把改动后内容补齐
         finishTurnChanges(this.sessionId, this.turnSeq);
+        // 还差条目 id 的消息再补一次：界面按条目合并，缺一个 key 就会多出一行
+        this.flushEntryIds();
         // 一轮结束后仍未送达的输入不会再进本轮，回显层清零；若 pi 稍后采纳，会话流仍会显示它
         this.clearPendingInputs();
         this.finishTurn();

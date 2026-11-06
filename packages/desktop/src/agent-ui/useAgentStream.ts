@@ -59,161 +59,57 @@ export interface UseAgentStreamResult {
 }
 
 /**
- * 同一条物理消息在两侧 id 不同（磁盘用 pi 条目 id，实时段用时间戳 id），只能按内容对齐。
- * 流式中的实时内容可能只是磁盘内容的片段，所以按前缀兼容比较。
- */
-function sameMessage(a: SessionChatMessage, b: SessionChatMessage): boolean {
-  if (a.role !== b.role) return false;
-  const left = a.content || '';
-  const right = b.content || '';
-  if (left === right) {
-    if (left.length > 0) return true;
-    if (a.id && b.id && a.id === b.id) return true;
-    const aTool = a.tools?.[0]?.id;
-    const bTool = b.tools?.[0]?.id;
-    if (aTool && bTool && aTool === bTool) return true;
-    return false;
-  }
-  if (left.length === 0 || right.length === 0) return false;
-  return left.length > right.length ? left.startsWith(right) : right.startsWith(left);
-}
-
-interface OverlapCache {
-  history?: SessionChatMessage[];
-  head?: string;
-  start: number;
-}
-
-/** 对齐时向前看几行：压缩提示这类历史独有的行会让两侧错位，但错位只在一两行内 */
-const ALIGN_LOOKAHEAD = 16;
-
-/** 从 from 起向后找一条与 target 同内容的行，返回下标；找不到返回 -1 */
-function findMatch(rows: SessionChatMessage[], from: number, target: SessionChatMessage): number {
-  const end = Math.min(rows.length, from + ALIGN_LOOKAHEAD);
-  for (let index = from; index < end; index += 1) {
-    if (sameMessage(rows[index], target)) return index;
-  }
-  return -1;
-}
-
-/**
- * 实时段在历史里的起点
+ * 消息的稳定身份：pi 会话条目 id
  *
- * 实时段是同一会话的尾部延续，定位只需要一个锚点：从后往前找第一条能与实时段连续对齐的历史消息。
- * 历史里还有实时段不会产生的行（压缩提示、扩展消息、pi 没有回显的重复用户消息），
- * 对齐时允许跳过它们，否则一遇到压缩提示就找不到锚点。
- * 越靠后的同文消息越可能是实时段的起点，所以从后往前扫、命中即停。
- * 历史与实时段都不再变化时（同一数组 + 同一首条消息）直接复用上次结果，流式期间每帧都是 O(1)。
+ * 磁盘历史与实时段是同一份会话的前后两段，消息落盘后两侧拿到同一个条目 id。
+ * 还没落盘的实时消息退回本地 id：它本身就不在历史里，不会与历史行撞车。
  */
-function findOverlapStart(
-  history: SessionChatMessage[],
-  live: SessionChatMessage[],
-  cache: OverlapCache
-): number {
-  const head = live[0].id;
-  if (cache.history === history && cache.head === head) return cache.start;
-
-  let start = -1;
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    if (!sameMessage(history[index], live[0])) continue;
-    let cursor = index + 1;
-    let matched = 1;
-    while (matched < live.length && cursor < history.length) {
-      if (sameMessage(history[cursor], live[matched])) {
-        matched += 1;
-        cursor += 1;
-        continue;
-      }
-      const skip = findMatch(history, cursor + 1, live[matched]);
-      if (skip < 0) break;
-      cursor = skip;
-    }
-    // 只认两种收尾：实时段全部对上，或历史尾部全部用完（实时段带着还没落盘的新消息）
-    if (matched === live.length || cursor >= history.length) {
-      start = index;
-      break;
-    }
-  }
-
-  cache.history = history;
-  cache.head = head;
-  cache.start = start;
-  return start;
+function messageKey(message: SessionChatMessage): string {
+  return message.entryId || message.id;
 }
 
 /**
- * 找不到锚点时的兜底：历史一行都不动，只把历史里还没有的实时消息补在末尾。
- * 实时段永远比历史新，补在末尾不会让旧消息跑到最新消息下面。
- * 绝不能按「角色 + 内容」判重，否则工具调用助手空行与用户重复指令都会被误吞。
- */
-function appendFreshLive(history: SessionChatMessage[], live: SessionChatMessage[]): SessionChatMessage[] {
-  const seenIds = new Set(history.map((message) => message.id));
-  const fresh = live.filter((message) => !seenIds.has(message.id));
-  return fresh.length === 0 ? history : history.concat(fresh);
-}
-
-/**
- * 对齐合并
+ * 历史 + 实时段合并
  *
- * 对齐的行以实时段为准（它持有流式状态与工具记录，增量事件也按它的 id 打补丁），
- * 历史独有的行留在原位，实时段独有的行插在对齐位置。
- * 历史任何一行都不会被挪到末尾：旧消息出现在最新消息下面，正是这条规则要杜绝的。
+ * 按条目 id 归并：一条消息只出现一次，顺序始终是会话的写入顺序。
+ * 绝不比内容：内容会被实时段改写（流式半句、完成标记抹除），短句重复（「好的」「继续」）时
+ * 按内容根本判不出谁是谁，同一段对话就会在列表里出现两遍。
  */
-function alignLive(
-  history: SessionChatMessage[],
-  live: SessionChatMessage[],
-  start: number
-): SessionChatMessage[] {
-  const merged = history.slice(0, start);
-  let cursor = start;
-  let index = 0;
-
-  while (index < live.length) {
-    if (cursor >= history.length) {
-      merged.push(live[index]);
-      index += 1;
-      continue;
-    }
-    if (sameMessage(history[cursor], live[index])) {
-      merged.push(live[index]);
-      cursor += 1;
-      index += 1;
-      continue;
-    }
-    // 历史独有的行（压缩提示等）：原位保留，继续用实时段对齐
-    if (findMatch(history, cursor + 1, live[index]) >= 0) {
-      merged.push(history[cursor]);
-      cursor += 1;
-      continue;
-    }
-    // 实时段独有的行（还没落盘的新消息）：插在对齐位置
-    if (findMatch(live, index + 1, history[cursor]) >= 0) {
-      merged.push(live[index]);
-      index += 1;
-      continue;
-    }
-    // 同一条消息内容被改写：以实时段为准
-    merged.push(live[index]);
-    cursor += 1;
-    index += 1;
-  }
-
-  for (; cursor < history.length; cursor += 1) merged.push(history[cursor]);
-  return merged;
-}
-
 function mergeMessages(
   history: SessionChatMessage[] | undefined,
-  live: SessionChatMessage[] | undefined,
-  cache: OverlapCache
+  live: SessionChatMessage[] | undefined
 ): SessionChatMessage[] {
   if (!live || live.length === 0) return history || [];
   if (!history || history.length === 0) return live;
 
-  const start = findOverlapStart(history, live, cache);
-  if (start < 0) return appendFreshLive(history, live);
+  const liveKeys = new Set(live.map(messageKey));
+  const merged: SessionChatMessage[] = [];
+  let historyIndex = 0;
+  let liveIndex = 0;
 
-  return alignLive(history, live, start);
+  while (historyIndex < history.length && liveIndex < live.length) {
+    const historyKey = messageKey(history[historyIndex]);
+    if (historyKey === messageKey(live[liveIndex])) {
+      // 同一条消息：以实时段为准，它持有流式状态与工具记录，增量事件也按它的 id 打补丁
+      merged.push(live[liveIndex]);
+      historyIndex += 1;
+      liveIndex += 1;
+      continue;
+    }
+    if (!liveKeys.has(historyKey)) {
+      // 历史独有：压缩提示、扩展消息、别的进程后来写入的行，原位保留
+      merged.push(history[historyIndex]);
+      historyIndex += 1;
+      continue;
+    }
+    // 实时独有：还没落盘的新消息，插在对齐位置
+    merged.push(live[liveIndex]);
+    liveIndex += 1;
+  }
+
+  for (; liveIndex < live.length; liveIndex += 1) merged.push(live[liveIndex]);
+  for (; historyIndex < history.length; historyIndex += 1) merged.push(history[historyIndex]);
+  return merged;
 }
 
 /**
@@ -230,11 +126,8 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   const stateStampRef = useRef(0);
   /** 上一次因外部同会话改动而取快照的时间 */
   const externalReloadAtRef = useRef(0);
-  const historyRef = useRef<SessionChatMessage[] | undefined>(historyMessages);
   const frameRef = useRef<number | null>(null);
   const [, forceRender] = useReducer((value: number) => value + 1, 0);
-
-  historyRef.current = historyMessages;
 
   const scheduleRender = useCallback(() => {
     if (frameRef.current !== null) return;
@@ -434,9 +327,8 @@ export function useAgentStream(options: UseAgentStreamOptions): UseAgentStreamRe
   }, [transport, clearIdleTimer, scheduleRender]);
 
   const state = stateRef.current;
-  const overlapCache = useRef<OverlapCache>({ start: -1 });
   const messages = useMemo(
-    () => mergeMessages(historyMessages, state?.messages, overlapCache.current),
+    () => mergeMessages(historyMessages, state?.messages),
     [state, historyMessages]
   );
   const pendingInputs = useMemo(() => state?.pendingInputs ?? [], [state]);
