@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { WorkflowDefinition, NodeType, Task, WorkflowTaskTemplate } from '@openloop/core';
 import { cleanTaskTemplate } from '../utils/workflowTemplate';
+import { buildPipelineScript } from '../utils/pipelineCards';
 import { api } from '../services/api';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { DebugWorkflowModal } from '../components/DebugWorkflowModal';
@@ -48,20 +49,8 @@ const STORAGE_KEY_PINNED_WORKFLOWS = 'openloop_pinned_workflow_ids';
 const STORAGE_KEY_VIEW_MODE = 'openloop_workflow_view_mode';
 const STORAGE_KEY_SUBTAB = 'openloop_workflow_subtab';
 
-/** 新建脚本流水线时的骨架，直接可用 */
-const SCRIPT_STARTER = `export default async function ({ task, sandbox, agent, approve, cli }) {
-  await sandbox.create()
-  await agent({ prompt: \`实现：\${task.title}\` })
-  const build = await cli('pnpm build')
-  if (!build.ok) return { status: 'failed', error: '构建失败' }
-
-  const verdict = await approve({ title: '验收', checklist: ['构建通过', '改动符合需求'] })
-  if (!verdict.ok) return { status: 'failed', error: verdict.feedback }
-
-  await sandbox.merge()
-  await sandbox.cleanup()
-  return { status: 'success' }
-}`;
+/** 新建流水线时的步骤骨架：空卡片列表 */
+const newPipelineScript = (name: string) => buildPipelineScript(name, []);
 
 interface WorkflowListViewProps {
   workflows: WorkflowDefinition[];
@@ -130,7 +119,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newTags, setNewTags] = useState<string[]>([]);
-  const [newMode, setNewMode] = useState<'graph' | 'script'>('graph');
   const [loading, setLoading] = useState(false);
 
   // 流水线编辑、复制、删除与调试状态
@@ -484,7 +472,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
     if (wf.script) {
       icon = <FileCode size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
-      tag = '脚本流水线';
+      tag = '步骤流水线';
     } else if (nodeTypes.has('agent')) {
       icon = <Bot size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
       tag = 'AI Agent';
@@ -569,30 +557,16 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     setLoading(true);
     try {
       const id = `wf_${Date.now().toString(36)}`;
-      const isScript = newMode === 'script';
-      const nodes: any[] = isScript
-        ? []
-        : [
-            {
-              id: 'node_start',
-              name: '起始节点',
-              type: 'cli' as NodeType,
-              position: { x: 200, y: 150 },
-              config: { command: 'echo "开始执行流水线"' },
-            },
-          ];
-      const edges: any[] = [];
-
       const newWf: WorkflowDefinition = {
         id,
         name: newTitle.trim(),
-        description: newDesc.trim() || (isScript ? '脚本流水线' : '自定义自动化编排流程'),
+        description: newDesc.trim() || '步骤卡片流水线',
         tags: newTags,
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        nodes,
-        edges,
-        script: isScript ? SCRIPT_STARTER : undefined,
+        nodes: [],
+        edges: [],
+        script: newPipelineScript(newTitle.trim()),
       };
 
       await api.saveWorkflow(newWf);
@@ -602,7 +576,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       setNewTags([]);
       toast.success(`流程「${newTitle.trim()}」创建成功`);
       onRefresh();
-      // 新建后直接进入脚本编辑页
+      // 新建后直接进入步骤卡片编辑页
       onSelectWorkflow(id);
     } catch (err: any) {
       if (import.meta.env?.DEV) {
@@ -614,11 +588,11 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     }
   };
 
-  /** 打开流水线：统一进入脚本编辑页，画布已下线 */
+  /** 打开流水线：统一进入步骤卡片编辑页，画布已下线 */
   const openWorkflow = (wf: WorkflowDefinition) => {
     if (import.meta.env?.DEV) {
       console.log('[WorkflowListView] 打开流水线编辑页:', wf.id, {
-        mode: (wf.script || '').trim() ? 'script' : 'legacy-graph',
+        scriptBytes: (wf.script || '').length,
       });
     }
     onSelectWorkflow(wf.id);
@@ -1318,7 +1292,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     {/* 节点规模与模板微标 */}
                     <div className="w-[85px] shrink-0 text-center flex items-center justify-center gap-1">
                       <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded shrink-0">
-                        {wf.script ? '脚本' : `${wf.nodes.length} 节点`}
+                        {wf.script ? '步骤' : `${wf.nodes.length} 节点`}
                       </span>
                       {(wf.taskTemplate?.descriptionTemplate || wf.taskTemplate?.acceptanceTemplate) && (
                         <span
@@ -1434,7 +1408,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                       <button
                         type="button"
                         onClick={() => openWorkflow(wf)}
-                        title={wf.script ? '编辑脚本流水线' : '进入流程画布编辑'}
+                        title={wf.script ? '编辑步骤卡片' : '进入流程画布编辑'}
                         className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#4f46e5] hover:bg-[#eeedfd] flex items-center justify-center transition-all cursor-pointer"
                       >
                         <ChevronRight size={13} />
@@ -1511,7 +1485,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                         <button
                           type="button"
                           onClick={() => openWorkflow(wf)}
-                          title="编辑脚本与信息"
+                          title="编辑步骤与信息"
                           className="w-[24px] h-[24px] rounded-[5px] flex items-center justify-center text-[#71717a] hover:bg-[#f4f4f5] hover:text-[#18181b] opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
                         >
                           <Edit3 size={11} />
@@ -1552,7 +1526,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
                     {/* 元数据行 */}
                     <div className="flex items-center gap-1.5 mt-1 text-[11px] text-[#71717a] font-sans">
-                      <span>{wf.script ? '脚本流水线' : `${wf.nodes.length} 节点`}</span>
+                      <span>{wf.script ? '步骤流水线' : `${wf.nodes.length} 节点`}</span>
                       {(wf.taskTemplate?.descriptionTemplate || wf.taskTemplate?.acceptanceTemplate) && (
                         <>
                           <span className="text-[#d4d4d8]">·</span>
@@ -1661,7 +1635,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     <button
                       type="button"
                       onClick={() => openWorkflow(wf)}
-                      title={wf.script ? '编辑脚本流水线' : '进入 DAG 可视化连线画布'}
+                      title={wf.script ? '编辑步骤卡片' : '进入 DAG 可视化连线画布'}
                       className="h-[25px] px-2.5 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-xs cursor-pointer"
                     >
                       <span>编辑</span>
@@ -1701,30 +1675,12 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
               <div>
                 <h3 className="font-semibold text-[14px] text-[#1c1c21]">新建自动化流程</h3>
                 <p className="text-[11.5px] text-[#85858d] mt-0.5">
-                  {newMode === 'script'
-                    ? '一条流水线一段 JS：逻辑用 if-else 编排，交互与卡点走系统方法'
-                    : '创建 DAG 编排拓扑，完成后直接打开画布编辑器'}
+                  创建后进入步骤卡片：可添加 Worktree、Agent、通用节点等内置步骤
                 </p>
               </div>
             </div>
 
             <form onSubmit={handleCreate} className="mt-4 space-y-3.5 text-[12px]">
-              <div className="flex items-center gap-1 p-1 bg-[#f4f4f6] rounded-[7px]">
-                {(['graph', 'script'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setNewMode(mode)}
-                    className={`flex-1 h-[26px] rounded-[5px] text-[11.5px] font-medium transition-all cursor-pointer ${
-                      newMode === mode
-                        ? 'bg-white text-[#1c1c21] shadow-sm'
-                        : 'text-[#71717a] hover:text-[#1c1c21]'
-                    }`}
-                  >
-                    {mode === 'graph' ? '编排流水线' : '脚本流水线'}
-                  </button>
-                ))}
-              </div>
 
               <div>
                 <label className="block font-medium text-[#4b4b53] mb-1">流程名称</label>
