@@ -263,7 +263,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
       visitedNodeIds.add(nid);
 
       const baseMeta = resolveNodeMeta(nid, workflow, allWorkflows);
-      // 脚本流水线的步骤自报名字与类型，直接用步骤记录里的元信息覆盖推断结果
+      // 流水线步骤自报名字与类型，直接用步骤记录里的元信息覆盖推断结果
       const stepOutput = run?.output && typeof run.output === 'object' ? (run.output as any) : null;
       const meta = stepOutput?.stepName
         ? { ...baseMeta, name: stepOutput.stepName, type: (stepOutput.stepType as any) || baseMeta.type }
@@ -677,7 +677,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
           const isEditingParams = editingNodeId === item.id;
           const isCurrentApprovalNode =
             item.status === 'waiting_approval' && task.status === 'waiting_approval';
-          // 人工卡点清单：脚本流水线写在步骤输出的 checklist，编排流水线写在节点配置
+          // 人工卡点清单：流水线写在步骤输出的 checklist，节点配置写在 wfNode.config
           const renderChecklist = (): any[] | null => {
             const fromNode = item.wfNode?.config?.checklist;
             if (Array.isArray(fromNode) && fromNode.length > 0) return fromNode;

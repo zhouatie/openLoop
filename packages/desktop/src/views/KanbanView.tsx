@@ -2953,13 +2953,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               {wfDef?.name || curTask.workflowId}
                             </span>
                             <span className="shrink-0 px-1 py-[0.5px] rounded-[3px] bg-[#f4f4f6] border border-[#e3e3e8] text-[9.5px] font-mono text-[#71717a]">
-                              {wfNodes.length > 0
-                                ? `${wfNodes.length} 节点`
-                                : wfDef?.markdown
-                                  ? 'Markdown 流水线'
-                                  : wfDef?.script
-                                    ? '脚本流水线'
-                                    : '0 节点'}
+                              {wfDef?.markdown
+                                ? 'Markdown 流水线'
+                                : wfNodes.length > 0
+                                  ? `${wfNodes.length} 节点`
+                                  : '0 节点'}
                             </span>
                           </div>
                         </div>

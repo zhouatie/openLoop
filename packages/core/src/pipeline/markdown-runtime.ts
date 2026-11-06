@@ -106,7 +106,7 @@ ${body}
 
 【执行约定】
 1. 只能通过工具执行动作：sandbox_create、run_command、agent_task、run_node、ask_human、sandbox_merge、sandbox_cleanup。
-2. 文档里的每个标题是一个步骤；调用工具时把标题传给 name，界面按它显示步骤名。
+2. 文档里的二级标题（##）是一个步骤，其余标题只是分节；调用工具时把步骤标题传给 name，界面按它显示步骤名。
 3. 文档要求的硬门禁必须遵守：工具返回 status=failed 且文档写「失败就停」时，直接调用 finish_pipeline 并给出失败原因，不继续后续步骤。
 4. 全部步骤完成且通过后，调用 finish_pipeline(status="success")。
 5. 行内代码里的命令、端口、超时按原文使用，不要改写。

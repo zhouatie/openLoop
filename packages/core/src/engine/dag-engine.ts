@@ -7,7 +7,6 @@ import { ExecutorRegistry, ExecutionContext } from '../executors';
 import { createLogger } from '../logger';
 import { PiSessionManager } from '../agent/pi-session';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
-import { ScriptRuntime } from '../pipeline/script-runtime';
 import { MarkdownRuntime } from '../pipeline/markdown-runtime';
 
 const dagLogger = createLogger('Engine:DAG');
@@ -74,7 +73,6 @@ export class DagEngine extends EventEmitter {
   private runningTasks: Set<string> = new Set();
   private abortControllers: Map<string, AbortController> = new Map();
   private activeProcesses: Map<string, Set<ChildProcess>> = new Map();
-  private scriptRuntime: ScriptRuntime;
   private markdownRuntime: MarkdownRuntime;
 
   constructor(store: Store, registry?: ExecutorRegistry) {
@@ -92,7 +90,6 @@ export class DagEngine extends EventEmitter {
         child.on('exit', () => procSet.delete(child));
       },
     };
-    this.scriptRuntime = new ScriptRuntime(store, this.registry, host);
     this.markdownRuntime = new MarkdownRuntime(store, this.registry, host);
   }
 
@@ -145,28 +142,6 @@ export class DagEngine extends EventEmitter {
       } catch (err: any) {
         dagLogger.error(`Markdown 流水线运行异常: ${err.message}`, err, { taskId });
         this.log(taskId, 'SCRIPT', 'stderr', `Markdown 流水线异常: ${err.message}`);
-        const latest = this.store.getTask(taskId);
-        if (latest && latest.status !== 'cancelled') {
-          latest.status = 'failed';
-          latest.kanbanColumn = 'backlog';
-          this.store.saveTask(latest);
-          this.emit('task:update', latest);
-        }
-      } finally {
-        this.runningTasks.delete(taskId);
-        this.abortControllers.delete(taskId);
-        this.activeProcesses.delete(taskId);
-      }
-      return;
-    }
-
-    // 脚本流水线：一条流水线 = 一段 JS，逻辑分支由脚本自身表达
-    if ((workflow.script || '').trim()) {
-      try {
-        await this.scriptRuntime.run(task, workflow);
-      } catch (err: any) {
-        dagLogger.error(`脚本流水线运行异常: ${err.message}`, err, { taskId });
-        this.log(taskId, 'SCRIPT', 'stderr', `脚本流水线异常: ${err.message}`);
         const latest = this.store.getTask(taskId);
         if (latest && latest.status !== 'cancelled') {
           latest.status = 'failed';
@@ -866,20 +841,6 @@ export class DagEngine extends EventEmitter {
       dagLogger.warn(`Markdown 运行期无待处理审批，回退到节点级审批: ${taskId}`, undefined, { taskId });
     }
 
-    // 脚本流水线的人工卡点由脚本运行期接管，无需按节点重跑
-    if ((workflow.script || '').trim()) {
-      if (this.scriptRuntime.resolveApproval(taskId, approved, feedback)) {
-        return this.store.getTask(taskId) || task;
-      }
-      // 运行期没有待处理卡点（服务重启后状态丢失，或流水线脚本化之前遗留的节点任务），
-      // 继续按节点级审批处理，不能直接报错卡死验收入口
-      dagLogger.warn(
-        `脚本运行期无待处理审批，回退到节点级审批: ${taskId}`,
-        undefined,
-        { taskId }
-      );
-    }
-
     const currentNodeId = task.currentNodeId;
     if (!currentNodeId || task.status !== 'waiting_approval') {
       dagLogger.warn(
@@ -1575,8 +1536,7 @@ export class DagEngine extends EventEmitter {
       throw new Error(`Task ${taskId} not found`);
     }
 
-    // 脚本 / Markdown 流水线：直接终止子进程、进程组与会话
-    this.scriptRuntime.cancel(taskId);
+    // Markdown 流水线：直接终止子进程、进程组与会话
     this.markdownRuntime.cancel(taskId);
 
     // 0. 若为任务组，级联取消其所有正在运行的子任务

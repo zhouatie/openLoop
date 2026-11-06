@@ -12,19 +12,15 @@ import {
   ChevronRight,
   ExternalLink,
   Copy,
-  ListTree,
-  AlertTriangle,
   FileText,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from '../components/Toast';
 import { WorkflowDefinition, Task } from '@openloop/core';
 import { api } from '../services/api';
 import { TagInput } from '../components/TagInput';
 import { DebugWorkflowModal } from '../components/DebugWorkflowModal';
-import { PipelineCards } from './workflow/PipelineCards';
-import { buildPipelineScript, parsePipelineScript } from '../utils/pipelineCards';
 import { markdownTemplate } from '../utils/pipelineMarkdown';
-import type { PipelineCard } from '../utils/pipelineCards';
 
 export interface WorkflowScriptViewProps {
   workflowId: string;
@@ -104,40 +100,15 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
   const [name, setName] = useState(base?.name || '');
   const [description, setDescription] = useState(base?.description || '');
   const [tags, setTags] = useState<string[]>(base?.tags || []);
-  /** 承载方式：Markdown 文档由编排 Agent 执行，步骤卡片编译成 JS 脚本 */
-  const [mode, setMode] = useState<'markdown' | 'cards'>(base?.markdown ? 'markdown' : 'cards');
-  const [markdown, setMarkdown] = useState(base?.markdown || '');
-  const [savedMarkdown, setSavedMarkdown] = useState(base?.markdown || '');
-  const [cards, setCards] = useState<PipelineCard[]>([]);
-  /** 脚本含卡片之外的逻辑：卡片只显示能识别的步骤 */
-  const [unparsed, setUnparsed] = useState(false);
-  const [savedCode, setSavedCode] = useState('');
+  /** 流程文档：有内容就用现有文档，没有就给一份起步骨架，骨架算未保存改动 */
+  const [markdown, setMarkdown] = useState(base?.markdown || markdownTemplate(base?.name || ''));
   const [saving, setSaving] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
 
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
-  /** 载入脚本：解析成卡片，解析不了就只读展示能识别的部分 */
-  const applyScript = useCallback((script: string, pipelineName: string) => {
-    const parsed = parsePipelineScript(script);
-    setCards(parsed || []);
-    setUnparsed(parsed === null);
-    // 卡片是脚本的规范化视图，以它作为基线，避免刚进页面就显示未保存
-    setSavedCode(buildPipelineScript(pipelineName, parsed || []));
-    if (import.meta.env?.DEV) {
-      console.log('[WorkflowScriptView] 载入流水线脚本:', {
-        steps: parsed?.length ?? 0,
-        unparsed: parsed === null,
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    applyScript(base?.script || '', base?.name || '');
-  }, [applyScript, base?.script, base?.name]);
-
-  // 列表数据可能落后（脚本由外部写入），进入页面时补一次最新定义
+  // 列表数据可能落后（文档由外部写入），进入页面时补一次最新定义
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -148,10 +119,7 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
         setName(fresh.name);
         setDescription(fresh.description || '');
         setTags(fresh.tags || []);
-        applyScript(fresh.script || '', fresh.name);
-        setMode(fresh.markdown ? 'markdown' : 'cards');
-        setMarkdown(fresh.markdown || '');
-        setSavedMarkdown(fresh.markdown || '');
+        setMarkdown(fresh.markdown || markdownTemplate(fresh.name));
       } catch (err: any) {
         if (import.meta.env?.DEV) {
           console.warn('[WorkflowScriptView] 拉取流水线定义失败:', err?.message);
@@ -161,7 +129,7 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [applyScript, workflowId]);
+  }, [workflowId]);
 
   // 描述框按内容自适应高度，最多 12 行后内部滚动
   useEffect(() => {
@@ -171,11 +139,11 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
     el.style.height = `${Math.min(el.scrollHeight, 12 * 17 + 18)}px`;
   }, [description, workflowId]);
 
-  const code = buildPipelineScript(name, cards);
-  const editingMarkdown = mode === 'markdown';
+  /** 已保存的文档原文：为空的流水线没有正文，骨架一律算未保存 */
+  const savedMarkdown = workflow?.markdown || '';
 
   const dirty =
-    (editingMarkdown ? markdown.trim() !== savedMarkdown.trim() : code !== savedCode) ||
+    markdown.trim() !== savedMarkdown.trim() ||
     (workflow ? name !== workflow.name || description !== (workflow.description || '') : false) ||
     (workflow ? tags.join(',') !== (workflow.tags || []).join(',') : false);
 
@@ -194,6 +162,10 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
       toast.error('流水线名称不能为空');
       return;
     }
+    if (!markdown.trim()) {
+      toast.error('流程文档不能为空');
+      return;
+    }
     setSaving(true);
     try {
       const updated: WorkflowDefinition = {
@@ -201,22 +173,18 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
         name: name.trim(),
         description: description.trim(),
         tags,
-        script: editingMarkdown ? undefined : code,
-        markdown: editingMarkdown ? markdown : undefined,
+        markdown,
         updatedAt: Date.now(),
       };
       const saved = await api.saveWorkflow(updated);
       if (import.meta.env?.DEV) {
         console.log('[WorkflowScriptView] 流水线已保存:', {
           id: updated.id,
-          mode: editingMarkdown ? 'markdown' : 'cards',
-          steps: cards.length,
-          bytes: editingMarkdown ? markdown.length : code.length,
+          lines: markdown.split('\n').length,
+          chars: markdown.length,
         });
       }
       setWorkflow({ ...updated, ...(saved || {}) });
-      setSavedCode(code);
-      setSavedMarkdown(markdown);
       toast.success('流水线已保存');
       onRefresh();
     } catch (err: any) {
@@ -227,23 +195,7 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [workflow, saving, name, description, tags, code, cards.length, editingMarkdown, markdown, onRefresh]);
-
-  /** 切换承载方式：Markdown 首次进入时给一份可跑的骨架，骨架不算用户改动 */
-  const switchMode = useCallback(
-    (next: 'markdown' | 'cards') => {
-      if (next === 'markdown' && !markdown.trim()) {
-        const draft = markdownTemplate(name || '未命名流水线');
-        setMarkdown(draft);
-        setSavedMarkdown(draft);
-      }
-      setMode(next);
-      if (import.meta.env?.DEV) {
-        console.log('[WorkflowScriptView] 切换承载方式:', next);
-      }
-    },
-    [markdown, name]
-  );
+  }, [workflow, saving, name, description, tags, markdown, onRefresh]);
 
   const handleCopyId = useCallback(async () => {
     const id = workflow?.id;
@@ -300,7 +252,7 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
   }
 
   const template = workflow.taskTemplate || {};
-  const legacyNodes = (workflow.nodes || []).length;
+  const steps = markdown.split('\n').filter((line) => /^##\s+\S/.test(line)).length;
 
   return (
     <div className="flex-1 h-full flex flex-col bg-[#f4f4f6] overflow-hidden">
@@ -323,8 +275,8 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
           className="shrink-0 text-[13px] font-medium text-[#1c1c21] bg-transparent outline-none border-b border-transparent focus:border-[#d4d4d8] py-0.5"
         />
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#eeedfd] text-[#4f46e5] text-[10px] font-medium border border-[#d8d6fb]/60 shrink-0">
-          {editingMarkdown ? <FileText size={10} strokeWidth={2.2} /> : <ListTree size={10} strokeWidth={2.2} />}
-          <span>{editingMarkdown ? 'Markdown 流水线' : '步骤流水线'}</span>
+          <FileText size={10} strokeWidth={2.2} />
+          <span>Markdown 流水线</span>
         </span>
         <button
           type="button"
@@ -373,62 +325,28 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
       </div>
 
       <div className="flex-1 flex min-h-0 gap-3 p-3.5">
-        {/* 步骤 / 脚本 编辑区 */}
+        {/* 流程文档编辑区 */}
         <div className="flex-1 min-w-0 flex flex-col min-h-0">
-          <div className="h-[28px] shrink-0 mb-2 flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="inline-flex items-center rounded-[5px] bg-[#ececf0] p-[2px]">
-                {(['markdown', 'cards'] as const).map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => switchMode(item)}
-                    className={`h-[20px] px-2 rounded-[4px] text-[11px] transition-colors cursor-pointer ${
-                      mode === item
-                        ? 'bg-white text-[#1c1c21] shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
-                        : 'text-[#71717a] hover:text-[#1c1c21]'
-                    }`}
-                  >
-                    {item === 'markdown' ? 'Markdown' : '步骤'}
-                  </button>
-                ))}
-              </div>
-              <span className="text-[10.5px] text-[#a1a1aa]">
-                {editingMarkdown ? `${markdown.split('\n').length} 行` : `${cards.length} 步`}
-              </span>
-              {!editingMarkdown && legacyNodes > 0 && (
-                <span className="text-[10.5px] text-[#b45309] truncate">
-                  旧画布 {legacyNodes} 个节点已下线，请用步骤重建
-                </span>
-              )}
-            </div>
+          <div className="h-[28px] shrink-0 mb-2 flex items-center gap-2 min-w-0">
+            <span className="text-[11.5px] font-medium text-[#3f3f46]">流程文档</span>
+            <span className="text-[10.5px] text-[#a1a1aa]">
+              {steps} 步 · {markdown.split('\n').length} 行
+            </span>
           </div>
 
-          {editingMarkdown ? (
-            <div className="flex-1 min-h-0 flex flex-col bg-white border border-[#e3e3e8] rounded-[8px] overflow-hidden">
-              <textarea
-                value={markdown}
-                onChange={(event) => setMarkdown(event.target.value)}
-                spellCheck={false}
-                placeholder="用自然语言写流程：一个标题一个步骤，执行交给编排 Agent…"
-                className="flex-1 min-h-0 w-full p-3.5 text-[12px] leading-[20px] font-mono text-[#1c1c21] outline-none resize-none"
-              />
-              <div className="shrink-0 h-[28px] px-3 flex items-center gap-1.5 border-t border-[#f1f1f4] text-[10.5px] text-[#a1a1aa]">
-                <FileText size={11} className="shrink-0" />
-                <span>按标题逐步执行；行内代码里的命令与端口原样使用；失败即停要写进文档</span>
-              </div>
+          <div className="flex-1 min-h-0 flex flex-col bg-white border border-[#e3e3e8] rounded-[8px] overflow-hidden">
+            <textarea
+              value={markdown}
+              onChange={(event) => setMarkdown(event.target.value)}
+              spellCheck={false}
+              placeholder="用自然语言写流程：一个二级标题一个步骤，执行交给编排 Agent…"
+              className="flex-1 min-h-0 w-full p-3.5 text-[12px] leading-[20px] font-mono text-[#1c1c21] outline-none resize-none"
+            />
+            <div className="shrink-0 h-[28px] px-3 flex items-center gap-1.5 border-t border-[#f1f1f4] text-[10.5px] text-[#a1a1aa]">
+              <FileText size={11} className="shrink-0" />
+              <span>按二级标题逐步执行；行内代码里的命令与端口原样使用；失败即停要写进文档</span>
             </div>
-          ) : (
-            <>
-              {unparsed && (
-                <div className="mb-2 shrink-0 flex items-start gap-2 px-2.5 py-1.5 rounded-[6px] bg-[#fffbeb] border border-[#fde68a]/70 text-[10.5px] text-[#b45309] leading-[16px]">
-                  <AlertTriangle size={12} className="shrink-0 mt-[2px]" />
-                  <span>原脚本含卡片之外的逻辑（分支、循环或自定义调用），只显示可识别的步骤；保存会按卡片重写脚本。</span>
-                </div>
-              )}
-              <PipelineCards cards={cards} onChange={setCards} />
-            </>
-          )}
+          </div>
         </div>
 
         {/* 右侧信息面板 */}
@@ -455,6 +373,13 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
               <span>创建 {formatTime(workflow.createdAt)}</span>
             </div>
           </section>
+
+          {(workflow.nodes || []).length > 0 && (
+            <section className="flex items-start gap-2 px-2.5 py-2 rounded-[6px] bg-[#fffbeb] border border-[#fde68a]/70 text-[10.5px] text-[#b45309] leading-[16px]">
+              <AlertTriangle size={12} className="shrink-0 mt-[2px]" />
+              <span>该流水线仍带 {(workflow.nodes || []).length} 个旧画布节点（已下线），运行只按本文档执行。</span>
+            </section>
+          )}
 
           <section className="bg-white border border-[#e3e3e8] rounded-[8px] shadow-sm overflow-hidden">
             <button
