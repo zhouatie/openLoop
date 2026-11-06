@@ -693,19 +693,39 @@ export class HookExecutor implements NodeExecutor {
 
 // 资深 QA 工程师黑盒自动化测试用例设计执行器 (qa-planner 节点)
 // 职责：基于产品需求纯黑盒视角，设计适量精炼（3~4步）的端到端自动化验收步骤，彻底解耦 Coder Agent
+
+/** 用例清单归一化：只保留非空字符串 */
+function normalizeInstructions(value: any): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+}
+
+/**
+ * 取验收用例清单，两处来源按优先级合并：
+ * 1. 任务的验收用例（用户在任务里输入或运行期间编辑录入，优先级最高）
+ * 2. 节点 config.instructions（流水线流程文档里声明的清单）
+ * 内存中的 task 是流水线启动时的快照，必须回读库中最新值，否则会漏掉运行期间用户保存的用例。
+ */
+function resolveQaInstructions(
+  ctx: ExecutionContext,
+  node: { config?: Record<string, any> }
+): { steps: string[]; source: 'task' | 'node' | 'none' } {
+  const latest = ctx.store?.getTask(ctx.task.id)?.context?.qaInstructions;
+  const fromTask = normalizeInstructions(latest);
+  if (fromTask.length > 0) return { steps: fromTask, source: 'task' };
+  const fromNode = normalizeInstructions(node.config?.instructions);
+  if (fromNode.length > 0) return { steps: fromNode, source: 'node' };
+  return { steps: [], source: 'none' };
+}
+
 export class QaPlannerExecutor implements NodeExecutor {
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
-    const { task, node, emitLog, settings = {} } = ctx;
+    const { task, node, emitLog } = ctx;
     emitLog('system', `>>> 开始执行节点 [${node.name || 'QA 黑盒用例设计'}] (qa-planner)`);
 
-    // 优先复用人工预设验收用例：若未配置或保持为空，则跳过 AI 规划并直接由人工自测验收。
-    // 内存中的 task 是流水线启动时的快照，必须回读库中最新值，否则会漏掉运行期间用户保存的用例。
-    const latestInstructions = ctx.store?.getTask(task.id)?.context?.qaInstructions;
-    const presetSteps = Array.isArray(latestInstructions)
-      ? latestInstructions.map((s) => String(s).trim()).filter(Boolean)
-      : [];
+    // 优先复用人工预设验收用例；任务未配置时回退到流程文档声明的清单；两处都为空才跳过人工自测。
+    const { steps, source } = resolveQaInstructions(ctx, node);
 
-    if (presetSteps.length === 0) {
+    if (steps.length === 0) {
       executorLogger.info(
         `[QA 黑盒用例设计] 任务未配置验收用例，跳过 AI 用例设计，直接保留现场由人工自测`,
         undefined,
@@ -726,10 +746,9 @@ export class QaPlannerExecutor implements NodeExecutor {
     }
 
     if (!task.context) task.context = {};
-    task.context.qaInstructions = presetSteps;
-    const steps = presetSteps;
+    task.context.qaInstructions = steps;
     task.context.qaPlan = {
-      role: '人工预设用例 (任务配置)',
+      role: source === 'task' ? '人工预设用例 (任务配置)' : '流程文档用例清单 (节点配置)',
       createdAt: Date.now(),
       steps,
     };
@@ -737,13 +756,13 @@ export class QaPlannerExecutor implements NodeExecutor {
       ctx.store.saveTask(task);
     }
     executorLogger.info(
-      `[QA 黑盒用例设计] 命中人工预设用例 (${steps.length} 步)，采用预设用例`,
+      `[QA 黑盒用例设计] 命中验收用例 (${steps.length} 步, 来源: ${source})`,
       { steps },
       { taskId: task.id, nodeId: node.id }
     );
     emitLog(
       'system',
-      `[QA 黑盒用例设计] ✔ 检测到任务已配置验收用例 (${steps.length} 步)，直接采用:\n${steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
+      `[QA 黑盒用例设计] ✔ ${source === 'task' ? '采用任务已配置验收用例' : '采用流程文档声明的用例清单'} (${steps.length} 步):\n${steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
     );
     return {
       status: 'success',
@@ -751,7 +770,8 @@ export class QaPlannerExecutor implements NodeExecutor {
       output: {
         qaInstructions: steps,
         stepsCount: steps.length,
-        preset: true,
+        preset: source === 'task',
+        source,
       },
     };
   }
@@ -971,13 +991,11 @@ export class MidsceneExecutor implements NodeExecutor {
       const dataDir = ctx.store?.getDataDir?.() || path.join(os.homedir(), '.openloop');
 
       // 1. 优先读取任务定制验收用例（用户在任务创建时输入，或在任务执行期间编辑录入）
-      // 回读库中最新值，确保使用用户在运行期间刚保存的用例
-      const latestInstructions = ctx.store?.getTask(task.id)?.context?.qaInstructions;
-      const cleanCustomInstructions = Array.isArray(latestInstructions)
-        ? latestInstructions.map((s) => String(s).trim()).filter(Boolean)
-        : [];
+      // 回读库中最新值，确保使用用户在运行期间刚保存的用例；任务未配置时回退流程文档声明的清单
+      const { steps: customInstructions, source: instructionsSource } = resolveQaInstructions(ctx, node);
+      const cleanCustomInstructions = customInstructions;
 
-      // 核心机制：当任务未输入用例或保持用例为空时，跳过 AI 自动化验证，保留现场服务供人工自测
+      // 核心机制：两处来源都为空时，跳过 AI 自动化验证，保留现场服务供人工自测
       if (cleanCustomInstructions.length === 0) {
         executorLogger.info(
           `[Midscene UI 测试] 任务未配置验收用例，跳过 AI 自动化验证，保留现场服务供人工自测`,
@@ -1001,7 +1019,10 @@ export class MidsceneExecutor implements NodeExecutor {
       }
 
       const instructions = cleanCustomInstructions;
-      emitLog('system', `[Midscene UI 测试] 载入定制验收用例 (${instructions.length} 步)`);
+      emitLog(
+        'system',
+        `[Midscene UI 测试] 载入验收用例 (${instructions.length} 步, 来源: ${instructionsSource === 'task' ? '任务配置' : '流程文档'})`
+      );
 
       const steps: QaStep[] = [];
       let stepCounter = 1;

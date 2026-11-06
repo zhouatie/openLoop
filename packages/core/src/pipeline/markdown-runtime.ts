@@ -67,6 +67,8 @@ interface MarkdownRun {
   workflow: WorkflowDefinition;
   abort: AbortController;
   steps: StepLog;
+  /** 流程文档声明的步骤标题，编排 Agent 只能在它们之内推进 */
+  stepTitles: string[];
   seq: number;
   session?: PiSessionInstance;
   approval?: { stepId: string; deliver: (value: any) => void };
@@ -76,6 +78,35 @@ interface MarkdownRun {
 
 const SIMPLE_STRING = { type: 'string' } as const;
 const STRING_LIST = { type: 'array', items: { type: 'string' } } as const;
+
+/** 文档声明的步骤：流程文档里的二级标题 */
+function extractStepTitles(body: string): string[] {
+  const titles: string[] = [];
+  for (const line of (body || '').split('\n')) {
+    const hit = /^##\s+(.+?)\s*$/.exec(line);
+    if (hit) titles.push(hit[1].trim());
+  }
+  return titles;
+}
+
+/** 步骤名比对键：去掉行首序号与全部空白，忽略大小写 */
+function stepKey(name: string): string {
+  return String(name || '')
+    .replace(/^\s*\d+\s*[.、)]\s*/, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+/** 调用声明的步骤名是否属于流程文档（允许省略标题尾部的括号注释） */
+function isDeclaredStep(titles: string[], name: string): boolean {
+  const key = stepKey(name);
+  if (key.length < 2) return false;
+  return titles.some((title) => {
+    const declared = stepKey(title);
+    if (!declared) return false;
+    return declared === key || declared.startsWith(key) || key.startsWith(declared);
+  });
+}
 
 /**
  * 文档变量渲染：只替换当前已知的值，未解析的占位符原样保留。
@@ -111,7 +142,9 @@ ${body}
 4. 全部步骤完成且通过后，调用 finish_pipeline(status="success")。
 5. 行内代码里的命令、端口、超时按原文使用，不要改写。
 6. 文档里 {{ports.xxx}} 这类占位符在建沙箱后才有效：用 sandbox_create 返回的真实端口替换，不要留空。
-7. 不确定下一步时，用 ask_human 让人类决定，不要自行猜测。`;
+7. 不确定下一步时，用 ask_human 让人类决定，不要自行猜测。
+8. 只能在流程文档声明的步骤内推进：工具调用的 name 必须使用文档里的步骤标题原文。文档没写的诊断、校验、排查类动作一律不要执行，系统会直接拒绝并且不会产生节点。
+9. 步骤返回 skipped 属于正常结果（例如任务没有配置验收用例），按文档继续执行下一个步骤，不要为它排查原因或补充步骤。`;
 }
 
 function describeStep(name: string, result: ExecutionResult): string {
@@ -160,6 +193,7 @@ export class MarkdownRuntime {
       workflow,
       abort: new AbortController(),
       steps: new StepLog(this.store, this.host),
+      stepTitles: extractStepTitles(meta.body),
       seq: 0,
       done: false,
     };
@@ -220,6 +254,31 @@ export class MarkdownRuntime {
     run.abort.signal.addEventListener('abort', () => {
       session.terminate();
     });
+  }
+
+  /** 编排约束：只允许执行流程文档声明的步骤，禁止运行期自行新增节点 */
+  private guardStep(run: MarkdownRun, tool: string, name: string): string | null {
+    if (run.stepTitles.length === 0) return null;
+    if (isDeclaredStep(run.stepTitles, name)) return null;
+
+    markdownLogger.warn(
+      `拒绝执行流程文档未声明的步骤: ${name}`,
+      { tool, allowed: run.stepTitles },
+      { taskId: run.task.id }
+    );
+    this.host.log(
+      run.task.id,
+      run.steps.current || 'SCRIPT',
+      'stderr',
+      `[编排约束] 拒绝执行文档未声明的步骤「${name}」(${tool})`
+    );
+    return [
+      `已拒绝：流程文档里没有名为「${name}」的步骤。本次调用未执行，也没有产生节点。`,
+      '流水线只允许执行文档声明的步骤，不能自行新增诊断、校验或排查步骤。',
+      `文档共声明 ${run.stepTitles.length} 个步骤，按顺序为：`,
+      ...run.stepTitles.map((title, index) => `${index + 1}. ${title}`),
+      '请改用上面步骤标题的原文重新调用。如果文档确实缺少必要步骤，请调用 finish_pipeline(status="failed") 说明原因，或改用 ask_human 交给人决定，不要反复重试。',
+    ].join('\n');
   }
 
   /** 执行一个内置步骤：落步骤记录，把结果交回编排 Agent */
@@ -410,6 +469,8 @@ export class MarkdownRuntime {
         promptSnippet: options.description,
         async execute(_toolCallId: string, params: any) {
           const plan = await options.run(params || {});
+          const rejected = runtime.guardStep(run, options.name, plan.name);
+          if (rejected) return { content: [{ type: 'text', text: rejected }] };
           const result = await runtime.runStep(run, plan.type, plan.name, plan.config);
           return { content: [{ type: 'text', text: describeStep(plan.name, result) }] };
         },
@@ -536,6 +597,9 @@ export class MarkdownRuntime {
         },
         promptSnippet: '提交人工验收卡点',
         async execute(_toolCallId: string, params: any) {
+          const title = String(params?.title || params?.name || '');
+          const rejected = runtime.guardStep(run, 'ask_human', title);
+          if (rejected) return { content: [{ type: 'text', text: rejected }] };
           const text = await runtime.waitApproval(run, params || {});
           return { content: [{ type: 'text', text }] };
         },
