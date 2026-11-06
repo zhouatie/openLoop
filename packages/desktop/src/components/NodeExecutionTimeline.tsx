@@ -552,7 +552,9 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
   if (timelineItems.length === 0) {
     return (
       <div className="p-4 rounded-[7px] border border-dashed border-[#e3e3e8] text-center text-[#85858d] text-[11.5px]">
-        任务尚未关联工作流或未触发执行，暂无节点时序数据
+        {workflow
+          ? `流水线「${workflow.name}」已关联，尚未产生步骤执行记录`
+          : '任务尚未关联工作流或未触发执行，暂无节点时序数据'}
       </div>
     );
   }

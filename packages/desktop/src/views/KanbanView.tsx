@@ -2609,14 +2609,22 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
             const paneClass = (active: boolean) =>
               `flex-1 min-h-0 p-5 overflow-y-auto space-y-3.5 text-[12px]${active ? '' : ' hidden'}`;
             const wfNodes = wfDef?.nodes || [];
-            const finishedNodeCount = wfNodes.filter((node) => {
-              const run = curTask.nodeRuns?.[node.id];
-              return run?.status === 'success' || run?.status === 'skipped';
-            }).length;
-            const nodePercent = wfNodes.length > 0 ? Math.round((finishedNodeCount / wfNodes.length) * 100) : 0;
+            // 脚本与 Markdown 流水线的步骤在执行时才产生，没有静态节点：进度改按已记录步骤统计
+            const runList = Object.values(curTask.nodeRuns || {});
+            const isFinishedRun = (status?: string) => status === 'success' || status === 'skipped';
+            const finishedNodeCount =
+              wfNodes.length > 0
+                ? wfNodes.filter((node) => isFinishedRun(curTask.nodeRuns?.[node.id]?.status)).length
+                : runList.filter((run) => isFinishedRun(run.status)).length;
+            const nodeTotal = wfNodes.length || runList.length;
+            const nodePercent = nodeTotal > 0 ? Math.round((finishedNodeCount / nodeTotal) * 100) : 0;
             const currentNodeMeta = curTask.currentNodeId
               ? resolveNodeMeta(curTask.currentNodeId, wfDef, workflows)
               : null;
+            // 动态步骤的节点 id 只是执行流水号，名称取步骤记录自报的名字
+            const currentStepName =
+              (curTask.currentNodeId && (curTask.nodeRuns?.[curTask.currentNodeId]?.output as any)?.stepName) || '';
+            const currentNodeLabel = (wfNodes.length > 0 ? currentNodeMeta?.name : currentStepName) || '流水线就绪';
 
             return (
               <div
@@ -2847,13 +2855,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       <div className="flex items-center gap-2 min-w-0">
                         <div
                           className="flex items-center gap-1.5 min-w-0"
-                          title={`当前节点：${currentNodeMeta?.name || '流水线就绪'} · 已完成 ${finishedNodeCount}/${wfNodes.length} 个节点`}
+                          title={`当前节点：${currentNodeLabel} · 已完成 ${finishedNodeCount}/${nodeTotal} 个步骤`}
                         >
                           <span className="text-[10px] font-mono text-[#85858d] shrink-0">
-                            {finishedNodeCount}/{wfNodes.length}
+                            {finishedNodeCount}/{nodeTotal}
                           </span>
                           <span className="text-[10.5px] text-[#52525b] truncate max-w-[160px]">
-                            {currentNodeMeta?.name || '流水线就绪'}
+                            {currentNodeLabel}
                           </span>
                           <div className="w-[44px] h-[3px] rounded-full bg-[#ececf0] overflow-hidden shrink-0">
                             <div
@@ -2945,7 +2953,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               {wfDef?.name || curTask.workflowId}
                             </span>
                             <span className="shrink-0 px-1 py-[0.5px] rounded-[3px] bg-[#f4f4f6] border border-[#e3e3e8] text-[9.5px] font-mono text-[#71717a]">
-                              {wfDef?.nodes.length || 0} 节点
+                              {wfNodes.length > 0
+                                ? `${wfNodes.length} 节点`
+                                : wfDef?.markdown
+                                  ? 'Markdown 流水线'
+                                  : wfDef?.script
+                                    ? '脚本流水线'
+                                    : '0 节点'}
                             </span>
                           </div>
                         </div>
