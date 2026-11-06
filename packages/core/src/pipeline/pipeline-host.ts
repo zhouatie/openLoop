@@ -25,7 +25,13 @@ export class StepLog {
   begin(task: Task, type: string, name: string, seq: number): string {
     const stepId = `s${seq}`;
     this.current = stepId;
-    task.nodeRuns[stepId] = { nodeId: stepId, status: 'running', startedAt: Date.now() };
+    // 步骤一开始就带上自报名与类型：界面无需等步骤结束就能知道这一步是什么
+    task.nodeRuns[stepId] = {
+      nodeId: stepId,
+      status: 'running',
+      startedAt: Date.now(),
+      output: { stepName: name, stepType: type },
+    };
     task.currentNodeId = stepId;
     this.persist(task);
     this.host.emit('node:status', { taskId: task.id, nodeId: stepId, status: 'running' });
