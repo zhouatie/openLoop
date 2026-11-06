@@ -642,7 +642,7 @@ export const EditAutomationModal: React.FC<EditAutomationModalProps> = ({
                   >
                     {workflows.map((wf) => (
                       <option key={wf.id} value={wf.id}>
-                        {wf.name} ({wf.nodes?.length || 0} 节点)
+                        {wf.name}
                       </option>
                     ))}
                     {workflows.length === 0 && <option value="">暂无流水线</option>}

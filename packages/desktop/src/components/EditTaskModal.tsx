@@ -15,6 +15,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { Task, WorkflowDefinition, KanbanColumn, TaskAttachment } from '@openloop/core';
+import { parseMarkdownSteps } from '@openloop/core/markdown-format';
 import { WorkspacePicker } from './WorkspacePicker';
 import { TaskPromptArea } from './TaskPromptArea';
 import { toast } from './Toast';
@@ -435,7 +436,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
               </div>
               {currentWf && (
                 <span className="text-[10px] font-mono text-[#85858d]">
-                  {currentWf.nodes.length} 节点 · {currentWf.edges.length} 连线
+                  {parseMarkdownSteps(currentWf.markdown || '').length} 步骤
                 </span>
               )}
             </div>
@@ -527,7 +528,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
 
                       <div className="flex flex-col items-end shrink-0">
                         <span className="text-[10px] font-mono text-[#85858d]">
-                          {wf.nodes.length} 节点
+                          {parseMarkdownSteps(wf.markdown || '').length} 步骤
                         </span>
                         {isSelected && (
                           <span className="mt-0.5 flex items-center gap-1 text-[10px] text-[#4f46e5] font-medium">

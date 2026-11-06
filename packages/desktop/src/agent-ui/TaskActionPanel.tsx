@@ -62,7 +62,6 @@ export interface TaskActionPanelProps {
 interface WorkflowOption {
   id: string;
   name: string;
-  nodeCount: number;
 }
 
 const MODE_TITLE: Record<TaskActionMode, string> = {
@@ -79,7 +78,6 @@ function toWorkflowOption(definition: WorkflowDefinition): WorkflowOption {
   return {
     id: definition.id,
     name: definition.name || definition.id,
-    nodeCount: Array.isArray(definition.nodes) ? definition.nodes.length : 0,
   };
 }
 
@@ -590,7 +588,6 @@ export function TaskActionPanel({
             <Workflow size={13} />
           </span>
           <span className={styles.rowTitle}>{item.name}</span>
-          <span className={styles.rowMeta}>{item.nodeCount} 节点</span>
           {item.id === workflowId && (
             <span className={styles.rowCheck}>
               <Check size={13} />

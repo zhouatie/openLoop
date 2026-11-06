@@ -88,8 +88,6 @@ async function main() {
     id: 'wf_local_run',
     name: taskTitle,
     description: '本地试跑',
-    nodes: [],
-    edges: [],
     markdown: source,
   });
   store.saveTask({

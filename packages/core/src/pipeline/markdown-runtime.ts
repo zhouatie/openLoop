@@ -1,54 +1,13 @@
 import { Store } from '../store';
-import { Task, WorkflowDefinition, WorkflowNode } from '../types';
+import { Task, WorkflowDefinition, PipelineStep } from '../types';
 import { ExecutorRegistry, ExecutionResult } from '../executors';
 import { PiSessionInstance } from '../agent/pi-session';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 import { createLogger } from '../logger';
 import { PipelineHost, StepLog, buildNodeContext, captureWorktreeDiff } from './pipeline-host';
+import { MarkdownPipelineMeta, parseMarkdownPipeline } from './markdown-format';
 
 const markdownLogger = createLogger('MarkdownPipeline');
-
-/** Markdown 流水线的文件头信息 */
-export interface MarkdownPipelineMeta {
-  /** 流水线 id，仓库里的文件头用；数据库里的记录是运行时副本 */
-  id: string;
-  /** 流水线名称，缺省回落到数据库里的名称 */
-  name: string;
-  tags: string[];
-  /** 流程正文，去掉文件头后的全部内容 */
-  body: string;
-}
-
-/**
- * 解析 Markdown 流水线。
- * 文件头只承载身份信息（name / tags），正文是人工写的流程说明，不解析成步骤。
- */
-export function parseMarkdownPipeline(raw: string, fallbackName = ''): MarkdownPipelineMeta {
-  const text = (raw || '').replace(/\r\n/g, '\n');
-  const lines = text.split('\n');
-  const meta: MarkdownPipelineMeta = { id: '', name: fallbackName, tags: [], body: text.trim() };
-  if (lines[0]?.trim() !== '---') return meta;
-
-  const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
-  if (end < 0) return meta;
-
-  for (const line of lines.slice(1, end)) {
-    const hit = /^([A-Za-z][\w-]*)\s*:\s*(.+)$/.exec(line.trim());
-    if (!hit) continue;
-    const [, key, value] = hit;
-    if (key === 'id') meta.id = value.trim();
-    if (key === 'name') meta.name = value.trim();
-    if (key === 'tags') {
-      meta.tags = value
-        .replace(/^\[|\]$/g, '')
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean);
-    }
-  }
-  meta.body = lines.slice(end + 1).join('\n').trim();
-  return meta;
-}
 
 /** 编排 Agent 可用的工具，同时是会话的工具白名单 */
 const TOOL_NAMES = [
@@ -228,7 +187,7 @@ export class MarkdownRuntime {
     if (run.done) return { status: 'failed' as const, error: '流水线已结束', output: null };
 
     const stepId = run.steps.begin(task, type, name, ++run.seq);
-    const node = { id: stepId, type, name, config } as WorkflowNode;
+    const node: PipelineStep = { id: stepId, type, name, config };
 
     let result: ExecutionResult;
     try {
@@ -485,8 +444,8 @@ export class MarkdownRuntime {
       }),
       stepTool({
         name: 'run_node',
-        label: '通用节点',
-        description: '执行任意注册节点类型：qa-planner、midscene、env-prepare、hook、stitch-image 等。',
+        label: '通用执行器',
+        description: '执行任意内置执行器：qa-planner、midscene、env-prepare、hook、stitch-image、sub-workflow 等。',
         parameters: {
           type: 'object',
           properties: { name: SIMPLE_STRING, type: SIMPLE_STRING, config: { type: 'object' } },
@@ -494,7 +453,7 @@ export class MarkdownRuntime {
         },
         run: async (params) => ({
           type: String(params.type || ''),
-          name: stepName(params, `节点: ${params.type}`),
+          name: stepName(params, `步骤: ${params.type}`),
           config: { ...(params.config || {}) },
         }),
       }),

@@ -8,7 +8,7 @@ import { spawn, exec } from 'child_process';
 import util from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Store, toTaskSummary } from '../store';
-import { DagEngine } from '../engine/dag-engine';
+import { PipelineEngine } from '../engine/pipeline-engine';
 import {
   Task,
   WorkflowDefinition,
@@ -16,7 +16,6 @@ import {
   TaskSessionState,
   KanbanColumn,
   TaskAttachment,
-  WorkflowSessionState,
   QaSuite,
   QaRunRecord,
   AutomationTask,
@@ -44,7 +43,6 @@ import { searchWorkspaceFiles } from '../agent/fs-search';
 import { listOpenInAppTargets, openInApp } from '../system/open-in-app';
 import { getLanIpv4 } from '../system/net';
 import { terminalHost } from '../agent/terminal-host';
-import { WorkflowCopilotManager } from '../agent/workflow-copilot';
 import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
 import { IosDeviceManager } from '../qa/ios-device-manager';
@@ -101,7 +99,7 @@ export class OpenLoopServer {
   private port: number;
   private host: string;
   private store: Store;
-  private engine: DagEngine;
+  private engine: PipelineEngine;
   private scheduler: AutomationScheduler;
   private httpServer?: http.Server;
   private wss?: WebSocketServer;
@@ -117,7 +115,7 @@ export class OpenLoopServer {
     this.host = options.host || '127.0.0.1';
     this.staticDir = options.staticDir || process.env.OPENLOOP_STATIC_DIR;
     this.store = new Store(options.storeDir);
-    this.engine = new DagEngine(this.store);
+    this.engine = new PipelineEngine(this.store);
     // 进程重启后恢复各活跃任务的靶机端口预占，防止新任务抢占同一端口
     WorktreeManager.getInstance().restoreReservedPorts(this.store.getTasks());
     this.scheduler = new AutomationScheduler(this.store, this.engine);
@@ -129,7 +127,7 @@ export class OpenLoopServer {
     return this.store;
   }
 
-  public getEngine(): DagEngine {
+  public getEngine(): PipelineEngine {
     return this.engine;
   }
 
@@ -200,12 +198,6 @@ export class OpenLoopServer {
     });
     terminalHost.on('exit', ({ id, code }) => {
       this.broadcast({ type: 'agent:terminal', data: { id, exited: true, code } });
-    });
-
-    // 流程编排智能体 Copilot 状态推流广播
-    const copilotMgr = WorkflowCopilotManager.getInstance(this.store);
-    copilotMgr.on('update', ({ workflowId, state }) => {
-      this.broadcast({ type: 'workflow:chat_update', data: { workflowId, state } });
     });
 
     // 自动化任务调度服务事件推流广播
@@ -1254,42 +1246,6 @@ export class OpenLoopServer {
         return this.sendJson(res, 200, workflows, reqMeta);
       }
 
-      // Workflow Copilot 会话状态读取: GET /api/workflows/:id/session
-      const wfSessionMatch = pathname.match(/^\/api\/workflows\/([a-zA-Z0-9_-]+)\/session$/);
-      if (wfSessionMatch && method === 'GET') {
-        const wfId = wfSessionMatch[1];
-        const copilot = WorkflowCopilotManager.getInstance(this.store);
-        const state = copilot.getSessionState(wfId);
-        return this.sendJson(res, 200, state, reqMeta);
-      }
-
-      // Workflow Copilot 发送编排对话: POST /api/workflows/:id/session/chat
-      const wfChatMatch = pathname.match(/^\/api\/workflows\/([a-zA-Z0-9_-]+)\/session\/chat$/);
-      if (wfChatMatch && method === 'POST') {
-        const wfId = wfChatMatch[1];
-        const body = await this.parseJsonBody(req);
-        const { message, snapshot } = body;
-        if (!message || typeof message !== 'string') {
-          return this.sendJson(res, 400, { error: 'message string is required' }, reqMeta);
-        }
-        serverLogger.info(`[WorkflowCopilot:Chat] 收到编排对话 (Workflow: ${wfId}): "${message.slice(0, 40)}"`);
-        const copilot = WorkflowCopilotManager.getInstance(this.store);
-        copilot.sendMessage(wfId, message.trim(), snapshot).catch((err) => {
-          serverLogger.error(`[WorkflowCopilot:Chat] 发送消息异常: ${err.message}`, undefined, { workflowId: wfId });
-        });
-        return this.sendJson(res, 200, { success: true }, reqMeta);
-      }
-
-      // Workflow Copilot 重置会话: POST /api/workflows/:id/session/reset
-      const wfResetMatch = pathname.match(/^\/api\/workflows\/([a-zA-Z0-9_-]+)\/session\/reset$/);
-      if (wfResetMatch && method === 'POST') {
-        const wfId = wfResetMatch[1];
-        serverLogger.info(`[WorkflowCopilot:Reset] 重置工作流会话: ${wfId}`);
-        const copilot = WorkflowCopilotManager.getInstance(this.store);
-        copilot.resetSession(wfId);
-        return this.sendJson(res, 200, { success: true }, reqMeta);
-      }
-
       if (pathname === '/api/workflows' && method === 'POST') {
         const body = await this.parseJsonBody(req);
         serverLogger.info(`[Workflows] 保存工作流: "${body.name || '未命名'}" (${body.id})`);
@@ -2271,9 +2227,10 @@ export class OpenLoopServer {
           `session_${task.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
         const resumeCommand = task.context?.resumeCommand || resolveResumeCommand(sessionId);
 
-        const workflow = this.store.getWorkflow(task.workflowId);
-        const currentNode = workflow?.nodes.find((n) => n.id === task.currentNodeId);
-        const isCurrentAgentRunning = task.status === 'running' && currentNode?.type === 'agent';
+        const currentStepType = task.currentNodeId
+          ? task.nodeRuns[task.currentNodeId]?.output?.stepType
+          : undefined;
+        const isCurrentAgentRunning = task.status === 'running' && currentStepType === 'agent';
 
         // 若任务当前并非停留在 Agent 节点（例如进入了后续测试、门禁或已结束），修正历史遗留的 awaitingInput 脏数据
         if (!isCurrentAgentRunning && task.context?.awaitingInput) {
@@ -2464,10 +2421,11 @@ export class OpenLoopServer {
           }
         }
 
-        // 校验当前任务是否真正停留在 agent 节点上
-        const workflow = this.store.getWorkflow(task.workflowId);
-        const currentNode = workflow?.nodes.find((n) => n.id === task.currentNodeId);
-        const isCurrentAgentNode = task.status === 'running' && currentNode?.type === 'agent';
+        // 校验当前任务是否真正停留在 Agent 步骤上
+        const currentStepType = task.currentNodeId
+          ? task.nodeRuns[task.currentNodeId]?.output?.stepType
+          : undefined;
+        const isCurrentAgentNode = task.status === 'running' && currentStepType === 'agent';
         const isTaskGroup = task.kind === 'group' || (Array.isArray(task.subTaskIds) && task.subTaskIds.length > 0);
 
         let effectiveAgentName = task.context?.agentName || (isTaskGroup ? '任务组架构师' : 'OpenLoop Agent');
@@ -2858,160 +2816,6 @@ ${existingSubSummary}
         return this.sendJson(res, 200, task, reqMeta);
       }
 
-      // Task skip node: /api/tasks/:id/skip-node
-      const taskSkipNodeMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/skip-node$/);
-      if (taskSkipNodeMatch && method === 'POST') {
-        const taskId = taskSkipNodeMatch[1];
-        const body = await this.parseJsonBody(req);
-        const { nodeId } = body;
-        serverLogger.info(
-          `[Tasks:SkipNode] 接收到跳过节点指令: ${taskId}, Node: ${nodeId || '自动判定'}`,
-          { nodeId },
-          { taskId }
-        );
-        try {
-          const task = await this.engine.skipNode(taskId, nodeId);
-          return this.sendJson(res, 200, task, reqMeta);
-        } catch (err: any) {
-          serverLogger.error(`[Tasks:SkipNode] 跳过节点失败: ${err.message}`, err, { taskId });
-          return this.sendJson(res, 400, { error: err.message }, reqMeta);
-        }
-      }
-
-      // Task complete node: /api/tasks/:id/complete-node
-      const taskCompleteNodeMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/complete-node$/);
-      if (taskCompleteNodeMatch && method === 'POST') {
-        const taskId = taskCompleteNodeMatch[1];
-        const body = await this.parseJsonBody(req);
-        const { nodeId } = body;
-        serverLogger.info(
-          `[Tasks:CompleteNode] 接收到确认节点完成指令: ${taskId}, Node: ${nodeId || '自动判定'}`,
-          { nodeId },
-          { taskId }
-        );
-        try {
-          // 先释放仍停留在等待回复的 RPC 会话，再放行节点，避免下游长节点阻塞用户操作反馈
-          PiSessionManager.getInstance().removeSession(taskId);
-          const task = await this.engine.completeNode(taskId, nodeId);
-          return this.sendJson(res, 200, task, reqMeta);
-        } catch (err: any) {
-          serverLogger.error(`[Tasks:CompleteNode] 确认节点完成失败: ${err.message}`, err, { taskId });
-          return this.sendJson(res, 400, { error: err.message }, reqMeta);
-        }
-      }
-
-      // Task retry node: /api/tasks/:id/retry-node
-      const taskRetryNodeMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/retry-node$/);
-      if (taskRetryNodeMatch && method === 'POST') {
-        const taskId = taskRetryNodeMatch[1];
-        const body = await this.parseJsonBody(req);
-        const { nodeId } = body;
-        serverLogger.info(
-          `[Tasks:RetryNode] 接收到单节点重试指令: ${taskId}, Node: ${nodeId || '自动判定'}`,
-          { nodeId },
-          { taskId }
-        );
-        try {
-          const task = await this.engine.retryNode(taskId, nodeId);
-          return this.sendJson(res, 200, task, reqMeta);
-        } catch (err: any) {
-          serverLogger.error(`[Tasks:RetryNode] 重试节点失败: ${err.message}`, err, { taskId });
-          return this.sendJson(res, 400, { error: err.message }, reqMeta);
-        }
-      }
-
-      // Task node override: /api/tasks/:id/node-override
-      // 任务级节点覆盖：仅本任务生效，不写回流水线模板（O(1) 改写 context.nodeOverrides 单键）
-      const taskNodeOverrideMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/node-override$/);
-      if (taskNodeOverrideMatch && method === 'POST') {
-        const taskId = taskNodeOverrideMatch[1];
-        const body = await this.parseJsonBody(req);
-        const nodeId = String(body?.nodeId || '').trim();
-        if (!nodeId) return this.sendJson(res, 400, { error: '缺少 nodeId' }, reqMeta);
-
-        const task = this.store.getTask(taskId);
-        if (!task) return this.sendJson(res, 404, { error: 'Task not found' }, reqMeta);
-
-        const workflow = this.store.getWorkflow(task.workflowId);
-        if (workflow && !workflow.nodes.some((n) => n.id === nodeId)) {
-          return this.sendJson(res, 400, { error: `流水线中不存在节点: ${nodeId}` }, reqMeta);
-        }
-
-        if (!task.context) task.context = {};
-        const overrides: Record<string, any> = { ...(task.context.nodeOverrides || {}) };
-        const current = { ...(overrides[nodeId] || {}) };
-
-        if (body?.reset === true) {
-          delete overrides[nodeId];
-        } else {
-          if (body?.params !== undefined) {
-            const params: Record<string, string> = {};
-            if (body.params && typeof body.params === 'object') {
-              for (const [k, v] of Object.entries(body.params)) {
-                const key = String(k).trim();
-                const value = v === undefined || v === null ? '' : String(v);
-                // 空值等同于清除该参数，避免残留空字符串覆盖掉模板默认值
-                if (key && value !== '') params[key] = value;
-              }
-            }
-            if (Object.keys(params).length > 0) current.params = params;
-            else delete current.params;
-          }
-          if (body?.config !== undefined) {
-            const patch: Record<string, any> = { ...(current.config || {}) };
-            if (body.config && typeof body.config === 'object') {
-              for (const [k, v] of Object.entries(body.config)) {
-                // 传 null 表示清除该字段覆盖，回落到模板原值
-                if (v === null) delete patch[k];
-                else patch[k] = v;
-              }
-            } else {
-              for (const k of Object.keys(patch)) delete patch[k];
-            }
-            if (Object.keys(patch).length > 0) current.config = patch;
-            else delete current.config;
-          }
-          if (Object.keys(current).length > 0) overrides[nodeId] = current;
-          else delete overrides[nodeId];
-        }
-
-        if (Object.keys(overrides).length > 0) task.context.nodeOverrides = overrides;
-        else delete task.context.nodeOverrides;
-
-        task.updatedAt = Date.now();
-        this.store.saveTask(task);
-        serverLogger.info(
-          `[Tasks:NodeOverride] 更新任务级节点覆盖: ${taskId}, Node: ${nodeId}, 剩余覆盖节点: ${Object.keys(overrides).length}`,
-          { nodeId, reset: body?.reset === true },
-          { taskId }
-        );
-        this.broadcastTaskUpdate(task);
-        return this.sendJson(res, 200, task, reqMeta);
-      }
-
-      // Task custom retry: /api/tasks/:id/custom-retry
-      const taskCustomRetryMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/custom-retry$/);
-      if (taskCustomRetryMatch && method === 'POST') {
-        const taskId = taskCustomRetryMatch[1];
-        const body = await this.parseJsonBody(req);
-        const { selectedNodeIds, fromNodeId } = body;
-        serverLogger.info(
-          `[Tasks:CustomRetry] 接收到流水线定制重试指令: ${taskId}`,
-          { selectedNodeIds, fromNodeId },
-          { taskId }
-        );
-        try {
-          const task = await this.engine.customRetryTask(taskId, {
-            selectedNodeIds: Array.isArray(selectedNodeIds) ? selectedNodeIds : [],
-            fromNodeId,
-          });
-          return this.sendJson(res, 200, task, reqMeta);
-        } catch (err: any) {
-          serverLogger.error(`[Tasks:CustomRetry] 定制重试失败: ${err.message}`, err, { taskId });
-          return this.sendJson(res, 400, { error: err.message }, reqMeta);
-        }
-      }
-
       // Task diff: /api/tasks/:id/diff
       const taskDiffMatch = pathname.match(/^\/api\/tasks\/([a-zA-Z0-9_-]+)\/diff$/);
       if (taskDiffMatch && method === 'GET') {
@@ -3066,8 +2870,7 @@ ${existingSubSummary}
         }
         // 手机端扫码地址：优先流水线 env-prepare 声明的 scanUrl，缺省为本机局域网服务地址
         const lanIp = getLanIpv4();
-        const envNode = this.store.getWorkflow(task.workflowId)?.nodes.find((n) => n.type === 'env-prepare');
-        const scanTemplate = envNode?.config.scanUrl?.trim() || 'http://{{lanIp}}:{{webPort}}';
+        const scanTemplate = task.context.worktree.envPrepare?.scanUrl?.trim() || 'http://{{lanIp}}:{{webPort}}';
         const scanUrl = interpolateString(scanTemplate, {
           task,
           lanIp: lanIp || '127.0.0.1',
@@ -3145,34 +2948,33 @@ ${existingSubSummary}
           forTaskId: taskId,
         });
 
-        // 2. 动态获取命令与配置：优先从流水线 env-prepare 编排节点提取
+        // 2. 动态获取命令与配置：优先采用 env-prepare 步骤落库的启动命令
         const ports = {
           webPort: port,
           ...(task.context.worktree.ports || {}),
         };
-        const wf = this.store.getWorkflow(task.workflowId);
-        const envNode = wf?.nodes.find((n) => n.type === 'env-prepare');
+        const envPrepare = task.context.worktree.envPrepare;
 
         let cmd = '';
-        if (envNode?.config?.command) {
-          cmd = interpolateString(envNode.config.command, {
+        if (envPrepare?.command) {
+          cmd = interpolateString(envPrepare.command, {
             task,
             ports,
           });
         } else {
           cmd = `pnpm --filter @openloop/desktop dev --port ${port} --strictPort --host 0.0.0.0`;
-          serverLogger.warn(`[Sandbox:Start] 任务 ${taskId} 工作流未声明 env-prepare 节点命令，回退默认命令: ${cmd}`);
+          serverLogger.warn(`[Sandbox:Start] 任务 ${taskId} 未记录 env-prepare 启动命令，回退默认命令: ${cmd}`);
         }
 
         // 3. 探活地址与超时时间优先采用编排配置
         let targetUrl = task.context.worktree.targetUrl || `http://localhost:${port}`;
-        if (envNode?.config?.healthUrl) {
-          targetUrl = interpolateString(envNode.config.healthUrl, {
+        if (envPrepare?.healthUrl) {
+          targetUrl = interpolateString(envPrepare.healthUrl, {
             task,
             ports,
           });
         }
-        const warmupTimeoutMs = envNode?.config?.warmupTimeoutMs || 20000;
+        const warmupTimeoutMs = envPrepare?.warmupTimeoutMs || 20000;
 
         serverLogger.info(`[Sandbox:Start] 为任务 ${taskId} 启动靶机服务: ${cmd} (目录: ${worktreeDir}, 探活: ${targetUrl})`);
 

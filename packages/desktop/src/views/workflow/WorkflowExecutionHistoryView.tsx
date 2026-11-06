@@ -304,12 +304,12 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
     });
   };
 
-  // 计算任务耗时 (精确回溯实际节点运行时段，避免待办卡片或静止任务虚增耗时)
+  // 计算任务耗时 (精确回溯实际步骤运行时段，避免待办卡片或静止任务虚增耗时)
   const getTaskDurationStr = (task: Task) => {
     if (task.status === 'pending') return '-';
     if (!task.createdAt) return '-';
 
-    // 优先基于节点实际运行起止时间
+    // 优先基于步骤实际运行起止时间
     if (task.nodeRuns && Object.keys(task.nodeRuns).length > 0) {
       const runs = Object.values(task.nodeRuns);
       const startedTimes = runs.map((r) => r.startedAt).filter(Boolean) as number[];
@@ -434,7 +434,6 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
     return {
       name: wf?.name || '未知工作流',
       description: wf?.description || '',
-      nodesCount: wf?.nodes?.length || 0,
       workflow: wf,
     };
   };
@@ -534,17 +533,17 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
     ? getWorkflowInfo(activeTaskDetail.workflowId)
     : null;
 
-  // 判断当前选中的任务是否包含 Agent 节点
+  // 判断当前选中的任务是否包含 Agent 步骤
   const hasAgentNode = useMemo(() => {
     if (!activeTaskDetail) return false;
     if (activeTaskDetail.context?.sessionId || activeTaskDetail.context?.piSessionId) return true;
-    if (activeWfInfo?.workflow?.nodes?.some((n) => n.type === 'agent')) return true;
-    const runs = Object.keys(activeTaskDetail.nodeRuns || {});
-    return runs.some((nodeId) => {
-      const node = activeWfInfo?.workflow?.nodes?.find((n) => n.id === nodeId);
-      return node?.type === 'agent';
+    return Object.values(activeTaskDetail.nodeRuns || {}).some((run) => {
+      const output = (run.output && typeof run.output === 'object' ? run.output : null) as
+        | { stepType?: string }
+        | null;
+      return output?.stepType === 'agent';
     });
-  }, [activeTaskDetail, activeWfInfo]);
+  }, [activeTaskDetail]);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f4f4f6] overflow-hidden select-none">
@@ -921,7 +920,7 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                       </span>
                       {nodeRunsCount > 0 && (
                         <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded shrink-0">
-                          {nodeRunsCount} 节点
+                          {nodeRunsCount} 步骤
                         </span>
                       )}
                     </div>
@@ -975,7 +974,7 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                         <button
                           type="button"
                           onClick={() => handleSelectTask(task)}
-                          title="查看详情与节点日志"
+                          title="查看详情与步骤日志"
                           className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#4f46e5] hover:bg-[#eeedfd] flex items-center justify-center transition-all cursor-pointer"
                         >
                           <ChevronRight size={13} />
@@ -1052,16 +1051,16 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
-              {/* 跳转至流程画布 */}
+              {/* 跳转至流程文档 */}
               {activeWfInfo?.workflow && (
                 <button
                   type="button"
                   onClick={() => onSelectWorkflow(activeWfInfo.workflow!.id)}
                   className="flex items-center gap-1 h-[26px] px-2 rounded-[5px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[11px] text-[#4b4b53] hover:text-[#1c1c21] transition-all cursor-pointer whitespace-nowrap shrink-0"
-                  title="在编排画布中打开该工作流"
+                  title="打开该流水线的流程文档"
                 >
                   <Workflow size={11} className="shrink-0" />
-                  <span>打开流程画布</span>
+                  <span>打开流水线</span>
                 </button>
               )}
 
@@ -1142,15 +1141,15 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
               </p>
             </div>
 
-            {/* 节点执行时间线 (Node Execution Timeline) */}
+            {/* 步骤执行时间线 (Step Execution Timeline) */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h4 className="text-[12px] font-semibold text-[#1c1c21] flex items-center gap-1.5">
                   <Workflow size={13} className="text-[#4f46e5]" />
-                  <span>节点执行流转</span>
+                  <span>步骤执行流转</span>
                 </h4>
                 <span className="text-[10px] font-mono text-[#85858d]">
-                  {Object.keys(activeTaskDetail.nodeRuns || {}).length} 个节点执行记录
+                  {Object.keys(activeTaskDetail.nodeRuns || {}).length} 个步骤执行记录
                 </span>
               </div>
 
@@ -1158,7 +1157,6 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                 <NodeExecutionTimeline
                   task={activeTaskDetail}
                   workflow={activeWfInfo?.workflow}
-                  allWorkflows={workflows}
                   onOpenTaskLogs={(taskId, nodeId) => {
                     if (nodeId) setLogFilterNode(nodeId);
                   }}
@@ -1179,17 +1177,17 @@ export const WorkflowExecutionHistoryView: React.FC<WorkflowExecutionHistoryView
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  {/* 按节点过滤 */}
+                  {/* 按步骤过滤 */}
                   {Object.keys(activeTaskDetail.nodeRuns || {}).length > 0 && (
                     <select
                       value={logFilterNode}
                       onChange={(e) => setLogFilterNode(e.target.value)}
                       className="h-[22px] px-1.5 bg-[#f4f4f6] border border-[#e3e3e8] rounded-[4px] text-[10.5px] text-[#4b4b53] outline-none"
                     >
-                      <option value="all">全部节点日志</option>
+                      <option value="all">全部步骤日志</option>
                       {Object.keys(activeTaskDetail.nodeRuns || {}).map((nId) => (
                         <option key={nId} value={nId}>
-                          节点: {nId}
+                          步骤: {nId}
                         </option>
                       ))}
                     </select>

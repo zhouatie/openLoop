@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { OpenLoopClient } from './client';
-import { OpenLoopServer, Store, DagEngine, Task, WorkflowDefinition, LogEntry, PluginManifest, NodeRun, KanbanColumn } from '@openloop/core';
+import { OpenLoopServer, Store, PipelineEngine, Task, WorkflowDefinition, LogEntry, PluginManifest, NodeRun, KanbanColumn, parseMarkdownSteps } from '@openloop/core';
 
 const program = new Command();
 const client = new OpenLoopClient();
@@ -77,7 +77,8 @@ wfCmd
         console.log(`\x1b[36mID:\x1b[0m          ${wf.id}`);
         console.log(`\x1b[36m名称:\x1b[0m        ${wf.name}`);
         console.log(`\x1b[36m描述:\x1b[0m        ${wf.description}`);
-        console.log(`\x1b[36m包含节点:\x1b[0m    ${wf.nodes.map((n) => `${n.name}(${n.type})`).join(' -> ')}`);
+        const steps = parseMarkdownSteps(wf.markdown || '');
+        console.log(`\x1b[36m流程步骤:\x1b[0m    ${steps.length > 0 ? steps.join(' -> ') : '(未写二级标题)'}`);
         console.log('----------------------------------------------------------------------');
       }
     } catch (err: any) {
@@ -113,10 +114,10 @@ taskCmd
           autoRun: shouldAutoRun,
         });
       } catch (err: any) {
-        // 如果 Daemon 没启动，直接使用本地 Store 和 DagEngine 单机运行
+        // 如果 Daemon 没启动，直接使用本地 Store 和 PipelineEngine 单机运行
         console.log(`\x1b[33m[提示]\x1b[0m 守护进程未启动，自动以本地内嵌模式运行任务...`);
         const store = new Store();
-        const engine = new DagEngine(store);
+        const engine = new PipelineEngine(store);
         isLocalFallback = true;
 
         const localTask = store.saveTask({
@@ -322,7 +323,7 @@ taskCmd
         task = await client.resumeTask(id, approved, options.comment);
       } catch {
         const store = new Store();
-        const engine = new DagEngine(store);
+        const engine = new PipelineEngine(store);
         task = await engine.resumeTask(id, approved, options.comment);
       }
 
@@ -331,46 +332,6 @@ taskCmd
       console.log(`当前任务状态: ${task.status}, 看板泳道: ${task.kanbanColumn}`);
     } catch (err: any) {
       console.error(`\x1b[31m审批流转失败:\x1b[0m ${err.message}`);
-    }
-  });
-
-taskCmd
-  .command('skip <id> [nodeId]')
-  .description('跳过任务的指定节点（默认自动匹配报错节点）并驱动下游流转')
-  .action(async (id, nodeId) => {
-    try {
-      let task;
-      try {
-        task = await client.skipNode(id, nodeId);
-      } catch {
-        const store = new Store();
-        const engine = new DagEngine(store);
-        task = await engine.skipNode(id, nodeId);
-      }
-      console.log(`\x1b[32m✔\x1b[0m 任务 ${id} 节点跳过成功`);
-      console.log(`当前任务状态: ${task.status}, 看板泳道: ${task.kanbanColumn}`);
-    } catch (err: any) {
-      console.error(`\x1b[31m跳过节点失败:\x1b[0m ${err.message}`);
-    }
-  });
-
-taskCmd
-  .command('retry-node <id> [nodeId]')
-  .description('单独重试任务的指定节点（默认自动匹配报错节点）')
-  .action(async (id, nodeId) => {
-    try {
-      let task;
-      try {
-        task = await client.retryNode(id, nodeId);
-      } catch {
-        const store = new Store();
-        const engine = new DagEngine(store);
-        task = await engine.retryNode(id, nodeId);
-      }
-      console.log(`\x1b[32m✔\x1b[0m 任务 ${id} 节点已重新启动调度`);
-      console.log(`当前任务状态: ${task.status}, 看板泳道: ${task.kanbanColumn}`);
-    } catch (err: any) {
-      console.error(`\x1b[31m重试节点失败:\x1b[0m ${err.message}`);
     }
   });
 
@@ -573,7 +534,7 @@ program
       } catch (err: any) {
         console.log(`\x1b[33m[提示]\x1b[0m 核心守护进程未启动，自动使用内嵌引擎执行...`);
         const store = new Store();
-        const engine = new DagEngine(store);
+        const engine = new PipelineEngine(store);
         isLocalFallback = true;
 
         task = store.saveTask({

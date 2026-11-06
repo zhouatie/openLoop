@@ -10,7 +10,6 @@ import {
   ArrowRight,
   Edit3,
   AlertCircle,
-  SkipForward,
   Square,
   Lightbulb,
   FolderGit2,
@@ -178,7 +177,6 @@ export interface KanbanCardProps {
   isCancelling?: boolean;
   isMoving?: boolean;
   isRunning?: boolean;
-  isSkipping?: boolean;
   isApproving?: boolean;
   onSelect: (task: Task) => void;
   onCancel: (taskId: string) => void;
@@ -188,7 +186,6 @@ export interface KanbanCardProps {
   onDelete: (task: Task) => void;
   onRun: (taskId: string) => void;
   onArchive?: (taskId: string) => void;
-  onSkipNode: (taskId: string, nodeId?: string) => void;
   onVisualAcceptance: (task: Task) => void;
   onApprove: (taskId: string, approved: boolean, feedback?: string) => void;
   onSetParent?: (task: Task) => void;
@@ -211,7 +208,6 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   isCancelling,
   isMoving,
   isRunning,
-  isSkipping,
   isApproving,
   onSelect,
   onCancel,
@@ -221,7 +217,6 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   onDelete,
   onRun,
   onArchive,
-  onSkipNode,
   onVisualAcceptance,
   onApprove,
   onSetParent,
@@ -427,15 +422,13 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
       setSandboxStatus('stopped');
     }
   };
-  const currentNode = workflow?.nodes.find((n) => n.id === task.currentNodeId);
   const currentNodeMeta = task.currentNodeId
-    ? resolveNodeMeta(task.currentNodeId, workflow, workflows)
+    ? resolveNodeMeta(task.currentNodeId, task.nodeRuns?.[task.currentNodeId])
     : null;
   const nodeRuns = Object.values(task.nodeRuns || {});
   const isCompleted = task.status === 'completed';
   const completedCount = nodeRuns.filter((r) => r.status === 'success' || r.status === 'skipped').length;
-  const totalNodes = workflow?.nodes.length || completedCount || 1;
-  const displayTotal = Math.max(totalNodes, completedCount);
+  const displayTotal = Math.max(completedCount, nodeRuns.length, 1);
   const displayCompleted = isCompleted ? displayTotal : completedCount;
   const progressPct = isCompleted ? 100 : Math.round((displayCompleted / displayTotal) * 100);
   const lastFailedRun = nodeRuns.slice().reverse().find((r) => r.status === 'failed');
@@ -1015,19 +1008,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
             </div>
             <div className="shrink-0 flex items-center gap-1">
               <button
-                disabled={isSkipping || isRunning}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSkipNode(task.id, lastFailedRun?.nodeId);
-                }}
-                className="h-[20px] px-1.5 rounded-[4px] bg-white hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[10px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-sm disabled:opacity-50 cursor-pointer"
-                title="跳过当前报错节点，继续后续流程或标记完成"
-              >
-                <SkipForward size={9.5} className="text-[#85858d]" />
-                <span>{isSkipping ? '跳过中' : '跳过'}</span>
-              </button>
-              <button
-                disabled={isRunning || isSkipping}
+                disabled={isRunning}
                 onClick={(e) => {
                   e.stopPropagation();
                   onRun(task.id);
@@ -1080,12 +1061,12 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
         </div>
       )}
 
-      {/* 自动化运行中卡片：高亮工序节点展示 */}
-      {task.status === 'running' && (currentNodeMeta || currentNode) && (() => {
-        const activeType = currentNode?.type || currentNodeMeta?.type;
+      {/* 自动化运行中卡片：高亮当前步骤展示 */}
+      {task.status === 'running' && currentNodeMeta && (() => {
+        const activeType = currentNodeMeta.type;
         const visual = getRunningNodeVisual(activeType);
         const IconComp = visual.icon;
-        const activeName = currentNodeMeta?.name || currentNode?.name || '自动化工序执行中';
+        const activeName = currentNodeMeta.name;
         const isCurrentNodeAgent = activeType === 'agent';
         const isAwaitingInput = !!task.context?.awaitingInput && isCurrentNodeAgent;
         // 看板只接收任务摘要，是否已产生代码改动由服务端派生（避免前端全量扫描会话）
@@ -1188,7 +1169,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                 <span className="truncate">
                   {isManualQaMode
                     ? '现场就绪 · 人工自测'
-                    : `${currentNodeMeta?.name || currentNode?.name || 'QA 验收门禁'} · 待确认`}
+                    : `${currentNodeMeta?.name || 'QA 验收门禁'} · 待确认`}
                 </span>
               </span>
               {task.context?.worktree && (
@@ -1302,7 +1283,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
       <div className="pt-1.5 border-t border-[#ececf0] flex items-center justify-between text-[10.5px] text-[#85858d]">
         <div className="flex items-center gap-1.5">
           <span>
-            {isGroup ? `工序 ${groupCompletedCount}/${groupTotalCount}` : `节点 ${displayCompleted}/${displayTotal}`}
+            {isGroup ? `工序 ${groupCompletedCount}/${groupTotalCount}` : `步骤 ${displayCompleted}/${displayTotal}`}
           </span>
           {task.attachments && task.attachments.length > 0 && (
             <span
@@ -1345,7 +1326,6 @@ export const KanbanCard = memo(KanbanCardComponent, (prev, next) => {
     prev.isCancelling === next.isCancelling &&
     prev.isMoving === next.isMoving &&
     prev.isRunning === next.isRunning &&
-    prev.isSkipping === next.isSkipping &&
     prev.isApproving === next.isApproving
   );
 });

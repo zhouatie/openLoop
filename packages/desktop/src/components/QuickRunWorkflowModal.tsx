@@ -13,12 +13,13 @@ import {
   RotateCcw,
   ExternalLink,
 } from 'lucide-react';
-import { WorkflowDefinition, Task, LogEntry, NodeType } from '@openloop/core';
+import { WorkflowDefinition, Task, LogEntry } from '@openloop/core';
+import { parseMarkdownSteps } from '@openloop/core/markdown-format';
 import { api } from '../services/api';
 import { VisualAcceptanceModal } from './qa/VisualAcceptanceModal';
 
-// 依赖任务描述做 AI 推理的节点类型；仅包含此类节点的流水线才必须填写需求 Prompt
-const PROMPT_DEPENDENT_NODE_TYPES: NodeType[] = ['agent', 'qa-planner', 'midscene'];
+// 流程文档引用了任务标题或描述时，必须填写需求 Prompt
+const PROMPT_REFERENCE = /\{\{\s*task\.(title|description)\s*\}\}/;
 
 // 实时事件只携带摘要（最后一条 Agent 回复）；详情接口仍返回完整会话，两者兼容
 const readLastAssistantMessage = (task: Task): string | undefined =>
@@ -115,9 +116,9 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
 
   const activeWorkflow = workflows.find((w) => w.id === selectedWorkflowId) || workflows[0];
 
-  // 纯命令 / 脚本类流水线无需需求 Prompt，可直接执行
+  // 文档不引用任务需求的流水线可直接执行
   const promptRequired = useMemo(
-    () => Boolean(activeWorkflow?.nodes?.some((n) => PROMPT_DEPENDENT_NODE_TYPES.includes(n.type))),
+    () => PROMPT_REFERENCE.test(activeWorkflow?.markdown || ''),
     [activeWorkflow]
   );
   const canExecute = Boolean(activeWorkflow) && !isRunning && (!promptRequired || prompt.trim().length > 0);
@@ -334,7 +335,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
                     {activeWorkflow.name}
                   </span>
                   <span className="text-[9.5px] font-mono text-[#85858d] bg-white border border-[#ececf0] px-1 py-[0.5px] rounded shrink-0">
-                    {activeWorkflow.nodes.length} 节点
+                    {parseMarkdownSteps(activeWorkflow.markdown || '').length} 步骤
                   </span>
                   {activeWorkflow.tags && activeWorkflow.tags.length > 0 && (
                     <span className="text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1 py-[0.5px] rounded shrink-0">
@@ -403,7 +404,7 @@ export const QuickRunWorkflowModal: React.FC<QuickRunWorkflowModalProps> = ({
                               </span>
                             )}
                             <span className="text-[9.5px] font-mono text-[#85858d] opacity-75 shrink-0">
-                              {wf.nodes.length} 节点
+                              {parseMarkdownSteps(wf.markdown || '').length} 步骤
                             </span>
                           </div>
                           {isSelected && <Check size={12} className="text-[#4f46e5] shrink-0" />}

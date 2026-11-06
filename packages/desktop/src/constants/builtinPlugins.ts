@@ -23,7 +23,7 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
     id: 'workflow-editor',
     name: '流程编排',
     version: '1.0.0',
-    description: '基于 DAG 节点的可视化自动化流程设计与调试器',
+    description: '用 Markdown 写流程文档的自动化流水线设计与调试器',
     isBuiltin: true,
     sidebarItem: {
       id: 'workflow-editor',

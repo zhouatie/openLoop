@@ -62,7 +62,7 @@ tags: 开发,QA
 | 文件头 `name` / `tags` | 流水线身份；`push` 用它建库记录 |
 | `{{task.title}}`、`{{task.description}}` | 执行前替换为任务真实值 |
 | `{{ports.webPort}}` | 沙箱端口，建沙箱之后才有值 |
-| 二级标题 | 步骤名称，显示在任务时间轴 |
+| 二级标题 | 步骤名称，显示在任务时间轴与流水线卡片 |
 | 标题下正文 | 交给编排 Agent 的指令内容 |
 | 行内代码 `` `pnpm build` `` | 原样使用，不改写 |
 
@@ -73,13 +73,13 @@ tags: 开发,QA
 | `sandbox_create` | 建隔离 worktree，分配端口，切换任务工作区 |
 | `run_command` | 执行一条 shell 命令，返回退出码与输出 |
 | `agent_task` | 起一轮 Agent 会话编码或分析 |
-| `run_node` | 执行任意注册节点：`qa-planner`、`midscene`、`env-prepare`、`hook` 等 |
+| `run_node` | 执行任一执行器：`qa-planner`、`midscene`、`env-prepare`、`hook` 等；`sub-workflow` 把子流水线的流程文档展开给编排 Agent |
 | `ask_human` | 人工卡点，任务转 `waiting_approval`，等界面决策 |
 | `sandbox_merge` | 合并特性分支 |
 | `sandbox_cleanup` | 释放端口与沙箱目录 |
 | `finish_pipeline` | 声明整条流水线结束，带成功或失败原因 |
 
-每次工具调用落一条步骤记录，含状态、耗时、退出码与输出。界面时间轴、节点日志、人工卡点 Diff 与节点执行共用同一套视图。
+每次工具调用落一条步骤记录，含状态、耗时、退出码与输出。界面时间轴、步骤日志、人工卡点 Diff 共用同一套视图。
 
 ## 表达精度
 
@@ -91,7 +91,7 @@ tags: 开发,QA
 ## 唯一承载方式
 
 流水线只有 Markdown 一种承载方式，正文存在 `workflow.markdown`。
-编辑器只有一个流程文档输入框，没有步骤卡片，也没有脚本。
+编辑器只有一个流程文档输入框，没有步骤卡片，也没有脚本。流水线卡片按二级标题展示环节。
 
 ## 仓库同步
 

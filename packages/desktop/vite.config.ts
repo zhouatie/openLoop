@@ -15,6 +15,8 @@ export default defineConfig({
       '@openloop/core/agent-format': path.resolve(__dirname, '../core/src/agent/agent-format.ts'),
       // Agent 增量事件归约器：纯函数 + 纯类型，渲染层与服务端共用同一份语义
       '@openloop/core/agent-events': path.resolve(__dirname, '../core/src/agent/agent-events.ts'),
+      // 流程文档解析：纯字符串函数，渲染层与服务端共用同一份步骤约定
+      '@openloop/core/markdown-format': path.resolve(__dirname, '../core/src/pipeline/markdown-format.ts'),
       '@openloop/core/types': path.resolve(__dirname, '../core/src/types/index.ts'),
     },
   },
@@ -43,9 +45,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('@xyflow')) {
-              return 'vendor-flow';
-            }
             if (id.includes('lucide-react') || id.includes('prismjs') || id.includes('react-markdown')) {
               return 'vendor-ui';
             }

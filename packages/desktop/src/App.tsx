@@ -659,7 +659,7 @@ export const AppContent: React.FC = () => {
         onClose={() => setIsLogsOpen(false)}
         logs={logs}
         onClearLogs={() => setLogs([])}
-        workflows={workflows}
+        nodeRuns={tasks.find((t) => t.id === logScope.taskId)?.nodeRuns}
         scope={logScope}
       />
 

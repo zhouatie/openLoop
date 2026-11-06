@@ -9,15 +9,9 @@ import {
   Copy,
   Clock,
   Sparkles,
-  Bot,
-  Zap,
-  Target,
-  FileVideo,
-  CheckSquare,
   Search,
   ChevronRight,
   ChevronDown,
-  Boxes,
   FileText,
   Rocket,
   Pin,
@@ -26,16 +20,14 @@ import {
   Loader2,
   List,
   LayoutGrid,
-  Terminal,
-  GitBranch,
-  GitCommit,
   X,
   History,
   MoreHorizontal,
   Tag as TagIcon,
   Tags as TagsIcon,
 } from 'lucide-react';
-import { WorkflowDefinition, NodeType, Task, WorkflowTaskTemplate } from '@openloop/core';
+import { WorkflowDefinition, Task, WorkflowTaskTemplate } from '@openloop/core';
+import { parseMarkdownSteps } from '@openloop/core/markdown-format';
 import { cleanTaskTemplate } from '../utils/workflowTemplate';
 import { markdownTemplate } from '../utils/pipelineMarkdown';
 import { api } from '../services/api';
@@ -135,7 +127,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       return [];
     }
   });
-  const [sortBy, setSortBy] = useState<'updated' | 'created' | 'name' | 'nodes'>('updated');
+  const [sortBy, setSortBy] = useState<'updated' | 'created' | 'name'>('updated');
   const [isSortOpen, setIsSortOpen] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
@@ -155,7 +147,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       return 'list';
     }
   });
-  const [filterCategory, setFilterCategory] = useState<'all' | 'pinned' | 'agent' | 'qa'>('all');
+  const [filterCategory, setFilterCategory] = useState<'all' | 'pinned'>('all');
   const [selectedTag, setSelectedTag] = useState<string | 'all'>('all');
   const [isTagMenuOpen, setIsTagMenuOpen] = useState(false);
   const tagMenuRef = useRef<HTMLDivElement>(null);
@@ -279,7 +271,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   };
 
   // 切换排序方式
-  const handleSortChange = (newSort: 'updated' | 'created' | 'name' | 'nodes') => {
+  const handleSortChange = (newSort: 'updated' | 'created' | 'name') => {
     setSortBy(newSort);
     setIsSortOpen(false);
     if (import.meta.env?.DEV) {
@@ -310,185 +302,16 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     return {
       all: workflows.length,
       pinned: workflows.filter((w) => pinnedIds.includes(w.id)).length,
-      agent: workflows.filter((w) => w.nodes.some((n) => n.type === 'agent')).length,
-      qa: workflows.filter((w) => w.nodes.some((n) => n.type === 'qa-approval')).length,
     };
   }, [workflows, pinnedIds]);
 
-  // 拓扑分析与有序流水线环节提炼
-  const getPipelineSteps = (nodes: WorkflowDefinition['nodes'] = [], edges: WorkflowDefinition['edges'] = []) => {
-    if (!nodes || nodes.length === 0) return [];
-    if (nodes.length === 1) return nodes;
-
-    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-    const inDegree: Record<string, number> = {};
-    const adj: Record<string, string[]> = {};
-
-    nodes.forEach((n) => {
-      inDegree[n.id] = 0;
-      adj[n.id] = [];
-    });
-
-    edges.forEach((e) => {
-      if (inDegree[e.target] !== undefined) {
-        inDegree[e.target] = (inDegree[e.target] || 0) + 1;
-      }
-      if (adj[e.source]) {
-        adj[e.source].push(e.target);
-      }
-    });
-
-    const queue: string[] = nodes
-      .filter((n) => inDegree[n.id] === 0)
-      .sort((a, b) => (a.position?.x || 0) - (b.position?.x || 0))
-      .map((n) => n.id);
-
-    const ordered: typeof nodes = [];
-    const visited = new Set<string>();
-
-    while (queue.length > 0) {
-      const curId = queue.shift()!;
-      if (visited.has(curId)) continue;
-      visited.add(curId);
-      const node = nodeMap.get(curId);
-      if (node) ordered.push(node);
-
-      const neighbors = adj[curId] || [];
-      neighbors.sort((a, b) => {
-        const nodeA = nodeMap.get(a);
-        const nodeB = nodeMap.get(b);
-        return (nodeA?.position?.x || 0) - (nodeB?.position?.x || 0);
-      });
-
-      for (const nextId of neighbors) {
-        inDegree[nextId]--;
-        if (inDegree[nextId] <= 0 && !visited.has(nextId)) {
-          queue.push(nextId);
-        }
-      }
-    }
-
-    nodes.forEach((n) => {
-      if (!visited.has(n.id)) {
-        ordered.push(n);
-      }
-    });
-
-    return ordered;
-  };
-
-  // 节点类型图标与徽章元数据 (支持识别特定 CLI: Git/构建/部署)
-  const getNodeMeta = (type: NodeType, step?: any) => {
-    if (type === 'cli' && step) {
-      const name = step.name || '';
-      const cmd = step.config?.command || '';
-      const isGit = name.toLowerCase().includes('git') || step.id?.includes('git') || cmd.includes('git ');
-      if (isGit) {
-        return {
-          label: 'Git',
-          icon: <GitCommit size={11} className="text-[#1c1c21]" />,
-          badgeBg: 'bg-[#f4f4f6]',
-          badgeText: 'text-[#1c1c21]',
-          badgeBorder: 'border-[#e3e3e8]',
-        };
-      }
-      const isDeploy = name.includes('部署') || step.id === 'node_cli_deploy' || cmd.includes('deploy.sh');
-      if (isDeploy) {
-        return {
-          label: '部署',
-          icon: <Rocket size={11} className="text-[#52525b]" />,
-          badgeBg: 'bg-[#f4f4f5]',
-          badgeText: 'text-[#52525b]',
-          badgeBorder: 'border-transparent',
-        };
-      }
-      const isBuild = name.includes('构建') || cmd.includes('build');
-      if (isBuild) {
-        return {
-          label: '构建',
-          icon: <Boxes size={11} className="text-[#52525b]" />,
-          badgeBg: 'bg-[#f4f4f5]',
-          badgeText: 'text-[#52525b]',
-          badgeBorder: 'border-transparent',
-        };
-      }
-    }
-    switch (type) {
-      case 'agent':
-        return {
-          label: 'Agent',
-          icon: <Bot size={11} className="text-[#52525b]" />,
-          badgeBg: 'bg-[#f4f4f5]',
-          badgeText: 'text-[#52525b]',
-          badgeBorder: 'border-transparent',
-        };
-      case 'midscene':
-        return {
-          label: 'Midscene',
-          icon: <Target size={11} className="text-[#52525b]" />,
-          badgeBg: 'bg-[#f4f4f5]',
-          badgeText: 'text-[#52525b]',
-          badgeBorder: 'border-transparent',
-        };
-      case 'stitch-image':
-        return {
-          label: '动图',
-          icon: <FileVideo size={11} className="text-[#52525b]" />,
-          badgeBg: 'bg-[#f4f4f5]',
-          badgeText: 'text-[#52525b]',
-          badgeBorder: 'border-transparent',
-        };
-      case 'hook':
-        return {
-          label: 'Hook',
-          icon: <Zap size={11} className="text-[#52525b]" />,
-          badgeBg: 'bg-[#f4f4f5]',
-          badgeText: 'text-[#52525b]',
-          badgeBorder: 'border-transparent',
-        };
-      case 'qa-approval':
-        return {
-          label: 'QA门禁',
-          icon: <CheckSquare size={11} className="text-[#52525b]" />,
-          badgeBg: 'bg-[#f4f4f5]',
-          badgeText: 'text-[#52525b]',
-          badgeBorder: 'border-transparent',
-        };
-      case 'cli':
-        return {
-          label: 'CLI脚本',
-          icon: <Terminal size={11} className="text-[#52525b]" />,
-          badgeBg: 'bg-[#f4f4f5]',
-          badgeText: 'text-[#52525b]',
-          badgeBorder: 'border-transparent',
-        };
-      default:
-        return {
-          label: '扩展',
-          icon: <Boxes size={11} className="text-[#52525b]" />,
-          badgeBg: 'bg-[#f4f4f5]',
-          badgeText: 'text-[#52525b]',
-          badgeBorder: 'border-transparent',
-        };
-    }
-  };
-
   // 工作流图标配置 (Markdown 流水线统一使用文档图标)
   const getWorkflowVisual = (wf: WorkflowDefinition) => {
-    const nodeTypes = new Set(wf.nodes.map((n) => n.type));
     const iconClass = 'text-[#52525b] group-hover:text-[#18181b] transition-colors';
-    let icon = <Workflow size={15} strokeWidth={1.8} className={iconClass} />;
+    let icon = <FileText size={15} strokeWidth={1.8} className={iconClass} />;
 
-    if (wf.markdown) {
-      icon = <FileText size={15} strokeWidth={1.8} className={iconClass} />;
-    } else if (nodeTypes.has('agent')) {
-      icon = <Bot size={15} strokeWidth={1.8} className={iconClass} />;
-    } else if (nodeTypes.has('midscene')) {
-      icon = <Target size={15} strokeWidth={1.8} className={iconClass} />;
-    } else if (wf.name.includes('部署') || wf.id.includes('deploy')) {
+    if (wf.name.includes('部署') || wf.id.includes('deploy')) {
       icon = <Rocket size={15} strokeWidth={1.8} className={iconClass} />;
-    } else if (nodeTypes.has('qa-approval')) {
-      icon = <CheckSquare size={15} strokeWidth={1.8} className={iconClass} />;
     }
 
     return {
@@ -504,8 +327,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       .filter((w) => {
         // 分类筛选
         if (filterCategory === 'pinned' && !pinnedIds.includes(w.id)) return false;
-        if (filterCategory === 'agent' && !w.nodes.some((n) => n.type === 'agent')) return false;
-        if (filterCategory === 'qa' && !w.nodes.some((n) => n.type === 'qa-approval')) return false;
 
         // 标签筛选
         if (selectedTag !== 'all') {
@@ -514,7 +335,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           }
         }
 
-        // 关键词筛选 (匹配名称、ID、描述、节点名、分类标签)
+        // 关键词筛选 (匹配名称、ID、描述、流程文档、标签)
         if (!searchTerm) return true;
         const kw = searchTerm.toLowerCase();
         return (
@@ -522,7 +343,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           w.id.toLowerCase().includes(kw) ||
           (w.description && w.description.toLowerCase().includes(kw)) ||
           (w.markdown && w.markdown.toLowerCase().includes(kw)) ||
-          w.nodes.some((n) => n.name.toLowerCase().includes(kw)) ||
           (w.tags && w.tags.some((t) => t.toLowerCase().includes(kw)))
         );
       })
@@ -546,9 +366,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
         if (sortBy === 'name') {
           return a.name.localeCompare(b.name, 'zh-CN');
         }
-        if (sortBy === 'nodes') {
-          return b.nodes.length - a.nodes.length;
-        }
         return 0;
       });
   }, [workflows, searchTerm, pinnedIds, sortBy, filterCategory, selectedTag]);
@@ -567,8 +384,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
         tags: newTags,
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        nodes: [],
-        edges: [],
         markdown: markdownTemplate(newTitle.trim()),
       };
 
@@ -591,7 +406,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     }
   };
 
-  /** 打开流水线：统一进入流程文档编辑页，画布已下线 */
+  /** 打开流水线：统一进入流程文档编辑页 */
   const openWorkflow = (wf: WorkflowDefinition) => {
     if (import.meta.env?.DEV) {
       console.log('[WorkflowListView] 打开流水线编辑页:', wf.id, {
@@ -677,8 +492,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       tags: wf.tags ? [...wf.tags] : [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      nodes: JSON.parse(JSON.stringify(wf.nodes || [])),
-      edges: JSON.parse(JSON.stringify(wf.edges || [])),
       variables: wf.variables ? JSON.parse(JSON.stringify(wf.variables)) : undefined,
     };
 
@@ -882,36 +695,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
               <Pin size={9.5} className="rotate-45 fill-current" />
               已置顶 {counts.pinned}
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setFilterCategory('agent');
-                if (import.meta.env?.DEV) console.log('[WorkflowListView] 筛选分类: 含 AI Agent');
-              }}
-              className={`px-2.5 py-1 rounded-[5px] font-medium transition-all flex items-center gap-1 cursor-pointer ${
-                filterCategory === 'agent'
-                  ? 'bg-white text-[#4f46e5] shadow-2xs font-semibold'
-                  : 'text-[#63636b] hover:text-[#1c1c21]'
-              }`}
-            >
-              <Bot size={11} />
-              含 Agent {counts.agent}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setFilterCategory('qa');
-                if (import.meta.env?.DEV) console.log('[WorkflowListView] 筛选分类: 含 QA 门禁');
-              }}
-              className={`px-2.5 py-1 rounded-[5px] font-medium transition-all flex items-center gap-1 cursor-pointer ${
-                filterCategory === 'qa'
-                  ? 'bg-white text-[#ea580c] shadow-2xs font-semibold'
-                  : 'text-[#63636b] hover:text-[#1c1c21]'
-              }`}
-            >
-              <CheckSquare size={11} />
-              含门禁 {counts.qa}
-            </button>
           </div>
 
           {/* 标签专属快速筛选下拉 */}
@@ -1040,7 +823,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                 {sortBy === 'updated' && '最近更新'}
                 {sortBy === 'created' && '创建时间'}
                 {sortBy === 'name' && '名称 A-Z'}
-                {sortBy === 'nodes' && '节点最多'}
               </span>
               <ChevronDown size={10} className={`text-[#85858d] transition-transform ${isSortOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -1082,18 +864,6 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                 >
                   <span>名称 A-Z</span>
                   {sortBy === 'name' && <Check size={11} strokeWidth={2.4} />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSortChange('nodes')}
-                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded-[5px] text-left transition-colors cursor-pointer ${
-                    sortBy === 'nodes'
-                      ? 'bg-[#eeedfd] text-[#4f46e5] font-medium'
-                      : 'text-[#4b4b53] hover:bg-[#f4f4f6]'
-                  }`}
-                >
-                  <span>节点最多</span>
-                  {sortBy === 'nodes' && <Check size={11} strokeWidth={2.4} />}
                 </button>
               </div>
             )}
@@ -1142,7 +912,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
             <p className="text-[12px] text-[#85858d] mt-1 max-w-sm">
               {searchTerm || filterCategory !== 'all' || selectedTag !== 'all'
                 ? '可以尝试更换筛选条件、清除标签或清空搜索关键词'
-                : '点击右上角“新建工作流”基于 DAG 节点自由连线编排'}
+                : '点击右上角“新建工作流”，用 Markdown 写清流程'}
             </p>
             {searchTerm || filterCategory !== 'all' || selectedTag !== 'all' ? (
               <button
@@ -1390,11 +1160,11 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                           )}
                       </div>
 
-                      {/* 进入画布 */}
+                      {/* 进入流程文档 */}
                       <button
                         type="button"
                         onClick={() => openWorkflow(wf)}
-                        title={wf.markdown ? '编辑流水线' : '进入流程画布编辑'}
+                        title="编辑流水线"
                         className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#4f46e5] hover:bg-[#eeedfd] flex items-center justify-center transition-all cursor-pointer"
                       >
                         <ChevronRight size={13} />
@@ -1412,7 +1182,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
               const isPinned = pinnedIds.includes(wf.id);
               const friendlyTime = formatFriendlyTime(wf.updatedAt || wf.createdAt);
               const visual = getWorkflowVisual(wf);
-              const pipelineSteps = getPipelineSteps(wf.nodes, wf.edges);
+              const pipelineSteps = parseMarkdownSteps(wf.markdown || '');
 
               return (
                 <div
@@ -1559,36 +1329,35 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
                     {/* 流程描述 */}
                     <p className="text-[12px] text-[#71717a] line-clamp-2 leading-relaxed min-h-[34px] mt-2">
-                      {wf.description || '暂无流程描述，点击进入画布编辑'}
+                      {wf.description || '暂无流程描述，点击进入流程文档'}
                     </p>
 
-                    {/* DAG 流水线环节预览栏 (极简中性胶囊) */}
-                    <div className="mt-3 p-2 rounded-[6px] bg-[#f9f9fb] border border-[#f0f0f3]">
-                      <div className="flex items-center gap-1 overflow-hidden font-sans">
-                        {pipelineSteps.slice(0, 3).map((step, idx) => {
-                          const meta = getNodeMeta(step.type, step);
-                          return (
-                            <React.Fragment key={step.id}>
+                    {/* 流程文档环节预览栏：二级标题即步骤 */}
+                    {pipelineSteps.length > 0 && (
+                      <div className="mt-3 p-2 rounded-[6px] bg-[#f9f9fb] border border-[#f0f0f3]">
+                        <div className="flex items-center gap-1 overflow-hidden font-sans">
+                          {pipelineSteps.slice(0, 2).map((step, idx) => (
+                            <React.Fragment key={step}>
                               {idx > 0 && <span className="text-[#d4d4d8] text-[9px]">→</span>}
                               <span
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f5] text-[#52525b] text-[10px] font-medium shrink-0"
-                                title={`${step.name} (${meta.label})`}
+                                className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] bg-[#f4f4f5] text-[#52525b] text-[10px] font-medium min-w-0"
+                                title={step}
                               >
-                                {meta.label}
+                                <span className="truncate max-w-[96px]">{step}</span>
                               </span>
                             </React.Fragment>
-                          );
-                        })}
-                        {pipelineSteps.length > 3 && (
-                          <span
-                            className="text-[9.5px] font-mono text-[#a1a1aa] bg-[#f4f4f5] px-1 py-0.5 rounded shrink-0"
-                            title={`剩余 ${pipelineSteps.length - 3} 个环节`}
-                          >
-                            +{pipelineSteps.length - 3}
-                          </span>
-                        )}
+                          ))}
+                          {pipelineSteps.length > 2 && (
+                            <span
+                              className="text-[9.5px] font-mono text-[#a1a1aa] bg-[#f4f4f5] px-1 py-0.5 rounded shrink-0"
+                              title={`剩余 ${pipelineSteps.length - 2} 个步骤`}
+                            >
+                              +{pipelineSteps.length - 2}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
                   {/* 卡片底栏操作 */}
@@ -1619,7 +1388,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     <button
                       type="button"
                       onClick={() => openWorkflow(wf)}
-                      title={wf.markdown ? '编辑流水线' : '进入 DAG 可视化连线画布'}
+                      title="编辑流水线"
                       className="h-[25px] px-2.5 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-xs cursor-pointer"
                     >
                       <span>编辑</span>

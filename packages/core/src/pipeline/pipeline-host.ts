@@ -1,6 +1,6 @@
 import { ChildProcess } from 'child_process';
 import { Store } from '../store';
-import { Task, WorkflowDefinition, WorkflowNode, TaskSessionState } from '../types';
+import { Task, WorkflowDefinition, PipelineStep, TaskSessionState } from '../types';
 import { AgentStreamEvent } from '../agent/agent-events';
 import { ExecutionContext, ExecutionResult } from '../executors';
 import { WorktreeManager } from '../worktree/worktree-manager';
@@ -70,7 +70,7 @@ export function buildNodeContext(input: {
   host: PipelineHost;
   task: Task;
   workflow: WorkflowDefinition;
-  node: WorkflowNode;
+  node: PipelineStep;
   abortSignal?: AbortSignal;
 }): ExecutionContext {
   const { store, host, task, workflow, node } = input;

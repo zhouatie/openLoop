@@ -79,7 +79,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         id: 'nav-workflows',
         category: '导航',
         title: '流程编排',
-        description: '查看与编辑 DAG 自动化工作流',
+        description: '查看与编辑 Markdown 自动化流水线',
         icon: <Workflow size={16} strokeWidth={1.8} className="text-[#0284c7]" />,
         shortcutKeys: ['super', '2'],
         action: () => {

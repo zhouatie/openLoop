@@ -101,8 +101,6 @@ export class SqliteStore {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         description TEXT,
-        nodes_json TEXT NOT NULL,
-        edges_json TEXT NOT NULL,
         variables_json TEXT,
         tags_json TEXT,
         task_template_json TEXT,
@@ -276,6 +274,13 @@ export class SqliteStore {
       this.db.exec('ALTER TABLE workflows ADD COLUMN markdown TEXT');
     } catch {
       // 字段已存在，忽略
+    }
+
+    // 迁移：流水线只保留 Markdown 文档，删除历史节点图与脚本流水线的遗留列
+    const workflowColumns = this.db.prepare('PRAGMA table_info(workflows)').all() as Array<{ name: string }>;
+    for (const legacyColumn of ['nodes_json', 'edges_json', 'params_json', 'script']) {
+      if (!workflowColumns.some((column) => column.name === legacyColumn)) continue;
+      this.db.exec(`ALTER TABLE workflows DROP COLUMN ${legacyColumn}`);
     }
 
     // 增量表结构平滑迁移：为历史已有数据库的 tasks 表补齐 workspace 字段
@@ -482,7 +487,7 @@ export class SqliteStore {
         id: 'workflow-editor',
         name: '流程编排',
         version: '1.0.0',
-        description: '基于 DAG 节点的可视化自动化流程设计与调试器',
+        description: '用 Markdown 写流程文档的自动化流水线设计与调试器',
         isBuiltin: true,
         sidebarItem: {
           id: 'workflow-editor',
@@ -579,8 +584,6 @@ export class SqliteStore {
         id: r.id,
         name: r.name,
         description: r.description,
-        nodes: JSON.parse(r.nodes_json),
-        edges: JSON.parse(r.edges_json),
         tags,
         taskTemplate,
         variables,
@@ -614,8 +617,6 @@ export class SqliteStore {
       id: row.id,
       name: row.name,
       description: row.description,
-      nodes: JSON.parse(row.nodes_json),
-      edges: JSON.parse(row.edges_json),
       tags,
       taskTemplate,
       variables,
@@ -647,13 +648,11 @@ export class SqliteStore {
     const hasVariables = Object.keys(variablesObj).length > 0;
 
     const stmt = this.db.prepare(`
-      INSERT INTO workflows (id, name, description, nodes_json, edges_json, variables_json, tags_json, task_template_json, markdown, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO workflows (id, name, description, variables_json, tags_json, task_template_json, markdown, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
-        nodes_json = excluded.nodes_json,
-        edges_json = excluded.edges_json,
         variables_json = excluded.variables_json,
         tags_json = excluded.tags_json,
         task_template_json = excluded.task_template_json,
@@ -665,8 +664,6 @@ export class SqliteStore {
       wf.id,
       wf.name,
       wf.description || '',
-      JSON.stringify(wf.nodes || []),
-      JSON.stringify(wf.edges || []),
       hasVariables ? JSON.stringify(variablesObj) : null,
       JSON.stringify(tagsList),
       taskTemplateJson,

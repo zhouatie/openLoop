@@ -335,7 +335,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // 提示词状态
   const [prompts, setPrompts] = useState<AgentPromptTemplates>({ ...DEFAULT_PROMPT_TEMPLATES });
-  const [activePromptKey, setActivePromptKey] = useState<AgentPromptKey>('workflowCopilot');
+  const [activePromptKey, setActivePromptKey] = useState<AgentPromptKey>('qaPlanner');
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
   const promptSaveDebounceRef = useRef<any>(null);
 

@@ -44,7 +44,6 @@ import { toast } from '../Toast';
 import { openInDefaultBrowser } from '../../utils/openExternalBrowser';
 import { CodeDiffViewerModal } from '../diff/CodeDiffViewerModal';
 import { ScanPreviewModal } from './ScanPreviewModal';
-import { resolveQaTestNodeId } from '../../utils/nodeMeta';
 
 interface VisualAcceptanceModalProps {
   task: Task;
@@ -790,60 +789,20 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
         }
       }
 
-      // 3. 动态寻找 QA 测试节点 ID
-      const testNodeId = resolveQaTestNodeId(currentTask, workflow);
-
+      // 3. 重跑整条流水线：Markdown 流水线不支持从单个步骤续跑
       if (import.meta.env?.DEV) {
-        console.log('[VisualAcceptanceModal] 触发重跑 QA 自动化测试:', { taskId: currentTask.id, testNodeId });
+        console.log('[VisualAcceptanceModal] 触发重跑流水线:', { taskId: currentTask.id });
       }
 
-      const prevQaRunId = currentTask.context?.qaRunId;
-      await api.retryNode(currentTask.id, testNodeId);
-      toast.info('已重新启动 QA 自动化测试，AI 正在走查执行...');
+      await api.runTask(currentTask.id);
+      setIsRerunning(false);
+      toast.info('已按当前用例重跑流水线，新的验收产物稍后刷新');
 
-      let pollCount = 0;
-      const pollInterval = setInterval(async () => {
-        pollCount++;
-        try {
-          const latestTask = await api.getTask(currentTask.id);
-          const qaRunIdNew = latestTask.context?.qaRunId;
-          const testNodeStatus = latestTask.nodeRuns?.[testNodeId]?.status;
-          const taskStatus = latestTask.status;
-
-          const isNodeFinished = testNodeStatus === 'success' || testNodeStatus === 'failed';
-          const isTaskWaiting = taskStatus === 'waiting_approval' || taskStatus === 'failed';
-          const isNewRunGenerated = Boolean(qaRunIdNew && qaRunIdNew !== prevQaRunId);
-
-          if ((isNodeFinished || isTaskWaiting) && (isNewRunGenerated || pollCount >= 3)) {
-            clearInterval(pollInterval);
-            setIsRerunning(false);
-            setCurrentTask(latestTask);
-            onTaskUpdated?.(latestTask);
-
-            if (qaRunIdNew) {
-              const res = await api.getQaRunById(qaRunIdNew);
-              if (res) {
-                setRun(res);
-                setCurrentStepIndex(0);
-              }
-            }
-
-            if (testNodeStatus === 'failed' || taskStatus === 'failed') {
-              toast.warning('测试执行完毕，部分断言未通过，请查看执行截帧与报错');
-            } else {
-              toast.success('自动化测试已完成，最新截帧已就绪！');
-            }
-            setActiveDrawerTab('audit');
-            return;
-          }
-        } catch {}
-
-        if (pollCount > 60) {
-          clearInterval(pollInterval);
-          setIsRerunning(false);
-          toast.warning('测试执行轮询超时，请稍后刷新重试');
-        }
-      }, 1500);
+      const latestTask = await api.getTask(currentTask.id);
+      if (latestTask) {
+        setCurrentTask(latestTask);
+        onTaskUpdated?.(latestTask);
+      }
     } catch (err: any) {
       toast.error(`重新跑测试失败: ${err.message}`);
       setIsRerunning(false);
@@ -1784,7 +1743,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
                     disabled={isSavingCase || isRerunning}
                     onClick={handleSaveAndRerun}
                     className="flex-1 h-[30px] rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
-                    title="保存用例并让 AI 重新执行自动化测试 (⌘+Enter)"
+                    title="保存用例并重跑流水线 (⌘+Enter)"
                   >
                     {isRerunning ? (
                       <>
@@ -1905,7 +1864,7 @@ export const VisualAcceptanceModal: React.FC<VisualAcceptanceModalProps> = ({
               disabled={isSubmitting || isRerunning}
               onClick={() => handleRerunTest()}
               className="h-[30px] px-3 rounded-[6px] bg-white hover:bg-[#fafafc] border border-[#e3e3e8] text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1.5 transition-all active:scale-95 shadow-2xs cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
-              title="按当前测试用例重新执行自动化测试与截帧"
+              title="按当前测试用例重跑整条流水线"
             >
               <RotateCcw size={12} className={isRerunning ? 'animate-spin shrink-0' : 'shrink-0'} />
               <span className="whitespace-nowrap">{isRerunning ? '测试执行中...' : '重新跑测试'}</span>

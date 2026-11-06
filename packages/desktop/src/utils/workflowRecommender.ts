@@ -89,7 +89,7 @@ export class WorkflowRecommender {
 
       // 6. 工作区匹配加权（仅做轻微辅助，+5）
       if (wsLower && score > 0) {
-        if (wf.requireWorkspace || wf.nodes?.some((n) => n.type === 'worktree-setup' || n.type === 'cli')) {
+        if (wf.requireWorkspace) {
           score += 5;
         }
       }

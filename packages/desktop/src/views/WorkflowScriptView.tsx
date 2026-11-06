@@ -13,7 +13,6 @@ import {
   ExternalLink,
   Copy,
   FileText,
-  AlertTriangle,
 } from 'lucide-react';
 import { toast } from '../components/Toast';
 import { WorkflowDefinition, Task } from '@openloop/core';
@@ -373,13 +372,6 @@ export const WorkflowScriptView: React.FC<WorkflowScriptViewProps> = ({
               <span>创建 {formatTime(workflow.createdAt)}</span>
             </div>
           </section>
-
-          {(workflow.nodes || []).length > 0 && (
-            <section className="flex items-start gap-2 px-2.5 py-2 rounded-[6px] bg-[#fffbeb] border border-[#fde68a]/70 text-[10.5px] text-[#b45309] leading-[16px]">
-              <AlertTriangle size={12} className="shrink-0 mt-[2px]" />
-              <span>该流水线仍带 {(workflow.nodes || []).length} 个旧画布节点（已下线），运行只按本文档执行。</span>
-            </section>
-          )}
 
           <section className="bg-white border border-[#e3e3e8] rounded-[8px] shadow-sm overflow-hidden">
             <button

@@ -63,7 +63,7 @@ export interface AgentSessionSettings {
 /**
  * 全局 Agent 会话宿主
  *
- * 任务流水线里的会话由 dag-engine 持有；侧边栏「智能体开发」这类不绑定任务的会话
+ * 任务流水线里的会话由 pipeline-engine 持有；侧边栏「智能体开发」这类不绑定任务的会话
  * 没有 DAG 上下文，统一由这里托管：一个 pi session 一个子进程，事件直接推给 WS。
  */
 export class AgentSessionHost extends EventEmitter {

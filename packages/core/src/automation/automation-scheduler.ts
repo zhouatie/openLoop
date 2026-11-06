@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { exec } from 'child_process';
 import util from 'util';
 import { Store } from '../store';
-import { DagEngine } from '../engine/dag-engine';
+import { PipelineEngine } from '../engine/pipeline-engine';
 import {
   AutomationTask,
   AutomationLogRecord,
@@ -19,14 +19,14 @@ export interface TriggerOptions {
 
 export class AutomationScheduler extends EventEmitter {
   private store: Store;
-  private engine: DagEngine;
+  private engine: PipelineEngine;
   private timers: Map<string, NodeJS.Timeout> = new Map();
   private runningSet: Set<string> = new Set();
   /** 直连流水线仍在运行的自动化任务（避免周期重叠与误报终态） */
   private pipelineRunningSet: Set<string> = new Set();
   private isStarted = false;
 
-  constructor(store: Store, engine: DagEngine) {
+  constructor(store: Store, engine: PipelineEngine) {
     super();
     this.store = store;
     this.engine = engine;

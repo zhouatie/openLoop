@@ -1,16 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   X,
   Play,
-  Terminal,
-  Bot,
-  Zap,
-  Target,
-  FileVideo,
-  CheckSquare,
-  Sparkles,
-  GitCommit,
-  Rocket,
   ArrowRight,
   FolderGit2,
   Loader2,
@@ -18,7 +9,8 @@ import {
   CheckCircle2,
   HelpCircle,
 } from 'lucide-react';
-import { WorkflowDefinition, NodeType } from '@openloop/core';
+import { WorkflowDefinition } from '@openloop/core';
+import { parseMarkdownSteps } from '@openloop/core/markdown-format';
 import { WorkspacePicker } from './WorkspacePicker';
 
 export interface DebugWorkflowModalProps {
@@ -52,18 +44,9 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
   const descriptionTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 评估当前流水线是否必须关联工程工作区
-  const isWorkspaceRequired = Boolean(
-    workflow?.requireWorkspace ||
-    workflow?.nodes?.some((node) => {
-      if (node.type === 'cli') {
-        const cmd = node.config?.command?.toLowerCase() || '';
-        const hasGit = cmd.includes('git commit') || cmd.includes('git push') || cmd.includes('git add');
-        const hasBuild = cmd.includes('pnpm') || cmd.includes('npm run') || cmd.includes('yarn') || cmd.includes('mvn') || cmd.includes('gradle');
-        return (hasGit || hasBuild) && !node.config?.cwd;
-      }
-      return false;
-    })
-  );
+  const isWorkspaceRequired = Boolean(workflow?.requireWorkspace);
+  // 流程文档的二级标题即步骤
+  const steps = useMemo(() => parseMarkdownSteps(workflow?.markdown || ''), [workflow?.markdown]);
 
   // 打开弹窗时初始化表单状态与焦点
   useEffect(() => {
@@ -170,55 +153,6 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
     }
   };
 
-  // 渲染节点小图标与类型标签
-  const renderNodeBadge = (node: WorkflowDefinition['nodes'][number]) => {
-    const isGit =
-      node.type === 'cli' &&
-      (node.name?.toLowerCase().includes('git') ||
-        node.config?.command?.toLowerCase().includes('git'));
-    const isDeploy =
-      node.type === 'cli' &&
-      (node.name?.includes('部署') ||
-        node.name?.toLowerCase().includes('deploy') ||
-        node.config?.command?.toLowerCase().includes('deploy'));
-
-    let icon = <Terminal size={10} />;
-    let badgeClass = 'bg-[#f1f1f4] text-[#4b4b53] border-[#e3e3e8]';
-
-    if (node.type === 'agent') {
-      icon = <Bot size={10} />;
-      badgeClass = 'bg-[#eeedfd] text-[#4f46e5] border-[#c7d2fe]';
-    } else if (node.type === 'hook') {
-      icon = <Zap size={10} />;
-      badgeClass = 'bg-[#fbf0df] text-[#b45309] border-[#fde68a]';
-    } else if (node.type === 'midscene') {
-      icon = <Target size={10} />;
-      badgeClass = 'bg-[#e4f6ec] text-[#189a58] border-[#a7f3d0]';
-    } else if (node.type === 'stitch-image') {
-      icon = <FileVideo size={10} />;
-      badgeClass = 'bg-[#eff6ff] text-[#1d4ed8] border-[#bfdbfe]';
-    } else if (node.type === 'qa-approval') {
-      icon = <CheckSquare size={10} />;
-      badgeClass = 'bg-[#fef3c7] text-[#92400e] border-[#fde68a]';
-    } else if (isGit) {
-      icon = <GitCommit size={10} />;
-      badgeClass = 'bg-[#1c1c21] text-white border-[#1c1c21]';
-    } else if (isDeploy) {
-      icon = <Rocket size={10} />;
-      badgeClass = 'bg-[#0f172a] text-[#38bdf8] border-[#0f172a]';
-    }
-
-    return (
-      <div
-        key={node.id}
-        className={`flex items-center gap-1.5 px-2 py-1 rounded-[5px] text-[11px] font-medium border shadow-2xs shrink-0 ${badgeClass}`}
-      >
-        <span>{icon}</span>
-        <span className="truncate max-w-[120px]">{node.name || node.id}</span>
-      </div>
-    );
-  };
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
@@ -249,7 +183,7 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
                 </span>
               </div>
               <p className="text-[11.5px] text-[#85858d] mt-0.5">
-                以调试任务驱动链路执行，验证节点依赖流转、产物传递与执行状态
+                以调试任务驱动流程文档执行，验证步骤产物与验收门禁
               </p>
             </div>
           </div>
@@ -279,31 +213,30 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
             </div>
           )}
 
-          {/* 流水线节点流转拓扑预览 */}
+          {/* 流程文档步骤预览 */}
           <div className="p-3 rounded-[8px] bg-[#f8f9fa] border border-[#e9ebed] flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-[#4b4b53] flex items-center gap-1.5">
                 <Workflow size={12} className="text-[#4f46e5]" />
-                流水线链路概览 ({workflow.nodes?.length || 0} 个节点)
+                流程步骤概览 ({steps.length} 个步骤)
               </span>
               <span className="text-[10.5px] text-[#85858d] truncate max-w-[240px]">
                 {workflow.name}
               </span>
             </div>
 
-            {/* 节点横向流转预览条 */}
             <div className="flex items-center gap-1.5 overflow-x-auto py-1 scrollbar-none">
-              {workflow.nodes && workflow.nodes.length > 0 ? (
-                workflow.nodes.map((node, idx) => (
-                  <React.Fragment key={node.id}>
-                    {renderNodeBadge(node)}
-                    {idx < workflow.nodes.length - 1 && (
-                      <ArrowRight size={11} className="text-[#a1a1aa] shrink-0" />
-                    )}
+              {steps.length > 0 ? (
+                steps.map((step, idx) => (
+                  <React.Fragment key={step}>
+                    {idx > 0 && <ArrowRight size={11} className="text-[#a1a1aa] shrink-0" />}
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-[5px] text-[11px] font-medium border shadow-2xs shrink-0 bg-[#f1f1f4] text-[#4b4b53] border-[#e3e3e8]">
+                      <span className="truncate max-w-[160px]">{step}</span>
+                    </div>
                   </React.Fragment>
                 ))
               ) : (
-                <div className="text-[11px] text-[#85858d] italic">该流水线暂未配置节点</div>
+                <div className="text-[11px] text-[#85858d] italic">该流水线还没有写二级标题步骤</div>
               )}
             </div>
           </div>
@@ -333,7 +266,7 @@ export const DebugWorkflowModal: React.FC<DebugWorkflowModalProps> = ({
                 <span className="text-[10px] text-[#85858d] font-normal">(可选)</span>
               </span>
               <span className="text-[10px] text-[#85858d]">
-                将注入为任务描述及 Agent 节点的执行上下文
+                将注入为任务描述与执行上下文
               </span>
             </label>
             <textarea

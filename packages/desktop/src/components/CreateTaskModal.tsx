@@ -23,7 +23,8 @@ import {
   AlignLeft,
   GitFork,
 } from 'lucide-react';
-import type { WorkflowDefinition, NodeType, KanbanColumn, TaskAttachment } from '@openloop/core';
+import { parseMarkdownSteps } from '@openloop/core/markdown-format';
+import type { WorkflowDefinition, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { WorkflowRecommender } from '../utils/workflowRecommender';
 import { readLastWorkflowId, rememberWorkflowId } from '../utils/workflowMemory';
 import { WorkspacePicker } from './WorkspacePicker';
@@ -140,19 +141,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     [workflows, workflowId]
   );
 
-  const isCurrentWfWsRequired = Boolean(
-    currentWf?.requireWorkspace ||
-    currentWf?.nodes?.some((node) => {
-      if (node.config?.requireWorkspace) return true;
-      if (node.type === 'cli') {
-        const cmd = node.config?.command?.toLowerCase() || '';
-        const hasGit = cmd.includes('git commit') || cmd.includes('git push') || cmd.includes('git add');
-        const hasBuild = cmd.includes('pnpm') || cmd.includes('npm run') || cmd.includes('yarn') || cmd.includes('mvn') || cmd.includes('gradle');
-        return (hasGit || hasBuild) && !node.config?.cwd;
-      }
-      return false;
-    })
-  );
+  const isCurrentWfWsRequired = Boolean(currentWf?.requireWorkspace);
 
   // 弹窗打开或 workflows 变更时，优先恢复本地上次使用的流程与工作区记忆
   useEffect(() => {
@@ -378,13 +367,13 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               </div>
             )}
 
-            {getNodeSummaryBadges(wf)}
+            {getStepSummaryBadges(wf)}
           </div>
         </div>
 
         <div className="flex flex-col items-end shrink-0 pt-0.5">
           <span className="text-[10.5px] font-mono text-[#85858d]">
-            {wf.nodes.length} 节点
+            {parseMarkdownSteps(wf.markdown || '').length} 步骤
           </span>
           {isSelected && (
             <span className="mt-1 flex items-center gap-1 text-[10.5px] text-[#4f46e5] font-medium">
@@ -694,34 +683,23 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
   handleSubmitRef.current = handleSubmit;
 
-  const getNodeSummaryBadges = (wf: WorkflowDefinition) => {
-    const types = Array.from(new Set(wf.nodes.map((n) => n.type)));
+  /** 流程文档的二级标题即步骤，列表里只展示前几步 */
+  const getStepSummaryBadges = (wf: WorkflowDefinition) => {
+    const steps = parseMarkdownSteps(wf.markdown || '');
+    if (steps.length === 0) return null;
     return (
       <div className="flex items-center gap-1 mt-1">
-        {types.slice(0, 4).map((t) => {
-          let label = t;
-          let color = 'bg-[#f1f1f4] text-[#4b4b53]';
-          if (t === 'agent') {
-            label = 'Agent';
-            color = 'bg-[#eeedfd] text-[#4f46e5]';
-          } else if (t === 'midscene') {
-            label = 'Midscene';
-            color = 'bg-[#e4f6ec] text-[#189a58]';
-          } else if (t === 'qa-approval') {
-            label = 'QA验收';
-            color = 'bg-[#fbf0df] text-[#b45309]';
-          }
-          return (
-            <span
-              key={t}
-              className={`px-1.5 py-[1px] rounded-[3px] text-[9.5px] font-medium ${color}`}
-            >
-              {label}
-            </span>
-          );
-        })}
-        {types.length > 4 && (
-          <span className="text-[9.5px] text-[#85858d]">+{types.length - 4}</span>
+        {steps.slice(0, 3).map((step) => (
+          <span
+            key={step}
+            className="px-1.5 py-[1px] rounded-[3px] text-[9.5px] font-medium bg-[#f1f1f4] text-[#4b4b53] max-w-[110px] truncate"
+            title={step}
+          >
+            {step}
+          </span>
+        ))}
+        {steps.length > 3 && (
+          <span className="text-[9.5px] text-[#85858d]">+{steps.length - 3}</span>
         )}
       </div>
     );
@@ -888,7 +866,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               </div>
               {currentWf && (
                 <span className="text-[10px] font-mono text-[#85858d] shrink-0">
-                  {currentWf.nodes.length} 节点 · {currentWf.edges.length} 连线
+                  {parseMarkdownSteps(currentWf.markdown || '').length} 步骤
                 </span>
               )}
             </div>

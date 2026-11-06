@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { X, Trash2, ArrowDown, Copy, Check, Terminal, Search, RotateCcw, Clock } from 'lucide-react';
-import { LogEntry, WorkflowDefinition } from '@openloop/core';
+import { LogEntry, NodeRun } from '@openloop/core';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 
 interface LogTerminalDrawerProps {
@@ -8,8 +8,9 @@ interface LogTerminalDrawerProps {
   onClose: () => void;
   logs: LogEntry[];
   onClearLogs: () => void;
-  workflows?: WorkflowDefinition[];
-  /** 日志作用域：无 taskId 为全局日志，有 taskId 为任务日志，nodeId 再聚焦到节点 */
+  /** 当前任务的步骤记录：用于把步骤 id 显示成步骤名 */
+  nodeRuns?: Record<string, NodeRun>;
+  /** 日志作用域：无 taskId 为全局日志，有 taskId 为任务日志，nodeId 再聚焦到步骤 */
   scope?: LogScope;
 }
 
@@ -100,7 +101,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
   onClose,
   logs,
   onClearLogs,
-  workflows,
+  nodeRuns,
   scope,
 }) => {
   const [selectedNodeFilter, setSelectedNodeFilter] = useState<string>(scope?.nodeId || 'all');
@@ -119,7 +120,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     }
   }, []);
 
-  // 作用域变化（全局 / 任务 / 节点切换）时重置过滤与搜索，并定位到最新日志
+  // 作用域变化（全局 / 任务 / 步骤切换）时重置过滤与搜索，并定位到最新日志
   useEffect(() => {
     setSelectedNodeFilter(scope?.nodeId || 'all');
     setSelectedStreamFilter('all');
@@ -138,13 +139,13 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     }
   }, [isOpen, scrollToBottom]);
 
-  // 作用域内的日志集合：任务作用域仅保留该任务的日志（可再在节点下拉内收窄）
+  // 作用域内的日志集合：任务作用域仅保留该任务的日志（可再在步骤下拉内收窄）
   const scopedLogs = useMemo(
     () => (scope?.taskId ? logs.filter((l) => l.taskId === scope.taskId) : logs),
     [logs, scope?.taskId]
   );
 
-  const scopeLabel = scope?.taskId ? (scope.nodeId ? '节点日志' : '任务日志') : '全局日志';
+  const scopeLabel = scope?.taskId ? (scope.nodeId ? '步骤日志' : '任务日志') : '全局日志';
 
   const nodeIds = useMemo(
     () => Array.from(new Set(scopedLogs.map((l) => l.nodeId).filter(Boolean))),
@@ -161,7 +162,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
         return false;
       }
       if (query) {
-        const meta = resolveNodeMeta(log.nodeId, undefined, workflows);
+        const meta = resolveNodeMeta(log.nodeId, nodeRuns?.[log.nodeId]);
         const matchMessage = typeof log.message === 'string' && log.message.toLowerCase().includes(query);
         const matchNodeId = typeof log.nodeId === 'string' && log.nodeId.toLowerCase().includes(query);
         const matchNodeName = typeof meta.name === 'string' && meta.name.toLowerCase().includes(query);
@@ -171,7 +172,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
       }
       return true;
     });
-  }, [scopedLogs, selectedNodeFilter, selectedStreamFilter, searchQuery, workflows]);
+  }, [scopedLogs, selectedNodeFilter, selectedStreamFilter, searchQuery, nodeRuns]);
 
   const isFiltered =
     selectedNodeFilter !== 'all' || selectedStreamFilter !== 'all' || !!searchQuery.trim();
@@ -268,7 +269,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
     isAtBottomRef.current = true;
     scrollToBottom();
     if (import.meta.env.DEV) {
-      console.log('[LogTerminalDrawer] 节点筛选变更:', value);
+      console.log('[LogTerminalDrawer] 步骤筛选变更:', value);
     }
   };
 
@@ -295,7 +296,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
   const copyAll = () => {
     const text = filteredLogs
       .map((l) => {
-        const meta = resolveNodeMeta(l.nodeId, undefined, workflows);
+        const meta = resolveNodeMeta(l.nodeId, nodeRuns?.[l.nodeId]);
         return `[${formatClock(l.timestamp)}] [${meta.name} (${l.nodeId})] ${l.message}`;
       })
       .join('\n');
@@ -371,16 +372,16 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
                 <option value="system">system (系统)</option>
               </select>
 
-              {/* 节点过滤 */}
+              {/* 步骤过滤 */}
               <select
                 value={selectedNodeFilter}
                 onChange={(e) => handleNodeFilterChange(e.target.value)}
                 className="bg-[#24242c] border border-[#383842] text-[#e3e3e8] text-[11px] rounded-[4px] px-1.5 py-[1px] h-[22px] outline-none max-w-[160px] truncate"
-                title="按节点过滤"
+                title="按步骤过滤"
               >
-                <option value="all">所有节点</option>
+                <option value="all">所有步骤</option>
                 {nodeIds.map((nid) => {
-                  const meta = resolveNodeMeta(nid, undefined, workflows);
+                  const meta = resolveNodeMeta(nid, nodeRuns?.[nid]);
                   return (
                     <option key={nid} value={nid}>
                       {meta.name} ({nid})
@@ -486,7 +487,7 @@ export const LogTerminalDrawer: React.FC<LogTerminalDrawerProps> = ({
               let color = 'text-[#e4e4e7]';
               if (log.stream === 'stderr') color = 'text-[#f87171] font-semibold';
               if (log.stream === 'system') color = 'text-[#38bdf8]';
-              const meta = resolveNodeMeta(log.nodeId, undefined, workflows);
+              const meta = resolveNodeMeta(log.nodeId, nodeRuns?.[log.nodeId]);
               const trimmedQuery = searchQuery.trim();
 
               return (

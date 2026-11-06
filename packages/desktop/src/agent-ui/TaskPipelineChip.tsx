@@ -1,14 +1,15 @@
 /**
  * 会话任务条：全局智能体里当前会话属于某个看板任务时，把任务与流水线搬到顶栏。
- * 收起是一行状态与进度，展开可逐节点重试 / 跳过，并能运行、暂停或回到任务详情。
+ * 收起是一行状态与进度，展开可看每一步的进展，并能运行、暂停或回到任务详情。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUpRight, ChevronDown, Loader2, Pause, Play, RotateCcw, SkipForward } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, Loader2, Pause, Play } from 'lucide-react';
 import type { NodeStatus, Task, WorkflowDefinition } from '@openloop/core';
 import { api } from '../services/api';
 import { toast } from '../components/Toast';
 import { TASK_STATUS_LABEL } from './task-options';
+import { resolveNodeMeta } from '../utils/nodeMeta';
 import { useAnchoredPosition } from './dsh/useAnchoredPosition';
 import { useDismissOnOutsidePointer } from './dsh/useDismissOnOutsidePointer';
 import css from './TaskPipelineChip.module.css';
@@ -28,9 +29,6 @@ const NODE_STATUS_LABEL: Record<NodeStatus, string> = {
   failed: '失败',
   skipped: '已跳过',
 };
-
-/** 跑完过的节点可以单独重来一次，没开始的只能跳过 */
-const RETRYABLE_STATUS: NodeStatus[] = ['success', 'failed', 'skipped'];
 
 const MENU_GAP = 6;
 const VIEWPORT_MARGIN = 12;
@@ -53,23 +51,18 @@ interface PipelineNode {
   error?: string;
 }
 
-/** 节点顺序以流水线定义为准；定义缺失时退回任务里的执行记录 */
-function buildNodes(task: Task | null, workflow: WorkflowDefinition | null): PipelineNode[] {
-  const runs = task?.nodeRuns || {};
-  if (workflow?.nodes?.length) {
-    return workflow.nodes.map((node) => ({
-      id: node.id,
-      name: node.name || node.id,
-      status: runs[node.id]?.status || 'pending',
-      error: runs[node.id]?.error,
+/** 步骤按执行记录还原，顺序取开始时间 */
+function buildNodes(task: Task | null): PipelineNode[] {
+  const runs = Object.values(task?.nodeRuns || {});
+  return runs
+    .slice()
+    .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0))
+    .map((run) => ({
+      id: run.nodeId,
+      name: resolveNodeMeta(run.nodeId, run).name,
+      status: run.status,
+      error: run.error,
     }));
-  }
-  return Object.values(runs).map((run) => ({
-    id: run.nodeId,
-    name: run.nodeId,
-    status: run.status,
-    error: run.error,
-  }));
 }
 
 export function TaskPipelineChip({ taskId, onOpenTask }: TaskPipelineChipProps) {
@@ -112,7 +105,7 @@ export function TaskPipelineChip({ taskId, onOpenTask }: TaskPipelineChipProps) 
     };
   }, [taskId]);
 
-  // 流水线定义：只用来取节点名称与顺序，取不到就按执行记录显示
+  // 流水线定义：只用来取流水线名称
   useEffect(() => {
     const workflowId = task?.workflowId;
     if (!workflowId) {
@@ -132,7 +125,7 @@ export function TaskPipelineChip({ taskId, onOpenTask }: TaskPipelineChipProps) 
     };
   }, [task?.workflowId]);
 
-  const nodes = useMemo(() => buildNodes(task, workflow), [task, workflow]);
+  const nodes = useMemo(() => buildNodes(task), [task]);
   const doneCount = nodes.filter((node) => node.status === 'success' || node.status === 'skipped').length;
   const activeNode = nodes.find((node) => node.status === 'running') || nodes.find((node) => node.status === 'waiting_approval');
 
@@ -182,18 +175,6 @@ export function TaskPipelineChip({ taskId, onOpenTask }: TaskPipelineChipProps) 
       },
     };
   }, [task]);
-
-  /** 从指定节点开始：它和后面的节点重新执行，之前的节点记为跳过 */
-  const startFromNode = useCallback(
-    (nodeId: string) => {
-      if (!task) return;
-      const index = nodes.findIndex((node) => node.id === nodeId);
-      if (index < 0) return;
-      const selectedNodeIds = nodes.slice(index).map((node) => node.id);
-      void act(`from:${nodeId}`, () => api.customRetryTask(task.id, { selectedNodeIds, fromNodeId: nodeId }));
-    },
-    [act, nodes, task]
-  );
 
   if (!task) return null;
 
@@ -258,47 +239,12 @@ export function TaskPipelineChip({ taskId, onOpenTask }: TaskPipelineChipProps) 
                       </span>
                       <span className={css.nodeTail}>
                         <span className={css.nodeStatus}>{NODE_STATUS_LABEL[node.status]}</span>
-                        <button
-                          type="button"
-                          className={css.nodeStart}
-                          title={`从「${node.name}」开始执行，之前的节点记为跳过`}
-                          aria-label={`从「${node.name}」开始执行`}
-                          disabled={Boolean(busy) || task.status === 'running'}
-                          onClick={() => startFromNode(node.id)}
-                        >
-                          <span>从此</span>
-                        </button>
-                        {RETRYABLE_STATUS.includes(node.status) ? (
-                          <button
-                            type="button"
-                            className={css.nodeButton}
-                            title={`重试「${node.name}」`}
-                            aria-label={`重试「${node.name}」`}
-                            disabled={Boolean(busy)}
-                            onClick={() => void act(`retry:${node.id}`, () => api.retryNode(task.id, node.id))}
-                          >
-                            <RotateCcw size={11} />
-                            <span>重试</span>
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className={css.nodeButton}
-                            title={`跳过「${node.name}」`}
-                            aria-label={`跳过「${node.name}」`}
-                            disabled={Boolean(busy)}
-                            onClick={() => void act(`skip:${node.id}`, () => api.skipNode(task.id, node.id))}
-                          >
-                            <SkipForward size={11} />
-                            <span>跳过</span>
-                          </button>
-                        )}
                       </span>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className={css.empty}>该任务还没有流水线节点，可直接运行。</p>
+                <p className={css.empty}>该任务还没有执行步骤，可直接运行。</p>
               )}
 
               <div className={css.foot}>

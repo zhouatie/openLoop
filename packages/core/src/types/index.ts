@@ -8,10 +8,11 @@ export type TaskExecutionMode = 'serial' | 'parallel' | 'dag';
 
 export type KanbanColumn = 'inbox' | 'backlog' | 'in_progress' | 'agent_executing' | 'qa_review' | 'done';
 
-export type NodeType = 
+/** 内置步骤类型：界面据此选图标，执行器据此分发 */
+export type NodeType =
   | 'cli'             // 通用 CLI 脚本执行
   | 'agent'           // AI Agent 调用
-  | 'sub-workflow'    // 子流水线 / 复合支线调用
+  | 'sub-workflow'    // 展开子流水线的流程文档
   | 'qa-planner'      // 资深 QA 工程师黑盒用例设计
   | 'midscene'        // Midscene 自动化 UI 测试
   | 'stitch-image'    // 拼接截图与生成动图
@@ -20,26 +21,22 @@ export type NodeType =
   | 'worktree-setup'  // 创建 Git Worktree 与独立沙箱靶机
   | 'worktree-merge'  // 自动合并 Worktree 分支
   | 'worktree-cleanup'// 释放任务后台进程与清理沙箱目录
-  | 'env-prepare'      // 环境准备与服务拉起 / 现场就绪检查
-  | 'custom';         // 插件扩展节点
+  | 'env-prepare';    // 环境准备与服务拉起 / 现场就绪检查
 
 export interface NodeConfig {
   // CLI 或 Agent 相关配置
   command?: string;
-  args?: string[];
   cwd?: string;
   env?: Record<string, string>;
   
   // Agent 专用
   agentName?: string;
   prompt?: string;
-  inputFiles?: string[];
   
   // 环境准备 (env-prepare) 与服务拉起专用
   healthUrl?: string;
   targetPlatform?: QaPlatform;
   warmupTimeoutMs?: number;
-  background?: boolean; // 是否作为任务关联的后台守护服务常驻
   /** 扫码预览地址模板（支持 {{lanIp}} / {{webPort}} 等变量），缺省为本机局域网服务地址 */
   scanUrl?: string;
 
@@ -64,12 +61,8 @@ export interface NodeConfig {
   
   // 拼接截图专用
   sourceDir?: string;
-  outputFormat?: 'gif' | 'video' | 'sprite';
   outputFile?: string;
   
-  // Hook 专用
-  hookType?: 'event' | 'webhook' | 'file_change';
-  webhookUrl?: string;
   
   // 审批相关
   approvalPrompt?: string;
@@ -77,39 +70,12 @@ export interface NodeConfig {
 
   // 子流水线 (sub-workflow) 专用
   subWorkflowId?: string;     // 关联的子流水线定义 ID
-  inheritContext?: boolean;   // 是否继承父级任务全部变量与工作区，默认 true
 
-  // 节点超时与重试配置
+  // 步骤超时配置
   timeoutSec?: number;
-  retryCount?: number;
 
   // 工作区约束
   requireWorkspace?: boolean;
-
-  // 任务级可调参数声明：UI 据此在任务详情自动生成输入框，调整仅在当前任务生效
-  editableParams?: NodeEditableParam[];
-  
-  // 自定义扩展属性
-  customData?: Record<string, any>;
-}
-
-/**
- * 节点声明的任务级可调参数
- * 值是插值变量，执行时优先级高于任务上下文与流水线变量
- */
-export interface NodeEditableParam {
-  key: string;          // 变量名，节点命令中以 {{key}} 引用
-  label: string;        // 中文展示名
-  placeholder?: string; // 输入占位提示
-  hint?: string;        // 补充说明
-}
-
-/**
- * 任务级节点覆盖：仅对单个任务生效，不写回流水线模板
- */
-export interface TaskNodeOverride {
-  config?: Partial<NodeConfig>;      // 覆盖节点配置字段（如 command / prompt）
-  params?: Record<string, string>;   // 覆盖节点声明的可调参数
 }
 
 /** 工具卡形态分类：仅用于界面选择渲染样式，不参与业务判定 */
@@ -252,46 +218,13 @@ export interface SessionTreeSnapshot {
   leafId: string | null;
 }
 
-export interface WorkflowSessionState {
-  workflowId: string;
-  active: boolean;
-  isBusy: boolean;
-  isPaused: boolean;
-  messages: SessionChatMessage[];
-  agentName?: string;
-  model?: string;
-  piSessionId?: string;
-}
-
-export interface WorkflowActionPayload {
-  action: 'replace_all' | 'patch' | 'layout';
-  workflow?: {
-    name?: string;
-    description?: string;
-    nodes: WorkflowNode[];
-    edges: WorkflowEdge[];
-  };
-  addNodes?: WorkflowNode[];
-  updateNodes?: Partial<WorkflowNode>[];
-  removeNodeIds?: string[];
-  addEdges?: WorkflowEdge[];
-  removeEdgeIds?: string[];
-}
-
-export interface WorkflowNode {
+/** 一次流水线步骤：编排 Agent 调工具时临时组装，不落库成节点图 */
+export interface PipelineStep {
   id: string;
   name: string;
-  type: NodeType;
+  /** 内置类型名或执行器注册名 */
+  type: string;
   config: NodeConfig;
-  position: { x: number; y: number };
-}
-
-export interface WorkflowEdge {
-  id: string;
-  source: string;
-  target: string;
-  label?: string;
-  condition?: string; // 支持简单表达式，如 outcome === 'success'
 }
 
 export interface WorkflowTaskTemplate {
@@ -324,10 +257,8 @@ export interface WorkflowDefinition {
   description: string;
   createdAt: number;
   updatedAt: number;
-  nodes: WorkflowNode[];
-  edges: WorkflowEdge[];
   tags?: string[]; // 流水线标签列表，用于归类、筛选与过滤 (例如: '工作', '部署', 'QA', '日常')
-  markdown?: string; // Markdown 流水线：人工用自然语言说明流程，由编排 Agent 调工具执行
+  markdown?: string; // 流水线正文：人工用自然语言说明流程，由编排 Agent 调工具执行
   taskTemplate?: WorkflowTaskTemplate; // 流水线关联的创建任务输入模板
   variables?: Record<string, any>;
   requireWorkspace?: boolean; // 该流水线是否要求必须关联工程工作区根目录
@@ -386,7 +317,7 @@ export interface Task {
   updatedAt: number;
   currentNodeId?: string;
   nodeRuns: Record<string, NodeRun>;
-  context: Record<string, any>; // 运行时上下文，节点间传参 (含 nodeOverrides 任务级节点覆盖)
+  context: Record<string, any>; // 运行时上下文，步骤之间传参
 
   // 任务组 (Task Group) 扩展属性
   kind?: TaskKind;                             // 任务形态: single(单任务) | group(任务组根节点) | subtask(子任务)
@@ -425,7 +356,6 @@ export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high';
 export type ShortcutSuperKey = 'Control' | 'Meta' | 'Alt';
 
 export type AgentPromptKey =
-  | 'workflowCopilot'
   | 'qaPlanner'
   | 'agentNodeRequirement'
   | 'conflictResolution'
@@ -491,6 +421,13 @@ export interface WorktreeContextInfo {
   storeDir?: string; // 沙箱独立数据底座目录 (保证任务间及与稳定版彻底隔离)
   changedFiles?: string[];
   diffSummary?: string;
+  /** env-prepare 步骤落库的现场配置：靶机启动命令、探活地址与扫码模板 */
+  envPrepare?: {
+    command?: string;
+    healthUrl?: string;
+    scanUrl?: string;
+    warmupTimeoutMs?: number;
+  };
   diffResult?: TaskWorktreeDiffResult;
   qaRunId?: string;
   conflictResolution?: {

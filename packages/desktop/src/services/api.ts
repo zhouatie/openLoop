@@ -8,7 +8,6 @@ import {
   KanbanColumn,
   TaskStatus,
   TaskAttachment,
-  WorkflowSessionState,
   QaSuite,
   QaRunRecord,
   SelectedQaArtifacts,
@@ -335,35 +334,6 @@ export class DesktopApiService {
   async deleteWorkflow(id: string): Promise<boolean> {
     const data = await requestJson<{ success: boolean }>(`${BASE_URL}/api/workflows/${id}`, { method: 'DELETE' });
     return data.success;
-  }
-
-  // Workflow Copilot (AI 协助与零手动编排)
-  async getWorkflowSession(workflowId: string): Promise<WorkflowSessionState> {
-    return requestJson<WorkflowSessionState>(`${BASE_URL}/api/workflows/${workflowId}/session`);
-  }
-
-  async sendWorkflowChatMessage(
-    workflowId: string,
-    message: string,
-    snapshot?: { nodes?: any[]; edges?: any[]; name?: string; focusNodeId?: string }
-  ): Promise<{ success: boolean }> {
-    if (import.meta.env?.DEV) {
-      console.log(`[UI:WorkflowCopilot] 发送流程编排指令 (${workflowId}${snapshot?.focusNodeId ? `, 聚焦: ${snapshot.focusNodeId}` : ''}):`, message.slice(0, 40));
-    }
-    return requestJson<{ success: boolean }>(`${BASE_URL}/api/workflows/${workflowId}/session/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, snapshot }),
-    });
-  }
-
-  async resetWorkflowSession(workflowId: string): Promise<{ success: boolean }> {
-    if (import.meta.env?.DEV) {
-      console.log(`[UI:WorkflowCopilot] 请求重置编排助手会话 (${workflowId})`);
-    }
-    return requestJson<{ success: boolean }>(`${BASE_URL}/api/workflows/${workflowId}/session/reset`, {
-      method: 'POST',
-    });
   }
 
   // Tasks
@@ -698,70 +668,6 @@ export class DesktopApiService {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ approved, feedback }),
-    });
-  }
-
-  async skipNode(id: string, nodeId?: string): Promise<Task> {
-    if (import.meta.env?.DEV) {
-      console.log(`[UI:API] 请求跳过任务 [${id}] 的节点:`, nodeId || '自动判定');
-    }
-    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/skip-node`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodeId }),
-    });
-  }
-
-  async completeNode(id: string, nodeId?: string): Promise<Task> {
-    if (import.meta.env?.DEV) {
-      console.log(`[UI:API] 请求确认任务 [${id}] 的节点已完成:`, nodeId || '自动判定');
-    }
-    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/complete-node`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodeId }),
-    });
-  }
-
-  async retryNode(id: string, nodeId?: string): Promise<Task> {
-    if (import.meta.env?.DEV) {
-      console.log(`[UI:API] 请求单独重试任务 [${id}] 的节点:`, nodeId || '自动判定');
-    }
-    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/retry-node`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodeId }),
-    });
-  }
-
-  async customRetryTask(id: string, payload: { selectedNodeIds: string[]; fromNodeId?: string }): Promise<Task> {
-    if (import.meta.env?.DEV) {
-      console.log(`[UI:API] 请求流水线定制重试任务 [${id}]:`, payload);
-    }
-    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/custom-retry`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  }
-
-  // 任务级节点覆盖：只改本任务执行时的节点配置/参数，流水线模板不受影响
-  async setTaskNodeOverride(
-    id: string,
-    payload: {
-      nodeId: string;
-      params?: Record<string, string> | null;
-      config?: Record<string, any> | null;
-      reset?: boolean;
-    }
-  ): Promise<Task> {
-    if (import.meta.env?.DEV) {
-      console.log(`[UI:API] 更新任务级节点覆盖 [${id}]:`, payload);
-    }
-    return requestJson<Task>(`${BASE_URL}/api/tasks/${id}/node-override`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
     });
   }
 

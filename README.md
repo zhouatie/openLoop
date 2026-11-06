@@ -10,9 +10,9 @@
 
 | 能力 | 说明 |
 | :--- | :--- |
-| **可视化 DAG 编排** | 基于 React Flow 的节点编排器，支持拖拽连线、条件分支、节点级参数、配方（Recipe）复用与 AI 编排助手。 |
+| **Markdown 流水线** | 一条流水线 = 一份人工写的流程文档：二级标题即步骤，编排 Agent 读文档调受控工具执行；文档随仓库同步、可评审、可 diff。 |
 | **智能体工作台** | 内置多轮 Agent 会话：会话树分支、`@` 文件引用与斜杠指令、工具卡与推理折叠、变更文件清单与逐文件 Diff 审阅、任务级子代理编排。 |
-| **任务看板全生命周期** | `Inbox → 待处理 → 执行中 → 待验收 → 已完成` 泳道流转，卡片内嵌流水线时间轴、节点日志与人工卡点。 |
+| **任务看板全生命周期** | `Inbox → 待处理 → 执行中 → 待验收 → 已完成` 泳道流转，卡片内嵌步骤时间轴、步骤日志与人工卡点。 |
 | **Worktree 沙箱隔离** | 每个任务自动创建 Git Worktree、软链共享 `node_modules`、动态分配端口与独立数据目录，多任务并发互不干扰。 |
 | **QA 自动化（Web / Android / iOS）** | 基于 Midscene 多模态视觉驱动；用例套件、时间轴回放、截图动图产物；移动端未配置模型密钥时自动降级为 ADB / WDA 源码树直通模式。 |
 | **定时巡检与自动化任务** | 按周期轮询 CLI 脚本、GitHub Issue、推特查询或自定义命令，命中即创建任务或直连流水线。 |
@@ -27,9 +27,9 @@
 ```
 openLoop/
 ├── packages/
-│   ├── core/       # DAG 调度引擎、任务状态机、执行器、SQLite 存储、Agent 会话宿主、QA 运行时、HTTP/WebSocket 服务
+│   ├── core/       # 流水线调度、任务状态机、执行器、SQLite 存储、Agent 会话宿主、QA 运行时、HTTP/WebSocket 服务
 │   ├── cli/        # openloop 命令行客户端（daemon / workflow / task / plugin / qa / run）
-│   └── desktop/    # Electron + React 桌面端与 Web 前端（看板、编排、Agent 工作台、插件沙箱）
+│   └── desktop/    # Electron + React 桌面端与 Web 前端（看板、流水线、Agent 工作台、插件沙箱）
 ├── docs/           # 架构、插件系统、设计系统、移动端 QA 文档
 ├── scripts/        # 开发沙箱、端口清理、数据克隆、打包与部署脚本
 └── build/          # 应用图标与签名配置
@@ -144,11 +144,9 @@ pnpm cli task list
 pnpm cli task show <task_id>
 pnpm cli task logs <task_id> -f
 
-# 人工卡点：通过 / 驳回 / 跳过节点 / 单独重试节点
+# 人工卡点：通过 / 驳回
 pnpm cli task approve <task_id> -c "动图符合预期，用例通过"
 pnpm cli task approve <task_id> --reject -c "页面断言未通过"
-pnpm cli task skip <task_id> [nodeId]
-pnpm cli task retry-node <task_id> [nodeId]
 
 # QA 自动化
 pnpm cli qa list

@@ -95,7 +95,7 @@ import { SelectParentTaskModal } from '../components/SelectParentTaskModal';
 import { InboxQuickAdd } from '../components/InboxQuickAdd';
 import { LinkExistingTasksModal } from '../components/LinkExistingTasksModal';
 import { toast } from '../components/Toast';
-import { resolveNodeMeta, resolveQaTestNodeId } from '../utils/nodeMeta';
+import { resolveNodeMeta } from '../utils/nodeMeta';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
 import { orderSubTasksForDisplay } from '../utils/subtaskOrder';
 import {
@@ -433,9 +433,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
-  const [skippingTaskId, setSkippingTaskId] = useState<string | null>(null);
-  const [retryingNodeKey, setRetryingNodeKey] = useState<string | null>(null);
-  const [isCustomRetrying, setIsCustomRetrying] = useState<boolean>(false);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
 
   const handleCancelTask = async (taskId: string) => {
@@ -977,33 +974,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
 
-  // 确认当前节点已完成，手动放行流水线（兜底跳过）
-  const handleConfirmCompleteNode = async () => {
-    if (!selectedTask) return;
-    if (import.meta.env?.DEV) {
-      console.log('[UI:AgentChat] 请求跳过节点并放行流水线:', {
-        taskId: selectedTask.id,
-        nodeId: selectedTask.currentNodeId,
-      });
-    }
-    try {
-      // 乐观更新：提示条立即消失，无需等待下游节点调度完成
-      setSessionState((prev) =>
-        prev ? { ...prev, awaitingInput: false, isBusy: true } : prev
-      );
-      const updated = await api.completeNode(selectedTask.id, selectedTask.currentNodeId);
-      setSelectedTask(updated);
-      toast.info('已跳过当前节点，流水线继续推进');
-      const latestSession = await api.getTaskSession(selectedTask.id);
-      setSessionState(latestSession);
-    } catch (e: any) {
-      if (import.meta.env?.DEV) {
-        console.error('[UI:AgentChat] 确认节点完成失败:', e);
-      }
-      toast.error(`放行失败: ${e?.message || '未知错误'}`);
-    }
-  };
-
   // 看板列排序规则状态 (持久化存取与各列独立/全局联动)
   const [columnSortConfig, setColumnSortConfig] = useState<ColumnSortConfigMap>(() =>
     loadColumnSortConfig(COLUMNS.map((c) => c.key))
@@ -1267,111 +1237,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
   };
 
-  const handleSkipNode = async (taskId: string, nodeId?: string) => {
-    setSkippingTaskId(taskId);
-    if (import.meta.env?.DEV) {
-      console.log('[KanbanView] 手动跳过节点:', { taskId, nodeId });
-    }
-    try {
-      const updated = await api.skipNode(taskId, nodeId);
-      if (updated && onTaskUpdate) {
-        onTaskUpdate(updated);
-      }
-      if (selectedTask?.id === taskId && updated) {
-        setSelectedTask(updated);
-      }
-      toast.info('节点已跳过');
-      await onRefresh();
-    } catch (e: any) {
-      if (import.meta.env?.DEV) {
-        console.error('[KanbanView] 跳过节点失败:', e);
-      }
-      toast.error(`跳过节点失败: ${e?.message || '未知错误'}`);
-    } finally {
-      setSkippingTaskId(null);
-    }
-  };
-
-  const handleRetryNode = async (taskId: string, nodeId?: string) => {
-    const key = `${taskId}:${nodeId || ''}`;
-    setRetryingNodeKey(key);
-    if (import.meta.env?.DEV) {
-      console.log('[KanbanView] 仅重试单节点:', { taskId, nodeId });
-    }
-    try {
-      const updated = await api.retryNode(taskId, nodeId);
-      if (updated && onTaskUpdate) {
-        onTaskUpdate(updated);
-      }
-      if (selectedTask?.id === taskId && updated) {
-        setSelectedTask(updated);
-      }
-      toast.info('已触发节点重试');
-      await onRefresh();
-    } catch (e: any) {
-      if (import.meta.env?.DEV) {
-        console.error('[KanbanView] 重试节点失败:', e);
-      }
-      toast.error(`重试节点失败: ${e?.message || '未知错误'}`);
-    } finally {
-      setRetryingNodeKey(null);
-    }
-  };
-
-  const handleCustomRetry = async (taskId: string, payload: { selectedNodeIds: string[]; fromNodeId?: string }) => {
-    setIsCustomRetrying(true);
-    if (import.meta.env?.DEV) {
-      console.log(`[KanbanView] 触发任务 [${taskId}] 定制重试:`, payload);
-    }
-    try {
-      const updated = await api.customRetryTask(taskId, payload);
-      if (updated && onTaskUpdate) {
-        onTaskUpdate(updated);
-      }
-      if (selectedTask?.id === taskId && updated) {
-        setSelectedTask(updated);
-      }
-      toast.info(`已按定制勾选启动 ${payload.selectedNodeIds.length} 个节点重试`);
-      await onRefresh();
-    } catch (e: any) {
-      if (import.meta.env?.DEV) {
-        console.error('[KanbanView] 定制重试失败:', e);
-      }
-      toast.error(`定制重试失败: ${e?.message || '未知错误'}`);
-    } finally {
-      setIsCustomRetrying(false);
-    }
-  };
-
-  // 任务级节点覆盖：仅改变本任务下次执行的节点参数，流水线模板保持不变
-  const handleNodeOverride = async (
-    taskId: string,
-    payload: {
-      nodeId: string;
-      params?: Record<string, string> | null;
-      config?: Record<string, any> | null;
-      reset?: boolean;
-    }
-  ) => {
-    if (import.meta.env?.DEV) {
-      console.log(`[KanbanView] 更新任务 [${taskId}] 节点级覆盖:`, payload);
-    }
-    try {
-      const updated = await api.setTaskNodeOverride(taskId, payload);
-      if (updated) {
-        onTaskUpdate?.(updated);
-        if (selectedTask?.id === taskId) setSelectedTask(updated);
-      }
-      return updated;
-    } catch (e: any) {
-      if (import.meta.env?.DEV) {
-        console.error('[KanbanView] 节点级覆盖保存失败:', e);
-      }
-      toast.error(`参数保存失败: ${e?.message || '未知错误'}`);
-      throw e;
-    }
-  };
-
   const handleMoveTaskColumn = async (taskId: string, targetCol: KanbanColumn) => {
     const currentTask = tasks.find((t) => t.id === taskId);
     if (!currentTask) return;
@@ -1581,10 +1446,9 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     }
 
     // 1. 立即乐观更新，卡片平滑流转，彻底避免全看板重置与数据空闪
-    const wf = wfMap.get(currentTask.workflowId);
-    const nextEdges = wf?.edges.filter((e) => e.source === currentTask.currentNodeId) || [];
-    const nextCol: KanbanColumn = approved ? (nextEdges.length > 0 ? 'in_progress' : 'done') : 'backlog';
-    const nextStatus = approved ? (nextEdges.length > 0 ? 'running' : 'completed') : 'failed';
+    // 通过后编排继续推进，真实终态以服务端返回为准
+    const nextCol: KanbanColumn = approved ? 'in_progress' : 'backlog';
+    const nextStatus = approved ? 'running' : 'failed';
     const optimisticTask: Task = {
       ...currentTask,
       kanbanColumn: nextCol,
@@ -2506,7 +2370,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         cancellingTaskId={cancellingTaskId}
                         movingTaskId={movingTaskId}
                         runningTaskId={runningTaskId}
-                        skippingTaskId={skippingTaskId}
                         approvingId={approvingId}
                         onSelectTask={setSelectedTask}
                         onCancelTask={handleCancelTask}
@@ -2516,7 +2379,6 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         onDeleteTask={setTaskToDelete}
                         onRunTask={handleRunTask}
                         onArchiveTask={handleArchiveTask}
-                        onSkipNode={handleSkipNode}
                         onVisualAcceptance={setVisualAcceptanceTask}
                         onApprove={handleApprove}
                         onSetParentTask={(t) => setParentSelectTask(t)}
@@ -2608,23 +2470,19 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
             // 档案视图切换：懒加载首帧 + 常驻隐藏，切换不丢失滚动位置与展开状态
             const paneClass = (active: boolean) =>
               `flex-1 min-h-0 p-5 overflow-y-auto space-y-3.5 text-[12px]${active ? '' : ' hidden'}`;
-            const wfNodes = wfDef?.nodes || [];
-            // 脚本与 Markdown 流水线的步骤在执行时才产生，没有静态节点：进度改按已记录步骤统计
+            // 步骤在执行时才产生，进度按已记录步骤统计
             const runList = Object.values(curTask.nodeRuns || {});
             const isFinishedRun = (status?: string) => status === 'success' || status === 'skipped';
-            const finishedNodeCount =
-              wfNodes.length > 0
-                ? wfNodes.filter((node) => isFinishedRun(curTask.nodeRuns?.[node.id]?.status)).length
-                : runList.filter((run) => isFinishedRun(run.status)).length;
-            const nodeTotal = wfNodes.length || runList.length;
+            const finishedNodeCount = runList.filter((run) => isFinishedRun(run.status)).length;
+            const nodeTotal = runList.length;
             const nodePercent = nodeTotal > 0 ? Math.round((finishedNodeCount / nodeTotal) * 100) : 0;
             const currentNodeMeta = curTask.currentNodeId
-              ? resolveNodeMeta(curTask.currentNodeId, wfDef, workflows)
+              ? resolveNodeMeta(curTask.currentNodeId, curTask.nodeRuns?.[curTask.currentNodeId])
               : null;
-            // 动态步骤的节点 id 只是执行流水号，名称取步骤记录自报的名字
+            // 动态步骤的 id 只是执行流水号，名称取步骤记录自报的名字
             const currentStepName =
               (curTask.currentNodeId && (curTask.nodeRuns?.[curTask.currentNodeId]?.output as any)?.stepName) || '';
-            const currentNodeLabel = (wfNodes.length > 0 ? currentNodeMeta?.name : currentStepName) || '流水线就绪';
+            const currentNodeLabel = currentStepName || currentNodeMeta?.name || '流水线就绪';
 
             return (
               <div
@@ -2821,7 +2679,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           className={`h-[26px] px-2.5 rounded-[4px] text-[11.5px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
                             drawerTab === 'timeline' ? 'bg-white text-[#1c1c21] shadow-sm font-semibold' : 'text-[#63636b] hover:text-[#1c1c21]'
                           }`}
-                          title="查看流水线各节点的执行时序、参数与产物"
+                          title="查看流水线各步骤的执行时序与产物"
                         >
                           <GitCommit size={12} />
                           <span>执行轨迹</span>
@@ -2851,11 +2709,11 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         )}
                       </div>
 
-                      {/* 当前节点焦点与整条流水线进度微带 */}
+                      {/* 当前步骤焦点与整条流水线进度微带 */}
                       <div className="flex items-center gap-2 min-w-0">
                         <div
                           className="flex items-center gap-1.5 min-w-0"
-                          title={`当前节点：${currentNodeLabel} · 已完成 ${finishedNodeCount}/${nodeTotal} 个步骤`}
+                          title={`当前步骤：${currentNodeLabel} · 已完成 ${finishedNodeCount}/${nodeTotal} 个步骤`}
                         >
                           <span className="text-[10px] font-mono text-[#85858d] shrink-0">
                             {finishedNodeCount}/{nodeTotal}
@@ -2953,11 +2811,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                               {wfDef?.name || curTask.workflowId}
                             </span>
                             <span className="shrink-0 px-1 py-[0.5px] rounded-[3px] bg-[#f4f4f6] border border-[#e3e3e8] text-[9.5px] font-mono text-[#71717a]">
-                              {wfDef?.markdown
-                                ? 'Markdown 流水线'
-                                : wfNodes.length > 0
-                                  ? `${wfNodes.length} 节点`
-                                  : '0 节点'}
+                              Markdown 流水线
                             </span>
                           </div>
                         </div>
@@ -3020,24 +2874,16 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                       </div>
                     )}
 
-                    {/* TAB 2: 节点执行轨迹 */}
+                    {/* TAB 2: 步骤执行轨迹 */}
                     {visitedPanes.timeline && (
                       <div className={paneClass(drawerTab === 'timeline')}>
                     <NodeExecutionTimeline
                       task={curTask}
                       workflow={wfDef}
-                      allWorkflows={workflows}
                       onOpenTaskLogs={onOpenTaskLogs}
                       onPreviewArtifact={(art) => setPreviewArtifact(art)}
                       onApprove={(taskId, approved, feedback) => handleApprove(taskId, approved, feedback)}
                       isApproving={approvingId === curTask.id}
-                      onSkipNode={(taskId, nodeId) => handleSkipNode(taskId, nodeId)}
-                      onRetryNode={(taskId, nodeId) => handleRetryNode(taskId, nodeId)}
-                      isSkipping={skippingTaskId === curTask.id}
-                      isRetryingNode={retryingNodeKey?.startsWith(curTask.id)}
-                      onCustomRetry={handleCustomRetry}
-                      isCustomRetrying={isCustomRetrying}
-                      onNodeOverride={handleNodeOverride}
                     />
                       </div>
                     )}
@@ -3181,33 +3027,13 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                           )}
                           <button
                             type="button"
-                            disabled={skippingTaskId === curTask.id}
-                            onClick={() => handleSkipNode(curTask.id)}
-                            className="h-[28px] px-2 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                            title="跳过当前报错节点继续后续链路"
-                          >
-                            <SkipForward size={11} />
-                            <span>跳过</span>
-                          </button>
-                          <button
-                            type="button"
                             disabled={runningTaskId === curTask.id}
                             onClick={() => handleRunTask(curTask.id)}
-                            className="h-[28px] px-2.5 rounded-[6px] border border-[#e3e3e8] bg-white hover:bg-[#f4f4f6] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                            className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
                             title="重新从头执行整条流水线"
                           >
-                            <Play size={10.5} />
-                            <span>整单重跑</span>
-                          </button>
-                          <button
-                            type="button"
-                            disabled={retryingNodeKey === `${curTask.id}:`}
-                            onClick={() => handleRetryNode(curTask.id)}
-                            className="h-[28px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                            title="仅重新执行发生报错的节点"
-                          >
                             <RotateCcw size={11} strokeWidth={2.4} />
-                            <span>重试节点</span>
+                            <span>{runningTaskId === curTask.id ? '重跑中...' : '重新执行'}</span>
                           </button>
                         </>
                       )}
@@ -3863,7 +3689,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                                               setDrawerTab('overview');
                                             }}
                                             className="h-[24px] px-1.5 rounded-[4px] border border-[#e3e3e8] hover:bg-[#f4f4f6] text-[#63636b] hover:text-[#1c1c21] flex items-center gap-0.5 text-[10px] transition-colors cursor-pointer"
-                                            title="聚焦并打开此子工序的独立节点运行图与上下文"
+                                            title="聚焦并打开此子工序的独立运行记录与上下文"
                                           >
                                             <Eye size={10.5} />
                                             <span>查看</span>
@@ -4043,7 +3869,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
         isOpen={!!taskToDelete}
         title="删除任务"
         targetName={taskToDelete?.title}
-        description="删除后此任务的所有执行日志与节点时序历史将被彻底清除，此操作不可恢复。"
+        description="删除后此任务的所有执行日志与步骤时序历史将被彻底清除，此操作不可恢复。"
         confirmText="彻底删除"
         cancelText="取消"
         variant="danger"

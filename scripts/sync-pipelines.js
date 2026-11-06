@@ -166,8 +166,6 @@ function runPush() {
       tags: parsed.header.tags,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      nodes: [],
-      edges: [],
       markdown: parsed.body,
     });
     ensureHeaderId(file, parsed, id);

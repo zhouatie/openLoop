@@ -22,6 +22,7 @@
       "@openloop/core/task-summary": ["../core/src/store/task-summary.ts"],
       "@openloop/core/agent-format": ["../core/src/agent/agent-format.ts"],
       "@openloop/core/agent-events": ["../core/src/agent/agent-events.ts"],
+      "@openloop/core/markdown-format": ["../core/src/pipeline/markdown-format.ts"],
       "@openloop/core/types": ["../core/src/types/index.ts"]
     }
   },

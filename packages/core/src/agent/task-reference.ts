@@ -43,7 +43,7 @@ export interface TaskReferenceSnapshot {
   status: string;
   kanbanColumn: string;
   kind: string;
-  workflow: { id: string; name: string; nodeCount: number } | null;
+  workflow: { id: string; name: string } | null;
   workspace: string | null;
   description: string;
   subtasks: Array<{ title: string; status: string; workflowId: string }>;
@@ -110,7 +110,7 @@ export function projectTaskSnapshot(task: Task, store: Store): TaskReferenceSnap
     kanbanColumn: task.kanbanColumn,
     kind: task.kind || 'single',
     workflow: workflow
-      ? { id: workflow.id, name: workflow.name, nodeCount: Array.isArray(workflow.nodes) ? workflow.nodes.length : 0 }
+      ? { id: workflow.id, name: workflow.name }
       : null,
     workspace: task.workspace || null,
     description: clip(task.description, MAX_DESCRIPTION_CHARS),

@@ -21,14 +21,10 @@ import {
   FileImage,
   ExternalLink,
   AlertTriangle,
-  Play,
-  RotateCcw,
   CheckSquare,
-  SlidersHorizontal,
-  Undo2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Task, WorkflowDefinition, NodeRun, NodeStatus, WorkflowNode } from '@openloop/core';
+import type { Task, WorkflowDefinition, NodeRun, NodeStatus } from '@openloop/core';
 import {
   resolveNodeMeta,
   formatDurationHuman,
@@ -39,28 +35,11 @@ import {
 interface NodeExecutionTimelineProps {
   task: Task;
   workflow?: WorkflowDefinition | null;
-  allWorkflows?: WorkflowDefinition[];
   onOpenTaskLogs: (taskId: string, nodeId?: string) => void;
   onOpenAgentSession?: (taskId: string, nodeId: string, nodeName: string) => void;
   onPreviewArtifact?: (artifact: { name: string; type: string; path: string }) => void;
   onApprove?: (taskId: string, approved: boolean, feedback?: string) => void;
   isApproving?: boolean;
-  onSkipNode?: (taskId: string, nodeId: string) => void;
-  onRetryNode?: (taskId: string, nodeId: string) => void;
-  isSkipping?: boolean;
-  isRetryingNode?: boolean;
-  onCustomRetry?: (taskId: string, payload: { selectedNodeIds: string[]; fromNodeId?: string }) => void;
-  isCustomRetrying?: boolean;
-  /** 任务级节点覆盖：仅当前任务生效，不写回流水线模板 */
-  onNodeOverride?: (
-    taskId: string,
-    payload: {
-      nodeId: string;
-      params?: Record<string, string> | null;
-      config?: Record<string, any> | null;
-      reset?: boolean;
-    }
-  ) => Promise<unknown> | void;
 }
 
 interface TimelineItem {
@@ -72,13 +51,12 @@ interface TimelineItem {
   isDeploy?: boolean;
   run?: NodeRun;
   status: NodeStatus;
-  wfNode?: WorkflowNode;
   durationSec?: number;
   timeRangeStr?: string;
   order: number;
 }
 
-// 节点类型标识：中性灰文字 + 语义微图标着色，替代高饱和彩色胶囊
+// 步骤类型标识：中性灰文字 + 语义微图标着色，替代高饱和彩色胶囊
 const NODE_TYPE_LABELS: Record<string, { label: string; Icon: LucideIcon; tint: string }> = {
   agent: { label: 'AI Agent', Icon: Bot, tint: 'text-[#7c3aed]' },
   'qa-approval': { label: '人工门禁', Icon: ShieldCheck, tint: 'text-[#b45309]' },
@@ -96,114 +74,18 @@ const MICRO_BTN =
 export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
   task,
   workflow,
-  allWorkflows,
   onOpenTaskLogs,
   onOpenAgentSession,
   onPreviewArtifact,
   onApprove,
   isApproving = false,
-  onSkipNode,
-  onRetryNode,
-  isSkipping = false,
-  isRetryingNode = false,
-  onCustomRetry,
-  isCustomRetrying = false,
-  onNodeOverride,
 }) => {
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // 节点参数微调编辑器状态（单开，保证内存占用与视觉噪音最小）
-  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
-  const [draftParams, setDraftParams] = useState<Record<string, string>>({});
-  const [draftContent, setDraftContent] = useState<string>('');
-  const [contentField, setContentField] = useState<'command' | 'prompt'>('command');
-  const [showContentEditor, setShowContentEditor] = useState<boolean>(false);
-  const [overrideSaveState, setOverrideSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const overrideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingOverrideRef = useRef<{
-    nodeId: string;
-    params?: Record<string, string>;
-    config?: Record<string, any>;
-    reset?: boolean;
-  } | null>(null);
-  const savedTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 定制重试模式与勾选节点集合
-  const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
-  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
-
-  const handleEnterCustomMode = () => {
-    setIsCustomMode(true);
-    const nextSet = new Set<string>();
-    timelineItems.forEach((it) => nextSet.add(it.id));
-    setSelectedNodes(nextSet);
-  };
-
-  const handleToggleNodeSelection = (nodeId: string) => {
-    setSelectedNodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
-      }
-      return next;
-    });
-  };
-
-  const handleRunFromHere = (targetIdx: number) => {
-    const next = new Set<string>();
-    for (let i = 0; i < timelineItems.length; i++) {
-      if (i >= targetIdx) {
-        next.add(timelineItems[i].id);
-      }
-    }
-    setSelectedNodes(next);
-  };
-
-  // 直接从指定节点起跑：保留前序成功成果，只重跑本节点及其后续全部节点
-  const handleRerunFromNode = (targetIdx: number) => {
-    if (!onCustomRetry || isCustomRetrying) return;
-    const ids: string[] = [];
-    for (let i = targetIdx; i < timelineItems.length; i++) {
-      ids.push(timelineItems[i].id);
-    }
-    if (ids.length === 0) return;
-    if (import.meta.env?.DEV) {
-      console.log(`[NodeExecutionTimeline] 从节点 [${ids[0]}] 起重跑, 共 ${ids.length} 个节点`, ids);
-    }
-    onCustomRetry(task.id, { selectedNodeIds: ids, fromNodeId: ids[0] });
-  };
-
-  const handleSelectAll = () => {
-    const next = new Set<string>();
-    timelineItems.forEach((it) => next.add(it.id));
-    setSelectedNodes(next);
-  };
-
-  const handleSelectNone = () => {
-    setSelectedNodes(new Set());
-  };
-
-  const handleExecuteCustomRetry = () => {
-    if (!onCustomRetry) return;
-    const selectedList = Array.from(selectedNodes);
-    if (selectedList.length === 0) return;
-    // 以时间线中最早被勾选的节点作为起点，未勾选的前序节点保留既有成果
-    const firstSelected = timelineItems.find((it) => selectedNodes.has(it.id));
-    onCustomRetry(task.id, {
-      selectedNodeIds: selectedList,
-      fromNodeId: firstSelected?.id,
-    });
-    setIsCustomMode(false);
-  };
-
-  // 整理时间线全部节点（结合工作流定义与实际运行记录）
+  // 时间线全部步骤：只按步骤执行记录还原，顺序取开始时间
   const timelineItems: TimelineItem[] = useMemo(() => {
     const runs = task.nodeRuns || {};
-    const items: TimelineItem[] = [];
-    const visitedNodeIds = new Set<string>();
 
     const formatTime = (ts?: number) => {
       if (!ts) return '';
@@ -214,63 +96,11 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
       return `${h}:${m}:${s}`;
     };
 
-    // 1. 如果有工作流定义，按工作流编排次序遍历
-    if (workflow?.nodes && workflow.nodes.length > 0) {
-      workflow.nodes.forEach((wn, idx) => {
-        visitedNodeIds.add(wn.id);
-        const meta = resolveNodeMeta(wn.id, workflow, allWorkflows);
-        const run = runs[wn.id];
+    const items: TimelineItem[] = Object.entries(runs).map(([nid, run]) => {
+      const meta = resolveNodeMeta(nid, run);
 
-        let status: NodeStatus = 'pending';
-        if (run) {
-          status = run.status;
-        } else if (task.status === 'running' && task.currentNodeId === wn.id) {
-          status = 'running';
-        } else if (task.status === 'waiting_approval' && task.currentNodeId === wn.id) {
-          status = 'waiting_approval';
-        }
-
-        let durationSec: number | undefined;
-        let timeRangeStr: string | undefined;
-
-        if (run?.startedAt && run?.finishedAt) {
-          durationSec = (run.finishedAt - run.startedAt) / 1000;
-          timeRangeStr = `${formatTime(run.startedAt)} ~ ${formatTime(run.finishedAt)}`;
-        } else if (run?.startedAt) {
-          timeRangeStr = `${formatTime(run.startedAt)} 开始`;
-        }
-
-        items.push({
-          id: wn.id,
-          name: meta.name,
-          description: meta.description,
-          type: meta.type,
-          isGit: meta.isGit,
-          isDeploy: meta.isDeploy,
-          run,
-          status,
-          wfNode: wn,
-          durationSec,
-          timeRangeStr,
-          order: idx + 1,
-        });
-      });
-    }
-
-    // 2. 补充在 nodeRuns 中存在但未在 workflow.nodes 出现的动态节点（如重试或动态注入）
-    Object.entries(runs).forEach(([nid, run]) => {
-      if (visitedNodeIds.has(nid)) return;
-      visitedNodeIds.add(nid);
-
-      const baseMeta = resolveNodeMeta(nid, workflow, allWorkflows);
-      // 流水线步骤自报名字与类型，直接用步骤记录里的元信息覆盖推断结果
-      const stepOutput = run?.output && typeof run.output === 'object' ? (run.output as any) : null;
-      const meta = stepOutput?.stepName
-        ? { ...baseMeta, name: stepOutput.stepName, type: (stepOutput.stepType as any) || baseMeta.type }
-        : baseMeta;
       let durationSec: number | undefined;
       let timeRangeStr: string | undefined;
-
       if (run.startedAt && run.finishedAt) {
         durationSec = (run.finishedAt - run.startedAt) / 1000;
         timeRangeStr = `${formatTime(run.startedAt)} ~ ${formatTime(run.finishedAt)}`;
@@ -278,7 +108,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
         timeRangeStr = `${formatTime(run.startedAt)} 开始`;
       }
 
-      items.push({
+      return {
         id: nid,
         name: meta.name,
         description: meta.description,
@@ -289,24 +119,16 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
         status: run.status,
         durationSec,
         timeRangeStr,
-        order: items.length + 1,
-      });
+        order: 0,
+      };
     });
 
-    // 若无工作流定义，按启动时序升序排序
-    if (!workflow?.nodes || workflow.nodes.length === 0) {
-      items.sort((a, b) => {
-        const tA = a.run?.startedAt || 0;
-        const tB = b.run?.startedAt || 0;
-        return tA - tB;
-      });
-      items.forEach((item, idx) => {
-        item.order = idx + 1;
-      });
-    }
-
+    items.sort((a, b) => (a.run?.startedAt || 0) - (b.run?.startedAt || 0));
+    items.forEach((item, idx) => {
+      item.order = idx + 1;
+    });
     return items;
-  }, [task, workflow, allWorkflows]);
+  }, [task]);
 
   // 统计概览指标
   const metrics = useMemo(() => {
@@ -344,118 +166,6 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  // ===== 任务级节点覆盖：失焦或停输 600ms 自动落盘，无需保存按钮 =====
-  const flushOverride = useCallback(() => {
-    if (overrideTimerRef.current) {
-      clearTimeout(overrideTimerRef.current);
-      overrideTimerRef.current = null;
-    }
-    const pending = pendingOverrideRef.current;
-    pendingOverrideRef.current = null;
-    if (!pending || !onNodeOverride) return;
-    if (import.meta.env?.DEV) {
-      console.log('[NodeExecutionTimeline] 落盘任务级节点覆盖:', pending);
-    }
-    setOverrideSaveState('saving');
-    Promise.resolve(onNodeOverride(task.id, pending))
-      .then(() => {
-        setOverrideSaveState('saved');
-        if (savedTipTimerRef.current) clearTimeout(savedTipTimerRef.current);
-        savedTipTimerRef.current = setTimeout(() => setOverrideSaveState('idle'), 1600);
-      })
-      .catch(() => setOverrideSaveState('idle'));
-  }, [onNodeOverride, task.id]);
-
-  const queueOverride = useCallback(
-    (payload: { nodeId: string; params?: Record<string, string>; config?: Record<string, any> }) => {
-      pendingOverrideRef.current = payload;
-      if (overrideTimerRef.current) clearTimeout(overrideTimerRef.current);
-      overrideTimerRef.current = setTimeout(() => flushOverride(), 600);
-    },
-    [flushOverride]
-  );
-
-  // 卸载时只清理定时器，不向已卸载组件回写状态
-  useEffect(
-    () => () => {
-      if (overrideTimerRef.current) clearTimeout(overrideTimerRef.current);
-      if (savedTipTimerRef.current) clearTimeout(savedTipTimerRef.current);
-    },
-    []
-  );
-
-  // 参数的模板原值：上游微调值 > 任务上下文 > 流水线变量，用于展示当前生效值与还原
-  const resolveTemplateParamValue = (key: string): string => {
-    if (task.context?.nodeOverrides && typeof task.context.nodeOverrides === 'object') {
-      for (const ov of Object.values(task.context.nodeOverrides) as any[]) {
-        if (ov?.params?.[key] !== undefined && ov?.params?.[key] !== '') {
-          return String(ov.params[key]);
-        }
-      }
-    }
-    const raw = task.context?.[key] ?? workflow?.variables?.[key] ?? '';
-    return raw === undefined || raw === null ? '' : String(raw);
-  };
-
-  const openParamEditor = (item: TimelineItem) => {
-    if (editingNodeId === item.id) {
-      flushOverride();
-      setEditingNodeId(null);
-      return;
-    }
-    flushOverride();
-    const cfg: any = item.wfNode?.config || {};
-    const override: any = task.context?.nodeOverrides?.[item.id] || {};
-    const decls: any[] = Array.isArray(cfg.editableParams) ? cfg.editableParams : [];
-    const nextParams: Record<string, string> = {};
-    decls.forEach((d) => {
-      if (!d?.key) return;
-      nextParams[d.key] = override?.params?.[d.key] ?? resolveTemplateParamValue(d.key);
-    });
-    const field: 'command' | 'prompt' = cfg.command ? 'command' : 'prompt';
-    setDraftParams(nextParams);
-    setContentField(field);
-    setDraftContent(String(override?.config?.[field] ?? cfg[field] ?? ''));
-    setShowContentEditor(false);
-    setEditingNodeId(item.id);
-    if (import.meta.env?.DEV) {
-      console.log('[NodeExecutionTimeline] 打开节点参数微调:', item.id, nextParams);
-    }
-  };
-
-  const handleParamInput = (nodeId: string, key: string, value: string) => {
-    const nextParams = { ...draftParams, [key]: value };
-    setDraftParams(nextParams);
-    queueOverride({ nodeId, params: nextParams });
-  };
-
-  const handleContentInput = (nodeId: string, value: string) => {
-    setDraftContent(value);
-    queueOverride({ nodeId, config: { [contentField]: value } });
-  };
-
-  const handleResetOverride = (item: TimelineItem) => {
-    if (overrideTimerRef.current) {
-      clearTimeout(overrideTimerRef.current);
-      overrideTimerRef.current = null;
-    }
-    pendingOverrideRef.current = null;
-    const cfg: any = item.wfNode?.config || {};
-    const decls: any[] = Array.isArray(cfg.editableParams) ? cfg.editableParams : [];
-    const nextParams: Record<string, string> = {};
-    decls.forEach((d) => {
-      if (d?.key) nextParams[d.key] = resolveTemplateParamValue(d.key);
-    });
-    setDraftParams(nextParams);
-    setDraftContent(String(cfg[contentField] ?? ''));
-    if (import.meta.env?.DEV) {
-      console.log('[NodeExecutionTimeline] 还原节点模板:', item.id);
-    }
-    if (onNodeOverride) {
-      Promise.resolve(onNodeOverride(task.id, { nodeId: item.id, reset: true })).catch(() => {});
-    }
   };
 
   const renderTypeBadge = (item: TimelineItem) => {
@@ -554,7 +264,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
       <div className="p-4 rounded-[7px] border border-dashed border-[#e3e3e8] text-center text-[#85858d] text-[11.5px]">
         {workflow
           ? `流水线「${workflow.name}」已关联，尚未产生步骤执行记录`
-          : '任务尚未关联工作流或未触发执行，暂无节点时序数据'}
+          : '任务尚未关联流水线或未触发执行，暂无步骤时序数据'}
       </div>
     );
   }
@@ -577,20 +287,8 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
           )}
         </div>
 
-        {/* 状态指示简报与定制重试入口 */}
+        {/* 状态指示简报 */}
         <div className="flex items-center gap-1.5">
-          {onCustomRetry && !isCustomMode && (
-            <button
-              type="button"
-              onClick={handleEnterCustomMode}
-              className="h-[22px] px-2 rounded-[5px] bg-white hover:bg-[#fafafc] text-[#1c1c21] border border-[#e3e3e8] hover:border-[#b9b9c2] text-[10.5px] font-medium flex items-center gap-1 transition-all shadow-xs active:scale-95 cursor-pointer mr-1"
-              title="自由勾选/取消流水线节点，支持按需跳过或从特定节点重跑"
-            >
-              <RotateCcw size={10} className="text-[#63636b]" />
-              <span>定制重试</span>
-            </button>
-          )}
-
           {metrics.running > 0 && (
             <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded text-[9.5px] font-medium bg-[#eeedfd] text-[#4f46e5]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] animate-ping" />
@@ -610,84 +308,23 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
         </div>
       </div>
 
-      {/* 定制重试悬浮控制抽屉条 */}
-      {isCustomMode && (
-        <div className="p-2.5 rounded-[8px] bg-[#1c1c21] text-white flex items-center justify-between text-[11px] shadow-sm animate-in fade-in slide-in-from-top-1 duration-150 select-none">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-white/95 flex items-center gap-1.5">
-              <CheckSquare size={12} className="text-[#818cf8]" />
-              <span>定制重试流水线</span>
-            </span>
-            <span className="text-white/60 font-mono text-[10px]">
-              (已选 {selectedNodes.size}/{timelineItems.length} 个节点执行)
-            </span>
-            <div className="h-3 w-[1px] bg-white/20 mx-0.5" />
-            <button
-              type="button"
-              onClick={handleSelectAll}
-              className="text-[10px] text-white/70 hover:text-white underline cursor-pointer"
-            >
-              全选
-            </button>
-            <button
-              type="button"
-              onClick={handleSelectNone}
-              className="text-[10px] text-white/70 hover:text-white underline cursor-pointer"
-            >
-              清空
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsCustomMode(false)}
-              className="h-[24px] px-2 rounded-[5px] bg-white/10 hover:bg-white/20 text-white/90 text-[10.5px] font-medium transition-colors cursor-pointer"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              disabled={selectedNodes.size === 0 || isCustomRetrying}
-              onClick={handleExecuteCustomRetry}
-              className="h-[24px] px-2.5 rounded-[5px] bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[10.5px] font-medium flex items-center gap-1 transition-all shadow-xs cursor-pointer disabled:opacity-50 active:scale-95"
-            >
-              {isCustomRetrying ? (
-                <Loader2 size={11} className="animate-spin text-white" />
-              ) : (
-                <Play size={10} className="fill-current text-white" />
-              )}
-              <span>立即执行 ({selectedNodes.size} 步)</span>
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* 垂直时间线卡片流 */}
       <div className="relative pl-6 space-y-3 before:absolute before:top-2 before:bottom-3 before:left-[9px] before:w-[2px] before:bg-[#ececf0]">
-        {timelineItems.map((item, index) => {
+        {timelineItems.map((item) => {
           const isExpanded = !!expandedNodes[item.id];
           const hasArtifacts = item.run?.artifacts && item.run.artifacts.length > 0;
           const hasError = !!item.run?.error;
-          const nodeOverride: any = task.context?.nodeOverrides?.[item.id];
-          const hasOverride = !!nodeOverride;
-          const editableParams: any[] = Array.isArray(item.wfNode?.config?.editableParams)
-            ? item.wfNode!.config.editableParams!
-            : [];
-          const isEditingParams = editingNodeId === item.id;
           const isCurrentApprovalNode =
             item.status === 'waiting_approval' && task.status === 'waiting_approval';
-          // 人工卡点清单：流水线写在步骤输出的 checklist，节点配置写在 wfNode.config
+          // 人工卡点清单：由 ask_human 步骤写进步骤输出
           const renderChecklist = (): any[] | null => {
-            const fromNode = item.wfNode?.config?.checklist;
-            if (Array.isArray(fromNode) && fromNode.length > 0) return fromNode;
             const fromStep = (item.run?.output as any)?.checklist;
             return Array.isArray(fromStep) && fromStep.length > 0 ? fromStep : null;
           };
 
           return (
             <div key={item.id} className="relative group">
-              {/* 时间线轴节点指示器 */}
+              {/* 时间线轴步骤指示器 */}
               <div className="absolute -left-6 top-2.5 z-10">
                 {renderTimelineIcon(item.status, item.order)}
               </div>
@@ -695,11 +332,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
               {/* 卡片主体 */}
               <div
                 className={`rounded-[8px] border transition-all ${
-                  isCustomMode && !selectedNodes.has(item.id)
-                    ? 'opacity-65 border-dashed border-[#d4d4d8] bg-[#fbfbfd]'
-                    : isEditingParams
-                    ? 'border-[#d8d6fb] bg-white shadow-[0_2px_8px_rgba(79,70,229,0.08)]'
-                    : item.status === 'running'
+                  item.status === 'running'
                     ? 'border-[#c7d2fe] bg-[#fafaff] shadow-[0_2px_8px_rgba(79,70,229,0.06)]'
                     : item.status === 'waiting_approval'
                     ? 'border-[#fed7aa] bg-[#fffdfa] shadow-[0_2px_8px_rgba(245,158,11,0.06)]'
@@ -716,16 +349,6 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                   {/* 第一行：序号、中文主标题、类型胶囊与状态徽标 */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      {isCustomMode && (
-                        <input
-                          type="checkbox"
-                          checked={selectedNodes.has(item.id)}
-                          onChange={() => handleToggleNodeSelection(item.id)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="w-3.5 h-3.5 rounded border-[#d4d4d8] text-[#4f46e5] focus:ring-0 cursor-pointer shrink-0"
-                          title={selectedNodes.has(item.id) ? '已勾选：执行此节点' : '未勾选：跳过此节点'}
-                        />
-                      )}
                       <span className="text-[10px] font-mono text-[#85858d] shrink-0 font-medium">
                         #{String(item.order).padStart(2, '0')}
                       </span>
@@ -734,15 +357,6 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                         {item.name}
                       </span>
                       {renderTypeBadge(item)}
-                      {hasOverride && (
-                        <span
-                          className="inline-flex items-center gap-1 text-[9.5px] font-medium text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1 py-[0.5px] rounded-[3px] shrink-0"
-                          title={`本任务已覆盖该节点 ${Object.keys(nodeOverride.params || {}).length} 个参数 / ${Object.keys(nodeOverride.config || {}).length} 项配置，流水线模板未改动`}
-                        >
-                          <span className="w-1 h-1 rounded-full bg-[#4f46e5]" />
-                          <span>本任务覆盖</span>
-                        </span>
-                      )}
                     </div>
                     <div className="shrink-0 flex items-center gap-1.5">
                       {renderStatusBadge(item.status)}
@@ -760,7 +374,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                       {/* 英文标识采用浅色等宽字体显示，便于对账但不干扰中文理解 */}
                       <span
                         className="font-mono text-[9.5px] text-[#85858d] bg-white px-1.5 py-[0.5px] rounded border border-[#e3e3e8] shrink-0"
-                        title="底层节点标识 (Node ID)"
+                        title="底层步骤标识 (Step ID)"
                       >
                         {item.id}
                       </span>
@@ -790,128 +404,52 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                       className="flex items-center gap-0.5 shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* 定制重试模式下的专属微动作（常驻） */}
-                      {isCustomMode && (
-                        <div className="flex items-center gap-1">
-                          {!selectedNodes.has(item.id) && (
-                            <span className="text-[9.5px] font-mono text-[#a1a1aa] bg-[#f4f4f6] px-1 py-[0.5px] rounded border border-[#e4e4e7]">
-                              将跳过
-                            </span>
-                          )}
+                      {/* 次级动作：悬浮卡片或键盘聚焦时浮现，非悬浮态只留展开箭头 */}
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
+                        {/* 查看 Agent 交互会话 */}
+                        {item.type === 'agent' && onOpenAgentSession && (
                           <button
                             type="button"
-                            onClick={() => handleRunFromHere(index)}
-                            className="h-[21px] px-1.5 rounded-[4px] bg-[#eff6ff] hover:bg-[#dbeafe] text-[#2563eb] border border-[#bfdbfe] text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer"
-                            title="以此节点为起点，向下执行后续所有节点，跳过前序步骤"
+                            onClick={() => onOpenAgentSession(task.id, item.id, item.name)}
+                            className={`${MICRO_BTN} text-[#85858d] hover:text-[#7c3aed] hover:bg-[#eeedfd]`}
+                            title="查看该 Agent 步骤的交互会话"
                           >
-                            <Play size={8} className="fill-current" />
-                            <span>从此执行</span>
+                            <Bot size={11} />
                           </button>
-                        </div>
-                      )}
+                        )}
 
-                      {/* 次级动作：悬浮卡片或键盘聚焦时浮现，非悬浮态只留展开箭头 */}
-                      {!isCustomMode && (
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
-                          {/* 仅重试此节点（失败节点优先，语义红） */}
-                          {item.status === 'failed' && onRetryNode && (
-                            <button
-                              type="button"
-                              disabled={isRetryingNode}
-                              onClick={() => onRetryNode(task.id, item.id)}
-                              className={`${MICRO_BTN} text-[#d64545] hover:bg-[#fbe9e9]`}
-                              title="仅重试此节点"
-                            >
-                              <RotateCcw size={11} className={isRetryingNode ? 'animate-spin' : ''} />
-                            </button>
-                          )}
+                        {/* 查看步骤日志 */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (process.env.NODE_ENV !== 'production') {
+                              console.log('[NodeExecutionTimeline] openNodeLogs:', task.id, item.id);
+                            }
+                            onOpenTaskLogs(task.id, item.id);
+                          }}
+                          className={`${MICRO_BTN} text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0]`}
+                          title="查看该步骤日志（终端已按步骤过滤）"
+                        >
+                          <Terminal size={11} />
+                        </button>
 
-                          {/* 以本节点为起点重跑后续流程（之前成功的节点保留成果） */}
-                          {item.status !== 'running' && onCustomRetry && (
-                            <button
-                              type="button"
-                              disabled={isCustomRetrying || metrics.running > 0}
-                              onClick={() => handleRerunFromNode(index)}
-                              className={`${MICRO_BTN} text-[#85858d] hover:text-[#4f46e5] hover:bg-[#eeedfd]`}
-                              title="从此重跑：本节点及其后续节点全部重跑"
-                            >
-                              <Play size={10} className="fill-current" />
-                            </button>
-                          )}
-
-                          {/* 查看 Agent 交互会话 */}
-                          {item.type === 'agent' && onOpenAgentSession && (
-                            <button
-                              type="button"
-                              onClick={() => onOpenAgentSession(task.id, item.id, item.name)}
-                              className={`${MICRO_BTN} text-[#85858d] hover:text-[#7c3aed] hover:bg-[#eeedfd]`}
-                              title="查看该 Agent 节点的交互会话"
-                            >
-                              <Bot size={11} />
-                            </button>
-                          )}
-
-                          {/* 任务级节点参数微调：仅本任务生效 */}
-                          {onNodeOverride && (
-                            <button
-                              type="button"
-                              onClick={() => openParamEditor(item)}
-                              className={`${MICRO_BTN} ${
-                                hasOverride || isEditingParams
-                                  ? 'text-[#4f46e5] bg-[#eeedfd]'
-                                  : 'text-[#85858d] hover:text-[#4f46e5] hover:bg-[#eeedfd]'
-                              }`}
-                              title="微调该节点参数（仅本任务生效，流水线模板不变）"
-                            >
-                              <SlidersHorizontal size={11} />
-                            </button>
-                          )}
-
-                          {/* 查看节点日志 */}
+                        {/* 查看步骤产物 */}
+                        {hasArtifacts && (
                           <button
                             type="button"
                             onClick={() => {
-                              if (process.env.NODE_ENV !== 'production') {
-                                console.log('[NodeExecutionTimeline] openNodeLogs:', task.id, item.id);
+                              if (item.run?.artifacts?.[0] && onPreviewArtifact) {
+                                onPreviewArtifact(item.run.artifacts[0]);
                               }
-                              onOpenTaskLogs(task.id, item.id);
                             }}
                             className={`${MICRO_BTN} text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0]`}
-                            title="查看该节点日志（终端已按节点过滤）"
+                            title={`查看产物（${item.run!.artifacts!.length} 个）`}
                           >
-                            <Terminal size={11} />
+                            <FileImage size={11} />
                           </button>
+                        )}
 
-                          {/* 查看节点产物 */}
-                          {hasArtifacts && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (item.run?.artifacts?.[0] && onPreviewArtifact) {
-                                  onPreviewArtifact(item.run.artifacts[0]);
-                                }
-                              }}
-                              className={`${MICRO_BTN} text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0]`}
-                              title={`查看产物（${item.run!.artifacts!.length} 个）`}
-                            >
-                              <FileImage size={11} />
-                            </button>
-                          )}
-
-                          {/* 跳过失败节点 */}
-                          {item.status === 'failed' && onSkipNode && (
-                            <button
-                              type="button"
-                              disabled={isSkipping}
-                              onClick={() => onSkipNode(task.id, item.id)}
-                              className={`${MICRO_BTN} text-[#85858d] hover:text-[#1c1c21] hover:bg-[#ececf0]`}
-                              title="跳过此节点，继续后续流程"
-                            >
-                              <SkipForward size={11} />
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      </div>
 
                       {/* 展开收起详情 */}
                       <button
@@ -930,116 +468,6 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                     </div>
                   </div>
                 </div>
-
-                {/* 节点参数微调编辑器：内联展开，不影响抽屉高度基准 */}
-                {isEditingParams && onNodeOverride && (
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') {
-                        flushOverride();
-                        setEditingNodeId(null);
-                      }
-                    }}
-                    className="border-t border-[#ececf0] bg-white p-2.5 rounded-b-[8px] space-y-2 animate-in fade-in-50 duration-150 select-none"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <SlidersHorizontal size={11} className="text-[#4f46e5] shrink-0" />
-                        <span className="text-[10.5px] font-medium text-[#1c1c21] shrink-0">节点参数微调</span>
-                        <span className="text-[10px] text-[#85858d] truncate">仅本任务生效，模板不变</span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {overrideSaveState === 'saving' && (
-                          <span className="text-[10px] text-[#85858d] flex items-center gap-1">
-                            <Loader2 size={9} className="animate-spin" />
-                            <span>保存中</span>
-                          </span>
-                        )}
-                        {overrideSaveState === 'saved' && (
-                          <span className="text-[10px] text-[#059669] flex items-center gap-1">
-                            <Check size={9} />
-                            <span>已保存</span>
-                          </span>
-                        )}
-                        {hasOverride && (
-                          <button
-                            type="button"
-                            onClick={() => handleResetOverride(item)}
-                            className="text-[10px] text-[#85858d] hover:text-[#1c1c21] flex items-center gap-1 cursor-pointer transition-colors"
-                            title="清除本任务覆盖，回落到流水线模板原值"
-                          >
-                            <Undo2 size={10} />
-                            <span>还原模板</span>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            flushOverride();
-                            setEditingNodeId(null);
-                          }}
-                          className="h-[21px] px-2 rounded-[4px] text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f1f1f4] text-[10.5px] font-medium cursor-pointer transition-colors"
-                        >
-                          完成
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* 节点声明的可调参数：自动渲染为一行一参 */}
-                    {editableParams.map((p) => (
-                      <div key={p.key} className="flex items-center gap-2">
-                        <label
-                          className="w-[76px] shrink-0 text-[10.5px] text-[#63636b] truncate"
-                          title={`{{${p.key}}}${p.hint ? ` · ${p.hint}` : ''}`}
-                        >
-                          {p.label || p.key}
-                        </label>
-                        <input
-                          type="text"
-                          value={draftParams[p.key] ?? ''}
-                          placeholder={p.placeholder || `{{${p.key}}}`}
-                          spellCheck={false}
-                          onChange={(e) => handleParamInput(item.id, p.key, e.target.value)}
-                          onBlur={() => flushOverride()}
-                          className="flex-1 min-w-0 h-[26px] px-2 rounded-[5px] border border-[#e3e3e8] hover:border-[#d4d4d8] focus:border-[#a5a5b0] bg-white font-mono text-[10.5px] text-[#1c1c21] outline-none transition-colors"
-                        />
-                      </div>
-                    ))}
-
-                    {editableParams.length === 0 && !showContentEditor && (
-                      <div className="text-[10.5px] text-[#85858d] leading-relaxed">
-                        该节点未声明可调参数。可展开「调整执行指令」临时改写整段命令或 Prompt。
-                      </div>
-                    )}
-
-                    {/* 高级入口：直接改写节点命令 / Prompt */}
-                    <button
-                      type="button"
-                      onClick={() => setShowContentEditor((v) => !v)}
-                      className="text-[10.5px] text-[#63636b] hover:text-[#4f46e5] flex items-center gap-1 cursor-pointer transition-colors"
-                    >
-                      <ChevronDown
-                        size={11}
-                        className={`transform transition-transform duration-200 ${
-                          showContentEditor ? 'rotate-180' : ''
-                        }`}
-                      />
-                      <span>{showContentEditor ? '收起执行指令' : '调整执行指令 (高级)'}</span>
-                    </button>
-
-                    {showContentEditor && (
-                      <textarea
-                        value={draftContent}
-                        spellCheck={false}
-                        onChange={(e) => handleContentInput(item.id, e.target.value)}
-                        onBlur={() => flushOverride()}
-                        className="w-full min-h-[88px] max-h-[320px] p-2 rounded-[5px] border border-[#e3e3e8] hover:border-[#d4d4d8] focus:border-[#a5a5b0] bg-[#fafafc] font-mono text-[10px] leading-[1.55] text-[#1c1c21] outline-none resize-y transition-colors"
-                        placeholder="留空则回落到模板原命令"
-                      />
-                    )}
-                  </div>
-                )}
 
                 {/* 展开的详情面板 */}
                 {isExpanded && (
@@ -1080,75 +508,6 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                             <Terminal size={10} />
                             <span>查看报错终端</span>
                           </button>
-                          {onSkipNode && (
-                            <button
-                              disabled={isSkipping}
-                              onClick={() => onSkipNode(task.id, item.id)}
-                              className="h-[20px] px-2 rounded-[4px] bg-white text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] hover:bg-[#f1f1f4] text-[10px] font-medium flex items-center gap-1 shadow-sm transition-all disabled:opacity-50"
-                              title="跳过此节点继续后续流程"
-                            >
-                              <SkipForward size={10} />
-                              <span>{isSkipping ? '跳过中...' : '跳过此步'}</span>
-                            </button>
-                          )}
-                          {onRetryNode && (
-                            <button
-                              disabled={isRetryingNode}
-                              onClick={() => onRetryNode(task.id, item.id)}
-                              className="h-[20px] px-2 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[10px] font-medium flex items-center gap-1 shadow-sm transition-all active:scale-95 disabled:opacity-50"
-                              title="仅重新执行此节点"
-                            >
-                              <RotateCcw size={10} />
-                              <span>{isRetryingNode ? '重试中...' : '仅重试此步'}</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 配置与指令信息（优先展示本任务生效的覆盖值） */}
-                    {item.wfNode?.config?.command && (
-                      <div>
-                        <div className="text-[10px] text-[#85858d] mb-1 font-medium flex items-center justify-between">
-                          <span className="flex items-center gap-1.5">
-                            <span>{nodeOverride?.config?.command ? '执行 Shell 指令 (本任务覆盖):' : '执行 Shell 指令:'}</span>
-                            {nodeOverride?.config?.command && (
-                              <span className="text-[9px] text-[#4f46e5] bg-[#eeedfd] border border-[#d8d6fb] px-1 rounded-[3px]">
-                                已覆盖
-                              </span>
-                            )}
-                          </span>
-                          <button
-                            onClick={() =>
-                              copyText(
-                                `cmd-${item.id}`,
-                                String(nodeOverride?.config?.command ?? item.wfNode!.config.command ?? '')
-                              )
-                            }
-                            className="text-[#85858d] hover:text-[#1c1c21] flex items-center gap-0.5"
-                          >
-                            {copiedKey === `cmd-${item.id}` ? (
-                              <Check size={10} className="text-[#189a58]" />
-                            ) : (
-                              <Copy size={10} />
-                            )}
-                            <span>{copiedKey === `cmd-${item.id}` ? '已复制' : '复制命令'}</span>
-                          </button>
-                        </div>
-                        <div className="font-mono text-[10px] text-[#1c1c21] bg-[#f8f8fa] p-2 rounded-[5px] border border-[#ececf0] whitespace-pre-wrap break-all select-all">
-                          {nodeOverride?.config?.command ?? item.wfNode.config.command}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Agent Prompt 提示词 */}
-                    {item.wfNode?.config?.prompt && (
-                      <div>
-                        <div className="text-[10px] text-[#85858d] mb-1 font-medium">
-                          Agent 提示词 / 意图指令:
-                        </div>
-                        <div className="text-[11px] text-[#4b4b53] bg-[#f8f8fa] p-2 rounded-[5px] border border-[#ececf0] whitespace-pre-wrap leading-relaxed">
-                          {item.wfNode.config.prompt}
                         </div>
                       </div>
                     )}
@@ -1170,7 +529,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                       </div>
                     )}
 
-                    {/* 节点生成产物预览 */}
+                    {/* 步骤生成产物预览 */}
                     {hasArtifacts && (
                       <div>
                         <div className="text-[10px] text-[#85858d] mb-1 font-medium">
@@ -1192,7 +551,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                       </div>
                     )}
 
-                    {/* 当前待人工审批节点内嵌操作条 */}
+                    {/* 当前待人工审批步骤内嵌操作条 */}
                     {isCurrentApprovalNode && onApprove && (
                       <div className="p-2.5 rounded-[6px] bg-[#fffbeb] border border-[#fde68a] space-y-2 mt-2">
                         <div className="text-[11px] text-[#92400e] font-medium flex items-center gap-1">
@@ -1206,7 +565,7 @@ export const NodeExecutionTimeline: React.FC<NodeExecutionTimelineProps> = ({
                             className="flex-1 h-[26px] rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-50 shadow-sm"
                           >
                             <CheckCircle2 size={12} />
-                            <span>确认通过 (放行下游)</span>
+                            <span>确认通过 (继续执行)</span>
                           </button>
                           <button
                             disabled={isApproving}
