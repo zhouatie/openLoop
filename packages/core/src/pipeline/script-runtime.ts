@@ -254,7 +254,9 @@ export class ScriptRuntime {
     run.currentStepId = stepId;
     const diff = this.captureDiff(task);
 
+    // 卡点即待验收泳道：看板依据 kanbanColumn 分流，缺这一步任务会一直停在执行中
     task.status = 'waiting_approval';
+    task.kanbanColumn = 'qa_review';
     task.currentNodeId = stepId;
     task.nodeRuns[stepId].status = 'waiting_approval';
     task.nodeRuns[stepId].output = {
@@ -298,8 +300,9 @@ export class ScriptRuntime {
       approved ? `[验收通过] ${feedback || '继续执行'}` : `[验收驳回] ${feedback || '未通过验收指标'}`
     );
 
+    // 通过后脚本继续执行，回到执行中泳道；驳回则打回待处理
     task.status = approved ? 'running' : 'failed';
-    if (!approved) task.kanbanColumn = 'backlog';
+    task.kanbanColumn = approved ? 'in_progress' : 'backlog';
 
     // 验收决策后关停沙箱靶机进程，释放端口，避免遗留孤儿服务
     try {
