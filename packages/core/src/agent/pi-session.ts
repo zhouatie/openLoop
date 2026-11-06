@@ -108,6 +108,35 @@ function splitList(value?: string): string[] | undefined {
   return list.length > 0 ? list : undefined;
 }
 
+/**
+ * 任意错误值转可读文本
+ * SDK 抛出的不一定是 Error：字符串、普通对象都可能出现，直接 String() 只会得到 [object Object]
+ */
+function describeErrorValue(value: any): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value.trim();
+  if (value instanceof Error) return value.message;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch (_) {
+    return String(value);
+  }
+}
+
+/**
+ * 扩展错误转一行可读文本
+ * SDK 的扩展错误是 { extensionPath, event, error, stack } 结构，没有 message 字段，
+ * 只把对象塞进模板字符串会丢掉「哪个扩展、哪个事件出错」这两项关键信息。
+ */
+function describeExtensionError(input: any): string {
+  if (input instanceof Error || typeof input === 'string') return describeErrorValue(input);
+  const where = [path.basename(input?.extensionPath || ''), input?.event]
+    .filter((part) => typeof part === 'string' && part)
+    .join(' ');
+  const reason = describeErrorValue(input?.error) || describeErrorValue(input);
+  return where ? `${where}: ${reason}` : reason;
+}
+
 /** 单张内联图片上限，超过则不给工具卡内联，避免快照体积失控 */
 const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_INLINE_IMAGES = 4;
@@ -359,8 +388,9 @@ export class PiSessionInstance extends EventEmitter {
       // 沿用 rpc 模式：扩展里 ctx.mode === 'tui' 的终端专属能力依旧不启用
       mode: 'rpc',
       onError: (error: any) => {
-        const text = error?.message || String(error);
-        logger.warn(`扩展运行出错: ${text}`, undefined, { taskId: this.taskId });
+        const text = describeExtensionError(error);
+        // 原始对象留给日志文件：stack 与扩展路径只在排查时用得上，不上界面时间轴
+        logger.warn(`扩展运行出错: ${text}`, error, { taskId: this.taskId });
         this.emitLog('stderr', `[扩展错误] ${text}`);
       },
     });
