@@ -3,20 +3,13 @@ import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
 import { Store } from '../store';
-import { Task, WorkflowDefinition, WorkflowNode, TaskSessionState } from '../types';
-import { AgentStreamEvent } from '../agent/agent-events';
-import { ExecutorRegistry, ExecutionContext, ExecutionResult } from '../executors';
+import { Task, WorkflowDefinition, WorkflowNode } from '../types';
+import { ExecutorRegistry, ExecutionResult } from '../executors';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 import { createLogger } from '../logger';
+import { PipelineHost, StepLog, buildNodeContext, captureWorktreeDiff } from './pipeline-host';
 
 const scriptLogger = createLogger('ScriptPipeline');
-
-/** 宿主提供的通道：事件广播、日志落库、子进程登记 */
-export interface ScriptRuntimeHost {
-  emit: (event: string, payload: any) => void;
-  log: (taskId: string, nodeId: string, stream: 'stdout' | 'stderr' | 'system', message: string) => void;
-  registerChildProcess?: (taskId: string, child: ChildProcess) => void;
-}
 
 interface PendingCall {
   resolve: (value: any) => void;
@@ -36,6 +29,7 @@ interface RunningScript {
   pending: Map<number, PendingCall>;
   stepSeq: number;
   currentStepId: string;
+  steps: StepLog;
   approval?: ApprovalSlot;
   done: boolean;
   exitCode: number | null;
@@ -140,7 +134,7 @@ export class ScriptRuntime {
   constructor(
     private store: Store,
     private registry: ExecutorRegistry,
-    private host: ScriptRuntimeHost
+    private host: PipelineHost
   ) {}
 
   /** 运行时目录：bootstrap、import 代理、脚本与上下文临时文件 */
@@ -196,104 +190,9 @@ export class ScriptRuntime {
     return `节点: ${type}`;
   }
 
-  private buildContext(
-    task: Task,
-    workflow: WorkflowDefinition,
-    run: RunningScript,
-    node: WorkflowNode
-  ): ExecutionContext {
-    const settings = this.store.getSettings();
-    let persistAt = 0;
-    return {
-      task,
-      node,
-      settings,
-      store: this.store,
-      abortSignal: run.abort.signal,
-      registerChildProcess: (child: ChildProcess) => {
-        this.host.registerChildProcess?.(task.id, child);
-      },
-      variables: {
-        task: {
-          id: task.id,
-          title: task.title,
-          description: task.description || '',
-          workflowId: task.workflowId,
-          workspace: task.workspace || '',
-        },
-        ...(workflow.variables || {}),
-        ...(task.context || {}),
-        worktree: task.context?.worktree,
-        ports: task.context?.worktree?.ports,
-        testUrl: task.context?.worktree?.targetUrl,
-        inputs: task.context,
-      },
-      emitLog: (stream, message) => this.host.log(task.id, node.id, stream, message),
-      onSessionUpdate: (state: TaskSessionState) => {
-        if (run.abort.signal.aborted) return;
-        if (!task.context) task.context = {};
-        const patch: Record<string, any> = {
-          chatMessages: state.messages,
-          awaitingInput: !!state.awaitingInput,
-        };
-        if (state.model) patch.model = state.model;
-        Object.assign(task.context, patch);
-        const now = Date.now();
-        if (now - persistAt >= 800) {
-          persistAt = now;
-          this.store.updateTaskContext(task.id, patch);
-        }
-        this.host.emit('agent:chat_update', state);
-      },
-      onSessionEvent: (event: AgentStreamEvent) => {
-        if (run.abort.signal.aborted) return;
-        if (event.kind === 'snapshot') return;
-        this.host.emit('agent:stream', event);
-      },
-    };
-  }
-
-  /** 落库前同步终止态，避免在途步骤把 cancelled 覆写回 running */
-  private persist(task: Task): void {
-    const latest = this.store.getTask(task.id);
-    if (latest?.status === 'cancelled') {
-      task.status = 'cancelled';
-    }
-    this.store.saveTask(task);
-  }
-
-  private beginStep(task: Task, run: RunningScript, type: string, name: string): string {
-    const stepId = `s${++run.stepSeq}`;
-    run.currentStepId = stepId;
-    task.nodeRuns[stepId] = { nodeId: stepId, status: 'running', startedAt: Date.now() };
-    task.currentNodeId = stepId;
-    this.persist(task);
-    this.host.emit('node:status', { taskId: task.id, nodeId: stepId, status: 'running' });
-    this.host.emit('task:update', task);
-    this.host.log(task.id, stepId, 'system', `>>> ${name} (${type})`);
-    return stepId;
-  }
-
-  private endStep(
-    task: Task,
-    stepId: string,
-    type: string,
-    name: string,
-    result: ExecutionResult
-  ): void {
-    const record = task.nodeRuns[stepId];
-    if (!record) return;
-    record.status = result.status;
-    record.finishedAt = Date.now();
-    record.output = { stepName: name, stepType: type, result: result.output ?? null };
-    record.error = result.error;
-    record.exitCode = result.exitCode;
-    record.artifacts = result.artifacts;
-    this.persist(task);
-    this.host.emit('task:update', task);
-    this.host.emit('node:status', { taskId: task.id, nodeId: stepId, status: result.status });
-    const suffix = result.status === 'success' || result.status === 'skipped' ? '✔' : '✘';
-    this.host.log(task.id, stepId, 'system', `<<< ${suffix} ${name} (${result.status})`);
+  /** 采集沙箱代码改动，供人工卡点直接查看 Diff */
+  private captureDiff(task: Task): any {
+    return captureWorktreeDiff(task);
   }
 
   private async runNode(
@@ -305,7 +204,8 @@ export class ScriptRuntime {
     opts: Record<string, any> = {}
   ): Promise<any> {
     const name = opts.name || this.stepName(type, config);
-    const stepId = this.beginStep(task, run, type, name);
+    const stepId = run.steps.begin(task, type, name, ++run.stepSeq);
+    run.currentStepId = stepId;
     const node: WorkflowNode = {
       id: stepId,
       type: type as WorkflowNode['type'],
@@ -315,13 +215,24 @@ export class ScriptRuntime {
 
     let result: ExecutionResult;
     try {
-      result = await this.registry.get(type).execute(this.buildContext(task, workflow, run, node));
+      result = await this.registry
+        .get(type)
+        .execute(
+          buildNodeContext({
+            store: this.store,
+            host: this.host,
+            task,
+            workflow,
+            node,
+            abortSignal: run.abort.signal,
+          })
+        );
     } catch (err: any) {
       scriptLogger.error(`脚本步骤执行异常: ${err?.message}`, err, { taskId: task.id, nodeId: stepId });
       result = { status: 'failed', exitCode: 1, error: err?.message || String(err) };
     }
 
-    this.endStep(task, stepId, type, name, result);
+    run.steps.end(task, stepId, type, name, result);
     return {
       ok: result.status === 'success' || result.status === 'skipped',
       status: result.status,
@@ -333,33 +244,14 @@ export class ScriptRuntime {
     };
   }
 
-  /** 采集沙箱代码改动，供人工卡点直接查看 Diff */
-  private captureDiff(task: Task): any {
-    const wt = task.context?.worktree;
-    if (!wt?.worktreeDir) return null;
-    try {
-      const diff = WorktreeManager.getInstance().getWorktreeDiff(
-        wt.worktreeDir,
-        wt.baseBranch,
-        wt.baseCommit
-      );
-      wt.changedFiles = diff.changedFiles;
-      wt.diffSummary = diff.diffSummary;
-      wt.diffResult = diff.diffResult;
-      return { changedFiles: diff.changedFiles, diffSummary: diff.diffSummary, diffResult: diff.diffResult };
-    } catch (err: any) {
-      scriptLogger.warn(`采集沙箱 Diff 失败: ${err?.message}`, undefined, { taskId: task.id });
-      return null;
-    }
-  }
-
   private async waitApproval(
     task: Task,
     run: RunningScript,
     options: Record<string, any>
   ): Promise<any> {
     const title = options.title || '人工验收';
-    const stepId = this.beginStep(task, run, 'qa-approval', title);
+    const stepId = run.steps.begin(task, 'qa-approval', title, ++run.stepSeq);
+    run.currentStepId = stepId;
     const diff = this.captureDiff(task);
 
     task.status = 'waiting_approval';
@@ -612,6 +504,7 @@ export class ScriptRuntime {
       pending: new Map(),
       stepSeq: 0,
       currentStepId: 'SCRIPT',
+      steps: new StepLog(this.store, this.host),
       done: false,
       exitCode: null,
     };

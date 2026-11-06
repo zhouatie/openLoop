@@ -11,6 +11,8 @@ export * from './store';
 export * from './executors';
 export * from './engine/dag-engine';
 export * from './pipeline/script-runtime';
+export * from './pipeline/markdown-runtime';
+export * from './pipeline/pipeline-host';
 export * from './engine/workflow-recommender';
 export * from './agent/pi-session';
 export * from './agent/pi-extension-ui';

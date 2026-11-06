@@ -38,6 +38,7 @@ import {
 import { WorkflowDefinition, NodeType, Task, WorkflowTaskTemplate } from '@openloop/core';
 import { cleanTaskTemplate } from '../utils/workflowTemplate';
 import { buildPipelineScript } from '../utils/pipelineCards';
+import { markdownTemplate } from '../utils/pipelineMarkdown';
 import { api } from '../services/api';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { DebugWorkflowModal } from '../components/DebugWorkflowModal';
@@ -119,6 +120,8 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newTags, setNewTags] = useState<string[]>([]);
+  /** 承载方式：Markdown 文档由编排 Agent 执行，步骤卡片编译成 JS 脚本 */
+  const [newMode, setNewMode] = useState<'markdown' | 'cards'>('markdown');
   const [loading, setLoading] = useState(false);
 
   // 流水线编辑、复制、删除与调试状态
@@ -470,7 +473,10 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     let icon = <Workflow size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
     let tag = '通用编排';
 
-    if (wf.script) {
+    if (wf.markdown) {
+      icon = <FileText size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
+      tag = 'Markdown 流水线';
+    } else if (wf.script) {
       icon = <FileCode size={15} strokeWidth={1.8} className="text-[#52525b] group-hover:text-[#18181b] transition-colors" />;
       tag = '步骤流水线';
     } else if (nodeTypes.has('agent')) {
@@ -519,6 +525,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
           w.name.toLowerCase().includes(kw) ||
           w.id.toLowerCase().includes(kw) ||
           (w.description && w.description.toLowerCase().includes(kw)) ||
+          (w.markdown && w.markdown.toLowerCase().includes(kw)) ||
           w.nodes.some((n) => n.name.toLowerCase().includes(kw)) ||
           (w.tags && w.tags.some((t) => t.toLowerCase().includes(kw)))
         );
@@ -557,16 +564,19 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     setLoading(true);
     try {
       const id = `wf_${Date.now().toString(36)}`;
+      const isMarkdown = newMode === 'markdown';
       const newWf: WorkflowDefinition = {
         id,
         name: newTitle.trim(),
-        description: newDesc.trim() || '步骤卡片流水线',
+        description: newDesc.trim() || (isMarkdown ? 'Markdown 流水线' : '步骤卡片流水线'),
         tags: newTags,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         nodes: [],
         edges: [],
-        script: newPipelineScript(newTitle.trim()),
+        ...(isMarkdown
+          ? { markdown: markdownTemplate(newTitle.trim()) }
+          : { script: newPipelineScript(newTitle.trim()) }),
       };
 
       await api.saveWorkflow(newWf);
@@ -575,6 +585,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
       setNewDesc('');
       setNewTags([]);
       toast.success(`流程「${newTitle.trim()}」创建成功`);
+      setNewMode('markdown');
       onRefresh();
       // 新建后直接进入步骤卡片编辑页
       onSelectWorkflow(id);
@@ -593,6 +604,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
     if (import.meta.env?.DEV) {
       console.log('[WorkflowListView] 打开流水线编辑页:', wf.id, {
         scriptBytes: (wf.script || '').length,
+        markdownBytes: (wf.markdown || '').length,
       });
     }
     onSelectWorkflow(wf.id);
@@ -1292,7 +1304,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     {/* 节点规模与模板微标 */}
                     <div className="w-[85px] shrink-0 text-center flex items-center justify-center gap-1">
                       <span className="text-[10px] font-mono text-[#85858d] bg-[#f4f4f6] px-1.5 py-0.5 rounded shrink-0">
-                        {wf.script ? '步骤' : `${wf.nodes.length} 节点`}
+                        {wf.markdown ? 'Markdown' : wf.script ? '步骤' : `${wf.nodes.length} 节点`}
                       </span>
                       {(wf.taskTemplate?.descriptionTemplate || wf.taskTemplate?.acceptanceTemplate) && (
                         <span
@@ -1408,7 +1420,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                       <button
                         type="button"
                         onClick={() => openWorkflow(wf)}
-                        title={wf.script ? '编辑步骤卡片' : '进入流程画布编辑'}
+                        title={wf.markdown || wf.script ? '编辑流水线' : '进入流程画布编辑'}
                         className="w-6 h-6 rounded-[4px] text-[#63636b] hover:text-[#4f46e5] hover:bg-[#eeedfd] flex items-center justify-center transition-all cursor-pointer"
                       >
                         <ChevronRight size={13} />
@@ -1526,7 +1538,13 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
 
                     {/* 元数据行 */}
                     <div className="flex items-center gap-1.5 mt-1 text-[11px] text-[#71717a] font-sans">
-                      <span>{wf.script ? '步骤流水线' : `${wf.nodes.length} 节点`}</span>
+                      <span>
+                        {wf.markdown
+                          ? 'Markdown 流水线'
+                          : wf.script
+                            ? '步骤流水线'
+                            : `${wf.nodes.length} 节点`}
+                      </span>
                       {(wf.taskTemplate?.descriptionTemplate || wf.taskTemplate?.acceptanceTemplate) && (
                         <>
                           <span className="text-[#d4d4d8]">·</span>
@@ -1635,7 +1653,7 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
                     <button
                       type="button"
                       onClick={() => openWorkflow(wf)}
-                      title={wf.script ? '编辑步骤卡片' : '进入 DAG 可视化连线画布'}
+                      title={wf.markdown || wf.script ? '编辑流水线' : '进入 DAG 可视化连线画布'}
                       className="h-[25px] px-2.5 rounded-[4px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium flex items-center gap-1 transition-all active:scale-95 shadow-xs cursor-pointer"
                     >
                       <span>编辑</span>
@@ -1675,12 +1693,32 @@ export const WorkflowListView: React.FC<WorkflowListViewProps> = ({
               <div>
                 <h3 className="font-semibold text-[14px] text-[#1c1c21]">新建自动化流程</h3>
                 <p className="text-[11.5px] text-[#85858d] mt-0.5">
-                  创建后进入步骤卡片：可添加 Worktree、Agent、通用节点等内置步骤
+                  Markdown 用自然语言写流程；也可以改用步骤卡片逐项配置
                 </p>
               </div>
             </div>
 
             <form onSubmit={handleCreate} className="mt-4 space-y-3.5 text-[12px]">
+
+              <div>
+                <label className="block font-medium text-[#4b4b53] mb-1">承载方式</label>
+                <div className="inline-flex items-center rounded-[6px] bg-[#f1f1f4] p-[2px]">
+                  {(['markdown', 'cards'] as const).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setNewMode(item)}
+                      className={`h-[24px] px-3 rounded-[5px] text-[11.5px] transition-colors cursor-pointer ${
+                        newMode === item
+                          ? 'bg-white text-[#1c1c21] shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
+                          : 'text-[#71717a] hover:text-[#1c1c21]'
+                      }`}
+                    >
+                      {item === 'markdown' ? 'Markdown 文档' : '步骤卡片'}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div>
                 <label className="block font-medium text-[#4b4b53] mb-1">流程名称</label>

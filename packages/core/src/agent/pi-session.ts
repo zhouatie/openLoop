@@ -168,6 +168,8 @@ export interface PiSessionOptions {
   excludeTools?: string;
   /** 关闭全部工具，仅进行纯文本推理（一次性规划场景） */
   disableTools?: boolean;
+  /** 会话专属工具：与 builtin 一同注册，配合 tools 白名单使用 */
+  customTools?: any[];
   cwd?: string;
   env?: Record<string, string>;
   initialPrompt: string;
@@ -347,7 +349,10 @@ export class PiSessionInstance extends EventEmitter {
       tools: splitList(this.options.tools),
       excludeTools: splitList(this.options.excludeTools),
       noTools: this.options.disableTools ? 'all' : undefined,
-      customTools: this.shellEnv() ? [this.createBashToolDefinition(cwd)] : undefined,
+      customTools: [
+        ...(this.options.customTools || []),
+        ...(this.shellEnv() ? [this.createBashToolDefinition(cwd)] : []),
+      ],
     });
     await session.bindExtensions({
       uiContext: this.extensionUi.createContext(),
