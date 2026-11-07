@@ -444,9 +444,14 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   const progressPct = isCompleted ? 100 : Math.round((displayCompleted / displayTotal) * 100);
   const lastFailedRun = nodeRuns.slice().reverse().find((r) => r.status === 'failed');
   const failReason = lastFailedRun?.error || '执行中断或驳回';
-  // 已有 Agent 会话才露出直达入口：任务组根节点常驻架构师会话
+  // 已有 Agent 会话才露出直达入口：任务组根节点常驻架构师会话，Agent 节点执行中会话已在线
+  const isAgentNodeRunning = task.status === 'running' && currentNodeMeta?.type === 'agent';
   const hasAgentChat = Boolean(
-    task.context?.sessionId || task.context?.piSessionId || task.context?.awaitingInput || isGroup
+    task.context?.sessionId ||
+      task.context?.piSessionId ||
+      task.context?.awaitingInput ||
+      isGroup ||
+      isAgentNodeRunning
   );
   const isAwaitingReply = !!task.context?.awaitingInput;
 
