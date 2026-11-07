@@ -34,6 +34,53 @@ const MAX_PENDING_BYTES = 32 * 1024 * 1024;
 const MAX_VIEWER_BACKLOG_BYTES = 4 * 1024 * 1024;
 /** 发给浏览器的 multipart 分隔符（WDA 的边界格式由上游自行解析） */
 const BOUNDARY = 'openloop-ios-mjpeg-boundary';
+/** 降级状态下探测 WDA 是否恢复的间隔 */
+const UPGRADE_PROBE_INTERVAL_MS = 10000;
+
+/**
+ * 从缓冲区里取出一个完整帧（按 Content-Length）。
+ * 返回值：
+ * - { frame, rest } 已取到完整一帧
+ * - { pendFrom } 帧还没收齐，保留 pendFrom 之后的数据等下次
+ * - null 缓冲区里连分隔符都还没有
+ * WDA(FBMjpegServer) 声明 boundary=--BoundaryString，实际分隔符就是它本身，不再补 --。
+ */
+function takeFrame(
+  buffer: Buffer,
+  delimiter: Buffer
+): { frame: Buffer; rest: Buffer } | { pendFrom: number } | null {
+  for (;;) {
+    const boundaryIndex = buffer.indexOf(delimiter);
+    if (boundaryIndex < 0) return null;
+    const headerEnd = buffer.indexOf('\r\n\r\n', boundaryIndex);
+    if (headerEnd < 0) return { pendFrom: boundaryIndex };
+    const headerText = buffer.subarray(boundaryIndex, headerEnd).toString('latin1');
+    const lengthMatch = headerText.match(/content-length:\s*(\d+)/i);
+    const bodyStart = headerEnd + 4;
+    if (!lengthMatch) {
+      buffer = buffer.subarray(bodyStart);
+      continue;
+    }
+    const length = parseInt(lengthMatch[1], 10);
+    if (!Number.isFinite(length) || length <= 0) {
+      buffer = buffer.subarray(bodyStart);
+      continue;
+    }
+    // 一帧可能有上百 KB，必须等数据齐了再取，绝不能把半帧截掉
+    if (buffer.length < bodyStart + length) return { pendFrom: boundaryIndex };
+    return {
+      frame: Buffer.from(buffer.subarray(bodyStart, bodyStart + length)),
+      rest: buffer.subarray(bodyStart + length),
+    };
+  }
+}
+
+/** 按 Content-Type 里的 boundary 参数算出真正的分片分隔符 */
+function resolveDelimiter(contentType: string): Buffer {
+  const match = contentType.match(/boundary=("?)([^";]+)\1/i);
+  const boundary = (match?.[2] || 'BoundaryString').trim();
+  return Buffer.from(boundary.startsWith('--') ? boundary : `--${boundary}`);
+}
 
 /**
  * 解析 WDA MJPEG 串流的目标 URL
@@ -57,6 +104,27 @@ export function resolveIosMjpegUrl(rawWdaEndpoint?: string, rawMjpegUrl?: string
   }
 }
 
+/** 把任意图片数据缩到面板够用的尺寸，失败就返回原图 */
+async function downscaleImage(data: Buffer, ext = 'png'): Promise<Buffer> {
+  const unique = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const src = path.join(os.tmpdir(), `openloop-shot-${unique}.${ext}`);
+  const out = path.join(os.tmpdir(), `openloop-shot-${unique}-s.jpg`);
+  try {
+    await fs.writeFile(src, data);
+    await execFileAsync(
+      'sips',
+      ['-Z', String(SIMCTL_MAX_EDGE), '-s', 'formatOptions', String(SIMCTL_JPEG_QUALITY), src, '--out', out],
+      { timeout: FRAME_TIMEOUT_MS }
+    );
+    return await fs.readFile(out);
+  } catch {
+    return data;
+  } finally {
+    void fs.unlink(src).catch(() => {});
+    void fs.unlink(out).catch(() => {});
+  }
+}
+
 /** 通过 WDA 的 /screenshot 接口取一帧 */
 async function captureWdaScreenshot(wdaEndpoint: string): Promise<Buffer | null> {
   try {
@@ -68,7 +136,9 @@ async function captureWdaScreenshot(wdaEndpoint: string): Promise<Buffer | null>
     const json: any = await resp.json();
     const base64Data = json?.value;
     if (!base64Data || typeof base64Data !== 'string') return null;
-    return Buffer.from(base64Data, 'base64');
+    const raw = Buffer.from(base64Data, 'base64');
+    // WDA 原图可达 3MB 以上（PNG），直接推给浏览器会拖垮渲染进程，先缩小
+    return raw.length > 200 * 1024 ? await downscaleImage(raw) : raw;
   } catch {
     return null;
   }
@@ -145,6 +215,8 @@ class IosStreamSession {
   private idleTimer: NodeJS.Timeout | null = null;
   private watchdogTimer: NodeJS.Timeout | null = null;
   private pending: Buffer = Buffer.alloc(0);
+  private upgrading = false;
+  private lastUpgradeAt = 0;
   /** 管线代号：重启后旧轮询循环不会复活 */
   private generation = 0;
 
@@ -317,7 +389,14 @@ class IosStreamSession {
             },
           };
 
-          proxyRes.on('data', (chunk: Buffer) => this.consumeMjpeg(chunk, upstreamBoundary));
+          proxyRes.on('data', (chunk: Buffer) =>
+            this.consumeMjpeg(
+              chunk,
+              Buffer.from(
+                upstreamBoundary.startsWith('--') ? upstreamBoundary : `--${upstreamBoundary}`
+              )
+            )
+          );
           proxyRes.on('end', () => this.onUpstreamLost('WDA 串流已结束'));
           proxyRes.on('error', () => this.onUpstreamLost('WDA 串流中断'));
           settle(true);
@@ -341,7 +420,7 @@ class IosStreamSession {
   }
 
   /** 按 Content-Length 解析上游 multipart/x-mixed-replace 分片 */
-  private consumeMjpeg(chunk: Buffer, boundary: string): void {
+  private consumeMjpeg(chunk: Buffer, delimiter: Buffer): void {
     this.pending = this.pending.length ? Buffer.concat([this.pending, chunk]) : chunk;
     if (this.pending.length > MAX_PENDING_BYTES) {
       logger.warn(`[IosStreamProxy] 上游数据异常膨胀 ${this.key}，丢弃缓冲`);
@@ -349,49 +428,105 @@ class IosStreamSession {
       return;
     }
 
-    // WDA(FBMjpegServer) 声明 boundary=--BoundaryString，实际分片分隔符就是它本身，
-    // 不再额外补 --；标准 multipart 服务器声明 boundary=X 时则补 --
-    const delimiter = Buffer.from(boundary.startsWith('--') ? boundary : `--${boundary}`);
     for (;;) {
-      const boundaryIndex = this.pending.indexOf(delimiter);
-      if (boundaryIndex < 0) {
-        // 只保留可能被截断的尾部，避免无限增长
-        if (this.pending.length > delimiter.length) {
-          this.pending = this.pending.subarray(this.pending.length - delimiter.length);
+      const parsed = takeFrame(this.pending, delimiter);
+      if (!parsed) {
+        // 连分隔符都没有：只保留可能是分隔符前缀的尾部
+        if (this.pending.length >= delimiter.length) {
+          this.pending = this.pending.subarray(this.pending.length - (delimiter.length - 1));
         }
         return;
       }
-
-      const headerEnd = this.pending.indexOf('\r\n\r\n', boundaryIndex);
-      if (headerEnd < 0) {
-        this.pending = this.pending.subarray(boundaryIndex);
+      if ('pendFrom' in parsed) {
+        // 帧还没收齐：保留整段半帧数据，等后续到达
+        if (parsed.pendFrom > 0) this.pending = this.pending.subarray(parsed.pendFrom);
         return;
       }
-
-      const headerText = this.pending.subarray(boundaryIndex, headerEnd).toString('latin1');
-      const lengthMatch = headerText.match(/content-length:\s*(\d+)/i);
-      const bodyStart = headerEnd + 4;
-
-      if (!lengthMatch) {
-        // 上游没给长度：跳过这块头部，等下一个边界
-        this.pending = this.pending.subarray(bodyStart);
-        continue;
-      }
-
-      const length = parseInt(lengthMatch[1], 10);
-      if (!Number.isFinite(length) || length <= 0) {
-        this.pending = this.pending.subarray(bodyStart);
-        continue;
-      }
-      if (this.pending.length < bodyStart + length) {
-        this.pending = this.pending.subarray(boundaryIndex);
-        return;
-      }
-
-      const frame = Buffer.from(this.pending.subarray(bodyStart, bodyStart + length));
-      this.pending = this.pending.subarray(bodyStart + length);
-      this.broadcast(frame);
+      this.pending = parsed.rest;
+      this.broadcast(parsed.frame);
     }
+  }
+
+  /**
+   * 截图轮询阶段如果 WDA 恢复了，悄悄升回原生 MJPEG。
+   * 只有真拿到一帧才切换，拿不到就继续用旧的截图管道，不让画面断掉。
+   */
+  private upgradeToMjpeg(): void {
+    if (this.closed || this.upgrading || this.mode === 'wda-mjpeg' || !this.viewers.size) return;
+    this.upgrading = true;
+    this.lastUpgradeAt = Date.now();
+
+    const client = this.options.mjpegUrl.startsWith('https://') ? https : http;
+    let buffered: Buffer = Buffer.alloc(0);
+    let adopted = false;
+    let settled = false;
+    let request: http.ClientRequest | null = null;
+
+    const giveUp = (reason?: string) => {
+      if (settled) return;
+      settled = true;
+      this.upgrading = false;
+      try {
+        request?.destroy();
+      } catch {
+        /* 已断开 */
+      }
+      if (reason) logger.debug(`[IosStreamProxy] 升级探测未成功 (${reason})，继续截图轮询`);
+    };
+
+    try {
+      request = client.get(this.options.mjpegUrl, { timeout: 5000 }, (res) => {
+        const status = res.statusCode || 0;
+        if (status < 200 || status >= 300) {
+          res.destroy();
+          giveUp(`status ${status}`);
+          return;
+        }
+        const delimiter = resolveDelimiter(String(res.headers['content-type'] || ''));
+
+        res.on('data', (chunk: Buffer) => {
+          if (adopted) {
+            this.consumeMjpeg(chunk, delimiter);
+            return;
+          }
+          buffered = buffered.length ? Buffer.concat([buffered, chunk]) : chunk;
+          const parsed = takeFrame(buffered, delimiter);
+          if (!parsed || 'pendFrom' in parsed) return;
+
+          // 拿到第一帧，正式切换：停掉截图循环，接管这条上游
+          adopted = true;
+          settled = true;
+          this.upgrading = false;
+          this.stopSources();
+          this.mode = 'wda-mjpeg';
+          this.recoveries = 0;
+          this.pending = parsed.rest;
+          this.upstream = {
+            destroy: () => {
+              try {
+                res.destroy();
+                request?.destroy();
+              } catch {
+                /* 已断开 */
+              }
+            },
+          };
+          logger.info(`[IosStreamProxy] WDA 已恢复，升级为原生串流 ${this.key}`);
+          this.broadcast(parsed.frame);
+        });
+
+        res.on('end', () => (adopted ? this.onUpstreamLost('WDA 串流已结束') : giveUp('串流结束')));
+        res.on('error', () => (adopted ? this.onUpstreamLost('WDA 串流中断') : giveUp('串流异常')));
+      });
+    } catch (err: any) {
+      giveUp(err?.message);
+      return;
+    }
+
+    request.on('error', (err: any) => giveUp(err?.message));
+    request.on('timeout', () => giveUp('连接超时'));
+    // 兜底：迟迟拿不到帧就放弃这次升级
+    setTimeout(() => giveUp('等待首帧超时'), 5000).unref();
   }
 
   /** WDA MJPEG 在出过画面后断开：重启管线（含降级）而不是让面板黑屏 */
@@ -408,6 +543,7 @@ class IosStreamSession {
   /** 停掉当前上游（轮询或 MJPEG） */
   private stopSources(): void {
     this.generation += 1;
+    this.lastUpgradeAt = Date.now();
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
@@ -510,6 +646,15 @@ class IosStreamSession {
       // 稳定出画面 30 秒后，把重试额度还回去，避免长会话里一次抖动就永久失败
       if (this.recoveries > 0 && this.lastRestartAt && now - this.lastRestartAt > 30000) {
         this.recoveries = 0;
+      }
+      // 降级状态下定期探测 WDA 是否恢复，恢复就升回原生串流
+      if (
+        this.mode &&
+        this.mode !== 'wda-mjpeg' &&
+        !this.upgrading &&
+        now - this.lastUpgradeAt > UPGRADE_PROBE_INTERVAL_MS
+      ) {
+        this.upgradeToMjpeg();
       }
     }, 1000);
   }

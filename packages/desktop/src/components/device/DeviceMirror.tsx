@@ -293,7 +293,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     pointerStartRef.current = null;
 
     const info = getEventRatio(e);
-    if (!info) return;
+    if (!info || !start) return;
 
     const dx = e.clientX - start.clientX;
     const dy = e.clientY - start.clientY;

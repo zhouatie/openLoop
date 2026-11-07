@@ -253,11 +253,16 @@ export class DeviceActionController {
             } catch {}
           }
 
-          const res = await fetch(`${prefix}/wda/tap/nil`, {
+          // WDA 的真实路由是 POST /wda/tap（不是 /wda/tap/nil），传 x/y 坐标
+          const res = await fetch(`${prefix}/wda/tap`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ x, y }),
           });
+          if (!res.ok) {
+            const detail = await res.text().catch(() => '');
+            logger.warn(`[IosAction] 点按失败 (${x},${y}): ${res.status} ${detail.slice(0, 200)}`);
+          }
           return { success: res.ok };
         }
 
