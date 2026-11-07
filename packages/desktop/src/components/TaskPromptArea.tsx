@@ -94,8 +94,14 @@ export const TaskPromptArea = React.forwardRef<HTMLTextAreaElement, TaskPromptAr
     }
   };
 
-  // 粘贴多行文本自动拆分：首行作为标题，其余沉入说明区
+  // 标题行粘贴：截图直接上传，多行文本自动拆分标题与说明
   const handleTitlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const imageFiles = clipboardImageFiles(e.clipboardData);
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      uploadFiles(imageFiles);
+      return;
+    }
     const text = e.clipboardData.getData('text');
     if (!isMergedComposer || !/[\r\n]/.test(text)) return;
     e.preventDefault();
@@ -230,10 +236,11 @@ export const TaskPromptArea = React.forwardRef<HTMLTextAreaElement, TaskPromptAr
     }
   };
 
-  // 剪贴板监听 (粘贴截图 ⌘V / Ctrl+V)
+  // 说明区剪贴板监听 (粘贴截图 ⌘V / Ctrl+V)
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const files = clipboardImageFiles(e.clipboardData);
     if (files.length === 0) return;
+    e.preventDefault();
     if (import.meta.env?.DEV) {
       console.log('[TaskPromptArea:Paste] 识别到剪贴板包含截图，触发上传:', files);
     }
