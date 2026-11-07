@@ -477,6 +477,14 @@
   display: none;
 }
 
+/* 悬停时图钉标记让位给操作按钮，避免同行出现两个图钉 */
+.projectRow:hover .pinMark,
+.sessionRow:hover .pinMark,
+.projectRow:focus-visible .pinMark,
+.sessionRow:focus-visible .pinMark {
+  display: none;
+}
+
 .rowIcon {
   display: inline-flex;
   align-items: center;
