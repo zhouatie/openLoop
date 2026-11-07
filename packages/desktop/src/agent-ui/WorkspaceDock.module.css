@@ -5,7 +5,7 @@
   position: relative;
   flex: none;
   min-width: 0;
-  /* 拖动宽度再大也给会话列留位置：抽屉只有 620px 时也要能继续对话 */
+  /* 拖动宽度再大也给会话列留位置：抽屉只有 880px 时也要能继续对话 */
   max-width: 60%;
   overflow: hidden;
   visibility: hidden;
