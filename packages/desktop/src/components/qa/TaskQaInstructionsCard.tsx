@@ -14,19 +14,11 @@ import {
 import { Task } from '@openloop/core';
 import { api } from '../../services/api';
 import { toast } from '../Toast';
+import { readTaskQaSteps as readSteps } from '../../utils/taskQa';
 
 interface TaskQaInstructionsCardProps {
   task: Task;
   onTaskUpdated?: (task: Task) => void;
-}
-
-/** 读取任务当前生效的验收用例（人工预设优先，其次 AI 规划结果） */
-function readSteps(task: Task): string[] {
-  const preset = task.context?.qaInstructions;
-  if (Array.isArray(preset) && preset.length > 0) return preset.map((s) => String(s));
-  const planned = task.context?.qaPlan?.steps;
-  if (Array.isArray(planned) && planned.length > 0) return planned.map((s) => String(s));
-  return [];
 }
 
 export const TaskQaInstructionsCard: React.FC<TaskQaInstructionsCardProps> = ({

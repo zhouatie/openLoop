@@ -1378,6 +1378,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
     workspace?: string;
     attachments?: TaskAttachment[];
     parentTaskId?: string | null;
+    qaInstructions?: string[];
   }) => {
     if (!editingTask) return;
     if (import.meta.env?.DEV) {
