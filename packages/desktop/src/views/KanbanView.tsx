@@ -71,7 +71,7 @@ import {
 } from '@openloop/core/agent-format';
 import { guessImageMimeType } from '@openloop/core/media-mime';
 import { parseMarkdownSteps } from '@openloop/core/markdown-format';
-import { TaskAgentPanel } from '../agent-ui';
+import { AgentSessionDrawerHost, TaskAgentPanel } from '../agent-ui';
 import { api } from '../services/api';
 import { EditTaskModal } from '../components/EditTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -318,6 +318,8 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  /** 从卡片直达的 Agent 对话抽屉：只装对话，不打开任务详情 */
+  const [agentChatTask, setAgentChatTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -896,6 +898,21 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       }
     }
   };
+
+  // 卡片直达 Agent 对话：以抽屉形态只展示会话，不打断看板浏览
+  const handleOpenAgentChat = useCallback((task: Task) => {
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanView] 卡片直达 Agent 对话:', { taskId: task.id, hasSession: !!task.context?.sessionId });
+    }
+    setAgentChatTask(task);
+  }, []);
+
+  const handleCloseAgentChat = useCallback(() => {
+    if (import.meta.env?.DEV) {
+      console.log('[KanbanView] 关闭直达 Agent 对话抽屉:', agentChatTask?.id);
+    }
+    setAgentChatTask(null);
+  }, [agentChatTask?.id]);
 
   // 任务会话就是同一条 pi 会话：交给上层在全局智能体里打开它
   const handleOpenAgentSession = (
@@ -2385,6 +2402,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                         onMoveTaskColumn={handleMoveTaskColumn}
                         onEditTask={setEditingTask}
                         onOpenTaskLogs={onOpenTaskLogs}
+                        onOpenAgentChat={handleOpenAgentChat}
                         onDeleteTask={setTaskToDelete}
                         onRunTask={handleRunTask}
                         onSkipStepTask={handleSkipStep}
@@ -3819,6 +3837,14 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
       })()}
     </div>
   )}
+
+      {/* 看板直达 Agent 对话：抽屉只展示会话，看完即关，不进入任务详情 */}
+      <AgentSessionDrawerHost
+        isOpen={!!agentChatTask}
+        onClose={handleCloseAgentChat}
+        taskId={agentChatTask?.id}
+        taskTitle={agentChatTask?.kind === 'group' ? '任务组架构师' : agentChatTask?.title}
+      />
 
       {/* 编辑任务弹窗 */}
       <EditTaskModal

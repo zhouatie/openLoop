@@ -186,6 +186,8 @@ export interface KanbanCardProps {
   onMoveColumn: (taskId: string, targetCol: KanbanColumn) => void;
   onEdit: (task: Task) => void;
   onOpenLogs: (taskId: string, nodeId?: string) => void;
+  /** 直达该任务的 Agent 对话，无需先打开任务详情 */
+  onOpenAgentChat?: (task: Task) => void;
   onDelete: (task: Task) => void;
   onRun: (taskId: string) => void;
   onSkipStep: (taskId: string) => void;
@@ -219,6 +221,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   onMoveColumn,
   onEdit,
   onOpenLogs,
+  onOpenAgentChat,
   onDelete,
   onRun,
   onSkipStep,
@@ -441,6 +444,11 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
   const progressPct = isCompleted ? 100 : Math.round((displayCompleted / displayTotal) * 100);
   const lastFailedRun = nodeRuns.slice().reverse().find((r) => r.status === 'failed');
   const failReason = lastFailedRun?.error || '执行中断或驳回';
+  // 已有 Agent 会话才露出直达入口：任务组根节点常驻架构师会话
+  const hasAgentChat = Boolean(
+    task.context?.sessionId || task.context?.piSessionId || task.context?.awaitingInput || isGroup
+  );
+  const isAwaitingReply = !!task.context?.awaitingInput;
 
   return (
     <div
@@ -614,6 +622,32 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
               </span>
             </span>
           </>
+        )}
+        {hasAgentChat && onOpenAgentChat && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (import.meta.env?.DEV) {
+                console.log('[KanbanCard] 直达 Agent 对话:', task.id);
+              }
+              onOpenAgentChat(task);
+            }}
+            className={`ml-auto shrink-0 inline-flex items-center gap-1 h-[17px] pl-1 pr-1.5 rounded-[4px] border text-[10px] font-medium transition-all cursor-pointer select-none active:scale-95 ${
+              isAwaitingReply
+                ? 'border-[#ddd6fe] bg-[#f5f3ff] text-[#4f46e5] hover:bg-[#eeedfd]'
+                : 'border-[#ececf0] bg-[#f6f6f9] text-[#63636b] hover:text-[#4f46e5] hover:bg-[#eeedfd] hover:border-[#ddd6fe]'
+            }`}
+            title={
+              isAwaitingReply
+                ? 'Agent 正在等待你的回复，点击直达对话'
+                : '直达 Agent 对话（无需打开任务详情）'
+            }
+          >
+            <MessageSquare size={9.5} strokeWidth={2.2} className="shrink-0" />
+            <span>对话</span>
+            {isAwaitingReply && <span className="w-1 h-1 rounded-full bg-[#4f46e5] animate-pulse" />}
+          </button>
         )}
       </div>
 
@@ -1347,6 +1381,7 @@ export const KanbanCard = memo(KanbanCardComponent, (prev, next) => {
     prev.isMoving === next.isMoving &&
     prev.isRunning === next.isRunning &&
     prev.isApproving === next.isApproving &&
-    prev.isSkipping === next.isSkipping
+    prev.isSkipping === next.isSkipping &&
+    prev.onOpenAgentChat === next.onOpenAgentChat
   );
 });
