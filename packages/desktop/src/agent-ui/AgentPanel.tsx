@@ -212,6 +212,8 @@ export interface AgentPanelShellProps {
   forkPendingEntryId?: string | null;
   /** 切换会话时用来隔离输入框草稿 */
   draftKey?: string;
+  /** 输入框焦点请求序号：新建会话后自动聚焦 */
+  focusSeq?: number;
   /** 面板当前可见时才监听面板快捷键 */
   shortcutsEnabled?: boolean;
   /** 面板层级优先级：上层浮层高于页内面板，默认 0 */
@@ -268,6 +270,7 @@ export function AgentPanelShell({
   onFork,
   forkPendingEntryId,
   draftKey,
+  focusSeq,
   shortcutsEnabled = true,
   shortcutPriority = 0,
 }: AgentPanelShellProps) {
@@ -400,6 +403,7 @@ export function AgentPanelShell({
           if (import.meta.env?.DEV) console.log('[AgentPanel] 打开任务面板:', mode);
           setTaskAction(mode);
         }}
+        focusSeq={focusSeq}
         shortcutsEnabled={shortcutsEnabled}
         shortcutPriority={shortcutPriority}
       />
@@ -954,6 +958,8 @@ export function GlobalAgentPanel({
   const selectSeq = useRef(0);
   const [cwd, setCwd] = useState<string>('');
   const [sending, setSending] = useState(false);
+  /** 输入框焦点请求序号：新建会话后自动聚焦，不用再点一下输入框 */
+  const [composerFocusSeq, setComposerFocusSeq] = useState(0);
   const [commands, setCommands] = useState<ComposerCommand[]>([]);
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([]);
   const { models: globalModels } = useAgentModels();
@@ -1313,6 +1319,7 @@ export function GlobalAgentPanel({
     setHistoryLoading(false);
     setCwd(safeCwd);
     setDraft({ id, cwd: safeCwd });
+    setComposerFocusSeq((prev) => prev + 1);
     if (projectCwd && projectCwd !== TEMP_PROJECT_KEY) {
       setExtraProjects((prev) => (prev.includes(projectCwd) ? prev : [projectCwd, ...prev]));
       setCollapsed((prev) => prev.filter((key) => key !== projectCwd));
@@ -1720,6 +1727,7 @@ export function GlobalAgentPanel({
         setStreamKey(`agent_${next}`);
         setHistory([]);
         setDraft({ id: next, cwd });
+        setComposerFocusSeq((prev) => prev + 1);
       }
       await refresh();
     },
@@ -1960,6 +1968,13 @@ export function GlobalAgentPanel({
   // 面板不可见时收起启动器：下次打开浮层不应先看到一层弹窗
   useEffect(() => {
     if (!active) setSwitcherOpen(false);
+  }, [active]);
+
+  // 面板打开即把光标交给输入框：唤起后可以直接打字
+  useEffect(() => {
+    if (!active) return;
+    if (import.meta.env?.DEV) console.log('[AgentPanel] 面板激活：聚焦输入框');
+    setComposerFocusSeq((prev) => prev + 1);
   }, [active]);
 
   // 面板导航快捷键：命令表在 constants/agentShortcuts.ts，可在设置页改键
@@ -2303,6 +2318,7 @@ export function GlobalAgentPanel({
           }
           draftFill={draftFill}
           draftKey={activeId || ''}
+          focusSeq={composerFocusSeq}
           dock={
             <WorkspaceDock
               cwd={activeCwd}
