@@ -200,9 +200,9 @@ export class WebPlaywrightDriver implements QaDriver {
           ? `定位到「${fieldLabel}」输入框并成功清空内容`
           : `定位到页面输入框并清空内容`;
       } else {
-        thought = fieldLabel
-          ? `未在页面定位到「${fieldLabel}」对应输入框，保持视口`
-          : `未定位到可用输入框，保持视口`;
+        return this.failNoTarget(
+          fieldLabel ? `未在页面定位到「${fieldLabel}」对应输入框，清空步骤无法执行` : '未定位到可用输入框，清空步骤无法执行'
+        );
       }
     } else if (isInputAction) {
       const allQuotes = Array.from(prompt.matchAll(/[“"「]([^”"」]+)[”"」]/g)).map((m) => m[1].trim());
@@ -233,9 +233,9 @@ export class WebPlaywrightDriver implements QaDriver {
           ? `在「${fieldLabel}」输入框中输入「${inputText}」`
           : `定位到输入框并输入文本「${inputText}」`;
       } else {
-        thought = fieldLabel
-          ? `未在页面定位到「${fieldLabel}」对应输入框，保持视口`
-          : `未定位到可用输入框，保持视口`;
+        return this.failNoTarget(
+          fieldLabel ? `未在页面定位到「${fieldLabel}」对应输入框，输入步骤无法执行` : '未定位到可用输入框，输入步骤无法执行'
+        );
       }
     } else if (promptLower.includes('滚动') || promptLower.includes('scroll')) {
       await this.page.evaluate(() => window.scrollBy({ top: 300, behavior: 'smooth' }));
@@ -286,13 +286,14 @@ export class WebPlaywrightDriver implements QaDriver {
         }
       }
 
-      if (clickedCount > 0) {
-        thought = `在页面中依次完成: ${thoughts.join('，')}`;
-      } else {
-        thought = targetList.length > 0
-          ? `页面未定位到目标元素「${targetList.join(' / ')}」，保持当前视口`
-          : `页面无需进一步交互，已处于就绪状态`;
+      if (clickedCount === 0) {
+        return this.failNoTarget(
+          targetList.length > 0
+            ? `页面未定位到目标元素「${targetList.join(' / ')}」，点击步骤无法执行`
+            : '用例未指明可点击目标，点击步骤无法执行'
+        );
       }
+      thought = `在页面中依次完成: ${thoughts.join('，')}`;
 
       await new Promise((r) => setTimeout(r, 400));
     }
@@ -435,6 +436,59 @@ export class WebPlaywrightDriver implements QaDriver {
       targetBox,
       screenshotBuffer,
     };
+  }
+
+  async executeWaitFor(prompt: string, timeoutMs = 15000): Promise<QaStepExecutionResult> {
+    if (!this.page) {
+      throw new Error('Web 测试驱动尚未初始化');
+    }
+    if (this.navError) {
+      return this.failNoTarget(`目标地址无法连接或导航失败: ${this.navError}`);
+    }
+
+    const startTime = Date.now();
+    const deadline = startTime + Math.min(timeoutMs || 15000, 30000);
+
+    // 先等首屏资源请求收敛，避免网络仍在拉取时提前取帧
+    await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+
+    // 再等主内容真正渲染出来：DOM 完成、无编译错误覆盖层、页面有可见文本
+    let ready = false;
+    while (Date.now() < deadline) {
+      ready = await this.page
+        .evaluate(() => {
+          if (document.readyState !== 'complete') return false;
+          if (!document.body) return false;
+          if (document.querySelector('vite-error-overlay')) return false;
+          return (document.body.innerText || '').trim().length > 0;
+        })
+        .catch(() => false);
+      if (ready) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    // 就绪后再缓冲一帧，避开展开与过渡的中间态
+    await new Promise((r) => setTimeout(r, 300));
+    const screenshotBuffer = await this.captureScreenshot();
+
+    if (!ready) {
+      const reason = `等待 ${Math.round(
+        (Date.now() - startTime) / 1000
+      )} 秒后页面仍未就绪（无可见内容或存在编译错误）`;
+      return { passed: false, thought: reason, errorMessage: reason, screenshotBuffer };
+    }
+
+    return {
+      passed: true,
+      thought: `页面已就绪并完成首屏渲染（等待 ${Date.now() - startTime}ms）`,
+      screenshotBuffer,
+    };
+  }
+
+  /** 动作步骤找不到目标：如实判失败，不假通过也不伪造帧 */
+  private async failNoTarget(reason: string): Promise<QaStepExecutionResult> {
+    const screenshotBuffer = await this.captureScreenshot();
+    return { passed: false, thought: reason, errorMessage: reason, screenshotBuffer };
   }
 
   async captureScreenshot(): Promise<Buffer> {
