@@ -8,6 +8,7 @@ import {
   ExternalLink,
   CheckCircle2,
   XCircle,
+  MinusCircle,
   Sparkles,
   Camera,
   Globe,
@@ -312,6 +313,7 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
             {steps.map((st, idx) => {
               const isSelected = idx === currentStepIndex;
               const isStepPass = st.status === 'passed';
+              const isStepSkipped = st.status === 'skipped';
 
               return (
                 <div
@@ -340,6 +342,8 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
                       </span>
                       {isStepPass ? (
                         <CheckCircle2 size={12} className="text-[#10b981]" />
+                      ) : isStepSkipped ? (
+                        <MinusCircle size={12} className="text-[#a1a1aa]" />
                       ) : (
                         <XCircle size={12} className="text-[#ef4444]" />
                       )}
@@ -509,6 +513,7 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
                 {steps.map((st, idx) => {
                   const isCurrent = idx === currentStepIndex;
                   const isStepPass = st.status === 'passed';
+                  const isStepSkipped = st.status === 'skipped';
                   const percent = steps.length > 1 ? (idx / (steps.length - 1)) * 100 : 50;
 
                   return (
@@ -522,6 +527,8 @@ export const QaRunDetailView: React.FC<QaRunDetailViewProps> = ({
                       className={`absolute -translate-x-1/2 rounded-full border transition-all cursor-pointer ${
                         isCurrent
                           ? 'w-3 h-3 bg-[#4f46e5] border-2 border-white shadow-xs z-10 scale-125'
+                          : isStepSkipped
+                          ? 'w-2 h-2 bg-[#a1a1aa] border-white'
                           : isStepPass
                           ? 'w-2 h-2 bg-[#10b981] border-white'
                           : 'w-2 h-2 bg-[#ef4444] border-white'

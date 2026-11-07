@@ -31,7 +31,7 @@ function generateStepVisualSnapshot(
   totalSteps: number,
   stepIndex: number,
   step: QaStep,
-  status: 'passed' | 'failed',
+  status: 'passed' | 'failed' | 'skipped',
   width = 1280,
   height = 800,
   targetBox?: { x: number; y: number; width: number; height: number },
@@ -80,9 +80,9 @@ function generateStepVisualSnapshot(
   </g>
 
   <rect x="60" y="${height - 70}" width="${width - 120}" height="42" rx="8" fill="#0f172a" opacity="0.9"/>
-  <circle cx="85" cy="${height - 49}" r="7" fill="${isFailed ? '#ef4444' : '#22c55e'}"/>
+  <circle cx="85" cy="${height - 49}" r="7" fill="${status === 'skipped' ? '#a1a1aa' : isFailed ? '#ef4444' : '#22c55e'}"/>
   <text x="105" y="${height - 44}" font-family="-apple-system, sans-serif" font-size="12" font-weight="500" fill="#f8fafc">
-    ${status === 'passed' ? '✔ 步骤通过' : '✖ 步骤未通过'}: ${thought ? thought.slice(0, 70) : ''}
+    ${status === 'passed' ? '✔ 步骤通过' : status === 'skipped' ? '⏭ 步骤跳过（未验证）' : '✖ 步骤未通过'}: ${thought ? thought.slice(0, 70) : ''}
   </text>
 </svg>`;
 }
@@ -257,7 +257,7 @@ export class MidsceneRunner {
             suite.steps.length,
             i,
             step,
-            stepResult.passed ? 'passed' : 'failed',
+            stepResult.passed ? 'passed' : stepResult.skipped ? 'skipped' : 'failed',
             width,
             height,
             stepResult.targetBox,
@@ -271,12 +271,18 @@ export class MidsceneRunner {
         const screenshotUrl = `${serverUrl}/${screenshotRelPath}`;
         const stepDuration = Date.now() - stepStartTime;
 
+        const stepStatus: StepTimelineRecord['status'] = stepResult.passed
+          ? 'passed'
+          : stepResult.skipped
+          ? 'skipped'
+          : 'failed';
+
         const timelineItem: StepTimelineRecord = {
           stepIndex: i,
           stepId: step.id,
           type: step.type,
           prompt: step.prompt,
-          status: stepResult.passed ? 'passed' : 'failed',
+          status: stepStatus,
           durationMs: stepDuration,
           screenshotRelPath,
           screenshotUrl,
@@ -389,8 +395,8 @@ export class MidsceneRunner {
         <div class="step-card">
           <div class="step-header">
             <strong>步骤 ${t.stepIndex + 1}: [${t.type.toUpperCase()}] ${t.prompt}</strong>
-            <span style="color: ${t.status === 'passed' ? '#16a34a' : '#dc2626'}; font-weight: 600;">
-              ${t.status === 'passed' ? '✔ 完成' : '✖ 未通过'} (${t.durationMs}ms)
+            <span style="color: ${t.status === 'passed' ? '#16a34a' : t.status === 'skipped' ? '#71717a' : '#dc2626'}; font-weight: 600;">
+              ${t.status === 'passed' ? '✔ 完成' : t.status === 'skipped' ? '⏭ 跳过（用例未指明可定位目标，未验证）' : '✖ 未通过'} (${t.durationMs}ms)
             </span>
           </div>
           <div class="step-body">

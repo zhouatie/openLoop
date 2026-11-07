@@ -23,6 +23,8 @@ export interface QaDriverOptions {
 
 export interface QaStepExecutionResult {
   passed: boolean;
+  /** 用例未指明可定位目标，步骤无法执行：跳过而不判定失败 */
+  skipped?: boolean;
   thought: string;
   screenshotBuffer?: Buffer;
   targetBox?: { x: number; y: number; width: number; height: number };
