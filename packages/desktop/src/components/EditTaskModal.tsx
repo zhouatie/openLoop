@@ -13,6 +13,8 @@ import {
   Sparkles,
   GitMerge,
   Layers,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { Task, WorkflowDefinition, KanbanColumn, TaskAttachment } from '@openloop/core';
 import { parseMarkdownSteps } from '@openloop/core/markdown-format';
@@ -20,6 +22,7 @@ import { WorkspacePicker } from './WorkspacePicker';
 import { TaskPromptArea } from './TaskPromptArea';
 import { toast } from './Toast';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
+import { readTaskQaSteps } from '../utils/taskQa';
 
 interface EditTaskModalProps {
   isOpen: boolean;
@@ -35,6 +38,7 @@ interface EditTaskModalProps {
     workspace?: string;
     attachments?: TaskAttachment[];
     parentTaskId?: string | null;
+    qaInstructions?: string[];
   }) => Promise<void>;
 }
 
@@ -53,6 +57,8 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const [kanbanColumn, setKanbanColumn] = useState<KanbanColumn>('backlog');
   const [workspace, setWorkspace] = useState('');
   const [parentTaskId, setParentTaskId] = useState<string | null>(null);
+  // 验收用例与看板速览、详情页共用同一份数据（context.qaInstructions 优先，其次 AI 规划）
+  const [qaInstructions, setQaInstructions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [idCopied, setIdCopied] = useState(false);
@@ -73,6 +79,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
       setKanbanColumn(task.kanbanColumn || 'backlog');
       setWorkspace(task.workspace || '');
       setParentTaskId(task.parentTaskId || null);
+      setQaInstructions(readTaskQaSteps(task));
       setErrorMsg(null);
     }
   }, [task, workflows]);
@@ -162,6 +169,7 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         workspace: trimmedWorkspace || undefined,
         attachments,
         parentTaskId: parentTaskId !== (task.parentTaskId || null) ? parentTaskId : undefined,
+        qaInstructions: qaInstructions.map((s) => s.trim()).filter(Boolean),
       });
       if (import.meta.env?.DEV) {
         console.log('[TaskEdit] 任务更新保存成功:', task.id);
@@ -447,6 +455,70 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+
+          {/* 验收用例：QA 门禁逐条核对，无需再进详情页维护 */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-medium text-[#63636b]">
+                验收用例
+                {qaInstructions.length > 0 && (
+                  <span className="ml-1 font-mono text-[10px] text-[#85858d]">{qaInstructions.length} 项</span>
+                )}
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setQaInstructions((prev) => [...prev, '']);
+                  if (import.meta.env?.DEV) console.log('[EditTaskModal] 新增一条验收用例:', task.id);
+                }}
+                className="text-[10px] text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-0.5 font-medium cursor-pointer"
+              >
+                <Plus size={10} strokeWidth={2.4} />
+                <span>添加</span>
+              </button>
+            </div>
+            {qaInstructions.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => setQaInstructions([''])}
+                className="w-full h-[26px] rounded-[5px] border border-dashed border-[#d4d4d8] text-[10.5px] text-[#85858d] hover:text-[#4f46e5] hover:border-[#c7d2fe] transition-colors cursor-pointer"
+              >
+                + 添加验收用例（可选，QA 门禁将逐条核对）
+              </button>
+            ) : (
+              <div className="space-y-1 max-h-[132px] overflow-y-auto pr-0.5">
+                {qaInstructions.map((step, index) => (
+                  <div key={index} className="flex items-center gap-1">
+                    <span className="w-3.5 shrink-0 text-center font-mono text-[9.5px] text-[#a1a1aa]">
+                      {index + 1}
+                    </span>
+                    <input
+                      value={step}
+                      onChange={(e) =>
+                        setQaInstructions((prev) => prev.map((s, i) => (i === index ? e.target.value : s)))
+                      }
+                      disabled={loading}
+                      placeholder="一条可验收的检查点"
+                      className="flex-1 min-w-0 h-[24px] px-2 rounded-[5px] border border-[#e3e3e8] bg-[#f9f9fb] text-[11px] text-[#1c1c21] placeholder:text-[#a1a1aa] outline-none focus:bg-white focus:border-[#4f46e5] transition-colors"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQaInstructions((prev) => prev.filter((_, i) => i !== index));
+                        if (import.meta.env?.DEV) {
+                          console.log('[EditTaskModal] 删除验收用例:', { taskId: task.id, index });
+                        }
+                      }}
+                      className="w-5 h-5 shrink-0 rounded-[4px] text-[#a1a1aa] hover:text-[#dc2626] hover:bg-[#fef2f2] flex items-center justify-center transition-colors cursor-pointer"
+                      title="删除该用例"
+                    >
+                      <Trash2 size={10.5} />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>

@@ -37,6 +37,7 @@ import {
   UserCheck,
   ScanLine,
   Archive,
+  ScrollText,
 } from 'lucide-react';
 import { Task, KanbanColumn, TaskAttachment, WorkflowDefinition } from '@openloop/core';
 import { parseMarkdownSteps } from '@openloop/core/markdown-format';
@@ -46,6 +47,8 @@ import { openInDefaultBrowser } from '../utils/openExternalBrowser';
 import { resolveNodeMeta } from '../utils/nodeMeta';
 import { formatShortTaskId, copyToClipboard } from '../utils/taskId';
 import { orderSubTasksForDisplay } from '../utils/subtaskOrder';
+import { readTaskQaSteps } from '../utils/taskQa';
+import { KanbanCardQuickView } from './KanbanCardQuickView';
 import { ScanPreviewModal } from './qa/ScanPreviewModal';
 
 interface RunningNodeVisual {
@@ -234,6 +237,10 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
 }) => {
   const [sandboxStatus, setSandboxStatus] = useState<'checking' | 'running' | 'stopped' | 'starting'>('checking');
   const [isScanOpen, setIsScanOpen] = useState(false);
+  // 卡片速览：把详情页里的档案信息收进卡片，默认收起以保持列表密度
+  const [isQuickViewOpen, setIsQuickViewOpen] = useState(false);
+  // 任务组里展开哪一条子工序的速览（同一条再点即收起）
+  const [subQuickViewId, setSubQuickViewId] = useState<string | null>(null);
   // 空任务组默认展开，让「添加子工序」入口一眼可见
   const [isExpanded, setIsExpanded] = useState<boolean>(() => task.kind === 'group' && !(task.subTaskIds || []).length);
   const [idCopied, setIdCopied] = useState<boolean>(false);
@@ -454,6 +461,15 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
       isAgentNodeRunning
   );
   const isAwaitingReply = !!task.context?.awaitingInput;
+  // 有档案信息才露出速览入口，避免出现空面板；任务组自身是容器，速览放在子工序行上
+  const hasQuickViewFor = (target: Task) =>
+    Boolean(
+      target.description?.trim() ||
+        (target.attachments?.length || 0) > 0 ||
+        Object.keys(target.nodeRuns || {}).length > 0 ||
+        readTaskQaSteps(target).length > 0
+    );
+  const hasQuickViewContent = !isGroup && hasQuickViewFor(task);
 
   return (
     <div
@@ -834,7 +850,11 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
           )}
 
           {isExpanded && displaySubtasks.length > 0 && (
-            <div className="p-1.5 space-y-1 border-t border-[#ececf0] bg-[#fafafc] max-h-[200px] overflow-y-auto">
+            <div
+              className={`p-1.5 space-y-1 border-t border-[#ececf0] bg-[#fafafc] overflow-y-auto ${
+                subQuickViewId ? 'max-h-[420px]' : 'max-h-[200px]'
+              }`}
+            >
 
               {displaySubtasks.map(({ st, orderNo }) => {
                 let statusBadge = (
@@ -893,7 +913,7 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                       e.stopPropagation();
                       onSelect(st);
                     }}
-                    className={`flex items-center justify-between gap-1.5 px-1.5 py-1 rounded-[5px] bg-white border transition-all cursor-pointer group/sub ${
+                    className={`flex flex-wrap items-center justify-between gap-1.5 px-1.5 py-1 rounded-[5px] bg-white border transition-all cursor-pointer group/sub ${
                       st.status === 'waiting_approval'
                         ? 'border-[#fde68a] bg-[#fffdfa] hover:border-[#f59e0b]'
                         : 'border-[#ececf0] hover:border-[#d8d6fb]'
@@ -954,7 +974,40 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                       >
                         <Terminal size={10} />
                       </button>
+                      {hasQuickViewFor(st) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (import.meta.env?.DEV) {
+                              console.log('[KanbanCard] 切换子工序速览:', { parentId: task.id, subtaskId: st.id });
+                            }
+                            setSubQuickViewId((prev) => (prev === st.id ? null : st.id));
+                          }}
+                          className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
+                            subQuickViewId === st.id
+                              ? 'bg-[#eeedfd] text-[#4f46e5]'
+                              : 'text-[#85858d] hover:text-[#4f46e5] hover:bg-[#eeedfd]'
+                          }`}
+                          title={subQuickViewId === st.id ? '收起该工序速览' : '展开该工序速览'}
+                        >
+                          <ScrollText size={10} />
+                        </button>
+                      )}
                     </div>
+                  {/* 子工序速览：展开在该行内，任务组本身不再提供速览 */}
+                  {subQuickViewId === st.id && (
+                    <div className="w-full" onClick={(e) => e.stopPropagation()}>
+                      <KanbanCardQuickView
+                        task={st}
+                        allTasks={allTasks}
+                        workflow={workflows.find((w) => w.id === st.workflowId)}
+                        onOpenLogs={onOpenLogs}
+                        onEdit={onEdit}
+                        onSelect={onSelect}
+                      />
+                    </div>
+                  )}
                   </div>
                 );
               })}
@@ -1338,6 +1391,18 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
         </div>
       )}
 
+      {/* 卡片速览：需求说明、参考图、验收用例与步骤轨迹都在卡片内看完 */}
+      {isQuickViewOpen && hasQuickViewContent && (
+        <KanbanCardQuickView
+          task={task}
+          allTasks={allTasks}
+          workflow={workflow}
+          onOpenLogs={onOpenLogs}
+          onEdit={onEdit}
+          onSelect={onSelect}
+        />
+      )}
+
       {/* 卡片底栏：进度与附件 */}
       <div className="pt-1.5 border-t border-[#ececf0] flex items-center justify-between text-[10.5px] text-[#85858d]">
         <div className="flex items-center gap-1.5">
@@ -1352,6 +1417,31 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
               <ImageIcon size={9} className="text-[#85858d]" />
               <span>{task.attachments.length}</span>
             </span>
+          )}
+          {hasQuickViewContent && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (import.meta.env?.DEV) {
+                  console.log('[KanbanCard] 切换卡片速览:', { taskId: task.id, next: !isQuickViewOpen });
+                }
+                setIsQuickViewOpen((v) => !v);
+              }}
+              className={`inline-flex items-center gap-0.5 h-[16px] pl-1 pr-1 rounded-[4px] border text-[9.5px] font-medium transition-all cursor-pointer select-none active:scale-95 ${
+                isQuickViewOpen
+                  ? 'bg-[#eeedfd] text-[#4f46e5] border-[#d8d6fb]'
+                  : 'bg-[#f4f4f7] text-[#63636b] border-[#ececf0] hover:text-[#4f46e5] hover:border-[#d8d6fb]'
+              }`}
+              title={isQuickViewOpen ? '收起卡片速览' : '在卡片内查看需求说明、参考图、验收用例与步骤轨迹'}
+            >
+              <ScrollText size={9} />
+              <span>速览</span>
+              <ChevronDown
+                size={8}
+                className={`transition-transform duration-150 ${isQuickViewOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
           )}
         </div>
         <div className="flex items-center gap-2">
