@@ -22,6 +22,7 @@ export interface KanbanLaneListProps {
   onMoveTaskColumn: (taskId: string, targetCol: KanbanColumn) => void;
   onEditTask: (task: Task) => void;
   onOpenTaskLogs: (taskId: string, nodeId?: string) => void;
+  onOpenAgentChat?: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   onRunTask: (taskId: string) => void;
   onSkipStepTask: (taskId: string) => void;
@@ -55,6 +56,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
   onMoveTaskColumn,
   onEditTask,
   onOpenTaskLogs,
+  onOpenAgentChat,
   onDeleteTask,
   onRunTask,
   onSkipStepTask,
@@ -121,6 +123,7 @@ const KanbanLaneListComponent: React.FC<KanbanLaneListProps> = ({
           onMoveColumn={onMoveTaskColumn}
           onEdit={onEditTask}
           onOpenLogs={onOpenTaskLogs}
+          onOpenAgentChat={onOpenAgentChat}
           onDelete={onDeleteTask}
           onRun={onRunTask}
           onSkipStep={onSkipStepTask}
@@ -162,6 +165,7 @@ export const KanbanLaneList = memo(KanbanLaneListComponent, (prev, next) => {
     prev.runningTaskId === next.runningTaskId &&
     prev.approvingId === next.approvingId &&
     prev.skippingStepTaskId === next.skippingStepTaskId &&
-    prev.wfMap === next.wfMap
+    prev.wfMap === next.wfMap &&
+    prev.onOpenAgentChat === next.onOpenAgentChat
   );
 });
