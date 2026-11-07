@@ -126,6 +126,17 @@ export class DeviceLeasePool {
     });
   }
 
+  /** 检查某台设备当前是否已被自动化任务锁定占用 */
+  static isDeviceBusy(key: string): boolean {
+    const id = key.trim();
+    return this.holders.has(id);
+  }
+
+  /** 获取正在占用该设备任务的摘要信息 */
+  static getHolder(key: string): { label: string; ownerId?: string; since: number } | undefined {
+    return this.holders.get(key.trim());
+  }
+
   /** 订阅队列变化，返回取消订阅函数 */
   static subscribe(listener: () => void): () => void {
     this.listeners.add(listener);

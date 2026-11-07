@@ -330,7 +330,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [qaModelApiKey, setQaModelApiKey] = useState('');
   const [qaModelName, setQaModelName] = useState('');
   const [qaModelFamily, setQaModelFamily] = useState('');
-  const [autoOpenMirror, setAutoOpenMirror] = useState(true);
+  const [autoOpenMirror, setAutoOpenMirror] = useState(false);
   const [showQaApiKey, setShowQaApiKey] = useState(false);
 
   // 提示词状态
@@ -512,7 +512,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           setQaModelApiKey(settings.qaAutomation.modelApiKey || '');
           setQaModelName(settings.qaAutomation.modelName || '');
           setQaModelFamily(settings.qaAutomation.modelFamily || '');
-          setAutoOpenMirror(settings.qaAutomation.autoOpenMirror !== false);
+          setAutoOpenMirror(settings.qaAutomation.autoOpenMirror === true);
         }
       }
       // 扩展清单单独取：需要本机已安装列表，不在设置体里

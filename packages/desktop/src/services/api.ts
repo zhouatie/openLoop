@@ -1557,6 +1557,50 @@ export class DesktopApiService {
     return requestJson<IosDevicesSnapshot>(`${BASE_URL}/api/qa/devices/ios${query}`);
   }
 
+  getAndroidStreamWsUrl(serial: string): string {
+    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    try {
+      const u = new URL(BASE_URL);
+      return `${wsProto}//${u.host}/api/qa/devices/android/${encodeURIComponent(serial)}/stream`;
+    } catch {
+      return `${wsProto}//127.0.0.1:19889/api/qa/devices/android/${encodeURIComponent(serial)}/stream`;
+    }
+  }
+
+  getIosStreamPreviewUrl(options?: { wdaEndpoint?: string }): string {
+    const query = options?.wdaEndpoint ? `?wdaEndpoint=${encodeURIComponent(options.wdaEndpoint)}` : '';
+    return `${BASE_URL}/api/qa/devices/ios/preview${query}`;
+  }
+
+  async executeDeviceAction(payload: {
+    platform: 'android' | 'ios';
+    serial: string;
+    action: {
+      type: 'tap' | 'swipe' | 'text' | 'key' | 'launch';
+      x?: number;
+      y?: number;
+      endX?: number;
+      endY?: number;
+      duration?: number;
+      key?: string;
+      text?: string;
+      appPackage?: string;
+    };
+    wdaEndpoint?: string;
+  }): Promise<{ success: boolean; message?: string; busy?: boolean }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 执行设备反向控制:', payload.platform, payload.serial, payload.action.type);
+    }
+    return requestJson<{ success: boolean; message?: string; busy?: boolean }>(
+      `${BASE_URL}/api/qa/devices/action`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
   async getDeviceLeases(): Promise<DeviceLeaseSnapshot[]> {
     const data = await requestJson<{ leases: DeviceLeaseSnapshot[] }>(`${BASE_URL}/api/qa/device-leases`);
     return data.leases || [];

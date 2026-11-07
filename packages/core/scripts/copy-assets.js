@@ -11,3 +11,11 @@ const target = path.join(__dirname, '..', 'dist', 'agent', 'assets');
 fs.mkdirSync(target, { recursive: true });
 fs.cpSync(source, target, { recursive: true });
 console.log(`[core] 静态资源已复制: ${path.relative(process.cwd(), target)}`);
+
+const binSource = path.join(__dirname, '..', 'bin');
+const binTarget = path.join(__dirname, '..', 'dist', 'bin');
+if (fs.existsSync(binSource)) {
+  fs.mkdirSync(binTarget, { recursive: true });
+  fs.cpSync(binSource, binTarget, { recursive: true });
+  console.log(`[core] 驱动工具已复制: ${path.relative(process.cwd(), binTarget)}`);
+}

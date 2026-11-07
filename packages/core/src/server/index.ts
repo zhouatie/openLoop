@@ -47,6 +47,9 @@ import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
 import { IosDeviceManager } from '../qa/ios-device-manager';
 import { DeviceLeasePool } from '../qa/device-lease-pool';
+import { AndroidStreamHub } from '../preview/android-stream-hub';
+import { proxyIosStream } from '../preview/ios-stream-proxy';
+import { DeviceActionController } from '../preview/device-action-controller';
 import { isQaPlatform } from '../qa/qa-driver';
 import { applyQaModelEnv } from '../qa/model-env';
 import { configureQaRuntimePaths } from '../qa/runtime-paths';
@@ -259,7 +262,25 @@ export class OpenLoopServer {
         this.handleHttpRequest(req, res);
       });
 
-      this.wss = new WebSocketServer({ server: this.httpServer });
+      this.wss = new WebSocketServer({ noServer: true });
+      const androidStreamWss = new WebSocketServer({ noServer: true });
+
+      this.httpServer.on('upgrade', (request, socket, head) => {
+        const reqUrl = request.url || '';
+        const parsedUrl = new URL(reqUrl, `http://${request.headers.host || 'localhost'}`);
+        const streamMatch = parsedUrl.pathname.match(/^\/api\/qa\/devices\/android\/([^/]+)\/stream$/);
+
+        if (streamMatch) {
+          const serial = decodeURIComponent(streamMatch[1]);
+          androidStreamWss.handleUpgrade(request, socket, head, (ws) => {
+            AndroidStreamHub.attach(serial, ws);
+          });
+        } else {
+          this.wss!.handleUpgrade(request, socket, head, (ws) => {
+            this.wss!.emit('connection', ws, request);
+          });
+        }
+      });
 
       this.wss.on('connection', (ws, req) => {
         this.clients.add(ws);
@@ -342,6 +363,8 @@ export class OpenLoopServer {
     if (this.wss) {
       this.wss.close();
     }
+
+    await AndroidStreamHub.destroyAll();
 
     if (this.httpServer) {
       await new Promise<void>((resolve) => this.httpServer?.close(() => resolve()));
@@ -3360,6 +3383,39 @@ ${existingSubSummary}
 
       if (pathname === '/api/qa/device-leases' && method === 'GET') {
         return this.sendJson(res, 200, { leases: DeviceLeasePool.getSnapshots() }, reqMeta);
+      }
+
+      // iOS 设备 MJPEG / 截图视频流代理
+      if (pathname === '/api/qa/devices/ios/preview' && method === 'GET') {
+        const wdaEndpoint = parsedUrl.searchParams.get('wdaEndpoint') || undefined;
+        const mjpegUrl = parsedUrl.searchParams.get('mjpegUrl') || undefined;
+        await proxyIosStream(req, res, { wdaEndpoint, mjpegUrl });
+        return;
+      }
+
+      // 统一设备反向控制接口 (支持点击、滑动、输入、按键、拉起应用)
+      if (pathname === '/api/qa/devices/action' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const platform = (body.platform === 'ios' ? 'ios' : 'android') as 'android' | 'ios';
+        const serial = (body.serial || body.udid || '').toString();
+        const action = body.action || body;
+        const result = await DeviceActionController.executeAction(platform, serial, action, {
+          wdaEndpoint: body.wdaEndpoint,
+        });
+        const statusCode = result.busy ? 409 : result.success ? 200 : 400;
+        return this.sendJson(res, statusCode, result, reqMeta);
+      }
+
+      const deviceActionMatch = pathname.match(/^\/api\/qa\/devices\/(android|ios)\/([^/]+)\/action$/);
+      if (deviceActionMatch && method === 'POST') {
+        const platform = deviceActionMatch[1] as 'android' | 'ios';
+        const serial = decodeURIComponent(deviceActionMatch[2]);
+        const body = await this.parseJsonBody(req);
+        const result = await DeviceActionController.executeAction(platform, serial, body.action || body, {
+          wdaEndpoint: body.wdaEndpoint,
+        });
+        const statusCode = result.busy ? 409 : result.success ? 200 : 400;
+        return this.sendJson(res, statusCode, result, reqMeta);
       }
 
       if (pathname === '/api/qa/devices/ios' && method === 'GET') {

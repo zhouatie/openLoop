@@ -1120,9 +1120,9 @@ export class MidsceneExecutor implements NodeExecutor {
         } catch {}
       }
 
-      // 客户端（Android）自动化：按设置自动拉起设备镜像窗口，便于实时观看验收过程
+      // 客户端（Android）自动化：按设置自动拉起设备镜像窗口，默认关闭（优先使用界面内嵌实时串流监视）
       if (platform === 'android') {
-        const autoOpenMirror = ctx.store?.getSettings?.()?.qaAutomation?.autoOpenMirror !== false;
+        const autoOpenMirror = ctx.store?.getSettings?.()?.qaAutomation?.autoOpenMirror === true;
         if (autoOpenMirror) {
           const mirrorRes = await AndroidDeviceManager.openMirror(node.config.deviceSerial || undefined);
           emitLog(

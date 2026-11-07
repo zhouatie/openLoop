@@ -19,8 +19,10 @@ import styles from './WorkspaceDock.module.css';
 
 /** 终端页签首次被选中才加载 xterm：不进首屏包 */
 const TerminalPane = lazy(() => import('./dsh/TerminalPane').then((module) => ({ default: module.TerminalPane })));
+/** 设备画面监视页签懒加载 */
+const DockDevicePane = lazy(() => import('../components/device/DockDevicePane').then((module) => ({ default: module.DockDevicePane })));
 
-export type DockTab = 'files' | 'terminal' | 'preview' | 'diff';
+export type DockTab = 'files' | 'terminal' | 'preview' | 'diff' | 'device';
 
 /** 上层发起的页签请求：同一个请求重复触发也要生效，所以带序号 */
 export interface DockRequest {
@@ -57,6 +59,7 @@ const MARKDOWN_EXT = /\.(md|mdx)$/i;
 
 /** 文件页签：唯一的固定页签，预览页签由打开的文件生成 */
 const FILES_PANE: DockPane = { key: 'files', kind: 'files', title: '文件', seq: 0 };
+const DEVICE_PANE: DockPane = { key: 'device', kind: 'device', title: '设备画面', seq: 0 };
 
 /** 终端页签的 key 带序号：新建一个终端就是再加一个页签，各自一个 PTY */
 const TERMINAL_PREFIX = 'terminal:';
@@ -68,10 +71,11 @@ function terminalPane(index: number): DockPane {
 /** 默认页签：文件与第一个终端，页签全关掉后回到这里 */
 const DEFAULT_PANES: DockPane[] = [FILES_PANE, terminalPane(1)];
 
-/** 「+」菜单：文件只开一个，终端每点一次新建一个 */
+/** 「+」菜单：文件只开一个，终端每点一次新建一个，设备画面可按需开启 */
 const ADDABLE_KINDS: Array<{ kind: DockTab; title: string; single?: boolean }> = [
   { kind: 'files', title: '文件', single: true },
   { kind: 'terminal', title: '新建终端' },
+  { kind: 'device', title: '设备画面', single: true },
 ];
 
 /** 面板宽度：拖动左缘调整，双击复位，按工作区无关的界面偏好持久化 */
@@ -679,6 +683,11 @@ export const WorkspaceDock = memo(function WorkspaceDock({
         onPanesChange([...panes, pane], pane.key);
         return;
       }
+      if (kind === 'device') {
+        if (import.meta.env?.DEV) console.log('[WorkspaceDock] 打开设备画面页签');
+        onPanesChange(panes.some((p) => p.key === DEVICE_PANE.key) ? panes : [...panes, DEVICE_PANE], DEVICE_PANE.key);
+        return;
+      }
       onPanesChange(panes.some((pane) => pane.key === FILES_PANE.key) ? panes : [...panes, FILES_PANE], FILES_PANE.key);
     },
     [panes, onPanesChange]
@@ -846,6 +855,11 @@ export const WorkspaceDock = memo(function WorkspaceDock({
                 )}
                 {pane.kind === 'diff' && pane.changeId && pane.path && (
                   <DiffPane changeId={pane.changeId} path={pane.path} onOpenSource={openPreview} />
+                )}
+                {pane.kind === 'device' && (
+                  <Suspense fallback={null}>
+                    <DockDevicePane active={pane.key === activeKey} />
+                  </Suspense>
                 )}
               </div>
             ))}

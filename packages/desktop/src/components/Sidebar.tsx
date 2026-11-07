@@ -11,6 +11,7 @@ import {
   Timer,
   Bot,
   Zap,
+  Smartphone,
 } from 'lucide-react';
 import { PluginManifest } from '@openloop/core';
 import { BrandLogo } from './BrandLogo';
@@ -40,6 +41,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   Timer: <Timer size={15} strokeWidth={1.8} />,
   Bot: <Bot size={15} strokeWidth={1.8} />,
   Zap: <Zap size={15} strokeWidth={1.8} />,
+  Smartphone: <Smartphone size={15} strokeWidth={1.8} />,
 };
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -123,6 +125,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 ? formatCombo('3')
                 : plugin.id === 'qa-automation'
                 ? formatCombo('4')
+                : plugin.id === 'devices'
+                ? formatCombo('5')
                 : undefined;
 
             const titleText = plugin.sidebarItem?.title || plugin.name;

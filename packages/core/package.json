@@ -11,8 +11,13 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.5.0",
-    "@midscene/android": "^1.16.0",
-    "@midscene/ios": "^1.16.0",
+    "@midscene/android": "^1.17.7",
+    "@midscene/ios": "^1.17.7",
+    "@yume-chan/adb": "2.6.3",
+    "@yume-chan/adb-scrcpy": "2.3.2",
+    "@yume-chan/adb-server-node-tcp": "2.5.2",
+    "@yume-chan/scrcpy": "2.3.0",
+    "@yume-chan/stream-extra": "2.6.1",
     "better-sqlite3": "^13.0.3",
     "node-pty": "1.2.0-beta.15",
     "ws": "^8.18.0"

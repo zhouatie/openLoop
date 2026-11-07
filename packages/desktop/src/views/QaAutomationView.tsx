@@ -11,6 +11,7 @@ import { api } from '../services/api';
 import { QaRunsListView } from './qa/QaRunsListView';
 import { QaRunDetailView } from './qa/QaRunDetailView';
 import { QaSuitesListView } from './qa/QaSuitesListView';
+import { QaDevicesView } from './qa/QaDevicesView';
 import { QaSuiteModal } from '../components/qa/QaSuiteModal';
 import { QaLiveRunModal } from '../components/qa/QaLiveRunModal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -18,13 +19,13 @@ import { toast } from '../components/Toast';
 
 const STORAGE_KEY_QA_SUBTAB = 'openloop_qa_subtab';
 
-type QaTab = 'runs' | 'suites';
+type QaTab = 'runs' | 'suites' | 'devices';
 
 export const QaAutomationView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<QaTab>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_QA_SUBTAB);
-      if (saved === 'runs' || saved === 'suites') return saved;
+      if (saved === 'runs' || saved === 'suites' || saved === 'devices') return saved;
     } catch {}
     return 'runs';
   });
@@ -251,6 +252,19 @@ export const QaAutomationView: React.FC = () => {
               {suites.length}
             </span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabChange('devices')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-[5px] text-[11.5px] font-medium transition-all cursor-pointer ${
+              activeTab === 'devices'
+                ? 'bg-white text-[#1c1c21] shadow-2xs font-semibold'
+                : 'text-[#63636b] hover:text-[#1c1c21]'
+            }`}
+          >
+            <Smartphone size={13} className={activeTab === 'devices' ? 'text-[#1c1c21]' : 'text-[#85858d]'} />
+            <span>设备监视</span>
+          </button>
         </div>
 
         {activeTab === 'suites' && (
@@ -303,38 +317,42 @@ export const QaAutomationView: React.FC = () => {
       )}
 
       {/* 主视图内容区域 */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6 pt-2">
-        {activeTab === 'runs' ? (
-          <QaRunsListView
-            runs={runs}
-            suites={suites}
-            onSelectRun={(runId) => setSelectedRunId(runId)}
-            onQuickRunSuite={handleQuickRunSuite}
-            onNewSuite={() => {
-              setEditingSuite(null);
-              setIsEditorOpen(true);
-            }}
-            onDeleteRun={(run) => setDeleteTargetRun(run)}
-            onBatchDeleteRuns={(runIds) => setBatchDeleteRunIds(runIds)}
-            onRefresh={loadData}
-            isLoading={isLoading}
-          />
-        ) : (
-          <QaSuitesListView
-            suites={suites}
-            onNewSuite={() => {
-              setEditingSuite(null);
-              setIsEditorOpen(true);
-            }}
-            onEditSuite={(suite) => {
-              setEditingSuite(suite);
-              setIsEditorOpen(true);
-            }}
-            onDeleteSuite={(suite) => setDeleteTargetSuite(suite)}
-            onRunSuite={handleQuickRunSuite}
-          />
-        )}
-      </div>
+      {activeTab === 'devices' ? (
+        <QaDevicesView />
+      ) : (
+        <div className="flex-1 overflow-y-auto px-6 pb-6 pt-2">
+          {activeTab === 'runs' ? (
+            <QaRunsListView
+              runs={runs}
+              suites={suites}
+              onSelectRun={(runId) => setSelectedRunId(runId)}
+              onQuickRunSuite={handleQuickRunSuite}
+              onNewSuite={() => {
+                setEditingSuite(null);
+                setIsEditorOpen(true);
+              }}
+              onDeleteRun={(run) => setDeleteTargetRun(run)}
+              onBatchDeleteRuns={(runIds) => setBatchDeleteRunIds(runIds)}
+              onRefresh={loadData}
+              isLoading={isLoading}
+            />
+          ) : (
+            <QaSuitesListView
+              suites={suites}
+              onNewSuite={() => {
+                setEditingSuite(null);
+                setIsEditorOpen(true);
+              }}
+              onEditSuite={(suite) => {
+                setEditingSuite(suite);
+                setIsEditorOpen(true);
+              }}
+              onDeleteSuite={(suite) => setDeleteTargetSuite(suite)}
+              onRunSuite={handleQuickRunSuite}
+            />
+          )}
+        </div>
+      )}
 
       {/* 新建/编辑用例 Modal */}
       {isEditorOpen && (

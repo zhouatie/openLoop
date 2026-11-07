@@ -17,6 +17,7 @@ import { WorkflowListView } from './views/WorkflowListView';
 import { WorkflowScriptView } from './views/WorkflowScriptView';
 import { AutomationListView } from './views/AutomationListView';
 import { QaAutomationView } from './views/QaAutomationView';
+import { QaDevicesView } from './views/qa/QaDevicesView';
 import { GlobalAgentPanel } from './agent-ui';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
@@ -568,6 +569,10 @@ export const AppContent: React.FC = () => {
             <QaAutomationView />
           )}
 
+          {activePluginId === 'devices' && (
+            <QaDevicesView />
+          )}
+
           {isSettings && (
             <SettingsView
               activeSubTab={activePluginId === 'plugin-manager' ? 'settings-plugins' : activePluginId}
@@ -590,6 +595,7 @@ export const AppContent: React.FC = () => {
             activePluginId !== 'workflow-editor' &&
             activePluginId !== 'automations' &&
             activePluginId !== 'qa-automation' &&
+            activePluginId !== 'devices' &&
             activePluginId !== 'plugin-manager' &&
             !isSettings &&
             (currentPlugin?.entry ? (
