@@ -34,6 +34,13 @@ export interface TaskPromptAreaProps {
   disabled?: boolean;
   maxAttachmentCount?: number;
   id?: string;
+  /** 合体输入：传入标题即在同一个输入卡片内渲染首行，回车自然续写说明 */
+  title?: string;
+  onTitleChange?: (value: string) => void;
+  titlePlaceholder?: string;
+  titleInputRef?: React.RefObject<HTMLInputElement>;
+  /** 正文随内容自动增高（合体输入默认开启） */
+  autoGrow?: boolean;
 }
 
 export const TaskPromptArea = React.forwardRef<HTMLTextAreaElement, TaskPromptAreaProps>(
@@ -48,6 +55,11 @@ export const TaskPromptArea = React.forwardRef<HTMLTextAreaElement, TaskPromptAr
       disabled = false,
       maxAttachmentCount = 8,
       id,
+      title,
+      onTitleChange,
+      titlePlaceholder = '一句话说清楚要做什么',
+      titleInputRef,
+      autoGrow,
     },
     ref
   ) => {
@@ -59,6 +71,65 @@ export const TaskPromptArea = React.forwardRef<HTMLTextAreaElement, TaskPromptAr
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const innerTitleRef = useRef<HTMLInputElement>(null);
+
+  // 首行标题与正文共享同一个卡片，视觉上就是一个输入框
+  const isMergedComposer = title !== undefined && Boolean(onTitleChange);
+  const resolvedTitleRef = titleInputRef ?? innerTitleRef;
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el || !(autoGrow ?? isMergedComposer)) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [value, autoGrow, isMergedComposer]);
+
+  // 回车即进入说明区，用户无需手动切换到另一个输入框
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    textareaRef.current?.focus();
+    if (import.meta.env?.DEV) {
+      console.log('[TaskPromptArea:Composer] 回车从标题连续进入说明与提示词');
+    }
+  };
+
+  // 粘贴多行文本自动拆分：首行作为标题，其余沉入说明区
+  const handleTitlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData('text');
+    if (!isMergedComposer || !/[\r\n]/.test(text)) return;
+    e.preventDefault();
+    const [firstLine, ...restLines] = text.split(/\r?\n/);
+    const rest = restLines.join('\n').trim();
+    onTitleChange?.(firstLine.replace(/\s+$/, ''));
+    onChange([rest, value].filter(Boolean).join('\n'));
+    if (import.meta.env?.DEV) {
+      console.log('[TaskPromptArea:Composer] 多行粘贴自动拆分标题与说明:', {
+        title: firstLine,
+        description: rest,
+      });
+    }
+  };
+
+  // 说明区开头退格回到标题行，书写流始终连续
+  const handleBodyKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const el = textareaRef.current;
+    if (!isMergedComposer || e.key !== 'Backspace' || value || el?.selectionStart !== 0) return;
+    e.preventDefault();
+    const titleEl = resolvedTitleRef.current;
+    if (!titleEl) return;
+    titleEl.focus();
+    titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length);
+  };
+
+  // 标题为空时，光标始终留在首行，避免产生无标题任务
+  const handleBodyFocus = () => {
+    if (!isMergedComposer || title?.trim()) return;
+    const titleEl = resolvedTitleRef.current;
+    if (!titleEl) return;
+    titleEl.focus();
+    titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length);
+  };
 
   // 清理临时 ObjectURL
   const cleanupPendingItem = useCallback((item: PendingUploadItem) => {
@@ -284,6 +355,24 @@ export const TaskPromptArea = React.forwardRef<HTMLTextAreaElement, TaskPromptAr
           </div>
         )}
 
+        {/* 合体输入的首行标题 */}
+        {isMergedComposer && (
+          <input
+            ref={resolvedTitleRef}
+            type="text"
+            value={title}
+            placeholder={titlePlaceholder}
+            disabled={disabled}
+            onChange={(e) => onTitleChange?.(e.target.value)}
+            onKeyDown={handleTitleKeyDown}
+            onPaste={handleTitlePaste}
+            className="w-full bg-transparent px-2.5 pt-2 text-[12.5px] font-medium text-[#1c1c21] placeholder-[#85858d] outline-none border-none"
+          />
+        )}
+        {isMergedComposer && value.trim() && (
+          <div className="mx-2.5 mt-1.5 border-t border-dashed border-[#e9e9ef]" />
+        )}
+
         {/* 文本输入框 */}
         <textarea
           ref={(node) => {
@@ -300,8 +389,12 @@ export const TaskPromptArea = React.forwardRef<HTMLTextAreaElement, TaskPromptAr
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onPaste={handlePaste}
+          onKeyDown={handleBodyKeyDown}
+          onFocus={handleBodyFocus}
           disabled={disabled}
-          className="w-full bg-transparent p-2.5 text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none resize-none leading-relaxed border-none"
+          className={`w-full bg-transparent text-[11.5px] text-[#1c1c21] placeholder-[#85858d] outline-none resize-none leading-relaxed border-none ${
+            isMergedComposer ? 'px-2.5 pt-1.5 pb-2' : 'p-2.5'
+          }`}
         />
 
         {/* 缩略图画廊栏 (有图片时平滑展开) */}
