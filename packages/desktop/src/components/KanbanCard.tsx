@@ -508,7 +508,8 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
           )}
         </div>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1">
-          {task.status === 'running' && (
+          {/* 运行中卡片已有运行面板内的终止入口，此处只在无节点信息时兜底，避免同一个卡片出现两个终止按钮 */}
+          {task.status === 'running' && !currentNodeMeta && (
             <button
               disabled={isCancelling}
               onClick={(e) => {
@@ -1137,7 +1138,8 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
               isAwaitingInput ? 'bg-[#fcfbff] border-[#dcdbf8]' : `${visual.badgeBg} ${visual.badgeBorder}`
             }`}
           >
-            <div className="flex items-center justify-between gap-1.5 mb-1.5">
+            {/* 状态行：只留呼吸点与节点类型徽标，次要动作悬浮卡片才浮现，避免挤压与遮挡 */}
+            <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="relative flex h-2 w-2 shrink-0">
                   <span
@@ -1152,29 +1154,29 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                   />
                 </span>
                 {isAwaitingInput ? (
-                  <span className="text-[9.5px] font-semibold tracking-wider px-1.5 py-[1px] rounded bg-white/90 border border-[#c7d2fe] text-[#4338ca] flex items-center gap-1 shrink-0">
-                    <MessageSquare size={9.5} />
-                    <span>{hasCodeChanges ? '待确认放行' : '等待回复'}</span>
+                  <span className="min-w-0 text-[9.5px] font-semibold tracking-wider px-1.5 py-[1px] rounded bg-white/90 border border-[#c7d2fe] text-[#4338ca] flex items-center gap-1">
+                    <MessageSquare size={9.5} className="shrink-0" />
+                    <span className="truncate">{hasCodeChanges ? '待确认放行' : '等待回复'}</span>
                   </span>
                 ) : (
-                  <span className={`text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/90 border ${visual.badgeBorder} ${visual.badgeText} flex items-center gap-1 shrink-0`}>
-                    <IconComp size={9.5} />
-                    <span>{visual.label}</span>
+                  <span className={`min-w-0 text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/90 border ${visual.badgeBorder} ${visual.badgeText} flex items-center gap-1`}>
+                    <IconComp size={9.5} className="shrink-0" />
+                    <span className="truncate">{visual.label}</span>
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="ml-auto flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                 {task.context?.worktree && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       setIsScanOpen(true);
                     }}
-                    className="h-[19px] px-1.5 rounded-[4px] bg-white/90 hover:bg-white text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all shadow-xs"
+                    className="w-5 h-[19px] rounded-[4px] bg-white/90 hover:bg-white text-[#71717a] hover:text-[#1c1c21] border border-[#e3e3e8] hover:border-[#d4d4d8] flex items-center justify-center transition-colors cursor-pointer shadow-xs"
                     title="扫码在手机上打开靶机页面"
+                    aria-label="扫码预览靶机页面"
                   >
-                    <ScanLine size={8.5} className="text-[#85858d]" />
-                    <span>扫码</span>
+                    <ScanLine size={9.5} />
                   </button>
                 )}
                 <button
@@ -1182,11 +1184,11 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                     e.stopPropagation();
                     onOpenLogs(task.id, task.currentNodeId);
                   }}
-                  className="h-[19px] px-1.5 rounded-[4px] bg-white/90 hover:bg-white text-[#4b4b53] hover:text-[#1c1c21] border border-[#e3e3e8] text-[9.5px] font-medium flex items-center gap-1 transition-all shadow-xs"
+                  className="w-5 h-[19px] rounded-[4px] bg-white/90 hover:bg-white text-[#71717a] hover:text-[#1c1c21] border border-[#e3e3e8] hover:border-[#d4d4d8] flex items-center justify-center transition-colors cursor-pointer shadow-xs"
                   title="查看实时运行终端"
+                  aria-label="查看实时运行终端"
                 >
-                  <Terminal size={8.5} className="text-[#85858d]" />
-                  <span>终端</span>
+                  <Terminal size={9.5} />
                 </button>
                 <button
                   disabled={isCancelling}
@@ -1194,11 +1196,15 @@ const KanbanCardComponent: React.FC<KanbanCardProps> = ({
                     e.stopPropagation();
                     onCancel(task.id);
                   }}
-                  className="h-[19px] px-1.5 rounded-[4px] bg-white/90 hover:bg-[#fee2e2] text-[#85858d] hover:text-[#d64545] border border-[#e3e3e8] hover:border-[#fecaca] text-[9.5px] font-medium flex items-center gap-1 transition-all shadow-xs"
+                  className="w-5 h-[19px] rounded-[4px] bg-white/90 hover:bg-[#fee2e2] text-[#85858d] hover:text-[#d64545] border border-[#e3e3e8] hover:border-[#fecaca] flex items-center justify-center transition-colors cursor-pointer shadow-xs disabled:opacity-50"
                   title="终止任务"
+                  aria-label="终止任务"
                 >
-                  <Square size={8} className="fill-current" />
-                  <span>{isCancelling ? '终止中' : '终止'}</span>
+                  {isCancelling ? (
+                    <Loader2 size={9} className="animate-spin text-[#d64545]" />
+                  ) : (
+                    <Square size={8} className="fill-current" />
+                  )}
                 </button>
               </div>
             </div>
