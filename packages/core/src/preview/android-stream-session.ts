@@ -4,7 +4,8 @@ import type { WebSocket } from 'ws';
 import { Adb, AdbServerClient } from '@yume-chan/adb';
 import { AdbServerNodeTcpConnector } from '@yume-chan/adb-server-node-tcp';
 import { AdbScrcpyClient, AdbScrcpyOptions3_3_3 } from '@yume-chan/adb-scrcpy';
-import { DefaultServerPath } from '@yume-chan/scrcpy';
+// 独立服务端路径：与 Midscene 内置会话的 DefaultServerPath 隔离，避免互相覆盖推送
+const SERVER_PATH = '/data/local/tmp/openloop-scrcpy-server.jar';
 import { createLogger } from '../logger';
 import { resolveScrcpyServerBinaryPath } from './scrcpy-binary';
 
@@ -109,8 +110,8 @@ export class AndroidStreamSession {
         throw new Error('未在系统或包资源中找到 scrcpy-server 二进制文件');
       }
 
-      logger.info(`[${this.serial}] 正在推送 scrcpy-server (${serverBin}) -> ${DefaultServerPath}...`);
-      await execFileAsync('adb', ['-s', this.serial, 'push', serverBin, DefaultServerPath], { timeout: 10000 });
+      logger.info(`[${this.serial}] 正在推送 scrcpy-server (${serverBin}) -> ${SERVER_PATH}...`);
+      await execFileAsync('adb', ['-s', this.serial, 'push', serverBin, SERVER_PATH], { timeout: 10000 });
 
       // 通过 TCP 连接本地 ADB 服务
       const adbConnector = new AdbServerNodeTcpConnector({ host: '127.0.0.1', port: 5037 });
@@ -130,10 +131,12 @@ export class AndroidStreamSession {
         maxSize: 1080,
         sendFrameMeta: true,
         videoBitRate: 3000000,
+        // 保持设备常亮：屏幕休眠会让编码器停摆，实时画面直接断流
+        stayAwake: true,
       });
 
       logger.info(`[${this.serial}] 正在启动设备端 scrcpy 服务...`);
-      this.scrcpyClient = await AdbScrcpyClient.start(adb, DefaultServerPath, scrcpyOptions);
+      this.scrcpyClient = await AdbScrcpyClient.start(adb, SERVER_PATH, scrcpyOptions);
 
       const videoStream = await this.scrcpyClient.videoStream;
       const meta = videoStream.metadata || {};
@@ -179,7 +182,10 @@ export class AndroidStreamSession {
       while (!this.isDestroyed) {
         const { done, value } = await reader.read();
         if (done) {
-          logger.info(`[${this.serial}] 视频流正常结束`);
+          // 服务端流结束意味着底层 scrcpy 已退出：必须销毁会话，
+          // 否则后续重连会命中这个没有画面的僵尸会话，表现为黑屏
+          logger.info(`[${this.serial}] 视频流正常结束，销毁会话以便重连时重新拉起`);
+          this.broadcastMessage({ type: 'end', message: '设备视频流已中断，请重新连接' });
           break;
         }
 
@@ -215,16 +221,26 @@ export class AndroidStreamSession {
       try {
         reader.releaseLock();
       } catch {}
+      if (!this.isDestroyed) {
+        // 帧读取循环退出后不留活体会话：让 Hub 摘掉它，下一次订阅重新开流
+        this.destroy().catch((err) => {
+          logger.warn(`[${this.serial}] 销毁已结束的流会话异常: ${err.message}`);
+        });
+      }
+    }
+  }
+
+  private broadcastMessage(message: Record<string, unknown>): void {
+    const payload = JSON.stringify(message);
+    for (const sub of this.subscribers) {
+      if (sub.readyState === sub.OPEN) {
+        sub.send(payload);
+      }
     }
   }
 
   private broadcastError(message: string): void {
-    const errorMsg = JSON.stringify({ type: 'error', message });
-    for (const sub of this.subscribers) {
-      if (sub.readyState === sub.OPEN) {
-        sub.send(errorMsg);
-      }
-    }
+    this.broadcastMessage({ type: 'error', message });
   }
 
   /**

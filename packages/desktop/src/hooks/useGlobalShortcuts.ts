@@ -68,6 +68,17 @@ export const useGlobalShortcuts = (actions: ShortcutActions, enabled = true) => 
         return;
       }
 
+      // Super + M 始终可用：在智能体浮层里写代码时也要能随时叫出真机画面
+      if (isSuperPressed && (e.key?.toLowerCase() === 'm' || e.code === 'KeyM') && actionsRef.current.onToggleMirror) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (import.meta.env?.DEV) {
+          console.log('[Shortcut] 触发快捷键: Super + M -> 屏幕镜像浮层', { superKey: activeSuper });
+        }
+        actionsRef.current.onToggleMirror();
+        return;
+      }
+
       if (!enabledRef.current) {
         return;
       }
@@ -176,17 +187,6 @@ export const useGlobalShortcuts = (actions: ShortcutActions, enabled = true) => 
           console.log('[Shortcut] 触发快捷键: Super + B -> 切换侧边栏', { superKey: activeSuper });
         }
         actionsRef.current.onToggleSidebar?.();
-        return;
-      }
-
-      // 7. Super + M: 切换右侧屏幕镜像浮层
-      if ((key === 'm' || code === 'KeyM') && actionsRef.current.onToggleMirror) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (import.meta.env?.DEV) {
-          console.log('[Shortcut] 触发快捷键: Super + M -> 屏幕镜像浮层', { superKey: activeSuper });
-        }
-        actionsRef.current.onToggleMirror();
         return;
       }
 
