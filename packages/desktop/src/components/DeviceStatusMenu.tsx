@@ -60,27 +60,45 @@ export const DeviceStatusMenu: React.FC<DeviceStatusMenuProps> = ({ onOpenMirror
   const stoppingUntilRef = useRef<Map<string, number>>(new Map());
 
   const reload = useCallback(async () => {
-    const [runningRes, androidList, emulatorRes, iosSnapshot] = await Promise.all([
-      api.getRunningEmulators().catch(() => ({ emulators: [] as RunningEmulatorInfo[] })),
-      api.getAndroidDevices().catch(() => [] as AndroidDeviceInfo[]),
-      api.getAndroidEmulators().catch(() => ({ available: false, avds: [] as string[], message: undefined })),
-      api.getIosDevices().catch(() => null),
+    // 部分接口失败时沿用上一轮结果：不能让一次抖动把整份设备列表清空
+    const [runningRes, androidRes, emulatorRes, iosRes] = await Promise.allSettled([
+      api.getRunningEmulators(),
+      api.getAndroidDevices(),
+      api.getAndroidEmulators(),
+      api.getIosDevices(),
     ]);
 
     const now = Date.now();
-    const visible = (runningRes.emulators || []).filter((item) => {
-      const until = stoppingUntilRef.current.get(item.key);
-      if (!until) return true;
-      if (until > now) return false;
-      stoppingUntilRef.current.delete(item.key);
-      return true;
-    });
+    if (runningRes.status === 'fulfilled') {
+      const visible = (runningRes.value.emulators || []).filter((item) => {
+        const until = stoppingUntilRef.current.get(item.key);
+        if (!until) return true;
+        if (until > now) return false;
+        stoppingUntilRef.current.delete(item.key);
+        return true;
+      });
+      setRunning(visible);
+    }
 
-    setRunning(visible);
-    setRealDevices((androidList || []).filter((d) => d.status === 'device' && !d.isEmulator));
-    setAvds(emulatorRes.available ? emulatorRes.avds : []);
-    setAvdsAvailable(Boolean(emulatorRes.available));
-    setSimulators(dedupeSimulators(iosSnapshot?.allSimulators || iosSnapshot?.simulators || []));
+    if (androidRes.status === 'fulfilled') {
+      setRealDevices((androidRes.value || []).filter((d) => d.status === 'device' && !d.isEmulator));
+    }
+
+    if (emulatorRes.status === 'fulfilled') {
+      setAvds(emulatorRes.value.available ? emulatorRes.value.avds : []);
+      setAvdsAvailable(Boolean(emulatorRes.value.available));
+    }
+
+    if (iosRes.status === 'fulfilled' && iosRes.value) {
+      setSimulators(dedupeSimulators(iosRes.value.allSimulators || iosRes.value.simulators || []));
+    }
+
+    if (import.meta.env?.DEV) {
+      const failed = [runningRes, androidRes, emulatorRes, iosRes].filter((r) => r.status === 'rejected');
+      if (failed.length > 0) {
+        console.warn('[DeviceStatusMenu] 部分设备探测失败，沿用上一轮结果:', failed.length);
+      }
+    }
   }, []);
 
   // 面板关闭时也低频对账，保证顶栏计数准确
@@ -181,7 +199,8 @@ export const DeviceStatusMenu: React.FC<DeviceStatusMenuProps> = ({ onOpenMirror
       }
       stoppingUntilRef.current.set(row.key, Date.now() + 15000);
       setRunning((prev) => prev.filter((item) => item.key !== row.key));
-      await reload();
+      // 不阻塞等待对账：对账失败也不能让电源按钮一直转圈
+      void reload();
     } catch (err: any) {
       if (import.meta.env?.DEV) {
         console.error('[DeviceStatusMenu] 停止设备失败:', err?.message);

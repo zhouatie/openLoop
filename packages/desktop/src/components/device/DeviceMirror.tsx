@@ -93,6 +93,11 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   const [inputOpen, setInputOpen] = useState(false);
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const autoRetryRef = useRef(0);
+  /**
+   * 单例视频渲染器：跨重连复用同一个 Canvas / WebGL 上下文。
+   * 每次重连都新建渲染器会耗尽 GPU 侧上下文，是界面卡死的直接来源。
+   */
+  const rendererRef = useRef<WebGLVideoFrameRenderer | BitmapVideoFrameRenderer | null>(null);
   /** iOS 分支是否已收到过画面（用于看门狗与错误判定） */
   const iosHasPictureRef = useRef(false);
   /** 是否正在后台构建启动 WebDriverAgent */
@@ -107,6 +112,37 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   const [touchIndicator, setTouchIndicator] = useState<{ left: number; top: number; id: number } | null>(null);
   const [codec, setCodec] = useState<string>('h264');
   const [stageBox, setStageBox] = useState<{ width: number; height: number } | null>(null);
+
+  /** 取或建渲染器；渲染器跟着组件活着，不跟着每次重连重建 */
+  const ensureRenderer = useCallback(() => {
+    if (rendererRef.current) return rendererRef.current;
+    rendererRef.current = WebGLVideoFrameRenderer.isSupported
+      ? new WebGLVideoFrameRenderer()
+      : new BitmapVideoFrameRenderer();
+    return rendererRef.current;
+  }, []);
+
+  /** 显式释放 WebGL 上下文，不等 GC */
+  const disposeRenderer = useCallback(() => {
+    const renderer = rendererRef.current;
+    rendererRef.current = null;
+    if (!renderer) return;
+    try {
+      const canvas = renderer.canvas as HTMLCanvasElement;
+      const gl = (canvas.getContext('webgl2') || canvas.getContext('webgl')) as
+        | WebGL2RenderingContext
+        | WebGLRenderingContext
+        | null;
+      gl?.getExtension('WEBGL_lose_context')?.loseContext();
+      canvas.width = 0;
+      canvas.height = 0;
+    } catch {
+      /* 上下文已丢失 */
+    }
+  }, []);
+
+  // 换设备或卸载时释放渲染器
+  useEffect(() => () => disposeRenderer(), [platform, serial, disposeRenderer]);
 
   // 检查设备当前是否正处于自动化任务运行中（运行态互斥保护）
   const leaseHolder = useMemo(() => {
@@ -309,6 +345,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     let decoderWriter: any = null;
     let isDisposed = false;
     let hasPicture = false;
+    let connectedAt = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     // 无画面看门狗：连上却不来画面（会话僵尸/设备休眠）不能一直黑屏
@@ -374,17 +411,14 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
       try {
         setDeviceSize({ width: meta.width, height: meta.height });
 
-        // 每次创建崭新的渲染器与 Canvas，避免 WebGL 上下文污染与 React 虚拟 DOM 冲突
-        const renderer = WebGLVideoFrameRenderer.isSupported
-          ? new WebGLVideoFrameRenderer()
-          : new BitmapVideoFrameRenderer();
-
+        // 复用同一个渲染器与 Canvas，避免重连风暴里反复创建 WebGL 上下文
+        const renderer = ensureRenderer();
         const canvas = renderer.canvas as HTMLCanvasElement;
         canvas.style.width = '100%';
         canvas.style.height = '100%';
         canvas.style.objectFit = 'contain';
 
-        if (canvasStageRef.current) {
+        if (canvasStageRef.current && canvas.parentElement !== canvasStageRef.current) {
           canvasStageRef.current.replaceChildren(canvas);
         }
 
@@ -401,7 +435,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
         decoderWriter = decoder.writable.getWriter();
 
         hasPicture = true;
-        autoRetryRef.current = 0;
+        connectedAt = Date.now();
         setStatus('streaming');
         if (import.meta.env?.DEV) console.log('[DeviceMirror:Android] WebCodecs 解码器初始化成功:', meta);
 
@@ -477,12 +511,25 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
       if (event.reason) {
         setErrorMessage(event.reason);
       }
-      // 已经出过画面的连接被服务端收掉（如流中断），静默重连一次
-      if (hasPicture && autoRetryRef.current < 1) {
+      // 稳定出画面超过 10 秒的连接才算「正常断流」，重连次数归零
+      if (connectedAt && Date.now() - connectedAt > 10000) {
+        autoRetryRef.current = 0;
+      }
+      // 只允许有限次自动重连；无限重连会把渲染进程拖死
+      if (hasPicture && autoRetryRef.current < 3) {
         autoRetryRef.current += 1;
+        const delay = 1200 * autoRetryRef.current;
+        if (import.meta.env?.DEV) {
+          console.log(`[DeviceMirror:Android] ${delay}ms 后第 ${autoRetryRef.current} 次重连`);
+        }
         retryTimer = setTimeout(() => {
           if (!isDisposed) setReconnectNonce((n) => n + 1);
-        }, 1200);
+        }, delay);
+        return;
+      }
+      if (hasPicture) {
+        setStatus('error');
+        setErrorMessage((prev) => prev || '视频流多次中断，请重新连接');
       }
     };
 
@@ -507,7 +554,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
         canvasStageRef.current.replaceChildren();
       }
     };
-  }, [platform, serial, reconnectNonce]);
+  }, [platform, serial, reconnectNonce, ensureRenderer]);
 
   // ================= iOS 画面管道（WDA 串流 / simctl 截图轮播） =================
   useEffect(() => {
@@ -517,11 +564,12 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     iosHasPictureRef.current = false;
 
     // 首帧看门狗：后端会依次尝试 WDA MJPEG、WDA 截图、本机模拟器截图
+    // 后端首帧超时为 8 秒，这里留出降级余量，避免提前误报
     const watchdog = window.setTimeout(() => {
       if (iosHasPictureRef.current) return;
       setStatus('error');
       setErrorMessage('长时间未收到 iOS 画面。请确认模拟器已启动，或用 Xcode 运行 WebDriverAgentRunner。');
-    }, 12000);
+    }, 15000);
 
     return () => window.clearTimeout(watchdog);
   }, [platform, serial, wdaEndpoint, reconnectNonce]);

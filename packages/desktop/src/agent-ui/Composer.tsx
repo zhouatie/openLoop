@@ -974,6 +974,14 @@ const PLUGIN_ROWS = [
                 )}
                 <span className={styles.attachmentName}>{item.name}</span>
                 {item.status === 'uploading' && <span className={styles.attachmentSpinner} />}
+                {item.status === 'error' && (
+                  <span
+                    className={styles.attachmentErrorBadge}
+                    title={item.errorMessage || '上传失败，请移除后重试'}
+                  >
+                    !
+                  </span>
+                )}
                 {onRemoveAttachment && (
                   <button
                     type="button"

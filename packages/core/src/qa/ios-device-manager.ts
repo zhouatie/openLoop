@@ -17,6 +17,21 @@ export const DEFAULT_WDA_ENDPOINT = 'http://localhost:8100';
  * iOS 自动化通过 WebDriverAgent（WDA）驱动，一个 WDA 端点对应一台设备。
  */
 export class IosDeviceManager {
+  /** simctl 列表缓存：多个面板并发轮询时只跑一次 xcrun */
+  private static simctlCache: { at: number; booted: IosDeviceInfo[]; all: IosDeviceInfo[] } | null = null;
+  private static simctlInflight: Promise<{ ok: boolean; booted: IosDeviceInfo[]; all: IosDeviceInfo[] }> | null =
+    null;
+  /** 快照缓存：5s/8s/20s 三个轮询源合并成一次真实探测 */
+  private static snapshotCache: { at: number; endpoint: string; value: IosDevicesSnapshot } | null = null;
+  private static snapshotInflight: Promise<IosDevicesSnapshot> | null = null;
+  private static readonly SIMCTL_TTL_MS = 1200;
+  private static readonly SNAPSHOT_TTL_MS = 1200;
+
+  /** 启停模拟器后主动失效，避免读到旧状态 */
+  static invalidateCache(): void {
+    this.simctlCache = null;
+    this.snapshotCache = null;
+  }
   /** 规范化用户填写的 WDA 地址，缺省协议与端口时自动补齐 */
   static normalizeEndpoint(endpoint?: string): string {
     const raw = (endpoint || '').trim().replace(/\/+$/, '');
@@ -36,34 +51,47 @@ export class IosDeviceManager {
     return this.normalizeEndpoint(endpoint || process.env.MIDSCENE_IOS_WDA_URL);
   }
 
-  /** 检查 iOS 自动化运行环境（仅 macOS + Xcode 可用） */
-  static async checkEnvironment(): Promise<{ available: boolean; message?: string }> {
-    if (process.platform !== 'darwin') {
-      return { available: false, message: 'iOS 自动化仅支持 macOS（需 Xcode 与 WebDriverAgent）' };
+  /** 单次取回全部模拟器（booted + all），带 1.2s 缓存与单飞行合并 */
+  private static async loadSimulators(): Promise<{
+    ok: boolean;
+    booted: IosDeviceInfo[];
+    all: IosDeviceInfo[];
+  }> {
+    const cached = this.simctlCache;
+    if (cached && Date.now() - cached.at < this.SIMCTL_TTL_MS) {
+      return { ok: true, booted: cached.booted, all: cached.all };
     }
-    try {
-      await execAsync('xcrun simctl list devices -j', { timeout: 8000 });
-      return { available: true };
-    } catch (err: any) {
-      logger.info(`[IosDeviceManager] Xcode 命令行工具不可用: ${err.message}`);
-      return { available: false, message: '未检测到 Xcode 命令行工具，请执行 xcode-select --install' };
-    }
+    if (this.simctlInflight) return this.simctlInflight;
+
+    this.simctlInflight = (async () => {
+      try {
+        const { stdout } = await execAsync('xcrun simctl list devices -j', {
+          timeout: 8000,
+          maxBuffer: 8 * 1024 * 1024,
+        });
+        const { booted, all } = this.parseSimulators(JSON.parse(stdout));
+        this.simctlCache = { at: Date.now(), booted, all };
+        return { ok: true, booted, all };
+      } catch (err: any) {
+        logger.info(`[IosDeviceManager] 读取模拟器列表失败: ${err.message}`);
+        return { ok: false, booted: [], all: [] };
+      } finally {
+        this.simctlInflight = null;
+      }
+    })();
+    return this.simctlInflight;
   }
 
-  /** 列出已启动的 iOS 模拟器 */
-  static async getBootedSimulators(): Promise<IosDeviceInfo[]> {
-    try {
-      const { stdout } = await execAsync('xcrun simctl list devices booted -j', {
-        timeout: 8000,
-        maxBuffer: 8 * 1024 * 1024,
-      });
-      const parsed = JSON.parse(stdout);
-      const devices: IosDeviceInfo[] = [];
-      for (const [runtime, list] of Object.entries<any[]>(parsed.devices || {})) {
-        const version = runtime.match(/iOS[- ](\d+(?:[-.]\d+)*)/)?.[1]?.replace(/-/g, '.');
-        for (const d of list || []) {
-          if (d.state !== 'Booted') continue;
-          devices.push({
+  private static parseSimulators(parsed: any): { booted: IosDeviceInfo[]; all: IosDeviceInfo[] } {
+    const booted: IosDeviceInfo[] = [];
+    const all: IosDeviceInfo[] = [];
+    for (const [runtime, list] of Object.entries<any[]>(parsed?.devices || {})) {
+      const version = runtime.match(/iOS[- ](\d+(?:[-.]\d+)*)/)?.[1]?.replace(/-/g, '.');
+      const isIos = /iOS/i.test(runtime);
+      for (const d of list || []) {
+        if (!d?.udid) continue;
+        if (d.state === 'Booted') {
+          booted.push({
             udid: d.udid,
             name: d.name,
             model: d.name,
@@ -72,48 +100,44 @@ export class IosDeviceManager {
             isSimulator: true,
           });
         }
+        if (!isIos) continue;
+        const state: IosDeviceInfo['state'] =
+          d.state === 'Booted' ? 'booted' : d.state === 'Shutdown' ? 'shutdown' : 'unknown';
+        all.push({
+          udid: d.udid,
+          name: d.name,
+          model: d.name,
+          version,
+          state,
+          isSimulator: true,
+        });
       }
-      return devices;
-    } catch (err: any) {
-      logger.info(`[IosDeviceManager] 读取模拟器列表失败: ${err.message}`);
-      return [];
     }
+    all.sort((a, b) => {
+      if (a.state !== b.state) return a.state === 'booted' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return { booted, all };
+  }
+
+  /** 检查 iOS 自动化运行环境（仅 macOS + Xcode 可用） */
+  static async checkEnvironment(): Promise<{ available: boolean; message?: string }> {
+    if (process.platform !== 'darwin') {
+      return { available: false, message: 'iOS 自动化仅支持 macOS（需 Xcode 与 WebDriverAgent）' };
+    }
+    const result = await this.loadSimulators();
+    if (result.ok) return { available: true };
+    return { available: false, message: '未检测到 Xcode 命令行工具，请执行 xcode-select --install' };
+  }
+
+  /** 列出已启动的 iOS 模拟器 */
+  static async getBootedSimulators(): Promise<IosDeviceInfo[]> {
+    return (await this.loadSimulators()).booted;
   }
 
   /** 列出本机全部模拟器（含未启动） */
   static async listSimulators(): Promise<IosDeviceInfo[]> {
-    try {
-      const { stdout } = await execAsync('xcrun simctl list devices -j', {
-        timeout: 8000,
-        maxBuffer: 8 * 1024 * 1024,
-      });
-      const parsed = JSON.parse(stdout);
-      const devices: IosDeviceInfo[] = [];
-      for (const [runtime, list] of Object.entries<any[]>(parsed.devices || {})) {
-        if (!/iOS/i.test(runtime)) continue;
-        const version = runtime.match(/iOS[- ](\d+(?:[-.]\d+)*)/)?.[1]?.replace(/-/g, '.');
-        for (const d of list || []) {
-          if (!d?.udid) continue;
-          const state: IosDeviceInfo['state'] =
-            d.state === 'Booted' ? 'booted' : d.state === 'Shutdown' ? 'shutdown' : 'unknown';
-          devices.push({
-            udid: d.udid,
-            name: d.name,
-            model: d.name,
-            version,
-            state,
-            isSimulator: true,
-          });
-        }
-      }
-      return devices.sort((a, b) => {
-        if (a.state !== b.state) return a.state === 'booted' ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-    } catch (err: any) {
-      logger.info(`[IosDeviceManager] 读取全部模拟器失败: ${err.message}`);
-      return [];
-    }
+    return (await this.loadSimulators()).all;
   }
 
   /** 启动指定模拟器（已启动时直接返回成功） */
@@ -123,10 +147,12 @@ export class IosDeviceManager {
     try {
       const { stdout } = await execAsync(`xcrun simctl boot ${target}`, { timeout: 60000 });
       logger.info(`[IosDeviceManager] 已启动模拟器: ${target} ${stdout.trim()}`);
+      this.invalidateCache();
       return { success: true, message: '模拟器正在启动，首次启动约需 20-60 秒' };
     } catch (err: any) {
       const message = String(err?.stderr || err?.message || '启动模拟器失败');
       if (/current state: Booted|already booted|Unable to boot device in current state/i.test(message)) {
+        this.invalidateCache();
         return { success: true, message: '模拟器已在运行' };
       }
       logger.warn(`[IosDeviceManager] 启动模拟器失败: ${message}`);
@@ -141,10 +167,12 @@ export class IosDeviceManager {
     try {
       await execAsync(`xcrun simctl shutdown ${target}`, { timeout: 30000 });
       logger.info(`[IosDeviceManager] 已关闭模拟器: ${target}`);
+      this.invalidateCache();
       return { success: true, message: '模拟器已关闭' };
     } catch (err: any) {
       const message = String(err?.stderr || err?.message || '关闭模拟器失败');
       if (/current state: Shutdown|Unable to shutdown device in current state/i.test(message)) {
+        this.invalidateCache();
         return { success: true, message: '模拟器已处于关闭状态' };
       }
       return { success: false, message };
@@ -280,14 +308,30 @@ export class IosDeviceManager {
     }
   }
 
-  /** 汇总 iOS 现场快照：环境、WDA 连接、已启动模拟器 */
+  /** 汇总 iOS 现场快照：环境、WDA 连接、已启动模拟器（缓存 + 单飞行合并并发轮询） */
   static async getSnapshot(endpoint?: string): Promise<IosDevicesSnapshot> {
-    const simulators = await this.getBootedSimulators();
-    const [environment, wda] = await Promise.all([
-      this.checkEnvironment(),
-      this.probeWda(endpoint, simulators),
-    ]);
-    const allSimulators = await this.listSimulators();
-    return { environment, wda, simulators, allSimulators };
+    const key = this.normalizeEndpoint(endpoint);
+    const cached = this.snapshotCache;
+    if (cached && cached.endpoint === key && Date.now() - cached.at < this.SNAPSHOT_TTL_MS) {
+      return cached.value;
+    }
+    if (this.snapshotInflight) return this.snapshotInflight;
+
+    this.snapshotInflight = (async () => {
+      try {
+        const simulators = await this.getBootedSimulators();
+        const [environment, wda] = await Promise.all([
+          this.checkEnvironment(),
+          this.probeWda(endpoint, simulators),
+        ]);
+        const allSimulators = await this.listSimulators();
+        const value: IosDevicesSnapshot = { environment, wda, simulators, allSimulators };
+        this.snapshotCache = { at: Date.now(), endpoint: key, value };
+        return value;
+      } finally {
+        this.snapshotInflight = null;
+      }
+    })();
+    return this.snapshotInflight;
   }
 }

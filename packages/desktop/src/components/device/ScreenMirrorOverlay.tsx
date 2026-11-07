@@ -3,7 +3,7 @@ import { Smartphone, RefreshCw, Play, Apple, Loader2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { DeviceMirror, SwitchableDevice } from './DeviceMirror';
 import { dedupeSimulators } from '../../utils/simulatorList';
-import { AndroidDeviceInfo, IosDeviceInfo, DeviceLeaseSnapshot } from '@openloop/core';
+import { AndroidDeviceInfo, IosDeviceInfo, IosDevicesSnapshot, DeviceLeaseSnapshot } from '@openloop/core';
 
 export interface MirrorRunContext {
   runId: string;
@@ -73,6 +73,12 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
   const [pendingIosUdid, setPendingIosUdid] = useState<string | null>(null);
   /** 已应用的顶栏指定设备序号，避免每轮刷新都覆盖手动切换 */
   const appliedFocusSeqRef = useRef(0);
+  /** 上一轮成功拿到的原始设备数据：单次请求抖动时沿用，避免列表变空把选中设备踢掉 */
+  const lastDataRef = useRef<{ android: AndroidDeviceInfo[]; ios: IosDevicesSnapshot | null }>({
+    android: [],
+    ios: null,
+  });
+  const leasesRef = useRef<DeviceLeaseSnapshot[]>([]);
 
   /** 空态可启动的模拟器：未启动的 Android AVD 与已关机的 iOS 模拟器 */
   const idleSimulators = [
@@ -85,11 +91,28 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [androidList, iosSnapshot, leaseList] = await Promise.all([
-        api.getAndroidDevices().catch(() => [] as AndroidDeviceInfo[]),
-        api.getIosDevices().catch(() => null),
-        api.getDeviceLeases().catch(() => [] as DeviceLeaseSnapshot[]),
+      const [androidRes, iosRes, leaseRes] = await Promise.allSettled([
+        api.getAndroidDevices(),
+        api.getIosDevices(),
+        api.getDeviceLeases(),
       ]);
+
+      if (androidRes.status === 'fulfilled') {
+        lastDataRef.current.android = androidRes.value || [];
+      }
+      if (iosRes.status === 'fulfilled' && iosRes.value) {
+        lastDataRef.current.ios = iosRes.value;
+      }
+      if (import.meta.env?.DEV && (androidRes.status === 'rejected' || iosRes.status === 'rejected')) {
+        console.warn('[ScreenMirrorOverlay] 设备探测失败，沿用上一轮结果', {
+          android: androidRes.status === 'rejected' ? androidRes.reason : null,
+          ios: iosRes.status === 'rejected' ? iosRes.reason : null,
+        });
+      }
+
+      const androidList = lastDataRef.current.android;
+      const iosSnapshot = lastDataRef.current.ios;
+      const leaseList = leaseRes.status === 'fulfilled' ? leaseRes.value || [] : leasesRef.current;
 
       const onlineAndroid = (androidList || []).filter((d) => d.status === 'device');
       const bootedIos = (iosSnapshot?.simulators || []).filter((d) => d.state === 'booted');
@@ -100,6 +123,7 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
           : bootedIos
       );
       setLeases(leaseList || []);
+      leasesRef.current = leaseList || [];
       setDevices([
         ...onlineAndroid.map((d) => ({
           key: `android-${d.serial}`,

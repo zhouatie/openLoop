@@ -50,7 +50,7 @@ import { DeviceLeasePool } from '../qa/device-lease-pool';
 import { QaActivity } from '../qa/qa-activity';
 import { registerQaAgentBridge } from '../qa/qa-agent-bridge';
 import { AndroidStreamHub } from '../preview/android-stream-hub';
-import { proxyIosStream } from '../preview/ios-stream-proxy';
+import { proxyIosStream, closeAllIosStreams } from '../preview/ios-stream-proxy';
 import { DeviceActionController } from '../preview/device-action-controller';
 import { isQaPlatform } from '../qa/qa-driver';
 import { applyQaModelEnv } from '../qa/model-env';
@@ -437,6 +437,7 @@ export class OpenLoopServer {
     }
 
     await AndroidStreamHub.destroyAll();
+    closeAllIosStreams();
 
     if (this.httpServer) {
       await new Promise<void>((resolve) => this.httpServer?.close(() => resolve()));

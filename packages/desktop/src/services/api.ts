@@ -92,10 +92,62 @@ function fsQuery(path: string, base?: string): string {
   return base ? `${query}&base=${encodeURIComponent(base)}` : query;
 }
 
-async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
+/** 默认请求超时：后端不可达时必须快速失败，不允许界面无限转圈 */
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+/** 请求超时错误：调用方据此区分「超时」与「业务失败」 */
+export class ApiTimeoutError extends Error {
+  constructor(url: string, timeoutMs: number) {
+    super(`请求超时（${Math.round(timeoutMs / 1000)} 秒无响应）：${url}`);
+    this.name = 'ApiTimeoutError';
+  }
+}
+
+/**
+ * 统一带超时的请求。超时后 abort，调用方拿到 ApiTimeoutError，界面可进入失败态。
+ * 开发环境输出耗时，便于定位慢链路。
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const startedAt = Date.now();
+  const method = init.method || 'GET';
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const elapsed = Date.now() - startedAt;
+    if (isDev && (elapsed > 800 || method !== 'GET')) {
+      console.log(`[UI:API] ${method} ${url} -> ${res.status} (${elapsed}ms)`);
+    }
+    return res;
+  } catch (error: any) {
+    if (timedOut) {
+      if (isDev) {
+        console.error(`[UI:API] ${method} ${url} 超时 ${timeoutMs}ms，已中止请求`);
+      }
+      throw new ApiTimeoutError(url, timeoutMs);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function requestJson<T>(
+  url: string,
+  options?: RequestInit,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<T> {
   const method = options?.method || 'GET';
   try {
-    const res = await fetch(url, options);
+    const res = await fetchWithTimeout(url, options, timeoutMs);
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       if (isDev) {
@@ -613,13 +665,18 @@ export class DesktopApiService {
       console.log('[UI:API] 正在上传图片附件:', { name: file.name, size: file.size, type: file.type });
     }
     const query = `filename=${encodeURIComponent(file.name)}`;
-    const res = await fetch(`${BASE_URL}/api/attachments?${query}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': file.type || 'image/png',
+    // 大图在慢盘上写入需要更多时间，单独放宽超时；超时后前端进入失败态而非一直转圈
+    const res = await fetchWithTimeout(
+      `${BASE_URL}/api/attachments?${query}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'image/png',
+        },
+        body: file,
       },
-      body: file,
-    });
+      120_000
+    );
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       throw new Error(`上传失败 (${res.status}): ${errText || res.statusText}`);
@@ -1559,11 +1616,16 @@ export class DesktopApiService {
     if (import.meta.env?.DEV) {
       console.log('[UI:QA] 启动 WebDriverAgent:', udid);
     }
-    return requestJson<{ success: boolean; message: string }>(`${BASE_URL}/api/qa/wda/launch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ udid }),
-    });
+    // 首次可能需要 clone 工程并编译，服务端最长约 3 分钟
+    return requestJson<{ success: boolean; message: string }>(
+      `${BASE_URL}/api/qa/wda/launch`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ udid }),
+      },
+      200_000
+    );
   }
 
   async stopEmulator(target: {
@@ -1805,10 +1867,14 @@ export class DesktopApiService {
     if (import.meta.env?.DEV) {
       console.log('[UI:Storage] 触发数据优化与垃圾清理:', options);
     }
-    return requestJson<StorageCleanResult>(`${BASE_URL}/api/storage/clean`, {
-      method: 'POST',
-      body: JSON.stringify(options),
-    });
+    return requestJson<StorageCleanResult>(
+      `${BASE_URL}/api/storage/clean`,
+      {
+        method: 'POST',
+        body: JSON.stringify(options),
+      },
+      120_000
+    );
   }
 
 }
