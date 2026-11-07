@@ -11,11 +11,34 @@ import {
   Lock,
   Minimize2,
   AlertTriangle,
+  ChevronDown,
+  Check,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { WebCodecsVideoDecoder, WebGLVideoFrameRenderer, BitmapVideoFrameRenderer } from '@yume-chan/scrcpy-decoder-webcodecs';
 import { ScrcpyVideoCodecId } from '@yume-chan/scrcpy';
 import { DeviceLeaseSnapshot } from '@openloop/core';
+
+/** 紧贴屏幕的竖向操作按键列宽度（px） */
+const ACTION_RAIL_WIDTH = 32;
+
+/** 可切换的设备条目（浮层标题栏下拉使用） */
+export interface SwitchableDevice {
+  key: string;
+  platform: 'android' | 'ios';
+  serial: string;
+  name: string;
+  /** 右侧弱化提示，例如「模拟器」 */
+  hint?: string;
+}
+
+export interface DeviceSwitcherConfig {
+  devices: SwitchableDevice[];
+  activeKey: string;
+  onSelect: (device: SwitchableDevice) => void;
+  /** 自动化任务锁定设备时禁止切换 */
+  locked?: boolean;
+}
 
 interface DeviceMirrorProps {
   platform: 'android' | 'ios';
@@ -28,6 +51,8 @@ interface DeviceMirrorProps {
   /** 紧凑模式（用于侧边栏嵌入）还是全量模式（用于主页面） */
   variant?: 'dock' | 'standalone';
   onClose?: () => void;
+  /** 标题栏设备切换器（设备数大于 1 时出现） */
+  deviceSwitcher?: DeviceSwitcherConfig;
   /** QA 执行上下文：镜像聚焦到正在执行的用例与步骤 */
   run?: {
     runId: string;
@@ -52,6 +77,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   leases = [],
   variant = 'dock',
   onClose,
+  deviceSwitcher,
   run,
 }) => {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -66,6 +92,9 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   const [inputOpen, setInputOpen] = useState(false);
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const autoRetryRef = useRef(0);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const switcherRef = useRef<HTMLDivElement>(null);
+  const canSwitch = Boolean(deviceSwitcher && deviceSwitcher.devices.length > 1 && !deviceSwitcher.locked);
   const [touchIndicator, setTouchIndicator] = useState<{ left: number; top: number; id: number } | null>(null);
   const [codec, setCodec] = useState<string>('h264');
   const [stageBox, setStageBox] = useState<{ width: number; height: number } | null>(null);
@@ -109,12 +138,13 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     };
   }, [stageBox, deviceSize]);
 
-  // 文本浮层锚定在按键列右侧，宽度按可用空白区收敛
+  // 文本浮层锚定在按键列左侧：向右展开会顶出应用可视区，所以一律朝画面外侧（左）打开
   const floatPanel = useMemo(() => {
     if (!stageBox || !frameSize) return null;
-    const left = Math.round((stageBox.width + frameSize.width) / 2) + 33 + 8;
-    const available = Math.max(120, stageBox.width - left - 6);
-    return { left, width: Math.min(260, available) };
+    const groupWidth = frameSize.width + ACTION_RAIL_WIDTH;
+    const groupLeft = Math.max(0, Math.round((stageBox.width - groupWidth) / 2));
+    const width = Math.min(260, Math.max(200, groupLeft - 16));
+    return { left: groupLeft - 8 - width, width };
   }, [stageBox, frameSize]);
 
   // 卡片较窄时收起次要信息，保持标题栏呼吸感
@@ -483,6 +513,17 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     return () => clearTimeout(timer);
   }, [platform, serial, wdaEndpoint, reconnectNonce]);
 
+  // 设备切换下拉：点击浮层外部关闭
+  useEffect(() => {
+    if (!switcherOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (switcherRef.current?.contains(event.target as Node)) return;
+      setSwitcherOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [switcherOpen]);
+
   const iosPreviewUrl = useMemo(() => {
     if (platform !== 'ios') return '';
     return api.getIosStreamPreviewUrl({ wdaEndpoint });
@@ -492,6 +533,41 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     <div className="relative flex w-full h-full min-h-0 items-stretch gap-3">
       {/* 画面舞台：手机外框 + 紧贴屏幕的操作按键列 */}
       <div ref={stageRef} className="flex-1 min-w-0 min-h-0 flex items-center justify-center">
+        {/* 紧贴屏幕的操作按键列（位于画面左侧） */}
+        <div className="flex flex-col shrink-0 self-center divide-y divide-[#f1f1f4] bg-white border border-r-0 border-[#e3e3e8] rounded-l-[9px] overflow-hidden shadow-xs">
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => handleAction({ type: 'key', key: 'back' })}
+            title="返回键 (Back)"
+            className="w-8 h-9 text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc] flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            <ArrowLeft size={13} strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => handleAction({ type: 'key', key: 'home' })}
+            title="主屏幕 (Home)"
+            className="w-8 h-9 text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc] flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            <Home size={13} strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => setInputOpen((v) => !v)}
+            title="发送文本输入（⌘ + Enter 发送）"
+            className={`w-8 h-9 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${
+              inputOpen
+                ? 'bg-[#eeedfd] text-[#4f46e5]'
+                : 'text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc]'
+            }`}
+          >
+            <Keyboard size={14} strokeWidth={1.8} />
+          </button>
+        </div>
+
         <div
           style={frameSize ? { width: `${frameSize.width}px`, height: `${frameSize.height}px` } : undefined}
           className={`flex flex-col overflow-hidden rounded-[10px] bg-[#18181b] text-white select-none border border-[#27272a] shadow-[0_8px_28px_rgba(0,0,0,0.12)] ${
@@ -499,16 +575,66 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
           }`}
         >
           {/* 顶部标题栏与状态指示 */}
-          <div className="h-[36px] bg-[#27272a]/90 backdrop-blur px-3 flex items-center justify-between border-b border-[#3f3f46]/60 shrink-0">
+          <div className="relative z-10 h-[36px] bg-[#27272a]/90 backdrop-blur px-3 flex items-center justify-between border-b border-[#3f3f46]/60 shrink-0">
             <div className="flex items-center gap-2 min-w-0">
               {platform === 'ios' ? (
                 <Apple size={14} className="text-[#a1a1aa] shrink-0" />
               ) : (
                 <Smartphone size={14} className="text-[#10b981] shrink-0" />
               )}
-              <span className="text-[12px] font-medium text-[#f4f4f5] truncate">
-                {name || serial}
-              </span>
+              <div ref={switcherRef} className="relative min-w-0">
+                {canSwitch ? (
+                  <button
+                    type="button"
+                    title="切换设备"
+                    onClick={() => setSwitcherOpen((prev) => !prev)}
+                    className="group flex items-center gap-1 min-w-0 rounded-[4px] px-1 -mx-1 h-[22px] hover:bg-[#3f3f46]/70 transition-colors cursor-pointer"
+                  >
+                    <span className="text-[12px] font-medium text-[#f4f4f5] truncate">{name || serial}</span>
+                    <ChevronDown
+                      size={11}
+                      className={`shrink-0 text-[#71717a] group-hover:text-[#d4d4d8] transition-transform ${
+                        switcherOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+                ) : (
+                  <span className="text-[12px] font-medium text-[#f4f4f5] truncate">{name || serial}</span>
+                )}
+
+                {switcherOpen && deviceSwitcher && (
+                  <div className="absolute left-0 top-[26px] z-20 w-[196px] rounded-[8px] border border-[#3f3f46] bg-[#27272a] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-[#71717a]">切换设备</div>
+                    {deviceSwitcher.devices.map((device) => {
+                      const isActive = device.key === deviceSwitcher.activeKey;
+                      return (
+                        <button
+                          key={device.key}
+                          type="button"
+                          onClick={() => {
+                            setSwitcherOpen(false);
+                            if (!isActive) deviceSwitcher.onSelect(device);
+                          }}
+                          className={`w-full flex items-center gap-2 px-2 h-[28px] text-left transition-colors cursor-pointer ${
+                            isActive ? 'bg-[#3f3f46]/60' : 'hover:bg-[#3f3f46]/70'
+                          }`}
+                        >
+                          {device.platform === 'ios' ? (
+                            <Apple size={11} className="shrink-0 text-[#a1a1aa]" />
+                          ) : (
+                            <Smartphone size={11} className="shrink-0 text-[#10b981]" />
+                          )}
+                          <span className="flex-1 min-w-0 truncate text-[11px] text-[#e4e4e7]">{device.name}</span>
+                          {device.hint && (
+                            <span className="shrink-0 font-mono text-[10px] text-[#71717a]">{device.hint}</span>
+                          )}
+                          {isActive && <Check size={11} className="shrink-0 text-[#a5b4fc]" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               {!isCompact && (
                 <span className="font-mono text-[10px] text-[#71717a] truncate max-w-[90px]">
                   {serial}
@@ -663,40 +789,6 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
 
           </div>
         </div>
-      {/* 紧贴屏幕的操作按键列 */}
-      <div className="flex flex-col shrink-0 self-center divide-y divide-[#f1f1f4] bg-white border border-l-0 border-[#e3e3e8] rounded-r-[9px] overflow-hidden shadow-xs">
-        <button
-          type="button"
-          disabled={isBusy}
-          onClick={() => handleAction({ type: 'key', key: 'back' })}
-          title="返回键 (Back)"
-          className="w-8 h-9 text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc] flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
-        >
-          <ArrowLeft size={13} strokeWidth={2} />
-        </button>
-        <button
-          type="button"
-          disabled={isBusy}
-          onClick={() => handleAction({ type: 'key', key: 'home' })}
-          title="主屏幕 (Home)"
-          className="w-8 h-9 text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc] flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
-        >
-          <Home size={13} strokeWidth={2} />
-        </button>
-        <button
-          type="button"
-          disabled={isBusy}
-          onClick={() => setInputOpen((v) => !v)}
-          title="发送文本输入（⌘ + Enter 发送）"
-          className={`w-8 h-9 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${
-            inputOpen
-              ? 'bg-[#eeedfd] text-[#4f46e5]'
-              : 'text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc]'
-          }`}
-        >
-          <Keyboard size={14} strokeWidth={1.8} />
-        </button>
-      </div>
       </div>
 
       {/* 文本输入浮层 */}

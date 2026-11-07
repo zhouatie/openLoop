@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Smartphone, RefreshCw } from 'lucide-react';
 import { api } from '../../services/api';
-import { DeviceMirror } from './DeviceMirror';
+import { DeviceMirror, SwitchableDevice } from './DeviceMirror';
 import { AndroidDeviceInfo, IosDeviceInfo, DeviceLeaseSnapshot } from '@openloop/core';
 
 export interface MirrorRunContext {
@@ -28,6 +28,30 @@ interface MirrorTarget {
   name?: string;
 }
 
+/** 记住上一次手动选择的设备，下次打开沿用（设备离线则回退自动选择） */
+const PREFERRED_DEVICE_KEY = 'openloop.mirror.device';
+
+const readPreferredDevice = (): MirrorTarget | null => {
+  try {
+    const raw = window.localStorage.getItem(PREFERRED_DEVICE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.platform !== 'android' && parsed?.platform !== 'ios') return null;
+    if (typeof parsed?.serial !== 'string' || !parsed.serial) return null;
+    return { platform: parsed.platform, serial: parsed.serial, name: parsed.name };
+  } catch {
+    return null;
+  }
+};
+
+const writePreferredDevice = (target: MirrorTarget) => {
+  try {
+    window.localStorage.setItem(PREFERRED_DEVICE_KEY, JSON.stringify(target));
+  } catch {
+    /* 隐私模式等场景忽略 */
+  }
+};
+
 /**
  * 右侧贴边屏幕镜像浮层（Super + M 唤起）。
  * 只保留实时画面与操作按键，自动选中首个在线设备，便于边写代码边看真机效果。
@@ -37,6 +61,7 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
   const [rendered, setRendered] = useState(open);
   const [shown, setShown] = useState(false);
   const [leases, setLeases] = useState<DeviceLeaseSnapshot[]>([]);
+  const [devices, setDevices] = useState<SwitchableDevice[]>([]);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -51,6 +76,22 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
       const onlineAndroid = (androidList || []).filter((d) => d.status === 'device');
       const bootedIos = (iosSnapshot?.simulators || []).filter((d) => d.state === 'booted');
       setLeases(leaseList || []);
+      setDevices([
+        ...onlineAndroid.map((d) => ({
+          key: `android-${d.serial}`,
+          platform: 'android' as const,
+          serial: d.serial,
+          name: d.model || d.serial,
+          hint: d.isEmulator ? '模拟器' : undefined,
+        })),
+        ...bootedIos.map((d) => ({
+          key: `ios-${d.udid}`,
+          platform: 'ios' as const,
+          serial: d.udid,
+          name: d.name || d.udid,
+          hint: '模拟器',
+        })),
+      ]);
 
       const lockedSerial = run?.serial;
       const lockedPlatform = run?.platform;
@@ -65,6 +106,16 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
             (curr.platform === 'android' && onlineAndroid.some((d) => d.serial === curr.serial)) ||
             (curr.platform === 'ios' && bootedIos.some((d) => d.udid === curr.serial));
           if (alive) return curr;
+        }
+        // 手动选择过的设备仍在线时优先恢复
+        const preferred = readPreferredDevice();
+        if (preferred) {
+          if (
+            (preferred.platform === 'android' && onlineAndroid.some((d) => d.serial === preferred.serial)) ||
+            (preferred.platform === 'ios' && bootedIos.some((d) => d.udid === preferred.serial))
+          ) {
+            return preferred;
+          }
         }
         if (onlineAndroid.length > 0) {
           return {
@@ -143,6 +194,19 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
           leases={leases}
           variant="standalone"
           run={run}
+          deviceSwitcher={{
+            devices,
+            activeKey: `${target.platform}-${target.serial}`,
+            locked: Boolean(run?.active),
+            onSelect: (device) => {
+              const next = { platform: device.platform, serial: device.serial, name: device.name };
+              if (import.meta.env?.DEV) {
+                console.log('[ScreenMirrorOverlay] 手动切换镜像设备:', next);
+              }
+              writePreferredDevice(next);
+              setTarget(next);
+            },
+          }}
         />
         </div>
       ) : (
