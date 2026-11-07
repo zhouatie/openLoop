@@ -270,7 +270,7 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
 
   return (
     <div
-      className={`fixed right-0 top-[52px] z-[900] w-[300px] h-[min(620px,calc(100vh-68px))] flex flex-col p-2 select-none pointer-events-none transition-transform duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+      className={`fixed right-0 top-[52px] bottom-0 z-[900] w-[300px] flex flex-col justify-center p-2 select-none pointer-events-none transition-transform duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
         shown ? 'translate-x-0' : 'translate-x-[105%]'
       }`}
     >
