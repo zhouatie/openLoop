@@ -125,8 +125,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 ? formatCombo('3')
                 : plugin.id === 'qa-automation'
                 ? formatCombo('4')
-                : plugin.id === 'devices'
-                ? formatCombo('5')
                 : undefined;
 
             const titleText = plugin.sidebarItem?.title || plugin.name;

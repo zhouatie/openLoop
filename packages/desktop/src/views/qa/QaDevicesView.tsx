@@ -4,7 +4,6 @@ import {
   Apple,
   RefreshCw,
   Plus,
-  Wifi,
   Radio,
   CheckCircle2,
   Lock,
@@ -21,10 +20,6 @@ export const QaDevicesView: React.FC = () => {
   const [iosDevices, setIosDevices] = useState<IosDeviceInfo[]>([]);
   const [leases, setLeases] = useState<DeviceLeaseSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
-  const [wifiAddress, setWifiAddress] = useState('');
-  const [showWifiConnect, setShowWifiConnect] = useState(false);
-  const [wifiLoading, setWifiLoading] = useState(false);
-
   const [selectedDevice, setSelectedDevice] = useState<{
     platform: 'android' | 'ios';
     serial: string;
@@ -105,19 +100,6 @@ export const QaDevicesView: React.FC = () => {
     ];
   }, [androidDevices, iosDevices, leases]);
 
-  const handleConnectWifi = async () => {
-    if (!wifiAddress.trim()) return;
-    setWifiLoading(true);
-    try {
-      await api.connectAndroidWifi(wifiAddress.trim());
-      setWifiAddress('');
-      setShowWifiConnect(false);
-      await fetchDevices();
-    } finally {
-      setWifiLoading(false);
-    }
-  };
-
   return (
     <div className="w-full h-full flex flex-col min-h-0 bg-[#f4f4f6] overflow-hidden p-6 gap-5 select-none">
       {/* 顶部概览指标与工具条 */}
@@ -149,15 +131,6 @@ export const QaDevicesView: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setShowWifiConnect((v) => !v)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#f4f4f5] hover:bg-[#e4e4e7] text-[#27272a] rounded-[6px] text-[12px] font-medium transition-colors cursor-pointer"
-          >
-            <Wifi size={13} />
-            <span>无线 ADB 配对</span>
-          </button>
-
-          <button
-            type="button"
             onClick={fetchDevices}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#e3e3e8] hover:bg-[#fafafc] text-[#27272a] rounded-[6px] text-[12px] font-medium shadow-2xs transition-colors cursor-pointer"
           >
@@ -166,29 +139,6 @@ export const QaDevicesView: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {/* 无线 ADB 配对输入框 */}
-      {showWifiConnect && (
-        <div className="bg-white border border-[#e3e3e8] rounded-[8px] p-3 flex items-center gap-3 shadow-xs">
-          <Wifi size={16} className="text-[#4f46e5] shrink-0" />
-          <input
-            type="text"
-            placeholder="输入设备 IP 与端口，如 192.168.1.102:5555"
-            value={wifiAddress}
-            onChange={(e) => setWifiAddress(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleConnectWifi()}
-            className="flex-1 bg-[#fafafc] border border-[#e3e3e8] rounded px-3 py-1.5 text-[12px] text-[#1c1c21] focus:outline-none focus:border-[#4f46e5]"
-          />
-          <button
-            type="button"
-            disabled={wifiLoading || !wifiAddress.trim()}
-            onClick={handleConnectWifi}
-            className="px-3 py-1.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[12px] font-medium rounded-[6px] disabled:opacity-50 transition-colors cursor-pointer"
-          >
-            {wifiLoading ? '连接中...' : '连接'}
-          </button>
-        </div>
-      )}
 
       {/* 设备列表与实时投屏工作区 */}
       <div className="flex-1 flex gap-5 min-h-0">

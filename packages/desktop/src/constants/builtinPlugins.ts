@@ -62,20 +62,6 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
     },
   },
   {
-    id: 'devices',
-    name: '设备监视',
-    version: '1.0.0',
-    description: '真机与模拟器实时画面监视、反向触控与输入',
-    isBuiltin: true,
-    sidebarItem: {
-      id: 'devices',
-      title: '设备监视',
-      icon: 'Smartphone',
-      order: 5,
-      path: '/devices',
-    },
-  },
-  {
     id: 'plugin-manager',
     name: '插件中心',
     version: '1.0.0',
@@ -99,6 +85,5 @@ export const BUILTIN_VIEW_TITLES: Record<string, string> = {
   'workflow-editor': '流程编排',
   automations: '自动化任务',
   'qa-automation': 'QA 自动化',
-  devices: '设备监视',
   'plugin-manager': '插件扩展',
 };

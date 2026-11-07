@@ -32,6 +32,7 @@ import {
   Camera,
   Terminal,
   Smartphone,
+  Wifi,
   Eye,
   EyeOff,
   KeyRound,
@@ -332,6 +333,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [qaModelFamily, setQaModelFamily] = useState('');
   const [autoOpenMirror, setAutoOpenMirror] = useState(false);
   const [showQaApiKey, setShowQaApiKey] = useState(false);
+
+  // 无线 ADB 配对
+  const [wifiAddress, setWifiAddress] = useState('');
+  const [wifiLoading, setWifiLoading] = useState(false);
+  const [wifiResult, setWifiResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   // 提示词状态
   const [prompts, setPrompts] = useState<AgentPromptTemplates>({ ...DEFAULT_PROMPT_TEMPLATES });
@@ -735,6 +741,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         ...override,
       },
     });
+  };
+
+  // 无线 ADB 配对：把局域网设备接入 ADB，随后自动出现在镜像与用例的设备列表
+  const connectWifiDevice = async () => {
+    const address = wifiAddress.trim();
+    if (!address || wifiLoading) return;
+    setWifiLoading(true);
+    setWifiResult(null);
+    try {
+      const result = await api.connectAndroidWifi(address);
+      const ok = result?.success !== false;
+      setWifiResult({ ok, text: result?.message || (ok ? '连接成功' : '连接失败') });
+      if (ok) setWifiAddress('');
+    } catch (err: any) {
+      setWifiResult({ ok: false, text: err?.message || '连接失败，请确认设备与电脑处于同一网段' });
+    } finally {
+      setWifiLoading(false);
+    }
   };
 
   const copyToClipboard = (text: string, key: string) => {
@@ -1714,6 +1738,52 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     }`}
                   >
                     开启
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white border border-[#e3e3e8] rounded-[10px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium text-[#1c1c21] flex items-center gap-1.5">
+                    无线 ADB 配对
+                    <Wifi size={11} className="text-[#a1a1aa]" />
+                  </div>
+                  <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                    在设备上开启无线调试后填入 IP 与端口完成配对，设备会自动出现在设备镜像与用例的设备列表
+                  </div>
+                  {wifiResult && (
+                    <div
+                      className={`mt-1 flex items-center gap-1 text-[11px] ${
+                        wifiResult.ok ? 'text-[#059669]' : 'text-[#dc2626]'
+                      }`}
+                    >
+                      {wifiResult.ok ? <Check size={11} /> : <X size={11} />}
+                      <span className="truncate">{wifiResult.text}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="shrink-0 self-center flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={wifiAddress}
+                    onChange={(e) => setWifiAddress(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') connectWifiDevice();
+                    }}
+                    placeholder="192.168.1.102:5555"
+                    className="w-56 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#85858d] outline-none shadow-sm focus:border-[#4f46e5]"
+                  />
+                  <button
+                    type="button"
+                    onClick={connectWifiDevice}
+                    disabled={wifiLoading || !wifiAddress.trim()}
+                    className="h-[26px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {wifiLoading && <Loader2 size={11} className="animate-spin" />}
+                    <span>{wifiLoading ? '连接中' : '连接'}</span>
                   </button>
                 </div>
               </div>
