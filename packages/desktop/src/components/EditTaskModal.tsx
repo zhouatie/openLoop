@@ -254,28 +254,56 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="mt-3 space-y-2.5 text-[11.5px]">
-          {/* 任务名称 */}
+          {/* 任务内容：首行即名称，回车续写说明与提示词，一个输入框完成 */}
           <div>
-            <label className="block text-[11px] font-medium text-[#63636b] mb-1">
-              {isCurrentGroup ? '任务组名称' : '任务名称'}
-            </label>
-            <input
-              type="text"
-              required
-              placeholder={isCurrentGroup ? '请输入任务组名称' : (currentWf?.taskTemplate?.titlePlaceholder || '请输入任务名称')}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Tab' && !e.shiftKey) {
-                  e.preventDefault();
-                  descriptionInputRef.current?.focus();
-                  if (import.meta.env?.DEV) {
-                    console.log('[EditTaskModal] 任务名称 Tab 键聚焦到任务说明与提示词');
-                  }
-                }
-              }}
-              className="w-full h-[30px] bg-[#f9f9fb] border border-[#e3e3e8] rounded-[6px] px-2.5 text-[12px] text-[#1c1c21] placeholder-[#85858d] outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] focus:bg-white focus:border-[#4f46e5] focus:ring-1 focus:ring-[#4f46e5]/20 transition-all"
+            <TaskPromptArea
+              ref={descriptionInputRef}
+              title={title}
+              onTitleChange={setTitle}
+              titlePlaceholder={
+                isCurrentGroup
+                  ? '任务组名称'
+                  : currentWf?.taskTemplate?.titlePlaceholder || '一句话说清楚要做什么'
+              }
+              value={description}
+              onChange={setDescription}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              placeholder={
+                isCurrentGroup
+                  ? '任务组全局需求说明与公共上下文（可选）...'
+                  : '任务说明与提示词（可选）...'
+              }
+              disabled={loading}
+              rows={1}
             />
+            <div className="flex items-center justify-between mt-1">
+              <span className="text-[10px] text-[#85858d]">
+                {isCurrentGroup
+                  ? '首行为任务组名称 · 其余为所有子工序共享的公共上下文'
+                  : '首行为任务名称 · 回车续写说明与提示词'
+                }
+              </span>
+              {!isCurrentGroup &&
+                currentWf?.taskTemplate?.descriptionTemplate &&
+                description.trim() !== currentWf.taskTemplate.descriptionTemplate.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDescription(currentWf.taskTemplate!.descriptionTemplate!);
+                      if (import.meta.env?.DEV) {
+                        console.log('[EditTaskModal] 用户套用流程专属模板:', currentWf.name);
+                      }
+                      toast.success(`已套用「${currentWf.name}」专属模板`);
+                    }}
+                    className="text-[10px] text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-1 cursor-pointer font-medium shrink-0"
+                    title="将说明区替换为当前流水线的专属结构化模板"
+                  >
+                    <Sparkles size={10} />
+                    <span>套用流程模板</span>
+                  </button>
+                )}
+            </div>
           </div>
 
           {/* 关联工程工作区 */}
@@ -542,45 +570,6 @@ export const EditTaskModal: React.FC<EditTaskModalProps> = ({
                 })}
               </div>
             )}
-          </div>
-
-          {/* 任务描述与上下文 */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-[11px] font-medium text-[#63636b]">
-                {isCurrentGroup
-                  ? '任务组全局需求说明与公共上下文'
-                  : '任务说明与提示词 (可选)'}
-              </label>
-              {!isCurrentGroup &&
-                currentWf?.taskTemplate?.descriptionTemplate &&
-                description.trim() !== currentWf.taskTemplate.descriptionTemplate.trim() && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDescription(currentWf.taskTemplate!.descriptionTemplate!);
-                      if (import.meta.env?.DEV) {
-                        console.log('[EditTaskModal] 用户套用流程专属模板:', currentWf.name);
-                      }
-                      toast.success(`已套用「${currentWf.name}」专属模板`);
-                    }}
-                    className="text-[10px] text-[#4f46e5] hover:text-[#4338ca] hover:underline flex items-center gap-1 cursor-pointer font-medium"
-                    title="将说明框重置为当前流水线的专属结构化模板"
-                  >
-                    <Sparkles size={10} />
-                    <span>套用流程模板</span>
-                  </button>
-                )}
-            </div>
-            <TaskPromptArea
-              ref={descriptionInputRef}
-              value={description}
-              onChange={setDescription}
-              attachments={attachments}
-              onAttachmentsChange={setAttachments}
-              disabled={loading}
-              rows={3}
-            />
           </div>
 
           {/* 未运行任务允许调整看板泳道 (Segmented Control) */}
