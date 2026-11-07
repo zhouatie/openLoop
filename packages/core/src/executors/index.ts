@@ -1146,6 +1146,11 @@ export class MidsceneExecutor implements NodeExecutor {
         onStepFinish: (index, record) => {
           if (record.status === 'passed') {
             emitLog('stdout', `[Midscene 步骤 ${index + 1}] ✔ 完成 (${record.durationMs}ms) - ${record.thought || ''}`);
+          } else if (record.status === 'skipped') {
+            emitLog(
+              'stdout',
+              `[Midscene 步骤 ${index + 1}] ⏭ 跳过（用例未指明可定位目标，未验证，不影响流程）: ${record.error || record.thought || ''}`
+            );
           } else {
             emitLog(
               'stdout',
@@ -1207,6 +1212,32 @@ export class MidsceneExecutor implements NodeExecutor {
       }
 
       const isSuccess = runRecord.status === 'passed';
+      // 全部步骤都因用例未指明目标而跳过时，没有任何真实验证结果，交由人工验收判定
+      const nothingVerified = isSuccess && runRecord.passedSteps === 0;
+      if (nothingVerified) {
+        emitLog(
+          'system',
+          `[Midscene UI 测试] ⏭ 验收用例未指明可定位目标，${runRecord.totalSteps} 步全部跳过，未产出验证结论。流程直达人工验收门禁供肉眼确认。`
+        );
+        return {
+          status: 'skipped',
+          exitCode: 0,
+          artifacts: artifacts.length > 0 ? artifacts : undefined,
+          output: {
+            skipped: true,
+            reason: 'unexecutable_qa_instructions',
+            qa: {
+              runId: runRecord.id,
+              status: runRecord.status,
+              passedSteps: runRecord.passedSteps,
+              totalSteps: runRecord.totalSteps,
+              reportUrl: runRecord.reportUrl,
+              timeline: runRecord.timeline,
+            },
+          },
+        };
+      }
+
       if (isSuccess) {
         emitLog(
           'system',

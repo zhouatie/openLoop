@@ -287,11 +287,9 @@ export class WebPlaywrightDriver implements QaDriver {
       }
 
       if (clickedCount === 0) {
-        return this.failNoTarget(
-          targetList.length > 0
-            ? `页面未定位到目标元素「${targetList.join(' / ')}」，点击步骤无法执行`
-            : '用例未指明可点击目标，点击步骤无法执行'
-        );
+        return targetList.length > 0
+          ? this.failNoTarget(`页面未定位到目标元素「${targetList.join(' / ')}」，点击步骤无法执行`)
+          : this.failNoTarget('用例未指明可点击目标，点击步骤无法执行', true);
       }
       thought = `在页面中依次完成: ${thoughts.join('，')}`;
 
@@ -485,10 +483,13 @@ export class WebPlaywrightDriver implements QaDriver {
     };
   }
 
-  /** 动作步骤找不到目标：如实判失败，不假通过也不伪造帧 */
-  private async failNoTarget(reason: string): Promise<QaStepExecutionResult> {
+  /**
+   * 动作步骤找不到目标：如实判失败，不假通过也不伪造帧。
+   * 用例本身没有指明目标时标记 skipped，让流程继续到人工验收。
+   */
+  private async failNoTarget(reason: string, skipped = false): Promise<QaStepExecutionResult> {
     const screenshotBuffer = await this.captureScreenshot();
-    return { passed: false, thought: reason, errorMessage: reason, screenshotBuffer };
+    return { passed: false, skipped, thought: reason, errorMessage: reason, screenshotBuffer };
   }
 
   async captureScreenshot(): Promise<Buffer> {

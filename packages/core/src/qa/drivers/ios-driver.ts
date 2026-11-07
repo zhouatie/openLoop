@@ -329,14 +329,7 @@ export class IosDriver implements QaDriver {
   }
 
   /** 无视觉模型时的 WDA 页面源码树直通执行器 */
-  private async executeWdaFallbackAction(
-    prompt: string
-  ): Promise<{
-    passed: boolean;
-    thought: string;
-    errorMessage?: string;
-    targetBox?: { x: number; y: number; width: number; height: number };
-  }> {
+  private async executeWdaFallbackAction(prompt: string): Promise<QaStepExecutionResult> {
     const promptLower = prompt.toLowerCase();
     try {
       if (promptLower.includes('home') || promptLower.includes('主屏') || promptLower.includes('桌面')) {
@@ -363,6 +356,7 @@ export class IosDriver implements QaDriver {
 
       return {
         passed: false,
+        skipped: true,
         thought: '当前未配置视觉模型，且指令中没有可定位的界面文案，无法执行该操作',
         errorMessage: '操作需要视觉模型支持，请在「设置 → 自动化测试」中配置模型密钥',
       };
