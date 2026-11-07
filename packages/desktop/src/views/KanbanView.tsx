@@ -2682,7 +2682,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   <main className="flex-1 min-w-0 flex flex-col">
                     {/* 档案视图切换：切换不卸载、不丢滚动位置 */}
                     <div className="h-[40px] pl-4 pr-3 flex items-center justify-between gap-2 shrink-0 bg-white border-b border-[#ececf0]">
-                      <div className="flex items-center p-0.5 rounded-[6px] bg-[#f1f1f4] border border-[#e3e3e8]">
+                      <div className="flex items-center shrink-0 p-0.5 rounded-[6px] bg-[#f1f1f4] border border-[#e3e3e8]">
                         <button
                           onClick={() => setDrawerTab('overview')}
                           className={`h-[26px] px-2.5 rounded-[4px] text-[11.5px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
@@ -3770,7 +3770,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
                   </main>
 
                   {/* 右栏：Agent 协作流，任务详情内常驻同屏 */}
-                  <aside className="w-[clamp(360px,42%,640px)] shrink-0 flex flex-col min-h-0 overflow-hidden border-l border-[#ececf0]">
+                  <aside className="w-[clamp(380px,56%,900px)] shrink-0 flex flex-col min-h-0 overflow-hidden border-l border-[#ececf0]">
                     <TaskAgentPanel
                       taskId={curTask.id}
                       taskTitle={curTask.kind === 'group' ? '任务组架构师' : curTask.title}
