@@ -2,6 +2,7 @@ import { Store } from '../store';
 import { NodeRun, Task, WorkflowDefinition, PipelineStep } from '../types';
 import { ExecutorRegistry, ExecutionResult } from '../executors';
 import { PiSessionInstance } from '../agent/pi-session';
+import { orchestratorSessionId } from '../agent/task-session';
 import { WorktreeManager, TaskProcessManager } from '../worktree/worktree-manager';
 import { createLogger } from '../logger';
 import { PipelineHost, StepLog, buildNodeContext, captureWorktreeDiff } from './pipeline-host';
@@ -252,7 +253,7 @@ export class MarkdownRuntime {
       taskId: task.id,
       taskTitle: task.title,
       // 每次运行用独立会话：重跑必须重新读文档执行，不能续用上一轮的历史
-      sessionId: `${task.id}_orchestrator_${Date.now().toString(36)}`,
+      sessionId: orchestratorSessionId(task.id),
       agentName: '流水线编排 Agent',
       model: settings.defaultModel,
       thinking: settings.reasoningLevel || 'high',

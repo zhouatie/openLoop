@@ -28,7 +28,7 @@ import { sanitizeChatMessages } from '../agent/agent-format';
 import { piSessionIndex } from '../agent/session-index';
 import { composeMessageWithSessionReferences } from '../agent/session-reference';
 import { composeMessageWithTaskReferences } from '../agent/task-reference';
-import { buildTaskSessionIndex, resolveTaskSessionId } from '../agent/task-session';
+import { buildTaskSessionIndex, isPipelineInternalSession, resolveTaskSessionId } from '../agent/task-session';
 import {
   DEFAULT_PI_EXTENSION_PACKAGES,
   getEnabledPiExtensions,
@@ -812,6 +812,8 @@ export class OpenLoopServer {
         // 任务会话标注：侧栏据此显示「任务」标记与任务标题
         const taskBySession = buildTaskSessionIndex(this.store.getTaskSummaries());
         const sessions = raw
+          // 编排 Agent 的会话是流水线内部会话，标题与任务同名：列出来会让每个任务多一行重复会话
+          .filter((session) => !isPipelineInternalSession(session.id))
           .map((session) => {
             const meta = agentSessionMeta.getSession(session.id);
             const project = projectMeta[session.cwd] || {};
@@ -851,7 +853,9 @@ export class OpenLoopServer {
         if (!keyword) {
           return this.sendJson(res, 200, { query: '', results: [] }, reqMeta);
         }
-        const results = await piSessionIndex.searchContent(keyword, { limit });
+        const results = (await piSessionIndex.searchContent(keyword, { limit })).filter(
+          (hit) => !isPipelineInternalSession(hit.id)
+        );
         return this.sendJson(res, 200, { query: keyword, results }, reqMeta);
       }
 
@@ -879,8 +883,13 @@ export class OpenLoopServer {
           200,
           {
             sessions: agentSessionHost.listLive(),
-            // 流水线 agent 节点也在跑 pi 会话，运行指示要一并统计
-            busy: [...agentSessionHost.listBusy(), ...PiSessionManager.getInstance().listBusySessionIds()],
+            // 流水线 agent 节点也在跑 pi 会话，运行指示要一并统计；编排会话不进列表，不再回报
+            busy: [
+              ...agentSessionHost.listBusy(),
+              ...PiSessionManager.getInstance()
+                .listBusySessionIds()
+                .filter((id) => !isPipelineInternalSession(id)),
+            ],
           },
           reqMeta
         );
