@@ -523,6 +523,14 @@ export const IconGroup = createIcon('IconGroup', 16, () => (
   </>
 ));
 
+/** 设备：手机轮廓，真机验证与屏幕镜像入口 */
+export const IconDevice = createIcon('IconDevice', 16, () => (
+  <>
+    <rect x="4.2" y="2.2" width="7.6" height="11.6" rx="1.6" stroke="currentColor" />
+    <path d="M6.9 11.6h2.2" stroke="currentColor" strokeLinecap="round" />
+  </>
+));
+
 /** 执行：三角形播放键，流水线启动入口 */
 export const IconRun = createIcon('IconRun', 16, () => (
   <path d="M5.6 3.4 12.4 8l-6.8 4.6V3.4Z" stroke="currentColor" strokeLinejoin="round" />

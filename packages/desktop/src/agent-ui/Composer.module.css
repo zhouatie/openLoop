@@ -191,6 +191,48 @@
   padding: 4px 14px 0;
 }
 
+/* 插件 chip：本条消息交给哪个插件处理，发送后自动清除 */
+.plugins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 14px 0;
+}
+
+.pluginChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, var(--dsw-alias-bg-base));
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pluginChipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.65;
+}
+
+.pluginChipRemove:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+}
+
 .attachment {
   display: inline-flex;
   align-items: center;

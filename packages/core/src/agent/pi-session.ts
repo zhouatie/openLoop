@@ -26,6 +26,7 @@ import { piSessionIndex } from './session-index';
 import { ExtensionUiBridge, type ExtensionUiResponse } from './pi-extension-ui';
 import captureExtension from './extensions/openloop-capture';
 import titleExtension from './extensions/openloop-title';
+import qaExtension from './extensions/openloop-qa';
 import { changeCaptureDir, changeIdOf, finishTurnChanges, forgetSessionChanges, rememberTurnWrite } from './turn-changes';
 import {
   AgentStatusEvent,
@@ -50,6 +51,8 @@ const PI_SNAPSHOT_INTERVAL_MS = 250;
 
 /** pi SDK 是纯 ESM 包，CJS 宿主通过这份 ESM 桥加载（见 assets/pi-sdk.mjs） */
 const PI_SDK_BRIDGE = path.join(__dirname, 'assets', 'pi-sdk.mjs');
+/** 随 openLoop 发布的技能目录：真机验证等内置技能从这里装载 */
+const BUNDLED_SKILLS_DIR = path.join(__dirname, 'assets', 'skills');
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
 let sdkCache: PiSdk | null = null;
 
@@ -438,6 +441,7 @@ export class PiSessionInstance extends EventEmitter {
       agentDir: piSdk().getAgentDir(),
       noExtensions: true,
       additionalExtensionPaths: resolveEnabledPiExtensionPaths(),
+      additionalSkillPaths: [BUNDLED_SKILLS_DIR],
       extensionFactories: [
         // SDK 会话不自带 CLI 的内置扩展，需显式加载，否则 codemode / tool_search / MCP 工具全部缺失
         piSdk().createCodemodeExtension(),
@@ -447,6 +451,8 @@ export class PiSessionInstance extends EventEmitter {
           ? [captureExtension({ dir: captureDir, sessionId: this.sessionId, cwd }) as ExtensionFactory]
           : []),
         titleExtension as ExtensionFactory,
+        // QA 桥：把真机 / 网页验证做成 agent 可调用的工具
+        qaExtension() as ExtensionFactory,
       ],
     });
     await loader.reload();

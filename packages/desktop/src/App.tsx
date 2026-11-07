@@ -54,6 +54,17 @@ export const AppContent: React.FC = () => {
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isQuickRunModalOpen, setIsQuickRunModalOpen] = useState<boolean>(false);
   const [isMirrorOpen, setIsMirrorOpen] = useState(false);
+  // 镜像运行的上下文：由核心服务广播的 QA 活动事件驱动
+  const [mirrorRun, setMirrorRun] = useState<{
+    runId: string;
+    platform: 'android' | 'ios';
+    serial?: string;
+    suiteName?: string;
+    stepIndex?: number;
+    totalSteps?: number;
+    stepTitle?: string;
+    active: boolean;
+  } | null>(null);
   const [isAgentOverlayOpen, setIsAgentOverlayOpen] = useState<boolean>(() => {
     try {
       const cached = localStorage.getItem('openloop_auto_open_global_agent');
@@ -130,6 +141,54 @@ export const AppContent: React.FC = () => {
       }
       return next;
     });
+  }, []);
+
+  // QA 执行活动：任务开始即在右侧镜像中聚焦对应设备，并跟随展示当前步骤
+  useEffect(() => {
+    const unsubscribe = api.on('qa:activity', (event: any) => {
+      if (!event || (event.platform !== 'android' && event.platform !== 'ios')) return;
+      if (import.meta.env?.DEV) {
+        console.log('[App] 收到 QA 活动事件:', event);
+      }
+      if (event.state === 'started') {
+        setMirrorRun({
+          runId: event.runId,
+          platform: event.platform,
+          serial: event.deviceSerial,
+          suiteName: event.suiteName,
+          stepIndex: undefined,
+          totalSteps: event.totalSteps,
+          active: true,
+        });
+        if (event.deviceSerial) {
+          setIsMirrorOpen(true);
+        }
+        return;
+      }
+      if (event.state === 'step') {
+        setMirrorRun((prev) =>
+          prev && prev.runId === event.runId
+            ? {
+                ...prev,
+                stepIndex: event.stepIndex,
+                totalSteps: event.totalSteps,
+                stepTitle: event.stepTitle,
+                active: true,
+              }
+            : prev
+        );
+        return;
+      }
+      if (event.state === 'finished') {
+        setMirrorRun((prev) => (prev && prev.runId === event.runId ? { ...prev, active: false } : prev));
+        // 结束标记短暂保留后清除，卡片回到常规设备视图
+        const timer = window.setTimeout(() => {
+          setMirrorRun((prev) => (prev && prev.runId === event.runId ? null : prev));
+        }, 5000);
+        return () => window.clearTimeout(timer);
+      }
+    });
+    return unsubscribe;
   }, []);
 
   // 绑定全局快捷键（高频事件委托，极致性能与输入保护）
@@ -502,7 +561,11 @@ export const AppContent: React.FC = () => {
       />
 
       {/* 右侧屏幕镜像浮层（Super + M 唤起） */}
-      <ScreenMirrorOverlay open={isMirrorOpen} onClose={() => setIsMirrorOpen(false)} />
+      <ScreenMirrorOverlay
+        open={isMirrorOpen}
+        onClose={() => setIsMirrorOpen(false)}
+        run={mirrorRun}
+      />
 
       {/* 主视图 */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">

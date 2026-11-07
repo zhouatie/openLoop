@@ -4,9 +4,22 @@ import { api } from '../../services/api';
 import { DeviceMirror } from './DeviceMirror';
 import { AndroidDeviceInfo, IosDeviceInfo, DeviceLeaseSnapshot } from '@openloop/core';
 
+export interface MirrorRunContext {
+  runId: string;
+  platform: 'android' | 'ios';
+  serial?: string;
+  suiteName?: string;
+  stepIndex?: number;
+  totalSteps?: number;
+  stepTitle?: string;
+  active: boolean;
+}
+
 interface ScreenMirrorOverlayProps {
   open: boolean;
   onClose: () => void;
+  /** 当前 QA 执行上下文：有值时镜像锁定到该设备并展示步骤进度 */
+  run?: MirrorRunContext | null;
 }
 
 interface MirrorTarget {
@@ -19,7 +32,7 @@ interface MirrorTarget {
  * 右侧贴边屏幕镜像浮层（Super + M 唤起）。
  * 只保留实时画面与操作按键，自动选中首个在线设备，便于边写代码边看真机效果。
  */
-export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, onClose }) => {
+export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, onClose, run }) => {
   const [target, setTarget] = useState<MirrorTarget | null>(null);
   const [rendered, setRendered] = useState(open);
   const [shown, setShown] = useState(false);
@@ -39,7 +52,14 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
       const bootedIos = (iosSnapshot?.simulators || []).filter((d) => d.state === 'booted');
       setLeases(leaseList || []);
 
+      const lockedSerial = run?.serial;
+      const lockedPlatform = run?.platform;
+
       setTarget((curr) => {
+        if (lockedSerial && lockedPlatform) {
+          if (curr && curr.platform === lockedPlatform && curr.serial === lockedSerial) return curr;
+          return { platform: lockedPlatform, serial: lockedSerial };
+        }
         if (curr) {
           const alive =
             (curr.platform === 'android' && onlineAndroid.some((d) => d.serial === curr.serial)) ||
@@ -68,7 +88,7 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [run?.serial, run?.platform]);
 
   // 打开时拉取设备，保持 8 秒轮询感知设备上下线
   useEffect(() => {
@@ -122,6 +142,7 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
           name={target.name}
           leases={leases}
           variant="standalone"
+          run={run}
         />
         </div>
       ) : (

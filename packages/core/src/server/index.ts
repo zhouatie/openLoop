@@ -47,6 +47,8 @@ import { MidsceneRunner } from '../qa/midscene-runner';
 import { AndroidDeviceManager } from '../qa/android-device-manager';
 import { IosDeviceManager } from '../qa/ios-device-manager';
 import { DeviceLeasePool } from '../qa/device-lease-pool';
+import { QaActivity } from '../qa/qa-activity';
+import { registerQaAgentBridge } from '../qa/qa-agent-bridge';
 import { AndroidStreamHub } from '../preview/android-stream-hub';
 import { proxyIosStream } from '../preview/ios-stream-proxy';
 import { DeviceActionController } from '../preview/device-action-controller';
@@ -109,6 +111,7 @@ export class OpenLoopServer {
   private clients: Set<WebSocket> = new Set();
   private staticDir?: string;
   private unsubscribeDeviceLeases?: () => void;
+  private unsubscribeQaActivity?: () => void;
   private unsubscribeTaskProcesses?: () => void;
   private workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>();
   private skillsCache: { data: { commands: any[]; skills: any[] }; timestamp: number } | null = null;
@@ -124,6 +127,69 @@ export class OpenLoopServer {
     this.scheduler = new AutomationScheduler(this.store, this.engine);
 
     this.setupEngineEvents();
+    this.setupQaAgentBridge();
+  }
+
+  /** agent 会话里的 QA 工具通过这座桥调用同一套执行逻辑，避免另写一份驱动链路 */
+  private setupQaAgentBridge() {
+    registerQaAgentBridge({
+      listDevices: async () => ({
+        android: await AndroidDeviceManager.getDevices(),
+        ios: await IosDeviceManager.getSnapshot(),
+        leases: DeviceLeasePool.getSnapshots(),
+      }),
+      runSuite: (input) => {
+        const suite: QaSuite = {
+          id: `agent_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          name: input.name,
+          platform: input.platform,
+          targetUrl: input.target,
+          appPackage: input.platform === 'web' ? undefined : input.target,
+          deviceSerial: input.deviceSerial,
+          wdaEndpoint: input.wdaEndpoint,
+          steps: input.steps.map((step, index) => ({ id: `step_${index}`, type: step.type, prompt: step.prompt })),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        return this.executeQaSuite(suite, { ownerId: input.ownerId });
+      },
+    });
+  }
+
+  /**
+   * 执行一次测试用例并落库：界面路由与 agent 工具共用这条链路，
+   * 步骤进度、设备占用与运行记录的行为才不会两边不一致。
+   */
+  private async executeQaSuite(suite: QaSuite, options: { ownerId?: string; taskId?: string } = {}): Promise<QaRunRecord> {
+    const runner = new MidsceneRunner({
+      artifactBaseDir: path.join(this.store.getDataDir(), 'artifacts'),
+      serverBaseUrl: `http://${this.host}:${this.port}`,
+      platform: suite.platform,
+      ownerId: options.ownerId,
+      onStepStart: (stepIndex, step) => {
+        this.broadcast({
+          type: 'qa:step_start',
+          data: { suiteId: suite.id, stepIndex, step },
+        });
+      },
+      onStepFinish: (stepIndex, record) => {
+        this.broadcast({
+          type: 'qa:step_finish',
+          data: { suiteId: suite.id, stepIndex, record },
+        });
+      },
+      onLog: (msg) => {
+        serverLogger.info(`[QA:LiveLog] ${msg}`);
+      },
+    });
+
+    const record = await runner.runSuite(suite, options.taskId);
+    this.store.saveQaRun(record);
+    this.broadcast({
+      type: 'qa:run_completed',
+      data: record,
+    });
+    return record;
   }
 
   public getStore(): Store {
@@ -217,6 +283,11 @@ export class OpenLoopServer {
     // 设备租约队列推流：多任务争用同一 iOS 设备时，界面实时展示占用者与排队位次
     this.unsubscribeDeviceLeases = DeviceLeasePool.subscribe(() => {
       this.broadcast({ type: 'qa:device_leases', data: { leases: DeviceLeasePool.getSnapshots() } });
+    });
+
+    // QA 执行活动推流：镜像浮层据此自动聚焦设备并展示当前步骤
+    this.unsubscribeQaActivity = QaActivity.subscribe((event) => {
+      this.broadcast({ type: 'qa:activity', data: event });
     });
 
     // 任务后台进程名册推流：只在进程注册 / 退出 / 被终止时推一次整份名册
@@ -352,6 +423,7 @@ export class OpenLoopServer {
   public async stop(): Promise<void> {
     this.scheduler.stop();
     this.unsubscribeDeviceLeases?.();
+    this.unsubscribeQaActivity?.();
     this.unsubscribeTaskProcesses?.();
     terminalHost.closeAll();
 
@@ -565,6 +637,8 @@ export class OpenLoopServer {
     const searchDirs: string[] = [
       path.join(os.homedir(), '.agents', 'skills'),
       path.join(os.homedir(), '.pi', 'agent', 'skills'),
+      // 随 openLoop 发布的内置技能：/ 菜单与插件入口共用同一份清单
+      path.join(__dirname, '..', 'agent', 'assets', 'skills'),
     ];
     if (targetDir) {
       searchDirs.unshift(
@@ -3538,35 +3612,7 @@ ${existingSubSummary}
           return this.sendJson(res, 400, { error: 'suiteId or inline suite definition is required' }, reqMeta);
         }
 
-        const runner = new MidsceneRunner({
-          artifactBaseDir: path.join(this.store.getDataDir(), 'artifacts'),
-          serverBaseUrl: `http://${this.host}:${this.port}`,
-          platform: suite.platform,
-          ownerId: body.ownerId,
-          onStepStart: (stepIndex, step) => {
-            this.broadcast({
-              type: 'qa:step_start',
-              data: { suiteId: suite.id, stepIndex, step },
-            });
-          },
-          onStepFinish: (stepIndex, record) => {
-            this.broadcast({
-              type: 'qa:step_finish',
-              data: { suiteId: suite.id, stepIndex, record },
-            });
-          },
-          onLog: (msg) => {
-            serverLogger.info(`[QA:LiveLog] ${msg}`);
-          },
-        });
-
-        const record = await runner.runSuite(suite, body.taskId);
-        this.store.saveQaRun(record);
-        this.broadcast({
-          type: 'qa:run_completed',
-          data: record,
-        });
-
+        const record = await this.executeQaSuite(suite, { ownerId: body.ownerId, taskId: body.taskId });
         return this.sendJson(res, 200, record, reqMeta);
       }
 

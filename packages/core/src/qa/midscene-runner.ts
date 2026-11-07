@@ -6,6 +6,8 @@ import { QaDriver, QaPlatform, QaStepExecutionResult } from './qa-driver';
 import { QaDriverFactory } from './qa-driver-factory';
 import { DeviceLease, DeviceLeasePool } from './device-lease-pool';
 import { IosDeviceManager } from './ios-device-manager';
+import { AndroidDeviceManager } from './android-device-manager';
+import { QaActivity } from './qa-activity';
 
 const qaLogger = createLogger('QAMidsceneRunner');
 
@@ -121,6 +123,38 @@ export class MidsceneRunner {
     return lease;
   }
 
+  /** 解析 Android 目标序列号：用例显式指定优先，否则取首个在线设备（与驱动探测逻辑一致） */
+  private async resolveAndroidSerial(suite: QaSuite): Promise<string | undefined> {
+    if (suite.deviceSerial) return suite.deviceSerial;
+    try {
+      const devices = await AndroidDeviceManager.getDevices();
+      const online = devices.find((d) => d.status === 'device');
+      return online?.serial;
+    } catch (err: any) {
+      qaLogger.warn(`[MidsceneRunner] 解析 Android 序列号失败: ${err.message}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * Android 设备租约：同一台设备同时只允许一个执行流驱动。
+   * 租约同时是镜像界面的「自动化中·仅观看」信号源。
+   */
+  private async acquireAndroidLease(suite: QaSuite, serial: string): Promise<DeviceLease> {
+    return DeviceLeasePool.acquire(serial, {
+      label: suite.name || suite.id,
+      ownerId: this.options.ownerId || suite.id,
+      signal: this.options.signal,
+      onWait: (info) => {
+        const eta = info.estimatedWaitMs ? `，预计等待约 ${Math.ceil(info.estimatedWaitMs / 1000)}s` : '';
+        this.options.onLog?.(
+          `[QA 设备] Android 设备 ${serial} 使用中，排队第 ${info.position} 位（前方 ${info.ahead} 个任务${eta}）`,
+          'warn'
+        );
+      },
+    });
+  }
+
   public async runSuite(suite: QaSuite, taskId?: string): Promise<QaRunRecord> {
     const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const runDir = path.join(this.options.artifactBaseDir, runId);
@@ -153,6 +187,7 @@ export class MidsceneRunner {
     let driverReady = false;
     let driverInitError: string | undefined;
     let lease: DeviceLease | null = null;
+    let activeSerial: string | undefined;
 
     try {
       if (this.options.signal?.aborted) {
@@ -160,6 +195,13 @@ export class MidsceneRunner {
       }
 
       lease = await this.acquireIosLease(suite);
+      if (platform === 'android') {
+        const androidSerial = await this.resolveAndroidSerial(suite);
+        if (androidSerial) {
+          lease = await this.acquireAndroidLease(suite, androidSerial);
+          this.options.onLog?.(`[QA 设备] 已获得 Android 设备租约: ${androidSerial}`);
+        }
+      }
       driver = QaDriverFactory.createDriver(platform);
 
       if (this.options.signal) {
@@ -177,13 +219,26 @@ export class MidsceneRunner {
       await driver.initialize({
         targetUrl: suite.targetUrl,
         appPackage: suite.appPackage,
-        deviceSerial: suite.deviceSerial,
+        deviceSerial: suite.deviceSerial || (platform === 'android' ? lease?.key : undefined),
         wdaEndpoint: suite.wdaEndpoint,
         viewport: { width, height },
         headless: true,
       });
       driverReady = true;
+      activeSerial = driver.getActiveDeviceSerial?.() || lease?.key || suite.deviceSerial || undefined;
       this.options.onLog?.(`[QA 引擎] ${platform.toUpperCase()} 测试驱动初始化就绪`);
+
+      // 广播执行开始：镜像与任务面板据此自动聚焦到该设备
+      QaActivity.publish({
+        runId,
+        platform,
+        state: 'started',
+        suiteId: suite.id,
+        suiteName: suite.name,
+        deviceSerial: activeSerial,
+        totalSteps: suite.steps.length,
+        at: Date.now(),
+      });
 
       // Web 端导航到目标地址，移动端（Android/iOS）拉起目标应用
       const target = platform === 'web' ? suite.targetUrl : suite.appPackage || suite.targetUrl;
@@ -211,6 +266,18 @@ export class MidsceneRunner {
         const step = suite.steps[i];
         const stepStartTime = Date.now();
         this.options.onStepStart?.(i, step);
+        QaActivity.publish({
+          runId,
+          platform,
+          state: 'step',
+          suiteId: suite.id,
+          suiteName: suite.name,
+          deviceSerial: activeSerial,
+          stepIndex: i,
+          totalSteps: suite.steps.length,
+          stepTitle: step.prompt,
+          at: Date.now(),
+        });
 
         let stepResult: QaStepExecutionResult = {
           passed: true,
@@ -304,6 +371,16 @@ export class MidsceneRunner {
         await driver.close().catch(() => {});
       }
       lease?.release();
+      QaActivity.publish({
+        runId,
+        platform,
+        state: 'finished',
+        suiteId: suite.id,
+        suiteName: suite.name,
+        deviceSerial: activeSerial,
+        totalSteps: suite.steps.length,
+        at: Date.now(),
+      });
     }
 
     // 任一步骤未通过即判定套件失败，避免全部步骤失败时节点仍显示成功

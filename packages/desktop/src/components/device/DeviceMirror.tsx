@@ -28,6 +28,15 @@ interface DeviceMirrorProps {
   /** 紧凑模式（用于侧边栏嵌入）还是全量模式（用于主页面） */
   variant?: 'dock' | 'standalone';
   onClose?: () => void;
+  /** QA 执行上下文：镜像聚焦到正在执行的用例与步骤 */
+  run?: {
+    runId: string;
+    suiteName?: string;
+    stepIndex?: number;
+    totalSteps?: number;
+    stepTitle?: string;
+    active: boolean;
+  } | null;
 }
 
 interface DeviceSize {
@@ -43,6 +52,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   leases = [],
   variant = 'dock',
   onClose,
+  run,
 }) => {
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasStageRef = useRef<HTMLDivElement>(null);
@@ -55,6 +65,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   const [inputText, setInputText] = useState('');
   const [inputOpen, setInputOpen] = useState(false);
   const [reconnectNonce, setReconnectNonce] = useState(0);
+  const autoRetryRef = useRef(0);
   const [touchIndicator, setTouchIndicator] = useState<{ left: number; top: number; id: number } | null>(null);
   const [codec, setCodec] = useState<string>('h264');
   const [stageBox, setStageBox] = useState<{ width: number; height: number } | null>(null);
@@ -258,6 +269,15 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     let decoder: any = null;
     let decoderWriter: any = null;
     let isDisposed = false;
+    let hasPicture = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // 无画面看门狗：连上却不来画面（会话僵尸/设备休眠）不能一直黑屏
+    const watchdog = setTimeout(() => {
+      if (isDisposed || hasPicture) return;
+      setStatus((prev) => (prev === 'streaming' ? prev : 'error'));
+      setErrorMessage((prev) => prev || '长时间未收到画面数据，请重新连接');
+    }, 12000);
 
     try {
       ws = new WebSocket(wsUrl);
@@ -341,6 +361,8 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
         // 统一获取单例 writer，避免频繁 getWriter / releaseLock 引发 stream locked 冲突
         decoderWriter = decoder.writable.getWriter();
 
+        hasPicture = true;
+        autoRetryRef.current = 0;
         setStatus('streaming');
         if (import.meta.env?.DEV) console.log('[DeviceMirror:Android] WebCodecs 解码器初始化成功:', meta);
 
@@ -369,6 +391,10 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
           } else if (parsed.type === 'error') {
             setStatus('error');
             setErrorMessage(parsed.message || '串流会话异常');
+          } else if (parsed.type === 'end') {
+            if (import.meta.env?.DEV) console.log('[DeviceMirror:Android] 服务端视频流已结束:', parsed.message);
+            setStatus('disconnected');
+            setErrorMessage(parsed.message || '设备视频流已中断');
           }
         } catch {}
         return;
@@ -412,10 +438,19 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
       if (event.reason) {
         setErrorMessage(event.reason);
       }
+      // 已经出过画面的连接被服务端收掉（如流中断），静默重连一次
+      if (hasPicture && autoRetryRef.current < 1) {
+        autoRetryRef.current += 1;
+        retryTimer = setTimeout(() => {
+          if (!isDisposed) setReconnectNonce((n) => n + 1);
+        }, 1200);
+      }
     };
 
     return () => {
       isDisposed = true;
+      clearTimeout(watchdog);
+      if (retryTimer) clearTimeout(retryTimer);
       if (ws) {
         ws.close();
       }
@@ -477,6 +512,28 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
               {!isCompact && (
                 <span className="font-mono text-[10px] text-[#71717a] truncate max-w-[90px]">
                   {serial}
+                </span>
+              )}
+              {run?.suiteName && !isCompact && (
+                <span className="text-[10px] text-[#a1a1aa] truncate max-w-[120px]" title={run.suiteName}>
+                  {run.suiteName}
+                </span>
+              )}
+              {run && (
+                <span
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] font-medium whitespace-nowrap border ${
+                    run.active
+                      ? 'bg-[#4f46e5]/18 text-[#c7d2fe] border-[#4f46e5]/30'
+                      : 'bg-white/6 text-[#a1a1aa] border-white/10'
+                  }`}
+                  title={[run.suiteName, run.stepTitle].filter(Boolean).join(' · ') || 'QA 执行'}
+                >
+                  <span className={`w-1 h-1 rounded-full ${run.active ? 'bg-[#a5b4fc] animate-pulse' : 'bg-[#71717a]'}`} />
+                  {typeof run.stepIndex === 'number'
+                    ? `${run.stepIndex + 1}/${run.totalSteps ?? '?'}`
+                    : run.active
+                    ? '执行中'
+                    : '已结束'}
                 </span>
               )}
             </div>
@@ -604,15 +661,6 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
               </div>
             )}
 
-            {/* 运行态浮动徽章 */}
-            {isBusy && (
-              <div className="absolute top-2 left-2 z-20 pointer-events-none">
-                <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-black/75 backdrop-blur border border-[#3b82f6]/40 text-[#93c5fd] text-[10.5px]">
-                  <Lock size={10} className="text-[#60a5fa]" />
-                  <span>任务执行中: {leaseHolder?.label}</span>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       {/* 紧贴屏幕的操作按键列 */}

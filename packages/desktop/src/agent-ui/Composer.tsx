@@ -17,6 +17,7 @@ import {
   IconTask,
   IconGroup,
   IconRun,
+  IconDevice,
 } from './icons';
 import styles from './Composer.module.css';
 import { ComposerEditor } from './composer-editor/ComposerEditor';
@@ -259,6 +260,8 @@ export const Composer = React.memo(function Composer({
   const [menu, setMenu] = useState<MenuState | null>(null);
   /** 编辑器里的草稿文本（chip 展开成 `@path`）：发送与可发送判断都用它 */
   const [text, setText] = useState(value);
+  /** 由 ➕ 面板选中的插件：只在本条消息生效，发送时作为技能前缀带给 agent */
+  const [activePlugin, setActivePlugin] = useState<{ skill: string; label: string } | null>(null);
 
   /** 发送后焦点留在输入框：发送期间输入框会短暂禁用，解禁后再补回焦点 */
   const restoreFocusRef = useRef(false);
@@ -288,12 +291,18 @@ export const Composer = React.memo(function Composer({
     const trimmed = text.trim();
     if (import.meta.env?.DEV) console.log('[Composer] 提交:', { length: trimmed.length });
     if (!trimmed || disabled) return;
+    // 插件入口落成技能前缀：agent 读到 /skill 就会加载对应说明与工具
+    const payload = activePlugin ? `/${activePlugin.skill} ${trimmed}` : trimmed;
+    if (activePlugin && import.meta.env?.DEV) {
+      console.log('[Composer] 携带插件发送:', { plugin: activePlugin.skill });
+    }
     // 生成中发送会作为追加消息排入本轮，由输入卡上方的排队条承接反馈
-    onSend(trimmed);
+    onSend(payload);
+    setActivePlugin(null);
     // 发送会让输入框短暂禁用：下一帧取回焦点，仍禁用则等解禁后补回
     restoreFocusRef.current = true;
     window.requestAnimationFrame(focusInput);
-  }, [text, disabled, onSend, focusInput]);
+  }, [text, disabled, onSend, focusInput, activePlugin]);
 
   /** @ 候选的请求序号：连续输入时只采纳最后一次的结果，避免旧结果盖掉新候选 */
   const mentionSeq = useRef(0);
@@ -406,7 +415,17 @@ export const Composer = React.memo(function Composer({
     editorRef.current?.setDraft(value);
   }, [value, text]);
 
-  /** 权限 / 模型清单：面板与底部 chip 共用同一套行渲染 */
+  /** 可被 prompt 驱动的插件：能力由内置技能与 agent 工具提供，这里只放入口 */
+const PLUGIN_ROWS = [
+  {
+    skill: 'qa-verify',
+    label: '自动化验证',
+    alias: 'qa',
+    description: '在真机或网页上执行验证步骤，留下每步截图与结论',
+  },
+];
+
+/** 权限 / 模型清单：面板与底部 chip 共用同一套行渲染 */
   const openMenu = useCallback(
     (kind: 'model' | 'permission', fromAdd = false) => {
       // 底部 chip 再点一次收起
@@ -476,6 +495,16 @@ export const Composer = React.memo(function Composer({
         }
       );
     }
+    for (const plugin of PLUGIN_ROWS) {
+      items.push({
+        key: `plugin:${plugin.skill}`,
+        label: plugin.label,
+        alias: plugin.alias,
+        description: plugin.description,
+        icon: <IconDevice size={16} />,
+        section: '插件',
+      });
+    }
     if (onAddFiles) {
       items.push({
         key: 'file',
@@ -543,6 +572,15 @@ export const Composer = React.memo(function Composer({
         if (choice.key === 'file') {
           setMenu(null);
           fileInputRef.current?.click();
+          return;
+        }
+        if (choice.key.startsWith('plugin:')) {
+          const skill = choice.key.slice('plugin:'.length);
+          const row = PLUGIN_ROWS.find((item) => item.skill === skill);
+          if (import.meta.env?.DEV) console.log('[Composer] 选择插件:', skill);
+          setActivePlugin({ skill, label: row?.label || skill });
+          setMenu(null);
+          editorRef.current?.focus();
           return;
         }
         if (choice.key === 'task' || choice.key === 'group' || choice.key === 'pipeline') {
@@ -949,6 +987,24 @@ export const Composer = React.memo(function Composer({
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {activePlugin && (
+          <div className={styles.plugins}>
+            <span className={styles.pluginChip} title="本条消息会交给该插件处理">
+              <IconDevice size={12} />
+              {activePlugin.label}
+              <button
+                type="button"
+                className={styles.pluginChipRemove}
+                onClick={() => setActivePlugin(null)}
+                title="取消插件"
+                aria-label="取消插件"
+              >
+                <IconClose size={10} />
+              </button>
+            </span>
           </div>
         )}
 
