@@ -93,6 +93,8 @@ export interface ComposerProps {
   toolsExtra?: React.ReactNode;
   /** ➕ 面板里的任务入口：未传时该分组不出现 */
   onTaskAction?: (mode: TaskActionMode) => void;
+  /** 焦点请求序号：新建会话等场景递增一次，输入框随即取回焦点 */
+  focusSeq?: number;
   /** 快捷键是否生效 */
   shortcutsEnabled?: boolean;
   /** 快捷键层级优先级 */
@@ -242,6 +244,7 @@ export const Composer = React.memo(function Composer({
   models,
   onModelSelect,
   toolsExtra,
+  focusSeq,
   onTaskAction,
   shortcutsEnabled = true,
   shortcutPriority = 0,
@@ -260,6 +263,15 @@ export const Composer = React.memo(function Composer({
   /** 发送后焦点留在输入框：发送期间输入框会短暂禁用，解禁后再补回焦点 */
   const restoreFocusRef = useRef(false);
   const focusInput = useCallback(() => editorRef.current?.focus(), []);
+
+  /** 新建会话后把焦点交回输入框：调用方递增 focusSeq 触发 */
+  const focusSeqRef = useRef(focusSeq ?? 0);
+  useEffect(() => {
+    const next = focusSeq ?? 0;
+    if (next === focusSeqRef.current) return;
+    focusSeqRef.current = next;
+    focusInput();
+  }, [focusSeq, focusInput]);
 
   useEffect(() => {
     if (disabled || !restoreFocusRef.current) return;
