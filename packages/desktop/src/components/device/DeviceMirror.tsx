@@ -654,7 +654,30 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   const iosPreviewUrl = useMemo(() => {
     if (platform !== 'ios') return '';
     return api.getIosStreamPreviewUrl({ wdaEndpoint, udid: serial });
-  }, [platform, wdaEndpoint, serial, reconnectNonce]);
+  }, [platform, wdaEndpoint, serial]);
+
+  /**
+   * iOS 画面流按 ref 手动装载与卸载。
+   * 交给 React 用 <img src> 托管时，组件卸载后浏览器仍占着这条 multipart 长连接；
+   * 同源连接累计到 6 条后所有接口请求排队，界面表现得像服务崩了（刷新才恢复）。
+   */
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!img || !iosPreviewUrl) return;
+    // 重连时加个标记位，避免命中缓存拿到已断开的旧流
+    const separator = iosPreviewUrl.includes('?') ? '&' : '?';
+    const url = reconnectNonce > 0 ? `${iosPreviewUrl}${separator}_r=${reconnectNonce}` : iosPreviewUrl;
+    if (import.meta.env?.DEV) {
+      console.log('[DeviceMirror:iOS] 接入画面流:', { serial, url });
+    }
+    img.src = url;
+    return () => {
+      if (import.meta.env?.DEV) {
+        console.log('[DeviceMirror:iOS] 断开画面流:', serial);
+      }
+      img.removeAttribute('src');
+    };
+  }, [iosPreviewUrl, reconnectNonce, serial]);
 
   return (
     <div className="relative flex w-full h-full min-h-0 items-stretch gap-3">
@@ -870,8 +893,6 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
             ) : (
               <img
                 ref={imgRef}
-                key={`${iosPreviewUrl}#${reconnectNonce}`}
-                src={iosPreviewUrl}
                 alt="iOS Device Stream"
                 className="w-full h-full object-contain pointer-events-none"
                 onLoad={() => {

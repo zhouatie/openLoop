@@ -36,6 +36,17 @@ const MAX_VIEWER_BACKLOG_BYTES = 4 * 1024 * 1024;
 const BOUNDARY = 'openloop-ios-mjpeg-boundary';
 /** 降级状态下探测 WDA 是否恢复的间隔 */
 const UPGRADE_PROBE_INTERVAL_MS = 10000;
+/**
+ * 画面长连接预算：浏览器对同一 origin 的 HTTP/1.1 并发连接只有 6 条，
+ * 被画面流占满后停止模拟器、创建任务等接口会全部排队，界面表现为「服务崩了」。
+ * 因此同一台设备最多 3 路观众（镜像浮层 / 停靠面板 / 设备页），全局最多 4 路，
+ * 超预算时断开最老的一路，保证新观众总能接入。
+ */
+const MAX_VIEWERS_PER_DEVICE = 3;
+const MAX_TOTAL_VIEWERS = 4;
+
+/** 全局观众接入顺序：超预算时按接入先后踢人，僵尸连接总在最前面 */
+const viewerOrder: Array<{ session: IosStreamSession; res: ServerResponse }> = [];
 
 /**
  * 从缓冲区里取出一个完整帧（按 Content-Length）。
@@ -187,6 +198,17 @@ function framePartHeader(length: number): Buffer {
   );
 }
 
+/** 直接回绝一路观众：明确告知原因，绝不留一个永远不响应的请求 */
+function rejectViewer(res: ServerResponse, message: string): void {
+  try {
+    if (res.headersSent || res.writableEnded) return;
+    res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ error: message }));
+  } catch {
+    /* 连接已断开 */
+  }
+}
+
 export interface IosStreamOptions {
   wdaEndpoint?: string;
   mjpegUrl?: string;
@@ -234,12 +256,7 @@ class IosStreamSession {
   attach(_req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (this.closed) {
       // 会话刚被释放的竞态：明确告知重连，而不是留一个永不响应的请求
-      try {
-        res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-        res.end(JSON.stringify({ error: '画面管线已释放，请重新连接。' }));
-      } catch {
-        /* 连接已断开 */
-      }
+      rejectViewer(res, '画面管线已释放，请重新连接。');
       return Promise.resolve();
     }
     if (this.idleTimer) {
@@ -247,7 +264,11 @@ class IosStreamSession {
       this.idleTimer = null;
     }
     this.viewers.add(res);
+    viewerOrder.push({ session: this, res });
     logger.info(`[IosStreamProxy] 观众接入 ${this.key}，当前 ${this.viewers.size} 路`);
+    this.enforceViewerBudget(res);
+    // 本次接入恰好是被挤掉的那一路：直接结束，不留悬挂的 Promise
+    if (!this.viewers.has(res)) return Promise.resolve();
 
     // 新观众先看到最近一帧，避免面板闪黑
     if (this.lastFrame && Date.now() - this.lastFrameAt < 3000) {
@@ -271,7 +292,36 @@ class IosStreamSession {
     });
   }
 
+  /** 长连接超预算时断开最老的一路：多数是前端重挂后没释放的僵尸连接 */
+  private enforceViewerBudget(keep: ServerResponse): void {
+    while (this.viewers.size > MAX_VIEWERS_PER_DEVICE) {
+      const oldest = this.viewers.values().next().value as ServerResponse | undefined;
+      if (!oldest || oldest === keep) break;
+      this.evict(oldest, `单设备超过 ${MAX_VIEWERS_PER_DEVICE} 路`);
+    }
+    while (viewerOrder.length > MAX_TOTAL_VIEWERS) {
+      const record = viewerOrder.find((item) => item.res !== keep);
+      if (!record) break;
+      record.session.evict(record.res, `全局超过 ${MAX_TOTAL_VIEWERS} 路`);
+    }
+  }
+
+  /** 主动断开一路观众：先销毁连接再摘除登记（登记与连接不同步时也要移除，否则预算会被幽灵占着） */
+  evict(res: ServerResponse, reason: string): void {
+    if (this.viewers.has(res)) {
+      logger.info(`[IosStreamProxy] 主动断开观众 (${reason}) (${this.key})`);
+      try {
+        res.destroy();
+      } catch {
+        /* 已断开 */
+      }
+    }
+    this.detach(res);
+  }
+
   private detach(res: ServerResponse): void {
+    const index = viewerOrder.findIndex((record) => record.res === res);
+    if (index >= 0) viewerOrder.splice(index, 1);
     if (!this.viewers.delete(res)) return;
     logger.info(`[IosStreamProxy] 观众离开 ${this.key}，剩余 ${this.viewers.size} 路`);
     if (this.viewers.size === 0) {
@@ -688,6 +738,10 @@ class IosStreamSession {
     this.closed = true;
     this.polling = false;
     this.generation += 1;
+    // 会话释放时同步清掉全局登记，避免预算被已消失的连接占着
+    for (let index = viewerOrder.length - 1; index >= 0; index -= 1) {
+      if (viewerOrder[index].session === this) viewerOrder.splice(index, 1);
+    }
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.pollTimer) clearTimeout(this.pollTimer);
     if (this.watchdogTimer) clearInterval(this.watchdogTimer);

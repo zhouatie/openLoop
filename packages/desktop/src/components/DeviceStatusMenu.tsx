@@ -205,6 +205,7 @@ export const DeviceStatusMenu: React.FC<DeviceStatusMenuProps> = ({ onOpenMirror
       if (import.meta.env?.DEV) {
         console.error('[DeviceStatusMenu] 停止设备失败:', err?.message);
       }
+      setWifiResult({ ok: false, text: `停止 ${row.name} 失败：${err?.message || '未知异常'}` });
     } finally {
       setStoppingKey(null);
     }
