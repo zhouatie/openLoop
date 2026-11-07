@@ -19,6 +19,7 @@ import { AutomationListView } from './views/AutomationListView';
 import { QaAutomationView } from './views/QaAutomationView';
 import { QaDevicesView } from './views/qa/QaDevicesView';
 import { GlobalAgentPanel } from './agent-ui';
+import { ScreenMirrorOverlay } from './components/device/ScreenMirrorOverlay';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
 import { PluginSandboxContainer } from './components/PluginSandboxContainer';
@@ -52,6 +53,7 @@ export const AppContent: React.FC = () => {
   });
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isQuickRunModalOpen, setIsQuickRunModalOpen] = useState<boolean>(false);
+  const [isMirrorOpen, setIsMirrorOpen] = useState(false);
   const [isAgentOverlayOpen, setIsAgentOverlayOpen] = useState<boolean>(() => {
     try {
       const cached = localStorage.getItem('openloop_auto_open_global_agent');
@@ -176,6 +178,14 @@ export const AppContent: React.FC = () => {
       setIsCommandPaletteOpen((prev) => !prev);
     },
     onToggleSidebar: handleToggleSidebar,
+    onToggleMirror: () => {
+      setIsMirrorOpen((prev) => {
+        if (import.meta.env?.DEV) {
+          console.log('[App] 切换右侧屏幕镜像浮层:', { next: !prev });
+        }
+        return !prev;
+      });
+    },
     onEscape: () => {
       if (isAgentOverlayOpen) {
         // 浮层自己处理 Esc（先收瞬时层，再关闭浮层），这里不抢
@@ -490,6 +500,9 @@ export const AppContent: React.FC = () => {
         isDaemonConnected={isDaemonConnected}
         isOpen={isSidebarOpen}
       />
+
+      {/* 右侧屏幕镜像浮层（Super + M 唤起） */}
+      <ScreenMirrorOverlay open={isMirrorOpen} onClose={() => setIsMirrorOpen(false)} />
 
       {/* 主视图 */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">

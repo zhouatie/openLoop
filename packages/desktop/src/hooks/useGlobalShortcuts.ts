@@ -13,6 +13,8 @@ export interface ShortcutActions {
   onQuickRunWorkflow?: () => void;
   onToggleCommandPalette: () => void;
   onToggleSidebar?: () => void;
+  /** Super + M：切换右侧屏幕镜像浮层 */
+  onToggleMirror?: () => void;
   onEscape?: () => void;
 }
 
@@ -177,7 +179,18 @@ export const useGlobalShortcuts = (actions: ShortcutActions, enabled = true) => 
         return;
       }
 
-      // 7. Super + R: 唤起快捷工作流执行弹窗
+      // 7. Super + M: 切换右侧屏幕镜像浮层
+      if ((key === 'm' || code === 'KeyM') && actionsRef.current.onToggleMirror) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (import.meta.env?.DEV) {
+          console.log('[Shortcut] 触发快捷键: Super + M -> 屏幕镜像浮层', { superKey: activeSuper });
+        }
+        actionsRef.current.onToggleMirror();
+        return;
+      }
+
+      // 8. Super + R: 唤起快捷工作流执行弹窗
       if (key === 'r' || code === 'KeyR') {
         e.preventDefault();
         e.stopPropagation();

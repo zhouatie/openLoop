@@ -320,7 +320,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
           ? new WebGLVideoFrameRenderer()
           : new BitmapVideoFrameRenderer();
 
-        const canvas = renderer.canvas;
+        const canvas = renderer.canvas as HTMLCanvasElement;
         canvas.style.width = '100%';
         canvas.style.height = '100%';
         canvas.style.objectFit = 'contain';
