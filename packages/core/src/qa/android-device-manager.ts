@@ -1,6 +1,9 @@
 import { exec, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { AndroidDeviceInfo } from '../types';
+import { AndroidDeviceInfo, RunningEmulatorInfo } from '../types';
 import { createLogger } from '../logger';
 
 const execAsync = promisify(exec);
@@ -149,6 +152,113 @@ export class AndroidDeviceManager {
   }
 
   /**
+   * 列出本机正在运行的模拟器进程（在开机中的也会列出）
+   */
+  static async getRunningEmulators(): Promise<RunningEmulatorInfo[]> {
+    let processes: { pid: number; uptimeSeconds: number; avd: string }[] = [];
+    try {
+      const { stdout } = await execAsync('ps -ax -o pid=,etime=,command=', { timeout: 5000 });
+      for (const rawLine of stdout.split('\n')) {
+        const line = rawLine.trim();
+        if (!line.includes('-avd ')) continue;
+        if (!line.includes('qemu-system') && !line.includes('/emulator/')) continue;
+        const match = line.match(/^(\d+)\s+(\S+)\s+(.*)$/);
+        if (!match) continue;
+        const avd = match[3].match(/-avd\s+(\S+)/)?.[1];
+        if (!avd) continue;
+        processes.push({
+          pid: Number(match[1]),
+          uptimeSeconds: parseElapsedSeconds(match[2]),
+          avd,
+        });
+      }
+    } catch (err: any) {
+      logger.warn(`[AndroidDeviceManager] 读取模拟器进程失败: ${err?.message}`);
+      return [];
+    }
+
+    if (processes.length === 0) return [];
+
+    // 已开机的模拟器通过 AVD 名称与 adb 串号对齐
+    const serialByAvd = new Map<string, string>();
+    try {
+      const { stdout } = await execAsync('adb devices', { timeout: 5000 });
+      const serials = stdout
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/)[0])
+        .filter((serial) => serial && serial.startsWith('emulator-'));
+      for (const serial of serials) {
+        try {
+          const { stdout: avdName } = await execAsync(
+            `adb -s ${serial} shell getprop ro.boot.qemu.avd_name`,
+            { timeout: 4000 }
+          );
+          const name = avdName.trim();
+          if (name && !serialByAvd.has(name)) serialByAvd.set(name, serial);
+        } catch {
+          /* 仍在开机中，取不到属性属正常 */
+        }
+      }
+    } catch (err: any) {
+      logger.debug(`[AndroidDeviceManager] 对齐模拟器串号失败: ${err?.message}`);
+    }
+
+    return processes
+      .map((item) => {
+        const serial = serialByAvd.get(item.avd);
+        return {
+          platform: 'android' as const,
+          key: `android-${item.pid}`,
+          name: item.avd,
+          pid: item.pid,
+          serial,
+          uptimeSeconds: item.uptimeSeconds,
+          state: serial ? ('booted' as const) : ('starting' as const),
+        };
+      })
+      .sort((a, b) => (a.pid || 0) - (b.pid || 0));
+  }
+
+  /**
+   * 停止本机模拟器：已就绪走 adb emu kill，其余直接结束进程
+   */
+  static async stopEmulator(target: {
+    pid?: number;
+    serial?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    if (target?.serial) {
+      try {
+        const { stdout } = await execAsync(`adb -s ${target.serial} emu kill`, { timeout: 8000 });
+        return { success: true, message: stdout.trim() || `已请求关闭 ${target.serial}` };
+      } catch (err: any) {
+        logger.warn(`[AndroidDeviceManager] adb emu kill 失败: ${err?.message}`);
+        if (!target?.pid) {
+          return { success: false, message: err?.message || '关闭模拟器失败' };
+        }
+      }
+    }
+
+    if (!target?.pid) {
+      return { success: false, message: '缺少模拟器进程号' };
+    }
+
+    try {
+      process.kill(target.pid, 'SIGTERM');
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      try {
+        process.kill(target.pid, 0);
+        process.kill(target.pid, 'SIGKILL');
+      } catch {
+        /* 已退出 */
+      }
+      logger.info(`[AndroidDeviceManager] 已停止模拟器进程: ${target.pid}`);
+      return { success: true, message: '模拟器已停止' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || '停止模拟器失败' };
+    }
+  }
+
+  /**
    * 通过 WiFi ADB 连接远程设备 (如 192.168.1.100:5555)
    */
   static async connectWifiDevice(ipPort: string): Promise<{ success: boolean; message: string }> {
@@ -170,6 +280,106 @@ export class AndroidDeviceManager {
   }
 
   /**
+   * 解析本地 Android SDK 中的 emulator 可执行文件路径
+   */
+  static resolveEmulatorBinary(): string | null {
+    const candidates: string[] = [];
+    for (const envKey of ['ANDROID_HOME', 'ANDROID_SDK_ROOT']) {
+      const root = process.env[envKey];
+      if (root) candidates.push(path.join(root, 'emulator', 'emulator'));
+    }
+    const home = os.homedir();
+    candidates.push(
+      path.join(home, 'Library/Android/sdk/emulator/emulator'),
+      path.join(home, 'Android/Sdk/emulator/emulator'),
+      '/usr/local/share/android-sdk/emulator/emulator',
+      '/opt/homebrew/share/android-sdk/emulator/emulator'
+    );
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  /**
+   * 列出本机已创建的 Android 虚拟设备（AVD）
+   */
+  static async listAvds(): Promise<{ available: boolean; avds: string[]; message?: string }> {
+    const binary = AndroidDeviceManager.resolveEmulatorBinary();
+    if (!binary) {
+      return {
+        available: false,
+        avds: [],
+        message: '未找到 Android emulator，请先安装 Android Studio 或命令行 SDK 工具',
+      };
+    }
+    try {
+      const { stdout } = await execAsync(`"${binary}" -list-avds`, { timeout: 8000 });
+      const avds = stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith('INFO'));
+      return { available: true, avds };
+    } catch (err: any) {
+      logger.warn(`[AndroidDeviceManager] 读取 AVD 列表失败: ${err?.message}`);
+      return { available: false, avds: [], message: err?.message || '读取 AVD 列表失败' };
+    }
+  }
+
+  /**
+   * 启动本地 Android 模拟器（后台脱离父进程，启动后由设备轮询自动发现）
+   */
+  static async launchEmulator(
+    avdName: string,
+    options: { showWindow?: boolean } = {}
+  ): Promise<{ success: boolean; message: string }> {
+    const name = avdName.trim();
+    if (!name) {
+      return { success: false, message: '模拟器名称不能为空' };
+    }
+
+    const binary = AndroidDeviceManager.resolveEmulatorBinary();
+    if (!binary) {
+      return { success: false, message: '未找到 Android emulator，请先安装 Android Studio 或命令行 SDK 工具' };
+    }
+
+    const existing = (await AndroidDeviceManager.getDevices()).find((d) => d.isEmulator && d.status === 'device');
+    if (existing) {
+      return { success: true, message: `已有模拟器在线 (${existing.serial})，无需重复启动` };
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (payload: { success: boolean; message: string }) => {
+        if (settled) return;
+        settled = true;
+        resolve(payload);
+      };
+
+      try {
+        // 默认无窗口：画面通过 openLoop 镜像观看，避免出现第二个画面窗口
+        const args = ['-avd', name, '-netdelay', 'none', '-netspeed', 'full'];
+        if (!options.showWindow) args.push('-no-window');
+        const child = spawn(binary, args, {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.once('error', (err: any) => {
+          logger.warn(`[AndroidDeviceManager] 启动模拟器失败: ${err?.message}`);
+          done({ success: false, message: `启动模拟器失败: ${err?.message || '未知异常'}` });
+        });
+        child.once('spawn', () => {
+          child.unref();
+          logger.info(`[AndroidDeviceManager] 已启动模拟器: ${name} (${options.showWindow ? '带窗口' : '无窗口'})`);
+          done({ success: true, message: `正在启动 ${name}，首次开机约需 20-60 秒` });
+        });
+      } catch (err: any) {
+        done({ success: false, message: `启动模拟器失败: ${err?.message || '未知异常'}` });
+      }
+    });
+  }
+
+  /**
    * 断开 WiFi ADB 远程设备
    */
   static async disconnectWifiDevice(ipPort: string): Promise<{ success: boolean; message: string }> {
@@ -180,6 +390,16 @@ export class AndroidDeviceManager {
       return { success: false, message: err.message || '断开连接异常' };
     }
   }
+}
+
+/** 把 ps 的 etime（MM:SS / HH:MM:SS / D-HH:MM:SS）换算成秒 */
+function parseElapsedSeconds(etime: string): number {
+  const [daysPart, clockPart] = etime.includes('-') ? etime.split('-') : ['0', etime];
+  const days = Number(daysPart) || 0;
+  const segments = clockPart.split(':').map((seg) => Number(seg) || 0);
+  while (segments.length < 3) segments.unshift(0);
+  const [hours, minutes, seconds] = segments.slice(-3);
+  return days * 86400 + hours * 3600 + minutes * 60 + seconds;
 }
 
 function isEmulatorSerial(serial: string): boolean {

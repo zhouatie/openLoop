@@ -407,6 +407,8 @@ export interface QaAutomationSettings {
   modelFamily?: string;
   /** 客户端自动化执行时是否自动打开设备镜像窗口（默认开启） */
   autoOpenMirror?: boolean;
+  /** 启动本地模拟器时是否显示模拟器原生窗口（默认关闭，仅用 openLoop 镜像观看） */
+  emulatorShowWindow?: boolean;
 }
 
 export interface WorktreeContextInfo {
@@ -488,6 +490,25 @@ export interface AndroidDeviceInfo {
   isEmulator: boolean;
 }
 
+/** 本机正在运行的模拟器（Android 进程或已启动的 iOS 模拟器） */
+export interface RunningEmulatorInfo {
+  platform: 'android' | 'ios';
+  /** 唯一标识：Android 用进程号，iOS 用 UDID */
+  key: string;
+  /** 显示名称：Android 为 AVD 名称，iOS 为模拟器名称 */
+  name: string;
+  /** starting=开机中，booted=已就绪 */
+  state: 'starting' | 'booted';
+  /** Android 进程号 */
+  pid?: number;
+  /** Android 为 adb 串号，iOS 为 UDID */
+  serial?: string;
+  /** 已运行秒数（仅 Android 进程可取到） */
+  uptimeSeconds?: number;
+  /** 系统版本，如 27.0 */
+  version?: string;
+}
+
 export interface IosDeviceInfo {
   /** 模拟器 UDID 或真机标识 */
   udid: string;
@@ -511,7 +532,10 @@ export interface IosWdaStatus {
 export interface IosDevicesSnapshot {
   environment: { available: boolean; message?: string };
   wda: IosWdaStatus;
+  /** 已启动的模拟器 */
   simulators: IosDeviceInfo[];
+  /** 本机全部模拟器（含未启动），供镜像下拉切换与开机使用 */
+  allSimulators?: IosDeviceInfo[];
 }
 
 export interface QaStep {

@@ -1,5 +1,8 @@
-import { exec } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { existsSync, mkdirSync, openSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { IosDeviceInfo, IosDevicesSnapshot, IosWdaStatus } from '../types';
 import { createLogger } from '../logger';
 
@@ -77,6 +80,169 @@ export class IosDeviceManager {
     }
   }
 
+  /** 列出本机全部模拟器（含未启动） */
+  static async listSimulators(): Promise<IosDeviceInfo[]> {
+    try {
+      const { stdout } = await execAsync('xcrun simctl list devices -j', {
+        timeout: 8000,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+      const parsed = JSON.parse(stdout);
+      const devices: IosDeviceInfo[] = [];
+      for (const [runtime, list] of Object.entries<any[]>(parsed.devices || {})) {
+        if (!/iOS/i.test(runtime)) continue;
+        const version = runtime.match(/iOS[- ](\d+(?:[-.]\d+)*)/)?.[1]?.replace(/-/g, '.');
+        for (const d of list || []) {
+          if (!d?.udid) continue;
+          const state: IosDeviceInfo['state'] =
+            d.state === 'Booted' ? 'booted' : d.state === 'Shutdown' ? 'shutdown' : 'unknown';
+          devices.push({
+            udid: d.udid,
+            name: d.name,
+            model: d.name,
+            version,
+            state,
+            isSimulator: true,
+          });
+        }
+      }
+      return devices.sort((a, b) => {
+        if (a.state !== b.state) return a.state === 'booted' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+    } catch (err: any) {
+      logger.info(`[IosDeviceManager] 读取全部模拟器失败: ${err.message}`);
+      return [];
+    }
+  }
+
+  /** 启动指定模拟器（已启动时直接返回成功） */
+  static async bootSimulator(udid: string): Promise<{ success: boolean; message: string }> {
+    const target = (udid || '').trim();
+    if (!target) return { success: false, message: '缺少模拟器 UDID' };
+    try {
+      const { stdout } = await execAsync(`xcrun simctl boot ${target}`, { timeout: 60000 });
+      logger.info(`[IosDeviceManager] 已启动模拟器: ${target} ${stdout.trim()}`);
+      return { success: true, message: '模拟器正在启动，首次启动约需 20-60 秒' };
+    } catch (err: any) {
+      const message = String(err?.stderr || err?.message || '启动模拟器失败');
+      if (/current state: Booted|already booted|Unable to boot device in current state/i.test(message)) {
+        return { success: true, message: '模拟器已在运行' };
+      }
+      logger.warn(`[IosDeviceManager] 启动模拟器失败: ${message}`);
+      return { success: false, message };
+    }
+  }
+
+  /** 关闭指定模拟器 */
+  static async shutdownSimulator(udid: string): Promise<{ success: boolean; message: string }> {
+    const target = (udid || '').trim();
+    if (!target) return { success: false, message: '缺少模拟器 UDID' };
+    try {
+      await execAsync(`xcrun simctl shutdown ${target}`, { timeout: 30000 });
+      logger.info(`[IosDeviceManager] 已关闭模拟器: ${target}`);
+      return { success: true, message: '模拟器已关闭' };
+    } catch (err: any) {
+      const message = String(err?.stderr || err?.message || '关闭模拟器失败');
+      if (/current state: Shutdown|Unable to shutdown device in current state/i.test(message)) {
+        return { success: true, message: '模拟器已处于关闭状态' };
+      }
+      return { success: false, message };
+    }
+  }
+
+  /** 查找本机的 WebDriverAgent 工程；找不到时返回 null */
+  static resolveWdaProject(): string | null {
+    const candidates = [
+      process.env.OPENLOOP_WDA_PROJECT,
+      path.join(os.homedir(), 'WebDriverAgent', 'WebDriverAgent.xcodeproj'),
+      path.join(os.homedir(), '.openloop', 'webdriveragent', 'WebDriverAgent.xcodeproj'),
+      path.join(os.homedir(), 'appium-webdriveragent', 'WebDriverAgent.xcodeproj'),
+    ];
+    for (const candidate of candidates) {
+      if (candidate && existsSync(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  /** 是否有针对该设备的 xcodebuild WDA 进程在跑 */
+  private static async hasRunningWda(udid: string): Promise<boolean> {
+    try {
+      const { stdout } = await execAsync('ps -ax -o command=', { timeout: 5000 });
+      return stdout
+        .split('\n')
+        .some((line) => line.includes('WebDriverAgentRunner') && line.includes(udid));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 构建并启动 WebDriverAgentRunner（后台运行，日志写入 ~/.openloop/logs）
+   * 首次需要 clone 工程并编译，通常 1-3 分钟；启动后 WDA 监听 8100，MJPEG 9100。
+   */
+  static async launchWebDriverAgent(udid: string): Promise<{ success: boolean; message: string }> {
+    if (process.platform !== 'darwin') {
+      return { success: false, message: 'WebDriverAgent 只能在 macOS 上运行' };
+    }
+    const target = (udid || '').trim();
+    if (!target) return { success: false, message: '缺少模拟器 UDID' };
+
+    if (await this.hasRunningWda(target)) {
+      return { success: true, message: 'WebDriverAgent 正在启动中，请稍候' };
+    }
+
+    let project = this.resolveWdaProject();
+    if (!project) {
+      const cloneDir = path.join(os.homedir(), '.openloop', 'webdriveragent');
+      try {
+        mkdirSync(path.dirname(cloneDir), { recursive: true });
+        logger.info(`[IosDeviceManager] 未找到 WebDriverAgent 工程，克隆到 ${cloneDir}`);
+        await execAsync(
+          `git clone --depth 1 https://github.com/appium/WebDriverAgent.git "${cloneDir}"`,
+          { timeout: 180000 }
+        );
+        project = this.resolveWdaProject();
+      } catch (err: any) {
+        return {
+          success: false,
+          message: `自动获取 WebDriverAgent 失败：${err?.message || '未知错误'}。可手动执行 git clone https://github.com/appium/WebDriverAgent.git ~/.openloop/webdriveragent`,
+        };
+      }
+    }
+    if (!project) {
+      return { success: false, message: '未找到 WebDriverAgent.xcodeproj' };
+    }
+
+    try {
+      const logDir = path.join(os.homedir(), '.openloop', 'logs');
+      mkdirSync(logDir, { recursive: true });
+      const logPath = path.join(logDir, `wda-${target}.log`);
+      const logFd = openSync(logPath, 'a');
+      const child = spawn(
+        'xcodebuild',
+        [
+          '-project',
+          project,
+          '-scheme',
+          'WebDriverAgentRunner',
+          '-destination',
+          `platform=iOS Simulator,id=${target}`,
+          'test',
+        ],
+        { detached: true, stdio: ['ignore', logFd, logFd] }
+      );
+      child.unref();
+      logger.info(`[IosDeviceManager] 已启动 WebDriverAgent 构建: ${target} 日志 ${logPath}`);
+      return {
+        success: true,
+        message: '正在构建并启动 WebDriverAgent，首次约 1-3 分钟，就绪后画面会自动切到流畅串流',
+      };
+    } catch (err: any) {
+      return { success: false, message: err?.message || '启动 WebDriverAgent 失败' };
+    }
+  }
+
   /** 探测 WDA 端点连通性与对应设备信息 */
   static async probeWda(endpoint?: string, bootedSimulators?: IosDeviceInfo[]): Promise<IosWdaStatus> {
     const target = this.normalizeEndpoint(endpoint);
@@ -121,6 +287,7 @@ export class IosDeviceManager {
       this.checkEnvironment(),
       this.probeWda(endpoint, simulators),
     ]);
-    return { environment, wda, simulators };
+    const allSimulators = await this.listSimulators();
+    return { environment, wda, simulators, allSimulators };
   }
 }

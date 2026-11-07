@@ -3449,10 +3449,62 @@ ${existingSubSummary}
         return this.sendJson(res, resConn.success ? 200 : 400, resConn, reqMeta);
       }
 
+      if (pathname === '/api/qa/devices/android/emulators' && method === 'GET') {
+        const emulators = await AndroidDeviceManager.listAvds();
+        return this.sendJson(res, 200, emulators, reqMeta);
+      }
+
+      if (pathname === '/api/qa/devices/android/emulators/launch' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const launchRes = await AndroidDeviceManager.launchEmulator(body.name || body.avd || '', {
+          showWindow: body.showWindow === true,
+        });
+        return this.sendJson(res, launchRes.success ? 200 : 400, launchRes, reqMeta);
+      }
+
       if (pathname === '/api/qa/devices/android/disconnect' && method === 'POST') {
         const body = await this.parseJsonBody(req);
         const resDis = await AndroidDeviceManager.disconnectWifiDevice(body.address || body.ipPort || '');
         return this.sendJson(res, resDis.success ? 200 : 400, resDis, reqMeta);
+      }
+
+      // 本机模拟器：Android 进程 + 已启动的 iOS 模拟器，供顶栏状态灯与停止操作使用
+      if (pathname === '/api/qa/emulators/running' && method === 'GET') {
+        const [androidEmulators, iosSimulators] = await Promise.all([
+          AndroidDeviceManager.getRunningEmulators().catch(() => []),
+          IosDeviceManager.getBootedSimulators().catch(() => []),
+        ]);
+        const emulators = [
+          ...androidEmulators,
+          ...iosSimulators.map((sim) => ({
+            platform: 'ios' as const,
+            key: `ios-${sim.udid}`,
+            name: sim.name,
+            serial: sim.udid,
+            state: 'booted' as const,
+            version: sim.version,
+          })),
+        ];
+        return this.sendJson(res, 200, { emulators }, reqMeta);
+      }
+
+      if (pathname === '/api/qa/emulators/stop' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const stopRes =
+          body.platform === 'ios' || body.udid
+            ? await IosDeviceManager.shutdownSimulator(body.udid || body.serial)
+            : await AndroidDeviceManager.stopEmulator({
+                pid: typeof body.pid === 'number' ? body.pid : undefined,
+                serial: body.serial || undefined,
+              });
+        return this.sendJson(res, stopRes.success ? 200 : 400, stopRes, reqMeta);
+      }
+
+      // 构建并启动 WebDriverAgentRunner（iOS 流畅串流与反向控制的前提）
+      if (pathname === '/api/qa/wda/launch' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const launchRes = await IosDeviceManager.launchWebDriverAgent(body.udid);
+        return this.sendJson(res, launchRes.success ? 200 : 400, launchRes, reqMeta);
       }
 
       if (pathname === '/api/qa/device-leases' && method === 'GET') {
@@ -3463,8 +3515,16 @@ ${existingSubSummary}
       if (pathname === '/api/qa/devices/ios/preview' && method === 'GET') {
         const wdaEndpoint = parsedUrl.searchParams.get('wdaEndpoint') || undefined;
         const mjpegUrl = parsedUrl.searchParams.get('mjpegUrl') || undefined;
-        await proxyIosStream(req, res, { wdaEndpoint, mjpegUrl });
+        const udid = parsedUrl.searchParams.get('udid') || undefined;
+        await proxyIosStream(req, res, { wdaEndpoint, mjpegUrl, udid });
         return;
+      }
+
+      // 启动本机 iOS 模拟器
+      if (pathname === '/api/qa/devices/ios/boot' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const bootRes = await IosDeviceManager.bootSimulator(body.udid);
+        return this.sendJson(res, bootRes.success ? 200 : 400, bootRes, reqMeta);
       }
 
       // 统一设备反向控制接口 (支持点击、滑动、输入、按键、拉起应用)
