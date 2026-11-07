@@ -41,7 +41,6 @@ export const AppContent: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isLogsOpen, setIsLogsOpen] = useState<boolean>(false);
-  const [unreadLogsCount, setUnreadLogsCount] = useState<number>(0);
   const [logScope, setLogScope] = useState<LogScope>({});
   const [selectedWorkspaceFilter, setSelectedWorkspaceFilter] = useState<string>(() => {
     try {
@@ -305,9 +304,6 @@ export const AppContent: React.FC = () => {
 
     const unsubLog = api.on('log:new', (newLog: LogEntry) => {
       setLogs((prev) => [...prev, newLog]);
-      if (!isLogsOpen) {
-        setUnreadLogsCount((c) => c + 1);
-      }
     });
 
     return () => {
@@ -316,7 +312,7 @@ export const AppContent: React.FC = () => {
       unsubTaskNew();
       unsubLog();
     };
-  }, [isLogsOpen]);
+  }, []);
 
   // 应用打开时从服务端同步自启配置，若设置开启且用户尚未手动干预则展开全局智能体
   useEffect(() => {
@@ -366,7 +362,6 @@ export const AppContent: React.FC = () => {
     // 任务作用域：只展示该任务的日志，nodeId 进一步收窄到节点
     setLogScope({ taskId, nodeId });
     setIsLogsOpen(true);
-    setUnreadLogsCount(0);
     try {
       mergeLogs(await api.getTaskLogs(taskId));
     } catch (err) {
@@ -384,7 +379,6 @@ export const AppContent: React.FC = () => {
     // 顶部入口为全局作用域：展示所有任务的日志
     setLogScope({});
     setIsLogsOpen(true);
-    setUnreadLogsCount(0);
     try {
       mergeLogs(await api.getGlobalLogs());
     } catch (err) {
@@ -515,7 +509,6 @@ export const AppContent: React.FC = () => {
           }}
           onToggleLogs={handleToggleLogs}
           isLogsOpen={isLogsOpen}
-          unreadLogsCount={unreadLogsCount}
           onRefresh={refreshData}
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={handleToggleSidebar}

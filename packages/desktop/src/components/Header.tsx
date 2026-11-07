@@ -10,7 +10,6 @@ interface HeaderProps {
   onOpenCreateTask: () => void;
   onToggleLogs: () => void;
   isLogsOpen: boolean;
-  unreadLogsCount: number;
   onRefresh: () => void;
   onOpenCommandPalette?: () => void;
   /** 打开全局智能体浮层 */
@@ -26,7 +25,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCreateTask,
   onToggleLogs,
   isLogsOpen,
-  unreadLogsCount,
   onRefresh,
   onOpenCommandPalette,
   onOpenAgent,
@@ -156,9 +154,6 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Terminal size={13} strokeWidth={1.8} className="text-[#85858d]" />
           <span>日志</span>
-          {unreadLogsCount > 0 && (
-            <span className="w-1.5 h-1.5 rounded-full bg-[#4f46e5] inline-block" />
-          )}
         </button>
 
         {/* 更新/刷新胶囊 */}
