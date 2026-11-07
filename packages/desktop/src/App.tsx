@@ -19,6 +19,7 @@ import { AutomationListView } from './views/AutomationListView';
 import { QaAutomationView } from './views/QaAutomationView';
 import { GlobalAgentPanel } from './agent-ui';
 import { ScreenMirrorOverlay } from './components/device/ScreenMirrorOverlay';
+import { DeviceStatusMenu } from './components/DeviceStatusMenu';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SettingsView } from './views/SettingsView';
 import { PluginSandboxContainer } from './components/PluginSandboxContainer';
@@ -53,6 +54,20 @@ export const AppContent: React.FC = () => {
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState<boolean>(false);
   const [isQuickRunModalOpen, setIsQuickRunModalOpen] = useState<boolean>(false);
   const [isMirrorOpen, setIsMirrorOpen] = useState(false);
+  /** 顶栏「设备」面板指定的镜像目标（seq 变化即一次新的指定） */
+  const openMirrorForDevice = (device: { platform: 'android' | 'ios'; serial: string; name?: string }) => {
+    if (import.meta.env?.DEV) {
+      console.log('[App] 在镜像里打开设备:', device);
+    }
+    setMirrorFocus({ ...device, seq: Date.now() });
+    setIsMirrorOpen(true);
+  };
+  const [mirrorFocus, setMirrorFocus] = useState<{
+    platform: 'android' | 'ios';
+    serial: string;
+    name?: string;
+    seq: number;
+  } | null>(null);
   // 镜像运行的上下文：由核心服务广播的 QA 活动事件驱动
   const [mirrorRun, setMirrorRun] = useState<{
     runId: string;
@@ -564,6 +579,7 @@ export const AppContent: React.FC = () => {
         open={isMirrorOpen}
         onClose={() => setIsMirrorOpen(false)}
         run={mirrorRun}
+        focus={mirrorFocus}
       />
 
       {/* 主视图 */}
@@ -572,7 +588,6 @@ export const AppContent: React.FC = () => {
           category={category}
           title={pageTitle}
           isDaemonConnected={isDaemonConnected}
-          onOpenCreateTask={() => setIsCreateTaskModalOpen(true)}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onOpenAgent={() => {
             userInteractedAgentOverlayRef.current = true;
@@ -585,9 +600,9 @@ export const AppContent: React.FC = () => {
           }}
           onToggleLogs={handleToggleLogs}
           isLogsOpen={isLogsOpen}
-          onRefresh={refreshData}
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={handleToggleSidebar}
+          onOpenMirrorDevice={openMirrorForDevice}
         />
 
         <main className="flex-1 relative overflow-hidden bg-[#f4f4f6]">
@@ -598,6 +613,7 @@ export const AppContent: React.FC = () => {
               onOpenTaskLogs={handleOpenTaskLogs}
               onRefresh={refreshData}
               onTaskUpdate={handleTaskUpdate}
+              onCreateTask={() => setIsCreateTaskModalOpen(true)}
               selectedWorkspaceFilter={selectedWorkspaceFilter}
               onWorkspaceFilterChange={handleWorkspaceFilterChange}
               onOpenAgentSession={handleOpenAgentSession}
@@ -719,6 +735,7 @@ export const AppContent: React.FC = () => {
             userInteractedAgentOverlayRef.current = true;
             setIsAgentOverlayOpen(false);
           }}
+          deviceMenu={<DeviceStatusMenu onOpenMirror={openMirrorForDevice} />}
         />
       </div>
 

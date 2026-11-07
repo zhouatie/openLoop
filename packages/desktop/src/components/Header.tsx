@@ -1,35 +1,34 @@
 import React from 'react';
-import { PanelLeft, RefreshCw, Plus, Terminal, Command, Sparkles } from 'lucide-react';
-import { Kbd } from './Kbd';
+import { PanelLeft, Terminal, Command, Sparkles } from 'lucide-react';
+import { DeviceStatusMenu } from './DeviceStatusMenu';
 import { useShortcuts } from '../context/ShortcutContext';
 
 interface HeaderProps {
   category: string;
   title: string;
   isDaemonConnected: boolean;
-  onOpenCreateTask: () => void;
   onToggleLogs: () => void;
   isLogsOpen: boolean;
-  onRefresh: () => void;
   onOpenCommandPalette?: () => void;
   /** 打开全局智能体浮层 */
   onOpenAgent?: () => void;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  /** 在右侧镜像浮层里打开指定设备 */
+  onOpenMirrorDevice?: (device: { platform: 'android' | 'ios'; serial: string; name: string }) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   category,
   title,
   isDaemonConnected,
-  onOpenCreateTask,
   onToggleLogs,
   isLogsOpen,
-  onRefresh,
   onOpenCommandPalette,
   onOpenAgent,
   isSidebarOpen = true,
   onToggleSidebar,
+  onOpenMirrorDevice,
 }) => {
   const { formatCombo } = useShortcuts();
 
@@ -100,70 +99,48 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* 右侧：动作按钮 */}
-      <div className="flex items-center gap-2">
-        {/* 全局智能体浮层 */}
-        {onOpenAgent && (
+      <div className="flex items-center gap-1.5">
+        {/* 工具条：设备 / 智能体 / 命令 / 日志 / 刷新 收在一个胶囊里，避免一排等大方块 */}
+        <div className="flex items-center gap-[2px] h-[26px] px-[3px] rounded-[7px] border border-[#e3e3e8] bg-white">
+          {onOpenMirrorDevice && <DeviceStatusMenu onOpenMirror={onOpenMirrorDevice} />}
+
+          {onOpenAgent && (
+            <button
+              onClick={() => {
+                if (import.meta.env?.DEV) {
+                  console.log('[Header] 点击打开全局智能体浮层');
+                }
+                onOpenAgent();
+              }}
+              className="w-[24px] h-[22px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:text-[#4f46e5] hover:bg-[#f4f4f6] transition-colors cursor-pointer"
+              title="智能体（Super + `）"
+            >
+              <Sparkles size={13} strokeWidth={1.9} />
+            </button>
+          )}
+
+          {onOpenCommandPalette && (
+            <button
+              onClick={onOpenCommandPalette}
+              className="w-[24px] h-[22px] rounded-[5px] flex items-center justify-center text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f4f4f6] transition-colors cursor-pointer"
+              title="命令面板（Super + K）"
+            >
+              <Command size={13} strokeWidth={1.9} />
+            </button>
+          )}
+
           <button
-            onClick={() => {
-              if (import.meta.env?.DEV) {
-                console.log('[Header] 点击打开全局智能体浮层');
-              }
-              onOpenAgent();
-            }}
-            className="flex items-center gap-1.5 h-[26px] px-2 rounded-[7px] border border-[#e3e3e8] bg-[#f9f9fb] hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] transition-all"
-            title="打开智能体（全屏浮层）"
+            onClick={onToggleLogs}
+            title="运行日志"
+            className={`w-[24px] h-[22px] rounded-[5px] flex items-center justify-center transition-colors cursor-pointer ${
+              isLogsOpen
+                ? 'bg-[#eeedf2] text-[#1c1c21]'
+                : 'text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f4f4f6]'
+            }`}
           >
-            <Sparkles size={12} strokeWidth={2} className="text-[#4f46e5]" />
-            <span className="text-[11.5px]">智能体</span>
-            <Kbd keys={['super', '`']} size="xs" variant="light" className="ml-0.5" />
+            <Terminal size={13} strokeWidth={1.9} />
           </button>
-        )}
-
-        {/* 命令面板快捷唤起 */}
-        {onOpenCommandPalette && (
-          <button
-            onClick={onOpenCommandPalette}
-            className="flex items-center gap-1.5 h-[26px] px-2 rounded-[7px] border border-[#e3e3e8] bg-[#f9f9fb] hover:bg-[#f1f1f4] text-[#4b4b53] hover:text-[#1c1c21] text-[11.5px] transition-all"
-            title="唤起全局命令面板"
-          >
-            <Command size={12} strokeWidth={2} className="text-[#85858d]" />
-            <span className="text-[11.5px]">命令</span>
-            <Kbd keys={['super', 'K']} size="xs" variant="light" className="ml-0.5" />
-          </button>
-        )}
-
-        {/* 新建任务 */}
-        <button
-          onClick={onOpenCreateTask}
-          className="flex items-center gap-1.5 h-[26px] px-2.5 rounded-[7px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-all active:scale-95 shadow-sm"
-          title="新建任务"
-        >
-          <Plus size={13} strokeWidth={2.4} />
-          <span>新建任务</span>
-          <Kbd keys={['super', 'N']} size="xs" variant="dark" className="ml-0.5 opacity-80" />
-        </button>
-
-        {/* 终端实时日志 */}
-        <button
-          onClick={onToggleLogs}
-          className={`flex items-center gap-1.5 h-[26px] px-2.5 rounded-[7px] text-[12px] border transition-all ${
-            isLogsOpen
-              ? 'bg-[#e9e9ee] border-[#e3e3e8] text-[#1c1c21] font-medium'
-              : 'border-[#e3e3e8] bg-white text-[#4b4b53] hover:bg-[#f1f1f4] hover:text-[#1c1c21]'
-          }`}
-        >
-          <Terminal size={13} strokeWidth={1.8} className="text-[#85858d]" />
-          <span>日志</span>
-        </button>
-
-        {/* 更新/刷新胶囊 */}
-        <button
-          onClick={onRefresh}
-          className="h-[26px] px-2 rounded-[7px] border border-[#e3e3e8] bg-white text-[#4b4b53] hover:bg-[#f1f1f4] hover:text-[#1c1c21] transition-all flex items-center justify-center"
-          title="刷新数据"
-        >
-          <RefreshCw size={13} strokeWidth={1.8} />
-        </button>
+        </div>
       </div>
     </header>
   );

@@ -775,6 +775,8 @@ export interface GlobalAgentPanelProps {
   active?: boolean;
   /** 打开会话所属任务：挂载方决定跳转到看板还是其他任务视图 */
   onOpenTaskDetail?: (taskId: string) => void;
+  /** 顶栏插入的设备入口（挂载方提供，避免 agent-ui 依赖设备模块） */
+  deviceMenu?: React.ReactNode;
 }
 
 interface ProjectGroup {
@@ -905,6 +907,7 @@ export function GlobalAgentPanel({
   sessionRequest,
   active = true,
   onOpenTaskDetail,
+  deviceMenu,
 }: GlobalAgentPanelProps) {
   const initialSessionId = sessionRequest?.id || null;
   const { pick: pickDirectory, dialog: directoryDialog } = useDirectoryPicker();
@@ -2279,6 +2282,8 @@ export function GlobalAgentPanel({
           shortcutPriority={1}
           headerExtra={
             <>
+              {/* 设备入口：写代码时随时启动模拟器或打开镜像 */}
+              {deviceMenu}
               {taskContext?.taskId && mode !== 'drawer' ? (
                 <TaskPipelineChip taskId={taskContext.taskId} onOpenTask={onOpenTaskDetail} />
               ) : null}

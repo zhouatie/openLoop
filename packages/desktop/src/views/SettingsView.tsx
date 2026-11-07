@@ -32,7 +32,6 @@ import {
   Camera,
   Terminal,
   Smartphone,
-  Wifi,
   Eye,
   EyeOff,
   KeyRound,
@@ -334,10 +333,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [autoOpenMirror, setAutoOpenMirror] = useState(false);
   const [showQaApiKey, setShowQaApiKey] = useState(false);
 
-  // 无线 ADB 配对
-  const [wifiAddress, setWifiAddress] = useState('');
-  const [wifiLoading, setWifiLoading] = useState(false);
-  const [wifiResult, setWifiResult] = useState<{ ok: boolean; text: string } | null>(null);
+  // 本地 Android 模拟器（AVD）
+  const [emulatorAvds, setEmulatorAvds] = useState<string[]>([]);
+  const [selectedAvd, setSelectedAvd] = useState('');
+  const [emulatorHint, setEmulatorHint] = useState<{ ok: boolean; text: string } | null>(null);
+  const [emulatorLoading, setEmulatorLoading] = useState(false);
+  const [emulatorShowWindow, setEmulatorShowWindow] = useState(false);
 
   // 提示词状态
   const [prompts, setPrompts] = useState<AgentPromptTemplates>({ ...DEFAULT_PROMPT_TEMPLATES });
@@ -519,6 +520,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           setQaModelName(settings.qaAutomation.modelName || '');
           setQaModelFamily(settings.qaAutomation.modelFamily || '');
           setAutoOpenMirror(settings.qaAutomation.autoOpenMirror === true);
+          setEmulatorShowWindow(settings.qaAutomation.emulatorShowWindow === true);
         }
       }
       // 扩展清单单独取：需要本机已安装列表，不在设置体里
@@ -730,7 +732,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   // 自动化测试模型配置即时保存
-  const saveQaAutomation = (override?: Partial<{ modelBaseUrl: string; modelApiKey: string; modelName: string; modelFamily: string; autoOpenMirror: boolean }>) => {
+  const saveQaAutomation = (override?: Partial<{ modelBaseUrl: string; modelApiKey: string; modelName: string; modelFamily: string; autoOpenMirror: boolean; emulatorShowWindow: boolean }>) => {
     handleSave({
       qaAutomation: {
         modelBaseUrl: qaModelBaseUrl.trim(),
@@ -738,28 +740,54 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         modelName: qaModelName.trim(),
         modelFamily: qaModelFamily.trim(),
         autoOpenMirror,
+        emulatorShowWindow,
         ...override,
       },
     });
   };
 
-  // 无线 ADB 配对：把局域网设备接入 ADB，随后自动出现在镜像与用例的设备列表
-  const connectWifiDevice = async () => {
-    const address = wifiAddress.trim();
-    if (!address || wifiLoading) return;
-    setWifiLoading(true);
-    setWifiResult(null);
+  // 读取本机已创建的 AVD
+  const loadEmulators = async () => {
+    setEmulatorLoading(true);
     try {
-      const result = await api.connectAndroidWifi(address);
-      const ok = result?.success !== false;
-      setWifiResult({ ok, text: result?.message || (ok ? '连接成功' : '连接失败') });
-      if (ok) setWifiAddress('');
+      const res = await api.getAndroidEmulators();
+      setEmulatorAvds(res.available ? res.avds : []);
+      setSelectedAvd((curr) => (curr && res.avds.includes(curr) ? curr : res.avds[0] || ''));
+      if (!res.available) setEmulatorHint({ ok: false, text: res.message || '未检测到 Android emulator' });
     } catch (err: any) {
-      setWifiResult({ ok: false, text: err?.message || '连接失败，请确认设备与电脑处于同一网段' });
+      setEmulatorHint({ ok: false, text: err?.message || '读取模拟器列表失败' });
     } finally {
-      setWifiLoading(false);
+      setEmulatorLoading(false);
     }
   };
+
+  // 启动本地模拟器：后台开机，设备轮询会自动发现
+  const launchEmulator = async () => {
+    if (!selectedAvd || emulatorLoading) return;
+    setEmulatorLoading(true);
+    setEmulatorHint(null);
+    try {
+      const res = await api.launchAndroidEmulator(selectedAvd, emulatorShowWindow);
+      if (import.meta.env?.DEV) {
+        console.log('[Settings] 启动本地模拟器:', { avd: selectedAvd, result: res });
+      }
+      setEmulatorHint({
+        ok: res?.success !== false,
+        text: res?.message || `正在启动 ${selectedAvd}，开机后自动出现在设备列表`,
+      });
+    } catch (err: any) {
+      setEmulatorHint({ ok: false, text: err?.message || '启动模拟器失败' });
+    } finally {
+      setEmulatorLoading(false);
+    }
+  };
+
+  // 进入自动化测试页时探测本机 AVD
+  useEffect(() => {
+    if (activeTab !== 'qa' || emulatorAvds.length > 0) return;
+    void loadEmulators();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -1747,43 +1775,101 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6">
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium text-[#1c1c21] flex items-center gap-1.5">
-                    无线 ADB 配对
-                    <Wifi size={11} className="text-[#a1a1aa]" />
+                    本地模拟器
+                    <Smartphone size={11} className="text-[#a1a1aa]" />
                   </div>
                   <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
-                    在设备上开启无线调试后填入 IP 与端口完成配对，设备会自动出现在设备镜像与用例的设备列表
+                    无真机时直接启动本机 Android 虚拟设备，开机后自动出现在设备镜像与用例的设备列表
                   </div>
-                  {wifiResult && (
+                  {emulatorHint && (
                     <div
                       className={`mt-1 flex items-center gap-1 text-[11px] ${
-                        wifiResult.ok ? 'text-[#059669]' : 'text-[#dc2626]'
+                        emulatorHint.ok ? 'text-[#059669]' : 'text-[#dc2626]'
                       }`}
                     >
-                      {wifiResult.ok ? <Check size={11} /> : <X size={11} />}
-                      <span className="truncate">{wifiResult.text}</span>
+                      {emulatorHint.ok ? <Check size={11} /> : <X size={11} />}
+                      <span className="truncate">{emulatorHint.text}</span>
                     </div>
                   )}
                 </div>
 
                 <div className="shrink-0 self-center flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={wifiAddress}
-                    onChange={(e) => setWifiAddress(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') connectWifiDevice();
+                  <select
+                    value={selectedAvd}
+                    onChange={(e) => setSelectedAvd(e.target.value)}
+                    onFocus={() => {
+                      if (emulatorAvds.length === 0) void loadEmulators();
                     }}
-                    placeholder="192.168.1.102:5555"
-                    className="w-56 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] placeholder-[#85858d] outline-none shadow-sm focus:border-[#4f46e5]"
-                  />
+                    disabled={emulatorAvds.length === 0}
+                    className="w-56 h-[26px] px-2 rounded-[6px] border border-[#e3e3e8] text-[11.5px] font-mono text-[#1c1c21] outline-none shadow-sm focus:border-[#4f46e5] bg-white cursor-pointer disabled:opacity-50"
+                  >
+                    {emulatorAvds.length === 0 ? (
+                      <option value="">{emulatorLoading ? '正在读取...' : '未发现模拟器'}</option>
+                    ) : (
+                      emulatorAvds.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))
+                    )}
+                  </select>
                   <button
                     type="button"
-                    onClick={connectWifiDevice}
-                    disabled={wifiLoading || !wifiAddress.trim()}
+                    onClick={loadEmulators}
+                    disabled={emulatorLoading}
+                    title="刷新模拟器列表"
+                    className="h-[26px] w-[26px] rounded-[6px] border border-[#e3e3e8] bg-white text-[#63636b] hover:text-[#1c1c21] hover:bg-[#f9f9fb] transition-colors flex items-center justify-center shadow-sm cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw size={11} className={emulatorLoading ? 'animate-spin' : ''} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={launchEmulator}
+                    disabled={emulatorLoading || !selectedAvd}
                     className="h-[26px] px-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11.5px] font-medium transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
-                    {wifiLoading && <Loader2 size={11} className="animate-spin" />}
-                    <span>{wifiLoading ? '连接中' : '连接'}</span>
+                    {emulatorLoading && <Loader2 size={11} className="animate-spin" />}
+                    <span>启动</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="min-h-[52px] px-3.5 py-3 flex items-start justify-between gap-6 border-t border-[#ececf0]">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium text-[#1c1c21]">显示模拟器窗口</div>
+                  <div className="text-[11.5px] text-[#85858d] mt-0.5 leading-relaxed">
+                    关闭时模拟器在后台无窗口运行，画面只通过 openLoop 镜像观看
+                  </div>
+                </div>
+
+                <div className="inline-flex p-[2px] rounded-[7px] bg-[#e6e6eb] shrink-0 self-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmulatorShowWindow(false);
+                      saveQaAutomation({ emulatorShowWindow: false });
+                    }}
+                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer active:scale-95 ${
+                      !emulatorShowWindow
+                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.08)]'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    关闭
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmulatorShowWindow(true);
+                      saveQaAutomation({ emulatorShowWindow: true });
+                    }}
+                    className={`h-[22px] px-2.5 rounded-[5px] text-[11.5px] transition-all cursor-pointer active:scale-95 ${
+                      emulatorShowWindow
+                        ? 'bg-white text-[#1c1c21] font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.08)]'
+                        : 'text-[#63636b] hover:text-[#1c1c21]'
+                    }`}
+                  >
+                    开启
                   </button>
                 </div>
               </div>

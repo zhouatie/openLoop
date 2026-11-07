@@ -12,6 +12,7 @@ import {
   QaRunRecord,
   SelectedQaArtifacts,
   AndroidDeviceInfo,
+  RunningEmulatorInfo,
   IosDevicesSnapshot,
   DeviceLeaseSnapshot,
   AutomationTask,
@@ -1527,6 +1528,60 @@ export class DesktopApiService {
     return requestJson<{ packageName: string; activityName?: string }>(`${BASE_URL}/api/qa/devices/android/current-app${query}`);
   }
 
+  async getAndroidEmulators(): Promise<{ available: boolean; avds: string[]; message?: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 获取本地 Android 模拟器列表');
+    }
+    return requestJson<{ available: boolean; avds: string[]; message?: string }>(
+      `${BASE_URL}/api/qa/devices/android/emulators`
+    );
+  }
+
+  async launchAndroidEmulator(name: string, showWindow = false): Promise<{ success: boolean; message: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 启动本地 Android 模拟器:', { name, showWindow });
+    }
+    return requestJson<{ success: boolean; message: string }>(
+      `${BASE_URL}/api/qa/devices/android/emulators/launch`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, showWindow }),
+      }
+    );
+  }
+
+  async getRunningEmulators(): Promise<{ emulators: RunningEmulatorInfo[] }> {
+    return requestJson<{ emulators: RunningEmulatorInfo[] }>(`${BASE_URL}/api/qa/emulators/running`);
+  }
+
+  async launchWebDriverAgent(udid: string): Promise<{ success: boolean; message: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 启动 WebDriverAgent:', udid);
+    }
+    return requestJson<{ success: boolean; message: string }>(`${BASE_URL}/api/qa/wda/launch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ udid }),
+    });
+  }
+
+  async stopEmulator(target: {
+    platform?: 'android' | 'ios';
+    pid?: number;
+    serial?: string;
+    udid?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 停止本机模拟器:', target);
+    }
+    return requestJson<{ success: boolean; message: string }>(`${BASE_URL}/api/qa/emulators/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(target),
+    });
+  }
+
   async connectAndroidWifi(address: string): Promise<{ success: boolean; message: string }> {
     if (import.meta.env?.DEV) {
       console.log('[UI:QA] 连接 WiFi ADB 设备:', address);
@@ -1567,9 +1622,23 @@ export class DesktopApiService {
     }
   }
 
-  getIosStreamPreviewUrl(options?: { wdaEndpoint?: string }): string {
-    const query = options?.wdaEndpoint ? `?wdaEndpoint=${encodeURIComponent(options.wdaEndpoint)}` : '';
+  getIosStreamPreviewUrl(options?: { wdaEndpoint?: string; udid?: string }): string {
+    const params = new URLSearchParams();
+    if (options?.wdaEndpoint) params.set('wdaEndpoint', options.wdaEndpoint);
+    if (options?.udid) params.set('udid', options.udid);
+    const query = params.toString() ? `?${params.toString()}` : '';
     return `${BASE_URL}/api/qa/devices/ios/preview${query}`;
+  }
+
+  async bootIosSimulator(udid: string): Promise<{ success: boolean; message: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 启动 iOS 模拟器:', udid);
+    }
+    return requestJson<{ success: boolean; message: string }>(`${BASE_URL}/api/qa/devices/ios/boot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ udid }),
+    });
   }
 
   async executeDeviceAction(payload: {

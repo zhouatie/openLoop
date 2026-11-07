@@ -132,6 +132,8 @@ interface KanbanViewProps {
   /** 外部请求定位的任务：挂载或刷新后直接打开它的详情 */
   focusTaskId?: string | null;
   onFocusHandled?: () => void;
+  /** 打开新建任务弹窗 */
+  onCreateTask?: () => void;
 }
 
 interface ColumnDef {
@@ -315,6 +317,7 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
   onOpenAgentSession,
   focusTaskId,
   onFocusHandled,
+  onCreateTask,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -2287,6 +2290,24 @@ export const KanbanView: React.FC<KanbanViewProps> = ({
               </div>
             )}
           </div>
+
+          {/* 主操作：新建任务 */}
+          {onCreateTask && (
+            <button
+              type="button"
+              onClick={() => {
+                if (import.meta.env.DEV) {
+                  console.log('[KanbanView] 打开新建任务弹窗');
+                }
+                onCreateTask();
+              }}
+              className="flex items-center gap-1.5 h-[28px] pl-2 pr-3 rounded-[6px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[12px] font-medium transition-colors shadow-[0_1px_2px_rgba(0,0,0,0.06)] active:scale-[0.98] cursor-pointer"
+              title="新建任务（Super + N）"
+            >
+              <Plus size={13} strokeWidth={2.4} />
+              <span>新建任务</span>
+            </button>
+          )}
         </div>
       </div>
 

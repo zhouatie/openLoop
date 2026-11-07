@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   ChevronDown,
   Check,
+  Play,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { WebCodecsVideoDecoder, WebGLVideoFrameRenderer, BitmapVideoFrameRenderer } from '@yume-chan/scrcpy-decoder-webcodecs';
@@ -92,6 +93,14 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   const [inputOpen, setInputOpen] = useState(false);
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const autoRetryRef = useRef(0);
+  /** iOS 分支是否已收到过画面（用于看门狗与错误判定） */
+  const iosHasPictureRef = useRef(false);
+  /** 是否正在后台构建启动 WebDriverAgent */
+  const [wdaLaunching, setWdaLaunching] = useState(false);
+  /** WDA 启动过程提示 */
+  const [wdaHint, setWdaHint] = useState<string | null>(null);
+  /** iOS：WebDriverAgent 是否可用（false 表示当前走截图轮播，画面较慢且不能反向控制） */
+  const [wdaReachable, setWdaReachable] = useState<boolean | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const switcherRef = useRef<HTMLDivElement>(null);
   const canSwitch = Boolean(deviceSwitcher && deviceSwitcher.devices.length > 1 && !deviceSwitcher.locked);
@@ -500,18 +509,88 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     };
   }, [platform, serial, reconnectNonce]);
 
-  // ================= iOS MJPEG 视频流管道 =================
+  // ================= iOS 画面管道（WDA 串流 / simctl 截图轮播） =================
   useEffect(() => {
     if (platform !== 'ios') return;
     setStatus('connecting');
     setErrorMessage(null);
+    iosHasPictureRef.current = false;
 
-    const timer = setTimeout(() => {
-      setStatus('streaming');
-    }, 500);
+    // 首帧看门狗：后端会依次尝试 WDA MJPEG、WDA 截图、本机模拟器截图
+    const watchdog = window.setTimeout(() => {
+      if (iosHasPictureRef.current) return;
+      setStatus('error');
+      setErrorMessage('长时间未收到 iOS 画面。请确认模拟器已启动，或用 Xcode 运行 WebDriverAgentRunner。');
+    }, 12000);
 
-    return () => clearTimeout(timer);
+    return () => window.clearTimeout(watchdog);
   }, [platform, serial, wdaEndpoint, reconnectNonce]);
+
+  /** 启动 WebDriverAgentRunner；就绪后自动重连切换到 MJPEG 流畅串流 */
+  const handleLaunchWda = useCallback(async () => {
+    if (!serial || wdaLaunching) return;
+    setWdaLaunching(true);
+    setWdaHint('正在构建并启动 WebDriverAgent...');
+    try {
+      const res = await api.launchWebDriverAgent(serial);
+      if (import.meta.env?.DEV) {
+        console.log('[DeviceMirror:iOS] 启动 WebDriverAgent:', res);
+      }
+      setWdaHint(res.message);
+      if (!res.success) {
+        setWdaLaunching(false);
+        return;
+      }
+      // 轮询 WDA 就绪，最多等 6 分钟
+      const deadline = Date.now() + 6 * 60 * 1000;
+      const timer = window.setInterval(async () => {
+        if (Date.now() > deadline) {
+          window.clearInterval(timer);
+          setWdaLaunching(false);
+          setWdaHint('WebDriverAgent 启动超时，请检查 Xcode 构建日志（~/.openloop/logs）');
+          return;
+        }
+        try {
+          const snapshot = await api.getIosDevices(wdaEndpoint);
+          if (!snapshot?.wda?.reachable) return;
+          window.clearInterval(timer);
+          setWdaLaunching(false);
+          setWdaHint('WebDriverAgent 已就绪，已切换到流畅串流');
+          setStatus('connecting');
+          setErrorMessage(null);
+          setReconnectNonce((n) => n + 1);
+        } catch {
+          /* 探测失败继续等待 */
+        }
+      }, 5000);
+    } catch (err: any) {
+      setWdaLaunching(false);
+      setWdaHint(err?.message || '启动 WebDriverAgent 失败');
+    }
+  }, [serial, wdaEndpoint, wdaLaunching]);
+
+  // iOS：每 20 秒探测 WebDriverAgent 是否可用，用于在标题栏提供启动入口
+  useEffect(() => {
+    if (platform !== 'ios') {
+      setWdaReachable(null);
+      return;
+    }
+    let active = true;
+    const probe = async () => {
+      try {
+        const snapshot = await api.getIosDevices(wdaEndpoint);
+        if (active) setWdaReachable(Boolean(snapshot?.wda?.reachable));
+      } catch {
+        if (active) setWdaReachable(null);
+      }
+    };
+    void probe();
+    const timer = window.setInterval(() => void probe(), 20000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [platform, wdaEndpoint, wdaLaunching, reconnectNonce]);
 
   // 设备切换下拉：点击浮层外部关闭
   useEffect(() => {
@@ -526,8 +605,8 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
 
   const iosPreviewUrl = useMemo(() => {
     if (platform !== 'ios') return '';
-    return api.getIosStreamPreviewUrl({ wdaEndpoint });
-  }, [platform, wdaEndpoint, reconnectNonce]);
+    return api.getIosStreamPreviewUrl({ wdaEndpoint, udid: serial });
+  }, [platform, wdaEndpoint, serial, reconnectNonce]);
 
   return (
     <div className="relative flex w-full h-full min-h-0 items-stretch gap-3">
@@ -605,6 +684,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
                 {switcherOpen && deviceSwitcher && (
                   <div className="absolute left-0 top-[26px] z-20 w-[196px] rounded-[8px] border border-[#3f3f46] bg-[#27272a] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
                     <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-[#71717a]">切换设备</div>
+                    <div className="max-h-[300px] overflow-y-auto">
                     {deviceSwitcher.devices.map((device) => {
                       const isActive = device.key === deviceSwitcher.activeKey;
                       return (
@@ -632,10 +712,25 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
                         </button>
                       );
                     })}
+                    </div>
                   </div>
                 )}
               </div>
-              {!isCompact && (
+              {platform === 'ios' && wdaReachable === false && (
+                <button
+                  type="button"
+                  disabled={wdaLaunching}
+                  onClick={() => void handleLaunchWda()}
+                  title="WebDriverAgent 未运行：当前是截图轮播（约 1.5 fps）。启动后画面流畅，并可反向点击输入。"
+                  className="shrink-0 inline-flex items-center gap-1 px-1.5 h-[18px] rounded-[4px] bg-[#4f46e5]/18 text-[#c7d2fe] text-[10px] font-medium border border-[#4f46e5]/30 hover:bg-[#4f46e5]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {wdaLaunching ? <Loader2 size={9} className="animate-spin" /> : <Play size={9} />}
+                  <span className="whitespace-nowrap">
+                    {wdaLaunching ? '启动中' : isCompact ? 'WDA' : '启动 WDA'}
+                  </span>
+                </button>
+              )}
+              {!isCompact && platform !== 'ios' && (
                 <span className="font-mono text-[10px] text-[#71717a] truncate max-w-[90px]">
                   {serial}
                 </span>
@@ -727,16 +822,24 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
             ) : (
               <img
                 ref={imgRef}
+                key={`${iosPreviewUrl}#${reconnectNonce}`}
                 src={iosPreviewUrl}
                 alt="iOS Device Stream"
                 className="w-full h-full object-contain pointer-events-none"
                 onLoad={() => {
+                  iosHasPictureRef.current = true;
+                  setStatus('streaming');
                   if (imgRef.current?.naturalWidth && imgRef.current?.naturalHeight) {
                     setDeviceSize({
                       width: imgRef.current.naturalWidth,
                       height: imgRef.current.naturalHeight,
                     });
                   }
+                }}
+                onError={() => {
+                  if (iosHasPictureRef.current) return;
+                  setStatus('error');
+                  setErrorMessage('无法获取 iOS 画面：WebDriverAgent 未启动，且没有可截图的已启动模拟器。');
                 }}
               />
             )}
@@ -765,18 +868,35 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
                 <p className="text-[11px] text-[#a1a1aa] mt-1 max-w-[240px] leading-relaxed">
                   {errorMessage || '请确认设备在线、USB 调试或 WebDriverAgent 连通正常'}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStatus('connecting');
-                    setErrorMessage(null);
-                    setReconnectNonce((n) => n + 1);
-                  }}
-                  className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#3f3f46] hover:bg-[#52525b] text-white rounded-[5px] text-[11.5px] font-medium transition-colors cursor-pointer"
-                >
-                  <RotateCcw size={11} />
-                  <span>重新连接</span>
-                </button>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatus('connecting');
+                      setErrorMessage(null);
+                      setReconnectNonce((n) => n + 1);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#3f3f46] hover:bg-[#52525b] text-white rounded-[5px] text-[11.5px] font-medium transition-colors cursor-pointer"
+                  >
+                    <RotateCcw size={11} />
+                    <span>重新连接</span>
+                  </button>
+                  {platform === 'ios' && (
+                    <button
+                      type="button"
+                      disabled={wdaLaunching}
+                      onClick={() => void handleLaunchWda()}
+                      title="在后台构建并启动 WebDriverAgentRunner，获得流畅串流与反向控制"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-[5px] text-[11.5px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {wdaLaunching ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+                      <span>{wdaLaunching ? '正在启动' : '启动 WDA'}</span>
+                    </button>
+                  )}
+                </div>
+                {platform === 'ios' && wdaHint && (
+                  <p className="text-[10.5px] text-[#a1a1aa] mt-2 max-w-[240px] leading-relaxed">{wdaHint}</p>
+                )}
               </div>
             )}
 
