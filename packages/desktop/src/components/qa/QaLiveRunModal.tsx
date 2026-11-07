@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Play, CheckCircle2, XCircle, Loader2, Eye, Terminal, Smartphone, Globe, Clock } from 'lucide-react';
+import { X, Play, CheckCircle2, XCircle, MinusCircle, Loader2, Eye, Terminal, Smartphone, Globe, Clock } from 'lucide-react';
 import { QaSuite, QaRunRecord, DeviceLeaseSnapshot } from '@openloop/core';
 import { api } from '../../services/api';
 
@@ -211,7 +211,6 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
             {suite.steps.map((step, idx) => {
               const finishedStep = runRecord?.timeline?.find((t) => t.stepIndex === idx);
               const isStepDone = Boolean(finishedStep);
-              const isStepPass = finishedStep?.status === 'passed';
 
               return (
                 <div
@@ -224,8 +223,10 @@ export const QaLiveRunModal: React.FC<QaLiveRunModalProps> = ({
                 >
                   <div className="flex items-center gap-2 truncate">
                     {isStepDone ? (
-                      isStepPass ? (
+                      finishedStep?.status === 'passed' ? (
                         <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                      ) : finishedStep?.status === 'skipped' ? (
+                        <MinusCircle size={13} className="text-[#a1a1aa] shrink-0" />
                       ) : (
                         <XCircle size={13} className="text-red-500 shrink-0" />
                       )
