@@ -680,11 +680,12 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   }, [iosPreviewUrl, reconnectNonce, serial]);
 
   return (
-    <div className="relative flex w-full h-full min-h-0 items-stretch gap-3">
+    // 空白区域不吃点击：浮层贴在顶部设备面板下方时，透明区域必须让事件穿透到下层界面
+    <div className="relative flex w-full h-full min-h-0 items-stretch gap-3 pointer-events-none">
       {/* 画面舞台：手机外框 + 紧贴屏幕的操作按键列 */}
       <div ref={stageRef} className="flex-1 min-w-0 min-h-0 flex items-center justify-center">
         {/* 紧贴屏幕的操作按键列（位于画面左侧） */}
-        <div className="flex flex-col shrink-0 self-center divide-y divide-[#f1f1f4] bg-white border border-r-0 border-[#e3e3e8] rounded-l-[9px] overflow-hidden shadow-xs">
+        <div className="pointer-events-auto flex flex-col shrink-0 self-center divide-y divide-[#f1f1f4] bg-white border border-r-0 border-[#e3e3e8] rounded-l-[9px] overflow-hidden shadow-xs">
           <button
             type="button"
             disabled={isBusy}
@@ -720,7 +721,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
 
         <div
           style={frameSize ? { width: `${frameSize.width}px`, height: `${frameSize.height}px` } : undefined}
-          className={`flex flex-col overflow-hidden rounded-[10px] bg-[#18181b] text-white select-none border border-[#27272a] shadow-[0_8px_28px_rgba(0,0,0,0.12)] ${
+          className={`pointer-events-auto flex flex-col overflow-hidden rounded-[10px] bg-[#18181b] text-white select-none border border-[#27272a] shadow-[0_8px_28px_rgba(0,0,0,0.12)] ${
             frameSize ? 'shrink-0' : 'h-full w-full'
           }`}
         >
@@ -984,7 +985,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
       {inputOpen && (
         <div
           style={floatPanel ? { left: `${floatPanel.left}px`, width: `${floatPanel.width}px` } : undefined}
-          className="absolute top-1/2 -translate-y-1/2 z-30 flex flex-col bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.14)] overflow-hidden"
+          className="pointer-events-auto absolute top-1/2 -translate-y-1/2 z-30 flex flex-col bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.14)] overflow-hidden"
         >
           <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#f1f1f4] shrink-0">
             <div className="flex items-center gap-1.5">

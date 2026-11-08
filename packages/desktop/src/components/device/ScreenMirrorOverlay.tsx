@@ -299,7 +299,7 @@ export const ScreenMirrorOverlay: React.FC<ScreenMirrorOverlayProps> = ({ open, 
       }`}
     >
       {target ? (
-        <div className={`flex-1 min-h-0 flex flex-col ${shown ? 'pointer-events-auto' : 'pointer-events-none'}`}>
+        <div className="flex-1 min-h-0 flex flex-col pointer-events-none">
         <DeviceMirror
           key={`${target.platform}-${target.serial}`}
           platform={target.platform}
