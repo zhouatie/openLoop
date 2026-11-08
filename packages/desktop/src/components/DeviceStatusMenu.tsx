@@ -290,7 +290,7 @@ export const DeviceStatusMenu: React.FC<DeviceStatusMenuProps> = ({ onOpenMirror
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[30px] z-50 w-[288px] bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.12)] overflow-hidden">
+        <div className="absolute right-0 top-[30px] z-[950] w-[288px] bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.12)] overflow-hidden">
           <div className="max-h-[420px] overflow-y-auto">
             {/* 运行中 */}
             <div className="h-[26px] px-3 flex items-center justify-between bg-[#fafafc] border-b border-[#f1f1f4]">
