@@ -18,6 +18,7 @@ import {
   IconGroup,
   IconRun,
   IconDevice,
+  IconServer,
 } from './icons';
 import styles from './Composer.module.css';
 import { ComposerEditor } from './composer-editor/ComposerEditor';
@@ -94,6 +95,8 @@ export interface ComposerProps {
   toolsExtra?: React.ReactNode;
   /** ➕ 面板里的任务入口：未传时该分组不出现 */
   onTaskAction?: (mode: TaskActionMode) => void;
+  /** ➕ 面板里的「启动服务」入口：未传时该行不出现，服务面板由挂载方渲染 */
+  onServiceAction?: () => void;
   /** 焦点请求序号：新建会话等场景递增一次，输入框随即取回焦点 */
   focusSeq?: number;
   /** 快捷键是否生效 */
@@ -247,6 +250,7 @@ export const Composer = React.memo(function Composer({
   toolsExtra,
   focusSeq,
   onTaskAction,
+  onServiceAction,
   shortcutsEnabled = true,
   shortcutPriority = 0,
 }: ComposerProps) {
@@ -425,6 +429,14 @@ const PLUGIN_ROWS = [
   },
 ];
 
+/** 面板型插件：不是技能前缀，选中后直接打开能力面板 */
+const SERVICE_ROW = {
+  key: 'service',
+  label: '启动服务',
+  alias: 'service',
+  description: '在工作区里挑一个 RN 工程，就地拉起开发服务',
+};
+
 /** 权限 / 模型清单：面板与底部 chip 共用同一套行渲染 */
   const openMenu = useCallback(
     (kind: 'model' | 'permission', fromAdd = false) => {
@@ -505,6 +517,16 @@ const PLUGIN_ROWS = [
         section: '插件',
       });
     }
+    if (onServiceAction) {
+      items.push({
+        key: `plugin:${SERVICE_ROW.key}`,
+        label: SERVICE_ROW.label,
+        alias: SERVICE_ROW.alias,
+        description: SERVICE_ROW.description,
+        icon: <IconServer size={16} />,
+        section: '插件',
+      });
+    }
     if (onAddFiles) {
       items.push({
         key: 'file',
@@ -539,7 +561,7 @@ const PLUGIN_ROWS = [
     setMenu({ kind: 'add', items, index: 0 });
     // 点加号不抢焦点：面板的上下键与回车由编辑器承接
     editorRef.current?.focus();
-  }, [menu, onAddFiles, onPermissionSelect, onModelSelect, models, onTaskAction]);
+  }, [menu, onAddFiles, onPermissionSelect, onModelSelect, models, onTaskAction, onServiceAction]);
 
   useShortcutBindings(
     useMemo(
@@ -572,6 +594,12 @@ const PLUGIN_ROWS = [
         if (choice.key === 'file') {
           setMenu(null);
           fileInputRef.current?.click();
+          return;
+        }
+        if (choice.key === `plugin:${SERVICE_ROW.key}`) {
+          if (import.meta.env?.DEV) console.log('[Composer] 打开启动服务面板');
+          setMenu(null);
+          onServiceAction?.();
           return;
         }
         if (choice.key.startsWith('plugin:')) {

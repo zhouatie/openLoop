@@ -37,6 +37,9 @@ export * from './qa/model-env';
 export * from './qa/runtime-paths';
 export * from './qa/artifact-paths';
 export * from './automation/automation-scheduler';
+export * from './dev-server/dev-server-manager';
+export * from './dev-server/routes';
+export * from './dev-server/types';
 export * from './worktree/worktree-manager';
 
 

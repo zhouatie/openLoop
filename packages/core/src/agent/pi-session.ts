@@ -27,6 +27,7 @@ import { ExtensionUiBridge, type ExtensionUiResponse } from './pi-extension-ui';
 import captureExtension from './extensions/openloop-capture';
 import titleExtension from './extensions/openloop-title';
 import qaExtension from './extensions/openloop-qa';
+import devServerExtension from './extensions/openloop-dev-server';
 import { changeCaptureDir, changeIdOf, finishTurnChanges, forgetSessionChanges, rememberTurnWrite } from './turn-changes';
 import {
   AgentStatusEvent,
@@ -453,6 +454,8 @@ export class PiSessionInstance extends EventEmitter {
         titleExtension as ExtensionFactory,
         // QA 桥：把真机 / 网页验证做成 agent 可调用的工具
         qaExtension() as ExtensionFactory,
+        // 开发服务桥：改完代码就地拉起 Metro，不依赖任务与流水线
+        devServerExtension({ cwd }) as ExtensionFactory,
       ],
     });
     await loader.reload();

@@ -535,3 +535,12 @@ export const IconDevice = createIcon('IconDevice', 16, () => (
 export const IconRun = createIcon('IconRun', 16, () => (
   <path d="M5.6 3.4 12.4 8l-6.8 4.6V3.4Z" stroke="currentColor" strokeLinejoin="round" />
 ));
+
+/** 服务：机架 + 运行指示点，启动开发服务等常驻进程入口 */
+export const IconServer = createIcon('IconServer', 16, () => (
+  <>
+    <rect x="2.4" y="3.1" width="11.2" height="3.8" rx="1.2" stroke="currentColor" />
+    <rect x="2.4" y="9.1" width="11.2" height="3.8" rx="1.2" stroke="currentColor" />
+    <path d="M4.5 5h1.4M4.5 11h1.4" stroke="currentColor" strokeLinecap="round" />
+  </>
+));

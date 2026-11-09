@@ -27,7 +27,7 @@ import {
   TaskSessionRef,
   TaskBackgroundProcess,
 } from '@openloop/core';
-import type { OpenInAppTarget, SessionTreeSnapshot } from '@openloop/core/types';
+import type { DevServerConfig, DevServerProject, DevServerSnapshot, OpenInAppTarget, SessionTreeSnapshot } from '@openloop/core/types';
 
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
@@ -851,6 +851,47 @@ export class DesktopApiService {
   async deletePlugin(id: string): Promise<{ success: boolean; id: string }> {
     return requestJson<{ success: boolean; id: string }>(`${BASE_URL}/api/plugins/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+    });
+  }
+
+  /** 工作区开发服务（RN Metro）状态：随时可查，不依赖任务 */
+  async getDevServer(cwd: string): Promise<DevServerSnapshot> {
+    if (import.meta.env?.DEV) console.log(`[UI:API] 读取开发服务状态: ${cwd}`);
+    return requestJson<DevServerSnapshot>(`${BASE_URL}/api/dev-server?cwd=${encodeURIComponent(cwd)}`);
+  }
+
+  /** 工作区里可启动的工程清单：启动服务面板用它让用户挑选目录 */
+  async scanDevServerProjects(cwd: string): Promise<{ root: string; projects: DevServerProject[] }> {
+    if (import.meta.env?.DEV) console.log(`[UI:API] 扫描工作区开发服务: ${cwd}`);
+    return requestJson<{ root: string; projects: DevServerProject[] }>(
+      `${BASE_URL}/api/dev-server/projects?cwd=${encodeURIComponent(cwd)}`
+    );
+  }
+
+  async startDevServer(cwd: string, config?: DevServerConfig): Promise<DevServerSnapshot> {
+    if (import.meta.env?.DEV) console.log(`[UI:API] 启动开发服务: ${cwd}`, config || {});
+    return requestJson<DevServerSnapshot>(`${BASE_URL}/api/dev-server/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd, ...(config || {}) }),
+    });
+  }
+
+  async stopDevServer(cwd: string): Promise<DevServerSnapshot> {
+    if (import.meta.env?.DEV) console.log(`[UI:API] 停止开发服务: ${cwd}`);
+    return requestJson<DevServerSnapshot>(`${BASE_URL}/api/dev-server/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd }),
+    });
+  }
+
+  async saveDevServerConfig(cwd: string, config: DevServerConfig): Promise<DevServerSnapshot> {
+    if (import.meta.env?.DEV) console.log(`[UI:API] 保存开发服务配置: ${cwd}`, config);
+    return requestJson<DevServerSnapshot>(`${BASE_URL}/api/dev-server/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd, ...config }),
     });
   }
 

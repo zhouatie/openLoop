@@ -21,6 +21,7 @@ import {
   AutomationTask,
   AutomationLogRecord,
   RuntimeSettingsApplySummary,
+  DevServerConfig,
 } from '../types';
 import { createLogger } from '../logger';
 import { PiSessionManager, PIPELINE_DONE_MARKER } from '../agent/pi-session';
@@ -58,6 +59,12 @@ import { configureQaRuntimePaths } from '../qa/runtime-paths';
 import { guessImageMimeType } from '../constants/media-mime';
 import { resolveArtifactPath } from '../qa/artifact-paths';
 import { WorktreeManager, TaskProcessManager, findRepoRoot } from '../worktree/worktree-manager';
+import {
+  getDevServerManager,
+  setDevServerConfigProvider,
+  setDevServerProcessRegistry,
+} from '../dev-server/dev-server-manager';
+import { createDevServerRoutes, type DevServerRouteHandler } from '../dev-server/routes';
 import { interpolateString } from '../executors';
 import { resolveResumeCommand } from '../constants/pi-agent';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
@@ -114,6 +121,8 @@ export class OpenLoopServer {
   private unsubscribeQaActivity?: () => void;
   private unsubscribeTaskProcesses?: () => void;
   private workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>();
+  /** 开发服务路由：实现放在 dev-server 模块，宿主只提供配置存取与响应 */
+  private devServerRoutes: DevServerRouteHandler;
   private skillsCache: { data: { commands: any[]; skills: any[] }; timestamp: number } | null = null;
 
   constructor(options: ServerOptions = {}) {
@@ -128,6 +137,21 @@ export class OpenLoopServer {
 
     this.setupEngineEvents();
     this.setupQaAgentBridge();
+    // 会话工具与界面共用同一份工作区配置
+    setDevServerConfigProvider((cwd) => this.devServerConfig(cwd));
+    // 开发服务拉起的进程交给统一的后台进程登记表，界面与清理逻辑都能看到
+    setDevServerProcessRegistry({
+      register: (key, child, meta) => TaskProcessManager.getInstance().register(key, child, meta),
+      stopAll: (key) => TaskProcessManager.getInstance().stopAll(key),
+    });
+    this.devServerRoutes = createDevServerRoutes({
+      readConfig: (cwd) => this.devServerConfig(cwd),
+      saveConfig: (cwd, patch) => this.saveDevServerConfig(cwd, patch),
+      resolveCwd: (raw) => this.resolveDevCwd(raw),
+      sendJson: (res, status, body, meta) => this.sendJson(res, status, body, meta),
+      readBody: (req) => this.parseJsonBody(req).catch(() => ({}) as any),
+      log: (message) => serverLogger.info(message),
+    });
   }
 
   /** agent 会话里的 QA 工具通过这座桥调用同一套执行逻辑，避免另写一份驱动链路 */
@@ -310,6 +334,37 @@ export class OpenLoopServer {
   }
 
   // 任务事件按摘要推流：剔除超大会话与 Diff 明细，避免每条实时事件都搬运数 MB 数据
+  /** 工作区开发服务的用户配置：按工程归属键存取（worktree 回落主仓库） */
+  private devServerConfig(cwd: string): DevServerConfig {
+    const root = getDevServerManager().configKeyOf(cwd);
+    return this.store.getSettings().devServer?.workspaces?.[root] || {};
+  }
+
+  /** 合并并持久化开发服务配置；空字符串表示恢复自动探测 */
+  private saveDevServerConfig(cwd: string, patch: DevServerConfig): DevServerConfig {
+    const root = getDevServerManager().configKeyOf(cwd);
+    const settings = this.store.getSettings();
+    const workspaces = { ...(settings.devServer?.workspaces || {}) };
+    const next: DevServerConfig = { ...(workspaces[root] || {}) };
+
+    if (patch.command !== undefined) next.command = String(patch.command).trim() || undefined;
+    if (patch.nodeBinPath !== undefined) next.nodeBinPath = String(patch.nodeBinPath).trim() || undefined;
+    if (patch.port !== undefined) {
+      const port = Number(patch.port);
+      next.port = Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
+    }
+    workspaces[root] = next;
+    this.store.updateSettings({ devServer: { ...(settings.devServer || {}), workspaces } });
+    return next;
+  }
+
+  /** 请求里的会话目录：必须是已存在的绝对路径，避免误把服务拉到别处 */
+  private resolveDevCwd(raw: unknown): string | null {
+    const text = typeof raw === 'string' ? raw.trim() : '';
+    if (!text || !path.isAbsolute(text)) return null;
+    return fs.existsSync(text) ? text : null;
+  }
+
   private broadcastTaskUpdate(task: Task | { id: string; deleted: true }) {
     this.broadcast({ type: 'task:update', data: toTaskSummary(task as Task) });
   }
@@ -3248,6 +3303,9 @@ ${existingSubSummary}
         const ok = this.store.deletePlugin(id);
         return this.sendJson(res, 200, { success: ok, id }, reqMeta);
       }
+
+      // 工作区开发服务（RN Metro）：随时拉起，不依赖任务与流水线
+      if (await this.devServerRoutes(req, res, parsedUrl, reqMeta)) return;
 
       // Settings: /api/settings
       if (pathname === '/api/settings' && method === 'GET') {

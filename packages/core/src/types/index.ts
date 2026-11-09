@@ -1,3 +1,14 @@
+import type { DevServerSettings } from '../dev-server/types';
+
+/** 开发服务的配置与快照由 dev-server 模块自带，这里转发给应用层 */
+export type {
+  DevServerClient,
+  DevServerConfig,
+  DevServerProject,
+  DevServerSettings,
+  DevServerSnapshot,
+} from '../dev-server/types';
+
 export type NodeStatus = 'pending' | 'running' | 'waiting_approval' | 'success' | 'failed' | 'skipped';
 
 export type TaskStatus = 'pending' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
@@ -394,6 +405,8 @@ export interface OpenLoopSettings {
   qaAutomation?: QaAutomationSettings;
   /** 会话进程装载的 pi 扩展包名单；未配置时用内置白名单，空数组表示只装 openLoop 桥接扩展 */
   piExtensions?: string[];
+  /** 工作区维度的开发服务配置：键为工程根目录 */
+  devServer?: DevServerSettings;
   [key: string]: any;
 }
 

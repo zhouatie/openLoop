@@ -25,6 +25,7 @@ import { IconCheck, IconChevronDown, IconFolderClose, IconFolderOpen, IconPlus }
 import { useDismissOnOutsidePointer } from './dsh/useDismissOnOutsidePointer.ts';
 import { OpenInAppButton } from './dsh/OpenInAppButton';
 import { BackgroundProcessesAction } from './BackgroundProcessesAction';
+import { DevServerPanel } from '../components/DevServerPanel';
 import { useAttachments } from './useAttachments';
 import { SessionList, SessionListItem } from './SessionList';
 import { SessionSwitcher } from './SessionSwitcher';
@@ -218,6 +219,8 @@ export interface AgentPanelShellProps {
   shortcutsEnabled?: boolean;
   /** 面板层级优先级：上层浮层高于页内面板，默认 0 */
   shortcutPriority?: number;
+  /** ➕ 面板里的「启动服务」入口：提供时该行出现 */
+  onServiceAction?: () => void;
 }
 
 /** 三种挂载共用的会话外壳：顶栏 + 消息列 + 输入卡 */
@@ -273,6 +276,7 @@ export function AgentPanelShell({
   focusSeq,
   shortcutsEnabled = true,
   shortcutPriority = 0,
+  onServiceAction,
 }: AgentPanelShellProps) {
   const [draft, setDraft] = useState('');
   /** 每个会话各自的草稿，切换会话时不会串味 */
@@ -403,6 +407,7 @@ export function AgentPanelShell({
           if (import.meta.env?.DEV) console.log('[AgentPanel] 打开任务面板:', mode);
           setTaskAction(mode);
         }}
+        onServiceAction={onServiceAction}
         focusSeq={focusSeq}
         shortcutsEnabled={shortcutsEnabled}
         shortcutPriority={shortcutPriority}
@@ -911,6 +916,12 @@ export function GlobalAgentPanel({
 }: GlobalAgentPanelProps) {
   const initialSessionId = sessionRequest?.id || null;
   const { pick: pickDirectory, dialog: directoryDialog } = useDirectoryPicker();
+  /** ➕ 面板里的「启动服务」：能力与任务、会话解耦，只借用当前工作区作为起始目录 */
+  const [serviceOpen, setServiceOpen] = useState(false);
+  // 面板是 portal，覆盖层收起时必须一起关掉，否则会孤零零浮在别的视图上
+  useEffect(() => {
+    if (!active) setServiceOpen(false);
+  }, [active]);
   const [sessions, setSessions] = useState<SessionListItem[]>(loadCachedSessions);
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
@@ -2262,6 +2273,10 @@ export function GlobalAgentPanel({
           model={modelHint}
           commands={commands}
           onRequestMentions={requestMentions}
+          onServiceAction={() => {
+            if (import.meta.env?.DEV) console.log('[AgentPanel] 打开启动服务面板:', activeCwd);
+            setServiceOpen(true);
+          }}
           permission={permission}
           onPermissionSelect={handlePermissionSelect}
           models={models.length > 0 ? models : globalModels}
@@ -2359,6 +2374,10 @@ export function GlobalAgentPanel({
       )}
 
       {directoryDialog}
+
+      {serviceOpen ? (
+        <DevServerPanel rootDir={activeCwd} onClose={() => setServiceOpen(false)} />
+      ) : null}
     </div>
     </OpenFileContext.Provider>
   );

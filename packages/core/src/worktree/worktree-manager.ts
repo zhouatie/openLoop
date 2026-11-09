@@ -9,6 +9,7 @@ import { WorktreeContextInfo, FileDiffItem, TaskWorktreeDiffResult, Task, TaskBa
 import { createLogger } from '../logger';
 import { PiSessionManager } from '../agent/pi-session';
 import { getEffectivePrompt, renderPromptTemplate } from '../constants/prompts';
+import { devServerProcessKey } from '../dev-server/keys';
 
 const logger = createLogger('WorktreeManager');
 
@@ -1280,6 +1281,8 @@ export class WorktreeManager {
 
     // 1. 停止该任务的所有后台进程并注销端口
     TaskProcessManager.getInstance().stopAll(taskId);
+    // 会话内启动的开发服务不在任务名册里，按工作区键一并回收，避免 worktree 删了 Metro 还占端口
+    TaskProcessManager.getInstance().stopAll(devServerProcessKey(worktreeDir));
     this.unregisterTaskPorts(taskId);
 
     // 2. 移除 git worktree 关联
