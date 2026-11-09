@@ -152,6 +152,17 @@ export const IconFile = createIcon('IconFile', 16, () => (
   />
 ));
 
+/* 设备截图：相机轮廓，与镜像标题栏的相机按钮同语义 */
+export const IconCamera = createIcon('IconCamera', 16, () => (
+  <>
+    <path
+      d="M2 5.5A1.5 1.5 0 0 1 3.5 4h1.4a1 1 0 0 0 .8-.4l.6-.8a1 1 0 0 1 .8-.4h1.8a1 1 0 0 1 .8.4l.6.8a1 1 0 0 0 .8.4h1.4A1.5 1.5 0 0 1 14 5.5v6A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-6Z"
+      stroke="currentColor"
+    />
+    <circle cx="8" cy="8.75" r="2.25" stroke="currentColor" />
+  </>
+));
+
 /* 引用字形取自 DSH ReferenceIcon：文件是带两行正文的圆角框 */
 export const IconReferenceFile = createIcon('IconReferenceFile', 16, () => (
   <>
