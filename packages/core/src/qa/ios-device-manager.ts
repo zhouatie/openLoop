@@ -179,6 +179,46 @@ export class IosDeviceManager {
     }
   }
 
+  /** 在模拟器原生窗口打开并聚焦指定模拟器 */
+  static async openSimulatorWindow(udid: string): Promise<{ success: boolean; message: string }> {
+    const target = (udid || '').trim();
+    if (!target) return { success: false, message: '缺少模拟器 UDID' };
+    const boot = await this.bootSimulator(target);
+    if (!boot.success) return boot;
+    const appPath = await this.resolveSimulatorApp();
+    try {
+      // open -a 走 LaunchServices，索引缺失时会报找不到应用；拿到绝对路径后按路径打开更稳
+      await execAsync(appPath ? `open -a "${appPath}"` : 'open -a "Device Hub" || open -a Simulator', {
+        timeout: 15000,
+      });
+      logger.info(`[IosDeviceManager] 已打开模拟器窗口: ${target} (${appPath || 'LaunchServices'})`);
+      return { success: true, message: '已在模拟器窗口中打开' };
+    } catch (err: any) {
+      const message = String(err?.stderr || err?.message || '打开模拟器窗口失败').trim();
+      logger.warn(`[IosDeviceManager] 打开模拟器窗口失败: ${message}`);
+      return { success: false, message };
+    }
+  }
+
+  /** 解析本机模拟器 UI 应用路径：Xcode 27 起为 Device Hub，早期版本为 Simulator.app */
+  private static async resolveSimulatorApp(): Promise<string | null> {
+    let developerDir = '';
+    try {
+      const { stdout } = await execAsync('xcode-select -p', { timeout: 5000 });
+      developerDir = stdout.trim();
+    } catch {
+      /* 未安装命令行工具时按默认路径兜底 */
+    }
+    const candidates = [
+      developerDir && path.join(developerDir, 'Applications/Simulator.app'),
+      developerDir && path.join(developerDir, 'Applications/DeviceHub.app'),
+      '/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app',
+      '/Applications/Xcode.app/Contents/Applications/Simulator.app',
+      '/Applications/Xcode.app/Contents/Applications/DeviceHub.app',
+    ].filter(Boolean) as string[];
+    return candidates.find((candidate) => existsSync(candidate)) || null;
+  }
+
   /** 查找本机的 WebDriverAgent 工程；找不到时返回 null */
   static resolveWdaProject(): string | null {
     const candidates = [
