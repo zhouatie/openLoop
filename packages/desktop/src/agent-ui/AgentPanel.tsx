@@ -215,6 +215,8 @@ export interface AgentPanelShellProps {
   draftKey?: string;
   /** 输入框焦点请求序号：新建会话后自动聚焦 */
   focusSeq?: number;
+  /** Esc 是否关闭面板：全局浮层常驻，只让瞬时层自己收 */
+  closeOnEscape?: boolean;
   /** 面板当前可见时才监听面板快捷键 */
   shortcutsEnabled?: boolean;
   /** 面板层级优先级：上层浮层高于页内面板，默认 0 */
@@ -274,6 +276,7 @@ export function AgentPanelShell({
   forkPendingEntryId,
   draftKey,
   focusSeq,
+  closeOnEscape = true,
   shortcutsEnabled = true,
   shortcutPriority = 0,
   onServiceAction,
@@ -345,7 +348,7 @@ export function AgentPanelShell({
 
   /**
    * Esc 分层处理：双击 Esc 停止生成；有瞬时层（popover / 菜单 / 审批卡）时交给它们；
-   * 否则关闭面板。
+   * 面板允许关闭时才关闭（全局浮层保持常驻）。
    */
   const handleEscape = useCallback(() => {
     const now = Date.now();
@@ -363,8 +366,12 @@ export function AgentPanelShell({
       return;
     }
     if (rootRef.current?.querySelector('[data-agent-transient]')) return;
+    if (!closeOnEscape) {
+      if (import.meta.env?.DEV) console.log('[AgentPanel] Esc 不关闭：全局浮层常驻');
+      return;
+    }
     onClose?.();
-  }, [isBusy, onStop, onClose]);
+  }, [isBusy, onStop, onClose, closeOnEscape]);
 
   const composer = (
     <div className={styles.composerHost}>
@@ -2293,6 +2300,7 @@ export function GlobalAgentPanel({
           composerDisabled={!activeId}
           headerless={mode === 'page'}
           leading={headerLeading}
+          closeOnEscape={mode !== 'overlay'}
           shortcutsEnabled={active}
           shortcutPriority={1}
           headerExtra={
