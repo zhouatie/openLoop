@@ -64,6 +64,13 @@ export interface DeviceActionResult {
 
 export class DeviceActionController {
   private static androidSizeCache = new Map<string, { width: number; height: number }>();
+  /**
+   * WDA 会话与窗口尺寸缓存。
+   * 每次动作都重新探测会让一次点击白等两次往返（约 0.2s），是镜像「点了半天才动」的主因之一。
+   */
+  private static wdaSessions = new Map<string, { sessionId: string; at: number }>();
+  private static wdaWindows = new Map<string, { width: number; height: number; at: number }>();
+  private static readonly WDA_CACHE_TTL_MS = 60_000;
 
   /**
    * 获取 Android 设备的真实物理屏幕分辨率 (带内存缓存)
@@ -242,6 +249,108 @@ export class DeviceActionController {
     }
   }
 
+  /** 取 WDA 会话 id：命中缓存直接用，过期才探测一次 */
+  private static async resolveWdaSession(endpoint: string): Promise<string> {
+    const cached = this.wdaSessions.get(endpoint);
+    if (cached && Date.now() - cached.at < this.WDA_CACHE_TTL_MS) return cached.sessionId;
+
+    let sessionId = '';
+    try {
+      const statusRes = await fetch(`${endpoint}/status`);
+      if (statusRes.ok) {
+        const json: any = await statusRes.json();
+        sessionId = json.sessionId || '';
+      }
+    } catch (err: any) {
+      logger.warn(`[IosAction] 读取 WDA 状态失败 (${endpoint}): ${err?.message}`);
+    }
+
+    if (!sessionId) {
+      // 没有活跃会话时请求一个
+      try {
+        const sessionRes = await fetch(`${endpoint}/session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ capabilities: {} }),
+        });
+        if (sessionRes.ok) {
+          const json: any = await sessionRes.json();
+          sessionId = json.sessionId || json.value?.sessionId || '';
+        }
+      } catch (err: any) {
+        logger.warn(`[IosAction] 创建 WDA 会话失败 (${endpoint}): ${err?.message}`);
+      }
+    }
+
+    if (sessionId) this.wdaSessions.set(endpoint, { sessionId, at: Date.now() });
+    return sessionId;
+  }
+
+  /** 取 WDA 窗口尺寸（比例换算用）：同一台设备尺寸不变，缓存即可 */
+  private static async resolveWdaWindow(
+    endpoint: string,
+    prefix: string
+  ): Promise<{ width: number; height: number }> {
+    const cached = this.wdaWindows.get(endpoint);
+    if (cached && Date.now() - cached.at < this.WDA_CACHE_TTL_MS) {
+      return { width: cached.width, height: cached.height };
+    }
+
+    const fallback = { width: 393, height: 852 };
+    try {
+      const sizeRes = await fetch(`${prefix}/window/size`);
+      if (sizeRes.ok) {
+        const json: any = await sizeRes.json();
+        const size = {
+          width: json.value?.width || fallback.width,
+          height: json.value?.height || fallback.height,
+        };
+        this.wdaWindows.set(endpoint, { ...size, at: Date.now() });
+        return size;
+      }
+    } catch {
+      /* 尺寸拿不到时用默认值，不阻塞动作 */
+    }
+    return fallback;
+  }
+
+  /**
+   * 点按：优先 W3C actions（比 /wda/tap 少约 0.13s 合成开销），老版本 WDA 不支持时回落到 /wda/tap。
+   */
+  private static async tapWda(prefix: string, x: number, y: number): Promise<Response> {
+    const actionsRes = await fetch(`${prefix}/actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actions: [
+          {
+            type: 'pointer',
+            id: 'finger1',
+            parameters: { pointerType: 'touch' },
+            actions: [
+              { type: 'pointerMove', duration: 0, x, y },
+              { type: 'pointerDown', button: 0 },
+              { type: 'pointerUp', button: 0 },
+            ],
+          },
+        ],
+      }),
+    });
+    if (actionsRes.ok) return actionsRes;
+
+    return fetch(`${prefix}/wda/tap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ x, y }),
+    });
+  }
+
+  /** 会话或窗口尺寸可能已失效（WDA 重启、横竖屏切换）：清缓存，下一次动作重新解析 */
+  private static invalidateWdaCache(endpoint: string): void {
+    this.wdaSessions.delete(endpoint);
+    this.wdaWindows.delete(endpoint);
+  }
+
   /**
    * iOS 平台操作执行 (经 WebDriverAgent)
    */
@@ -267,27 +376,7 @@ export class DeviceActionController {
 
     const endpoint = IosDeviceManager.resolveEndpoint(rawWdaEndpoint);
     try {
-      // 1. 获取现有活跃 session
-      let sessionId = '';
-      const statusRes = await fetch(`${endpoint}/status`);
-      if (statusRes.ok) {
-        const json: any = await statusRes.json();
-        sessionId = json.sessionId || '';
-      }
-
-      if (!sessionId) {
-        // 请求一个新 session
-        const sessionRes = await fetch(`${endpoint}/session`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ capabilities: {} }),
-        });
-        if (sessionRes.ok) {
-          const json: any = await sessionRes.json();
-          sessionId = json.sessionId || json.value?.sessionId || '';
-        }
-      }
-
+      const sessionId = await this.resolveWdaSession(endpoint);
       const prefix = sessionId ? `${endpoint}/session/${sessionId}` : endpoint;
 
       switch (action.type) {
@@ -296,27 +385,16 @@ export class DeviceActionController {
           let y = Math.round(action.y ?? 0);
 
           if (typeof action.ratioX === 'number' && typeof action.ratioY === 'number') {
-            try {
-              const sizeRes = await fetch(`${prefix}/window/size`);
-              if (sizeRes.ok) {
-                const sJson: any = await sizeRes.json();
-                const w = sJson.value?.width || 393;
-                const h = sJson.value?.height || 852;
-                x = Math.round(action.ratioX * w);
-                y = Math.round(action.ratioY * h);
-              }
-            } catch {}
+            const size = await this.resolveWdaWindow(endpoint, prefix);
+            x = Math.round(action.ratioX * size.width);
+            y = Math.round(action.ratioY * size.height);
           }
 
-          // WDA 的真实路由是 POST /wda/tap（不是 /wda/tap/nil），传 x/y 坐标
-          const res = await fetch(`${prefix}/wda/tap`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ x, y }),
-          });
+          const res = await this.tapWda(prefix, x, y);
           if (!res.ok) {
             const detail = await res.text().catch(() => '');
             logger.warn(`[IosAction] 点按失败 (${x},${y}): ${res.status} ${detail.slice(0, 200)}`);
+            this.invalidateWdaCache(endpoint);
           }
           return { success: res.ok };
         }
@@ -333,18 +411,11 @@ export class DeviceActionController {
             typeof action.ratioEndX === 'number' &&
             typeof action.ratioEndY === 'number'
           ) {
-            try {
-              const sizeRes = await fetch(`${prefix}/window/size`);
-              if (sizeRes.ok) {
-                const sJson: any = await sizeRes.json();
-                const w = sJson.value?.width || 393;
-                const h = sJson.value?.height || 852;
-                x1 = Math.round(action.ratioX * w);
-                y1 = Math.round(action.ratioY * h);
-                x2 = Math.round(action.ratioEndX * w);
-                y2 = Math.round(action.ratioEndY * h);
-              }
-            } catch {}
+            const size = await this.resolveWdaWindow(endpoint, prefix);
+            x1 = Math.round(action.ratioX * size.width);
+            y1 = Math.round(action.ratioY * size.height);
+            x2 = Math.round(action.ratioEndX * size.width);
+            y2 = Math.round(action.ratioEndY * size.height);
           }
 
           const duration = ((action.duration ?? 300) / 1000).toFixed(2);
@@ -353,6 +424,7 @@ export class DeviceActionController {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fromX: x1, fromY: y1, toX: x2, toY: y2, duration: parseFloat(duration) }),
           });
+          if (!res.ok) this.invalidateWdaCache(endpoint);
           return { success: res.ok };
         }
 

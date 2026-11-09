@@ -15,6 +15,13 @@ const logger = createLogger('AndroidStreamSession');
 /** 空闲释放延迟：当所有订阅者离开后，保持会话的最长毫秒数 */
 const IDLE_TEARDOWN_MS = 20000;
 
+/**
+ * 单个订阅者的发送积压上限。
+ * 超过说明浏览器已消费不过来，再灌帧只会让画面越拖越晚（越操作越卡），
+ * 此时丢掉普通帧、保留关键帧，用帧率换实时性。
+ */
+const MAX_SUBSCRIBER_BACKLOG_BYTES = 1024 * 1024;
+
 export interface StreamMetadata {
   codec: string;
   width: number;
@@ -212,9 +219,9 @@ export class AndroidStreamSession {
 
         // 推送给所有活跃订阅客户端
         for (const sub of this.subscribers) {
-          if (sub.readyState === sub.OPEN) {
-            sub.send(packetBuffer, { binary: true });
-          }
+          if (sub.readyState !== sub.OPEN) continue;
+          if (!isKeyFrame && sub.bufferedAmount > MAX_SUBSCRIBER_BACKLOG_BYTES) continue;
+          sub.send(packetBuffer, { binary: true });
         }
       }
     } finally {
