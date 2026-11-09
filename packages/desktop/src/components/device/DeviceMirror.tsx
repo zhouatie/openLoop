@@ -892,6 +892,42 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
           >
             <Link2 size={13} strokeWidth={1.9} />
           </button>
+          {shots.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setStripPinned(!stripOpen);
+                setStripOpen((v) => !v);
+              }}
+              title={stripOpen ? '收起截图历史' : `截图历史（${shots.length} 张，点选一张让 agent 读取）`}
+              className={`w-8 h-9 flex items-center justify-center transition-colors cursor-pointer ${
+                stripOpen
+                  ? 'bg-[#eeedfd] text-[#4f46e5]'
+                  : 'text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc]'
+              }`}
+            >
+              <Images size={13} strokeWidth={1.9} />
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={shotState === 'capturing'}
+            onClick={() => void handleCaptureShot()}
+            title="截图：保存当前画面，可让 agent 读取分析"
+            className={`w-8 h-9 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${
+              shotState === 'done'
+                ? 'text-[#059669]'
+                : 'text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc]'
+            }`}
+          >
+            {shotState === 'capturing' ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : shotState === 'done' ? (
+              <Check size={13} strokeWidth={2} />
+            ) : (
+              <Camera size={13} strokeWidth={1.9} />
+            )}
+          </button>
         </div>
 
         <div
@@ -1031,48 +1067,6 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
                   {!isCompact && <span className="whitespace-nowrap">离线</span>}
                 </span>
               )}
-
-              {shots.length > 0 && (
-                <button
-                  type="button"
-                  title={
-                    stripOpen
-                      ? '收起截图历史'
-                      : `截图历史（${shots.length} 张，点选一张让 agent 读取）`
-                  }
-                  onClick={() => {
-                    setStripPinned(!stripOpen);
-                    setStripOpen((v) => !v);
-                  }}
-                  className={`p-1 rounded transition-colors cursor-pointer ${
-                    stripOpen
-                      ? 'text-[#a5b4fc] hover:bg-[#3f3f46]'
-                      : 'text-[#a1a1aa] hover:text-white hover:bg-[#3f3f46]'
-                  }`}
-                >
-                  <Images size={11} />
-                </button>
-              )}
-
-              <button
-                type="button"
-                title="截图：保存当前画面，可让 agent 读取分析"
-                disabled={shotState === 'capturing'}
-                onClick={() => void handleCaptureShot()}
-                className={`p-1 rounded transition-colors cursor-pointer disabled:cursor-not-allowed ${
-                  shotState === 'done'
-                    ? 'text-[#34d399]'
-                    : 'text-[#a1a1aa] hover:text-white hover:bg-[#3f3f46]'
-                }`}
-              >
-                {shotState === 'capturing' ? (
-                  <Loader2 size={11} className="animate-spin" />
-                ) : shotState === 'done' ? (
-                  <Check size={11} />
-                ) : (
-                  <Camera size={11} />
-                )}
-              </button>
 
               <button
                 type="button"
