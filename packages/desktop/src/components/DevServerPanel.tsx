@@ -15,7 +15,6 @@ const POLL_MS = 2_500;
 interface FormState {
   command: string;
   nodeBinPath: string;
-  port: string;
 }
 
 /** 徽章：运行 / 启动中 / 端口冲突 / 退出 / 停止 */
@@ -119,7 +118,7 @@ export function DevServerPanel({ rootDir, onClose, client, pickDirectory, notify
     if (import.meta.env?.DEV) console.log('[DevServerPanel] 启动开发服务:', project.path);
     try {
       const snapshot = await service.start(project.path);
-      if (snapshot.error && !snapshot.starting) say('启动失败，展开配置可看输出与端口', 'error');
+      if (snapshot.error && !snapshot.starting) say('启动失败，展开配置可看输出', 'error');
       await refresh();
     } catch (err: any) {
       say(`启动失败: ${err?.message || '未知异常'}`, 'error');
@@ -148,18 +147,16 @@ export function DevServerPanel({ rootDir, onClose, client, pickDirectory, notify
       return;
     }
     setEditing(project.path);
-    setForm({ command: project.command, nodeBinPath: project.nodeBinPath || '', port: String(project.port) });
+    setForm({ command: project.command, nodeBinPath: project.nodeBinPath || '' });
     setBrowsing(false);
   };
 
   const saveConfig = async (project: DevServerProject) => {
     if (!form) return;
-    const port = Number(form.port);
     try {
       await service.saveConfig(project.path, {
         command: form.command.trim(),
         nodeBinPath: form.nodeBinPath.trim(),
-        ...(Number.isInteger(port) && port > 0 ? { port } : {}),
       });
       setEditing(null);
       setForm(null);
@@ -348,7 +345,8 @@ export function DevServerPanel({ rootDir, onClose, client, pickDirectory, notify
                           spellCheck={false}
                           onChange={(event) => setForm({ ...form, command: event.target.value })}
                           aria-label="启动命令"
-                          className="flex-1 h-[24px] px-2 bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[5px] font-mono text-[11px] text-[#1c1c21] outline-none"
+                          placeholder="如 npx chitu dev --port=8082 | tee .run.log"
+                          className="flex-1 h-[24px] px-2 bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[5px] font-mono text-[11px] text-[#1c1c21] outline-none placeholder:text-[#b4b4bb]"
                         />
                       </label>
                       <label className="flex items-center gap-2">
@@ -362,16 +360,7 @@ export function DevServerPanel({ rootDir, onClose, client, pickDirectory, notify
                           className="flex-1 h-[24px] px-2 bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[5px] font-mono text-[11px] text-[#1c1c21] outline-none placeholder:text-[#b4b4bb]"
                         />
                       </label>
-                      <label className="flex items-center gap-2">
-                        <span className="shrink-0 w-[38px] text-[11px] text-[#85858d]">端口</span>
-                        <input
-                          value={form.port}
-                          inputMode="numeric"
-                          onChange={(event) => setForm({ ...form, port: event.target.value.replace(/[^\d]/g, '') })}
-                          aria-label="端口"
-                          className="w-[88px] h-[24px] px-2 bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[5px] font-mono text-[11px] text-[#1c1c21] outline-none"
-                        />
-                        <span className="flex-1" />
+                      <div className="flex items-center justify-end gap-1.5 pt-0.5">
                         <button
                           type="button"
                           onClick={() => setEditing(null)}
@@ -386,7 +375,7 @@ export function DevServerPanel({ rootDir, onClose, client, pickDirectory, notify
                         >
                           保存
                         </button>
-                      </label>
+                      </div>
                     </div>
                   ) : null}
                 </div>

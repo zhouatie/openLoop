@@ -2,8 +2,8 @@ import type { ChildProcess } from 'child_process';
 
 /** 开发服务（RN Metro）的用户覆盖配置；不填则用工程自动探测值 */
 export interface DevServerConfig {
+  /** 启动命令：端口由命令里的 --port 决定，不额外拼接 */
   command?: string;
-  port?: number;
   /** 额外注入 PATH 的 Node 运行时目录，兼容旧版 RN 需要的 Node 14 */
   nodeBinPath?: string;
 }

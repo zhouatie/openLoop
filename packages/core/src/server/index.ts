@@ -357,10 +357,6 @@ export class OpenLoopServer {
 
     if (patch.command !== undefined) next.command = String(patch.command).trim() || undefined;
     if (patch.nodeBinPath !== undefined) next.nodeBinPath = String(patch.nodeBinPath).trim() || undefined;
-    if (patch.port !== undefined) {
-      const port = Number(patch.port);
-      next.port = Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
-    }
     workspaces[root] = next;
     this.store.updateSettings({ devServer: { ...(settings.devServer || {}), workspaces } });
     return next;
