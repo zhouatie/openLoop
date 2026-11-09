@@ -189,6 +189,7 @@ export class DeviceActionController {
           const keyMap: Record<string, number> = {
             back: 4,
             home: 3,
+            recents: 187,
             power: 26,
             enter: 66,
             menu: 82,
@@ -433,6 +434,23 @@ export class DeviceActionController {
           if (rawKey === 'home') {
             const res = await fetch(`${endpoint}/wda/homescreen`, { method: 'POST' });
             return { success: res.ok };
+          }
+          if (rawKey === 'recents') {
+            // iOS 没有后台列表按键：从底部上滑并停顿，呼出多任务界面
+            const size = await this.resolveWdaWindow(endpoint, prefix);
+            const res = await fetch(`${prefix}/wda/dragfromtoforduration`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                fromX: Math.round(size.width / 2),
+                fromY: size.height - 1,
+                toX: Math.round(size.width / 2),
+                toY: Math.round(size.height * 0.55),
+                duration: 0.6,
+              }),
+            });
+            if (!res.ok) this.invalidateWdaCache(endpoint);
+            return { success: res.ok, message: res.ok ? undefined : '呼出多任务界面失败' };
           }
           // 其他键通过 keys 接口发送
           const res = await fetch(`${prefix}/wda/keys`, {

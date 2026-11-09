@@ -18,6 +18,7 @@ import {
   Camera,
   Images,
   AppWindow,
+  SquareStack,
 } from 'lucide-react';
 import { api, type DeviceScreenshotResult } from '../../services/api';
 import { imageSrc } from '../../agent-ui/local-image';
@@ -859,6 +860,15 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
             className="w-8 h-9 text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc] flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             <Home size={13} strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => handleAction({ type: 'key', key: 'recents' })}
+            title="打开 App 后台列表（最近任务）：上滑即可清掉后台 App"
+            className="w-8 h-9 text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc] flex items-center justify-center disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            <SquareStack size={13} strokeWidth={1.9} />
           </button>
           <button
             type="button"
