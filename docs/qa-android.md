@@ -53,7 +53,13 @@ DeepSeek 通过 Magpie 可正常识图，且 Midscene 内置 DeepSeek 专用的�
 在弹窗里勾选一张或多张（最多 6 张），确认后作为附件随消息发出；
 服务端会把图片路径拼进正文，agent 读图后直接分析。
 
-## 使用流程
+## 设备镜像打开链接
+
+镜像左侧操作列的链接按钮可以直接把 URL 下发给设备，网页地址与应用深链（如 `orpheus://…`）都支持。
+填入地址后回车或点「打开」即可。Android 走 `am start -a android.intent.action.VIEW -d`，
+iOS 模拟器走 `xcrun simctl openurl`，不依赖 WebDriverAgent。
+
+
 
 1. 进入 QA 自动化 → 用例 Tab → 新建用例。
 2. 平台切换选择 **Android 移动端**。
@@ -81,7 +87,9 @@ DeepSeek 通过 Magpie 可正常识图，且 Midscene 内置 DeepSeek 专用的�
 - `POST /api/qa/devices/android/disconnect` — 断开 WiFi ADB
 - `POST /api/qa/devices/screenshot` — 设备截图（`{ platform, serial }`），返回本地图片路径
 - `GET /api/qa/devices/screenshots?platform=&serial=` — 该设备保存过的截图列表（含 `selected` 标记）
-- `POST /api/qa/devices/screenshots/select` — 选定某张截图（`{ path }`），之后 agent 读这一张
+- `POST /api/qa/devices/action` — 设备反向控制（`{ platform, serial, action }`），
+  `action.type` 支持 `tap` / `swipe` / `text` / `key` / `launch` / `openUrl`，
+  `openUrl` 配 `action.url` 让设备打开链接或深链
 
 ## 产物位置与清理
 
