@@ -8,6 +8,7 @@
 
 import type { AndroidDeviceInfo, IosDevicesSnapshot, QaPlatform, QaRunRecord, QaStepType } from '../types';
 import type { DeviceLeaseSnapshot } from './device-lease-pool';
+import type { DeviceScreenshot, ScreenshotPlatform } from './device-screenshot';
 
 /** 设备快照：在线设备 + 当前租约占用的合并视图 */
 export interface QaAgentDeviceSnapshot {
@@ -33,9 +34,19 @@ export interface QaAgentRunInput {
   ownerId?: string;
 }
 
+export interface QaAgentScreenshotInput {
+  platform?: ScreenshotPlatform;
+  serial?: string;
+  wdaEndpoint?: string;
+  /** true 表示现场重抓；默认读取最近一张已保存的截图 */
+  fresh?: boolean;
+}
+
 export interface QaAgentBridge {
   listDevices(): Promise<QaAgentDeviceSnapshot>;
   runSuite(input: QaAgentRunInput): Promise<QaRunRecord>;
+  /** 设备截图：优先返回用户在镜像里刚点下的那一张 */
+  captureScreenshot(input: QaAgentScreenshotInput): Promise<DeviceScreenshot>;
 }
 
 let bridge: QaAgentBridge | null = null;

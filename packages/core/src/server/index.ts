@@ -50,6 +50,12 @@ import { IosDeviceManager } from '../qa/ios-device-manager';
 import { DeviceLeasePool } from '../qa/device-lease-pool';
 import { QaActivity } from '../qa/qa-activity';
 import { registerQaAgentBridge } from '../qa/qa-agent-bridge';
+import {
+  captureDeviceScreenshot,
+  listDeviceScreenshots,
+  resolveDeviceScreenshot,
+  selectDeviceScreenshot,
+} from '../qa/device-screenshot';
 import { AndroidStreamHub } from '../preview/android-stream-hub';
 import { proxyIosStream, closeAllIosStreams } from '../preview/ios-stream-proxy';
 import { DeviceActionController } from '../preview/device-action-controller';
@@ -177,6 +183,8 @@ export class OpenLoopServer {
         };
         return this.executeQaSuite(suite, { ownerId: input.ownerId });
       },
+      captureScreenshot: (input) =>
+        resolveDeviceScreenshot({ ...input, dataDir: this.store.getDataDir() }),
     });
   }
 
@@ -3584,6 +3592,50 @@ ${existingSubSummary}
         const body = await this.parseJsonBody(req);
         const bootRes = await IosDeviceManager.bootSimulator(body.udid);
         return this.sendJson(res, bootRes.success ? 200 : 400, bootRes, reqMeta);
+      }
+
+      // 设备截图：镜像面板的「截图」按钮与 agent 读取走同一条链路，图片落在数据目录 screenshots/
+      if (pathname === '/api/qa/devices/screenshot' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const platform = body.platform === 'ios' ? 'ios' : 'android';
+        try {
+          const shot = await captureDeviceScreenshot({
+            dataDir: this.store.getDataDir(),
+            platform,
+            serial: (body.serial || body.udid || '').toString().trim() || undefined,
+            wdaEndpoint: typeof body.wdaEndpoint === 'string' ? body.wdaEndpoint : undefined,
+          });
+          return this.sendJson(res, 200, { success: true, ...shot }, reqMeta);
+        } catch (err: any) {
+          serverLogger.warn(`[QA:DeviceScreenshot] 截图失败: ${err?.message}`);
+          return this.sendJson(res, 400, { success: false, message: err?.message || '设备截图失败' }, reqMeta);
+        }
+      }
+
+      // 截图条：列出这台设备保存过的截图，并标记当前选定的那张
+      if (pathname === '/api/qa/devices/screenshots' && method === 'GET') {
+        const query = parsedUrl.searchParams;
+        const platform = query.get('platform') === 'ios' ? 'ios' : query.get('platform') === 'android' ? 'android' : undefined;
+        const items = listDeviceScreenshots({
+          dataDir: this.store.getDataDir(),
+          platform,
+          serial: (query.get('serial') || '').trim() || undefined,
+        });
+        return this.sendJson(res, 200, { success: true, items }, reqMeta);
+      }
+
+      // 用户点选某张截图：之后 agent 读到的就是这一张
+      if (pathname === '/api/qa/devices/screenshots/select' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        try {
+          const shot = selectDeviceScreenshot({
+            dataDir: this.store.getDataDir(),
+            path: (body.path || '').toString(),
+          });
+          return this.sendJson(res, 200, { success: true, ...shot }, reqMeta);
+        } catch (err: any) {
+          return this.sendJson(res, 400, { success: false, message: err?.message || '选定截图失败' }, reqMeta);
+        }
       }
 
       // 统一设备反向控制接口 (支持点击、滑动、输入、按键、拉起应用)

@@ -29,6 +29,17 @@ import {
 } from '@openloop/core';
 import type { DevServerConfig, DevServerProject, DevServerSnapshot, OpenInAppTarget, SessionTreeSnapshot } from '@openloop/core/types';
 
+/** 设备截图保存结果：path 是本地绝对路径，界面与 agent 读的是同一份文件 */
+export interface DeviceScreenshotResult {
+  success: boolean;
+  platform: 'android' | 'ios';
+  serial?: string;
+  path: string;
+  capturedAt: number;
+  /** 是否是这台设备当前选定的截图（agent 默认读这一张） */
+  selected?: boolean;
+}
+
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
     const { protocol, hostname, port, search } = window.location;
@@ -1615,6 +1626,46 @@ export class DesktopApiService {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ serial }),
+    });
+  }
+
+  async captureDeviceScreenshot(payload: {
+    platform: 'android' | 'ios';
+    serial?: string;
+    wdaEndpoint?: string;
+  }): Promise<DeviceScreenshotResult> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 采集设备截图:', payload.platform, payload.serial || '默认设备');
+    }
+    return requestJson<DeviceScreenshotResult>(`${BASE_URL}/api/qa/devices/screenshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async listDeviceScreenshots(payload: {
+    platform: 'android' | 'ios';
+    serial?: string;
+  }): Promise<{ success: boolean; items: DeviceScreenshotResult[] }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 读取设备截图列表:', payload.platform, payload.serial || '默认设备');
+    }
+    const query = new URLSearchParams({ platform: payload.platform });
+    if (payload.serial) query.set('serial', payload.serial);
+    return requestJson<{ success: boolean; items: DeviceScreenshotResult[] }>(
+      `${BASE_URL}/api/qa/devices/screenshots?${query.toString()}`
+    );
+  }
+
+  async selectDeviceScreenshot(path: string): Promise<DeviceScreenshotResult> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 选定设备截图:', path);
+    }
+    return requestJson<DeviceScreenshotResult>(`${BASE_URL}/api/qa/devices/screenshots/select`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
     });
   }
 

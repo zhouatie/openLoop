@@ -6,7 +6,9 @@
  * 因此一次工具调用就产出可回看的运行记录，镜像面板也会同步锁定设备。
  */
 
+import fs from 'node:fs';
 import { getQaAgentBridge, type QaAgentDeviceSnapshot } from '../../qa/qa-agent-bridge';
+import { guessImageMimeType } from '../../constants/media-mime';
 import type { QaPlatform, QaRunRecord, QaStepType } from '../../types';
 
 interface ToolTextContent {
@@ -14,8 +16,14 @@ interface ToolTextContent {
   text: string;
 }
 
+interface ToolImageContent {
+  type: 'image';
+  data: string;
+  mimeType: string;
+}
+
 interface ToolResult {
-  content: ToolTextContent[];
+  content: Array<ToolTextContent | ToolImageContent>;
   details?: Record<string, unknown>;
   isError?: boolean;
 }
@@ -250,6 +258,70 @@ export default function qaExtension() {
           content: [{ type: 'text', text: describeRun(record) }],
           details: { runId: record.id, status: record.status, timeline: record.timeline },
         };
+      },
+    });
+    pi.registerTool({
+      name: 'qa_device_screenshot',
+      label: '设备截图',
+      description:
+        '读取当前真机/模拟器屏幕截图：默认返回用户在设备镜像截图条里选定的那一张（刚截的图自动成为选定），没有历史截图时现场抓一张。图片与本地路径一并返回，用于分析界面缺陷。',
+      promptSnippet: '读取设备屏幕截图并分析界面缺陷',
+      promptGuidelines: [
+        '用户说「刚截图了」「看下这个画面」时，直接调用 qa_device_screenshot 看图，不要再跑 qa_run_suite 重新复现。',
+        '分析后把界面缺陷定位到具体组件与代码位置，不要只复述截图内容。',
+      ],
+      parameters: {
+        type: 'object',
+        properties: {
+          platform: {
+            type: 'string',
+            enum: ['android', 'ios'],
+            description: '设备平台；不传则取用户选定的那张截图',
+          },
+          deviceSerial: {
+            type: 'string',
+            description: 'Android 序列号或 iOS UDID；不传则由服务端选择首个在线设备',
+          },
+          fresh: {
+            type: 'boolean',
+            description: 'true 表示现场重新抓一张；默认读取用户选定的那张（没有则取最新一张）',
+          },
+        },
+        additionalProperties: false,
+      },
+      async execute(_toolCallId, params, signal) {
+        const bridge = getQaAgentBridge();
+        if (!bridge) return failure('QA 服务尚未就绪：当前进程没有注册 QA 能力，请改用其他方式验证。');
+        if (signal?.aborted) return failure('设备截图读取已取消。');
+
+        const platform =
+          params?.platform === 'android' || params?.platform === 'ios' ? params.platform : undefined;
+        debug(`读取设备截图: ${platform || '最近一张'} fresh=${params?.fresh === true}`);
+
+        try {
+          const shot = await bridge.captureScreenshot({
+            platform,
+            serial:
+              typeof params?.deviceSerial === 'string' ? params.deviceSerial.trim() || undefined : undefined,
+            fresh: params?.fresh === true,
+          });
+          const capturedAt = new Date(shot.capturedAt).toISOString();
+          const platformLabel = PLATFORM_LABEL[shot.platform];
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `设备截图：${platformLabel}${shot.serial ? ` ${shot.serial}` : ''}${
+                  shot.selected ? '（用户选定）' : ''
+                }\n采集时间：${capturedAt}\n本地路径：${shot.path}`,
+              },
+              { type: 'image', data: fs.readFileSync(shot.path).toString('base64'), mimeType: guessImageMimeType(shot.path) },
+            ],
+            details: { path: shot.path, platform: shot.platform, serial: shot.serial, capturedAt },
+          };
+        } catch (err: any) {
+          return failure(`读取设备截图失败：${err?.message || '未知异常'}`);
+        }
       },
     });
   };

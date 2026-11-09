@@ -165,20 +165,32 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
     return isImagePath(target) ? target! : undefined;
   }, [tool.input]);
   const linkPath = targetPath && openFile ? targetPath : imagePath;
+  // 工具结果里给出的本地图片路径（如设备截图）：按路径出缩略图，大图不必内联进会话数据
+  const resultImagePath = useMemo(() => {
+    const details = tool.result?.details ?? tool.result?.structuredContent;
+    const candidate = details && typeof details === 'object' ? (details as any).path : undefined;
+    return typeof candidate === 'string' && isImagePath(candidate) && candidate !== imagePath
+      ? candidate
+      : undefined;
+  }, [tool.result, imagePath]);
 
   // 输出图片在两类展开体里都要出现，抽出来只写一次
   const imagesSection =
-    images.length > 0 ? (
+    images.length > 0 || resultImagePath ? (
       <div className={styles.section}>
         <div className={styles.sectionLabel}>输出图片</div>
         <div className={styles.images}>
-          {images.map((url, index) => (
-            <ImageThumb
-              key={`${index}-${url.slice(-12)}`}
-              image={{ url, name: `输出图片 ${index + 1}` }}
-              size={120}
-            />
-          ))}
+          {images.length > 0 ? (
+            images.map((url, index) => (
+              <ImageThumb
+                key={`${index}-${url.slice(-12)}`}
+                image={{ url, name: `输出图片 ${index + 1}` }}
+                size={120}
+              />
+            ))
+          ) : (
+            <ImageThumb image={{ url: imageSrc(resultImagePath!), name: '输出图片' }} size={120} />
+          )}
         </div>
       </div>
     ) : null;
@@ -223,7 +235,8 @@ export const ToolCard = memo(function ToolCard({ tool }: { tool: ToolExecutionRe
     [failed, linkPath, targetPath, openFile, summary, exitLabel, tool.durationMs]
   );
 
-  const canExpand = Boolean(diffHunks) || hasOutput || images.length > 0 || Boolean(tool.input);
+  const canExpand =
+    Boolean(diffHunks) || hasOutput || images.length > 0 || Boolean(resultImagePath) || Boolean(tool.input);
   const open = expanded && canExpand;
 
   return (

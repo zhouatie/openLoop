@@ -14,14 +14,20 @@ import {
   ChevronDown,
   Check,
   Play,
+  Camera,
+  Images,
 } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, type DeviceScreenshotResult } from '../../services/api';
+import { imageSrc } from '../../agent-ui/local-image';
+import { toast } from '../Toast';
 import { WebCodecsVideoDecoder, WebGLVideoFrameRenderer, BitmapVideoFrameRenderer } from '@yume-chan/scrcpy-decoder-webcodecs';
 import { ScrcpyVideoCodecId } from '@yume-chan/scrcpy';
 import { DeviceLeaseSnapshot } from '@openloop/core';
 
 /** 紧贴屏幕的竖向操作按键列宽度（px） */
 const ACTION_RAIL_WIDTH = 32;
+/** 画面底部截图条高度（px）：与卡片内 CSS 高度保持一致 */
+const SHOT_STRIP_HEIGHT = 50;
 
 /** 可切换的设备条目（浮层标题栏下拉使用） */
 export interface SwitchableDevice {
@@ -112,6 +118,14 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   const [touchIndicator, setTouchIndicator] = useState<{ left: number; top: number; id: number } | null>(null);
   const [codec, setCodec] = useState<string>('h264');
   const [stageBox, setStageBox] = useState<{ width: number; height: number } | null>(null);
+  /** 截图按钮状态：抓取中 / 已保存，用于给出不再赘述的即时反馈 */
+  const [shotState, setShotState] = useState<'idle' | 'capturing' | 'done'>('idle');
+  /** 这台设备保存过的截图：截图条可视化选给 agent 读哪一张 */
+  const [shots, setShots] = useState<DeviceScreenshotResult[]>([]);
+  /** 截图条默认收起，只在截图后短暂展开或手动展开 */
+  const [stripOpen, setStripOpen] = useState(false);
+  /** 用户手动展开或正在操作时，截图条不再自动收起 */
+  const [stripPinned, setStripPinned] = useState(false);
 
   /** 取或建渲染器；渲染器跟着组件活着，不跟着每次重连重建 */
   const ensureRenderer = useCallback(() => {
@@ -153,6 +167,9 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
 
   const isBusy = Boolean(leaseHolder);
 
+  // 截图条展开时底部多一条，等比换算时要扣掉这部分高度
+  const shotStripHeight = stripOpen && shots.length > 0 ? SHOT_STRIP_HEIGHT : 0;
+
   // 监听画面舞台尺寸，换算外框等比尺寸（外框 = 画面 + 标题栏）
   useEffect(() => {
     const el = stageRef.current;
@@ -175,13 +192,13 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     if (!stageBox || stageBox.width <= 0 || stageBox.height <= 0) return null;
     // 32px 为紧贴屏幕的按键列；36px 为卡片顶部标题栏
     const usableWidth = Math.max(80, stageBox.width - 32);
-    const usableHeight = Math.max(80, stageBox.height - 36);
+    const usableHeight = Math.max(80, stageBox.height - 36 - shotStripHeight);
     const scale = Math.min(usableWidth / deviceSize.width, usableHeight / deviceSize.height);
     return {
       width: Math.max(120, Math.round(deviceSize.width * scale)),
-      height: Math.round(deviceSize.height * scale) + 36,
+      height: Math.round(deviceSize.height * scale) + 36 + shotStripHeight,
     };
-  }, [stageBox, deviceSize]);
+  }, [stageBox, deviceSize, shotStripHeight]);
 
   // 文本浮层锚定在按键列左侧：向右展开会顶出应用可视区，所以一律朝画面外侧（左）打开
   const floatPanel = useMemo(() => {
@@ -248,6 +265,76 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
 
     return { ratioX, ratioY, rect };
   }, [getInscribedRect]);
+
+  /** 这台设备的截图列表（含「当前选定」标记） */
+  const refreshShots = useCallback(async () => {
+    try {
+      const res = await api.listDeviceScreenshots({ platform, serial });
+      setShots(res.items || []);
+    } catch (err) {
+      if (import.meta.env?.DEV) console.warn('[DeviceMirror] 读取截图列表失败:', err);
+    }
+  }, [platform, serial]);
+
+  /** 立刻截下当前画面：图片落在本地，agent 可通过 qa_device_screenshot 读回 */
+  const handleCaptureShot = useCallback(async () => {
+    if (shotState === 'capturing') return;
+    setShotState('capturing');
+    try {
+      const shot = await api.captureDeviceScreenshot({ platform, serial, wdaEndpoint });
+      if (import.meta.env?.DEV) console.log('[DeviceMirror] 设备截图已保存:', shot);
+      setShotState('done');
+      setShots((prev) => [
+        shot,
+        ...prev.map((item) => ({ ...item, selected: false })),
+      ]);
+      // 刚截完图，顺手把历史展开一下，方便换选要发给 agent 的那一张
+      setStripPinned(false);
+      setStripOpen(true);
+      toast.success('设备截图已保存', { description: '可以让 agent 读取这张图，直接分析界面问题' });
+    } catch (err: any) {
+      if (import.meta.env?.DEV) console.warn('[DeviceMirror] 设备截图失败:', err);
+      setShotState('idle');
+      toast.error('截图失败', { description: err?.message || '请确认设备画面正常后再试' });
+    }
+  }, [platform, serial, wdaEndpoint, shotState]);
+
+  /** 点选一张历史截图：agent 之后读到的就是这一张 */
+  const handleSelectShot = useCallback(async (shot: DeviceScreenshotResult) => {
+    if (shot.selected) return;
+    setStripPinned(true);
+    try {
+      await api.selectDeviceScreenshot(shot.path);
+      if (import.meta.env?.DEV) console.log('[DeviceMirror] 已选定截图:', shot.path);
+      setShots((prev) => prev.map((item) => ({ ...item, selected: item.path === shot.path })));
+      toast.success('已选定这张截图', { description: 'agent 会读取你选中的这一张' });
+    } catch (err: any) {
+      if (import.meta.env?.DEV) console.warn('[DeviceMirror] 选定截图失败:', err);
+      toast.error('选定失败', { description: err?.message || '请重新截图后再选' });
+    }
+  }, []);
+
+  // 已保存状态短暂停留后回归常态，避免按钮长期停在完成态
+  useEffect(() => {
+    if (shotState !== 'done') return;
+    const timer = window.setTimeout(() => setShotState('idle'), 1800);
+    return () => window.clearTimeout(timer);
+  }, [shotState]);
+
+  // 截图条只在截图后自动展开几秒，看完即收，不长期占画面
+  useEffect(() => {
+    if (!stripOpen || stripPinned) return;
+    const timer = window.setTimeout(() => setStripOpen(false), 6000);
+    return () => window.clearTimeout(timer);
+  }, [stripOpen, stripPinned, shots.length]);
+
+  // 换设备时重置截图状态并换一份截图条
+  useEffect(() => {
+    setShotState('idle');
+    setStripOpen(false);
+    setStripPinned(false);
+    void refreshShots();
+  }, [refreshShots]);
 
   // 触发反向控制
   const handleAction = useCallback(
@@ -857,6 +944,48 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
                 </span>
               )}
 
+              {shots.length > 0 && (
+                <button
+                  type="button"
+                  title={
+                    stripOpen
+                      ? '收起截图历史'
+                      : `截图历史（${shots.length} 张，点选一张让 agent 读取）`
+                  }
+                  onClick={() => {
+                    setStripPinned(!stripOpen);
+                    setStripOpen((v) => !v);
+                  }}
+                  className={`p-1 rounded transition-colors cursor-pointer ${
+                    stripOpen
+                      ? 'text-[#a5b4fc] hover:bg-[#3f3f46]'
+                      : 'text-[#a1a1aa] hover:text-white hover:bg-[#3f3f46]'
+                  }`}
+                >
+                  <Images size={11} />
+                </button>
+              )}
+
+              <button
+                type="button"
+                title="截图：保存当前画面，可让 agent 读取分析"
+                disabled={shotState === 'capturing'}
+                onClick={() => void handleCaptureShot()}
+                className={`p-1 rounded transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                  shotState === 'done'
+                    ? 'text-[#34d399]'
+                    : 'text-[#a1a1aa] hover:text-white hover:bg-[#3f3f46]'
+                }`}
+              >
+                {shotState === 'capturing' ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : shotState === 'done' ? (
+                  <Check size={11} />
+                ) : (
+                  <Camera size={11} />
+                )}
+              </button>
+
               <button
                 type="button"
                 title="重新连接"
@@ -978,6 +1107,36 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
             )}
 
           </div>
+
+          {/* 截图条：点哪张，agent 就读哪张（默认收起，截图后短暂露面） */}
+          {stripOpen && shots.length > 0 && (
+            <div
+              onMouseEnter={() => setStripPinned(true)}
+              className="shrink-0 h-[50px] flex items-center gap-1.5 px-2 overflow-x-auto overflow-y-hidden bg-[#1c1c21] border-t border-[#3f3f46]/60"
+            >
+              <span className="shrink-0 pr-0.5 text-[10px] text-[#71717a] select-none">截图</span>
+              {shots.map((shot) => (
+                <button
+                  key={shot.path}
+                  type="button"
+                  onClick={() => void handleSelectShot(shot)}
+                  title={shot.selected ? '当前选定的截图：agent 读这一张' : '点选这张：让 agent 读它'}
+                  className={`relative shrink-0 h-[38px] rounded-[4px] overflow-hidden border transition-all cursor-pointer ${
+                    shot.selected
+                      ? 'border-[#818cf8] ring-1 ring-[#818cf8]/70'
+                      : 'border-[#3f3f46] opacity-75 hover:opacity-100 hover:border-[#71717a]'
+                  }`}
+                >
+                  <img
+                    src={imageSrc(shot.path)}
+                    alt="设备截图"
+                    draggable={false}
+                    className="h-full w-auto object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

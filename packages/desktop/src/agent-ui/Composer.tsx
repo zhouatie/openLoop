@@ -11,6 +11,7 @@ import {
   IconCheck,
   IconChip,
   IconFile,
+  IconCamera,
   IconReferenceFile,
   IconChatLines,
   IconShield,
@@ -26,6 +27,7 @@ import type { ComposerEditorHandle } from './composer-editor/ComposerEditor';
 import type { EditorProjection } from './composer-editor/projection';
 import { sessionMention, taskMention } from './mentions';
 import { clipboardImageFiles } from './clipboard-images';
+import { DeviceScreenshotPicker } from './DeviceScreenshotPicker';
 import type { TaskActionMode } from './TaskActionPanel';
 import { useShortcuts } from '../context/ShortcutContext';
 import { useShortcutBindings } from '../hooks/useShortcutBindings';
@@ -261,6 +263,8 @@ export const Composer = React.memo(function Composer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
+  /** 设备截图选择器：挑好的图走同一条附件管线 */
+  const [screenshotPickerOpen, setScreenshotPickerOpen] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
   /** 编辑器里的草稿文本（chip 展开成 `@path`）：发送与可发送判断都用它 */
   const [text, setText] = useState(value);
@@ -529,6 +533,14 @@ const SERVICE_ROW = {
     }
     if (onAddFiles) {
       items.push({
+        key: 'screenshot',
+        label: '设备截图',
+        alias: 'shot',
+        description: '把设备镜像里的截图作为附件发给 agent',
+        icon: <IconCamera size={16} />,
+        section: '添加',
+      });
+      items.push({
         key: 'file',
         label: '文件',
         alias: 'file',
@@ -600,6 +612,11 @@ const SERVICE_ROW = {
           if (import.meta.env?.DEV) console.log('[Composer] 打开启动服务面板');
           setMenu(null);
           onServiceAction?.();
+          return;
+        }
+        if (choice.key === 'screenshot') {
+          setMenu(null);
+          setScreenshotPickerOpen(true);
           return;
         }
         if (choice.key.startsWith('plugin:')) {
@@ -1071,6 +1088,12 @@ const SERVICE_ROW = {
             </div>
           </div>
         )}
+
+        <DeviceScreenshotPicker
+          open={screenshotPickerOpen}
+          onClose={() => setScreenshotPickerOpen(false)}
+          onPick={(files) => acceptFiles(files)}
+        />
 
         {isDragging && (
           <div className={styles.dropOverlay} aria-hidden>
