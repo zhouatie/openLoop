@@ -24,8 +24,14 @@ const SIMCTL_JPEG_QUALITY = 80;
 const FIRST_FRAME_TIMEOUT_MS = 8000;
 /** 已在出画面后，帧间隔超过该值判定上游断流 */
 const STREAM_IDLE_TIMEOUT_MS = 6000;
-/** 送往前端的帧率上限：面板只有 300px 宽，全速推流只会白烧解码 */
-const MAX_BROADCAST_FPS = 15;
+/** 送往前端的帧率上限：WDA 侧已调到 30fps，这里只做兜底限速 */
+const MAX_BROADCAST_FPS = 30;
+/** 限速判定的容差：上游帧间隔天然抖动，卡死阈值会把 30fps 成对丢成 15fps */
+const FRAME_INTERVAL_TOLERANCE_MS = 6;
+/** WDA MJPEG 的目标帧率：默认只有 10fps，画面发涩的主因 */
+const WDA_MJPEG_FRAMERATE = 30;
+/** 调参结果的复用时长：同一端点在该时间内不重复设置 */
+const WDA_TUNE_TTL_MS = 5 * 60 * 1000;
 /** 最后一路订阅者离开后保持上游的时间，避免界面重挂时整条管线重建 */
 const IDLE_TEARDOWN_MS = 5000;
 /** 单会话累计缓冲上限，防止异常上游撑爆内存 */
@@ -221,6 +227,9 @@ export interface IosStreamOptions {
  * 这样重复挂载镜像面板不会叠加 WDA 客户端，也不会并发抓帧互相删临时文件。
  */
 class IosStreamSession {
+  /** 端点 → 上次调参时间：调参是幂等的，但无需每次开流都发一遍 */
+  private static tunedAt = new Map<string, number>();
+
   private viewers = new Set<ServerResponse>();
   private mode: 'wda-mjpeg' | 'wda-screenshot' | 'simctl' | null = null;
   private lastFrame: Buffer | null = null;
@@ -373,7 +382,8 @@ class IosStreamSession {
     this.lastFrame = frame;
 
     // 超出帧率上限直接丢弃最新帧：宁可丢帧也不能让浏览器排队解码
-    if (now - this.lastBroadcastAt < Math.floor(1000 / MAX_BROADCAST_FPS)) return;
+    const minInterval = Math.floor(1000 / MAX_BROADCAST_FPS) - FRAME_INTERVAL_TOLERANCE_MS;
+    if (now - this.lastBroadcastAt < minInterval) return;
     this.lastBroadcastAt = now;
 
     for (const res of Array.from(this.viewers)) {
@@ -387,6 +397,8 @@ class IosStreamSession {
     this.starting = true;
     try {
       this.startWatchdog();
+      await this.tuneWdaMjpeg();
+      if (this.closed) return;
       const native = await this.tryNativeMjpeg();
       if (this.closed || native) return;
       await this.startPolling();
@@ -395,6 +407,37 @@ class IosStreamSession {
       this.failAll('iOS 画面管线异常，请重新连接');
     } finally {
       this.starting = false;
+    }
+  }
+
+  /**
+   * 调高 WDA 的 MJPEG 帧率。
+   * WDA 默认只推 10fps，镜像看起来「发涩」主要来自这里；设置随会话生效，
+   * 老版本 WDA 没有该接口时静默跳过，不影响后续降级链路。
+   */
+  private async tuneWdaMjpeg(): Promise<void> {
+    const endpoint = this.options.wdaEndpoint;
+    const last = IosStreamSession.tunedAt.get(endpoint) || 0;
+    if (Date.now() - last < WDA_TUNE_TTL_MS) return;
+    IosStreamSession.tunedAt.set(endpoint, Date.now());
+
+    try {
+      const statusRes = await fetch(`${endpoint}/status`);
+      if (!statusRes.ok) return;
+      const status: any = await statusRes.json();
+      const sessionId = status.sessionId || '';
+      if (!sessionId) return;
+
+      const res = await fetch(`${endpoint}/session/${sessionId}/appium/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: { mjpegServerFramerate: WDA_MJPEG_FRAMERATE } }),
+      });
+      if (res.ok) {
+        logger.info(`[IosStreamProxy] 已把 WDA 推流帧率调到 ${WDA_MJPEG_FRAMERATE}fps (${endpoint})`);
+      }
+    } catch (err: any) {
+      logger.debug(`[IosStreamProxy] 调整 WDA 推流帧率失败: ${err?.message}`);
     }
   }
 

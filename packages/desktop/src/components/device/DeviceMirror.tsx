@@ -25,6 +25,18 @@ import { WebCodecsVideoDecoder, WebGLVideoFrameRenderer, BitmapVideoFrameRendere
 import { ScrcpyVideoCodecId } from '@yume-chan/scrcpy';
 import { DeviceLeaseSnapshot } from '@openloop/core';
 
+/** 把屏幕坐标钳制到画面内，手势滑出边界时也能拿到合法比例 */
+function clampRatio(
+  rect: { left: number; top: number; width: number; height: number },
+  clientX: number,
+  clientY: number
+) {
+  return {
+    ratioX: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
+    ratioY: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)),
+  };
+}
+
 /** 紧贴屏幕的竖向操作按键列宽度（px） */
 const ACTION_RAIL_WIDTH = 32;
 /** 画面底部截图条高度（px）：与卡片内 CSS 高度保持一致 */
@@ -265,10 +277,7 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
       return null;
     }
 
-    const ratioX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const ratioY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-
-    return { ratioX, ratioY, rect };
+    return { ...clampRatio(rect, e.clientX, e.clientY), rect };
   }, [getInscribedRect]);
 
   /** 这台设备的截图列表（含「当前选定」标记） */
@@ -398,6 +407,9 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     const info = getEventRatio(e);
     if (!info) return;
 
+    // 捕获指针：手指/鼠标拖出画面再松手也能收到 pointerup，滑动不会整段丢掉
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+
     pointerStartRef.current = {
       ratioX: info.ratioX,
       ratioY: info.ratioY,
@@ -412,9 +424,14 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     if (isBusy || !pointerStartRef.current) return;
     const start = pointerStartRef.current;
     pointerStartRef.current = null;
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
 
-    const info = getEventRatio(e);
-    if (!info || !start) return;
+    // 松手位置可能已经越出画面：钳制到边界，而不是把这次操作丢掉
+    const rect = getInscribedRect();
+    if (!rect) return;
+    const info = clampRatio(rect, e.clientX, e.clientY);
 
     const dx = e.clientX - start.clientX;
     const dy = e.clientY - start.clientY;
@@ -1067,6 +1084,10 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
             className="relative flex-1 min-h-0 bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-crosshair"
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
+            onPointerCancel={() => {
+              // 系统打断时清掉起点，避免下一次误判成滑动
+              pointerStartRef.current = null;
+            }}
           >
             {platform === 'android' ? (
               <div
