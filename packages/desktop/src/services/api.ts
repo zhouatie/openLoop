@@ -1799,7 +1799,7 @@ export class DesktopApiService {
     platform: 'android' | 'ios';
     serial: string;
     action: {
-      type: 'tap' | 'swipe' | 'text' | 'key' | 'launch';
+      type: 'tap' | 'swipe' | 'text' | 'key' | 'launch' | 'openUrl';
       x?: number;
       y?: number;
       endX?: number;
@@ -1808,6 +1808,7 @@ export class DesktopApiService {
       key?: string;
       text?: string;
       appPackage?: string;
+      url?: string;
     };
     wdaEndpoint?: string;
   }): Promise<{ success: boolean; message?: string; busy?: boolean }> {

@@ -4,6 +4,7 @@ import {
   Apple,
   RotateCcw,
   Keyboard,
+  Link2,
   X,
   ArrowLeft,
   Home,
@@ -97,6 +98,10 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   const [deviceSize, setDeviceSize] = useState<DeviceSize>({ width: 1080, height: 2400 });
   const [inputText, setInputText] = useState('');
   const [inputOpen, setInputOpen] = useState(false);
+  /** 打开链接浮层：把网页地址或应用深链直接下发给当前设备 */
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkInput, setLinkInput] = useState('');
+  const [linkOpening, setLinkOpening] = useState(false);
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const autoRetryRef = useRef(0);
   /**
@@ -357,6 +362,35 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     },
     [isBusy, platform, serial, wdaEndpoint]
   );
+
+  // 让当前设备打开链接（网页地址或 orpheus:// 这类应用深链）
+  const handleOpenUrl = useCallback(async () => {
+    const url = linkInput.trim();
+    if (!url || linkOpening) return;
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) {
+      toast.error('链接格式不正确', { description: '请填写带协议的地址，例如 https:// 或 orpheus://' });
+      return;
+    }
+    setLinkOpening(true);
+    try {
+      if (import.meta.env?.DEV) console.log('[DeviceMirror] 下发打开链接:', { platform, serial, url });
+      await api.executeDeviceAction({
+        platform,
+        serial,
+        action: { type: 'openUrl', url },
+        wdaEndpoint,
+      });
+      toast.success('已发送打开指令', {
+        description: url.length > 56 ? `${url.slice(0, 54)}…` : url,
+      });
+      setLinkOpen(false);
+    } catch (err: any) {
+      if (import.meta.env?.DEV) console.warn('[DeviceMirror] 打开链接失败:', err);
+      toast.error('打开链接失败', { description: err?.message || '请确认设备在线，且链接能被目标 App 接收' });
+    } finally {
+      setLinkOpening(false);
+    }
+  }, [linkInput, linkOpening, platform, serial, wdaEndpoint]);
 
   // 指针按下
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -794,7 +828,10 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
           <button
             type="button"
             disabled={isBusy}
-            onClick={() => setInputOpen((v) => !v)}
+            onClick={() => {
+              setInputOpen((v) => !v);
+              setLinkOpen(false);
+            }}
             title="发送文本输入（⌘ + Enter 发送）"
             className={`w-8 h-9 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${
               inputOpen
@@ -803,6 +840,22 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
             }`}
           >
             <Keyboard size={14} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => {
+              setLinkOpen((v) => !v);
+              setInputOpen(false);
+            }}
+            title="打开链接（网页地址或 orpheus:// 这类应用深链）"
+            className={`w-8 h-9 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${
+              linkOpen
+                ? 'bg-[#eeedfd] text-[#4f46e5]'
+                : 'text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc]'
+            }`}
+          >
+            <Link2 size={13} strokeWidth={1.9} />
           </button>
         </div>
 
@@ -1193,6 +1246,58 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
               className="h-[24px] px-3 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium transition-colors active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
             >
               发送
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 打开链接浮层：网页地址或应用深链直接下发到当前设备 */}
+      {linkOpen && (
+        <div
+          style={floatPanel ? { left: `${floatPanel.left}px`, width: `${floatPanel.width}px` } : undefined}
+          className="pointer-events-auto absolute top-1/2 -translate-y-1/2 z-30 flex flex-col bg-white border border-[#e3e3e8] rounded-[10px] shadow-[0_12px_32px_rgba(0,0,0,0.14)] overflow-hidden"
+        >
+          <div className="h-[32px] px-2.5 flex items-center justify-between border-b border-[#f1f1f4] shrink-0">
+            <div className="flex items-center gap-1.5">
+              <Link2 size={12} className="text-[#85858d]" />
+              <span className="text-[11px] font-medium text-[#1c1c21]">打开链接</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLinkOpen(false)}
+              title="关闭"
+              className="w-5 h-5 rounded-[4px] text-[#85858d] hover:text-[#1c1c21] hover:bg-[#f1f1f4] flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <X size={12} />
+            </button>
+          </div>
+
+          <input
+            value={linkInput}
+            onChange={(e) => setLinkInput(e.target.value)}
+            disabled={isBusy}
+            autoFocus
+            spellCheck={false}
+            placeholder={isBusy ? '自动化任务执行中，打开链接已锁定' : 'orpheus://… 或 https://…'}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void handleOpenUrl();
+              }
+            }}
+            className="h-[34px] w-full bg-transparent border-0 outline-none px-2.5 font-mono text-[11px] text-[#1c1c21] placeholder-[#a1a1aa] disabled:opacity-50"
+          />
+
+          <div className="px-2.5 py-2 border-t border-[#f1f1f4] flex items-center justify-between gap-2">
+            <span className="text-[10px] text-[#a1a1aa]">回车打开</span>
+            <button
+              type="button"
+              disabled={isBusy || linkOpening || !linkInput.trim()}
+              onClick={() => void handleOpenUrl()}
+              className="h-[24px] px-3 rounded-[5px] bg-[#1c1c21] hover:bg-[#2e2f36] text-white text-[11px] font-medium transition-colors active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-1"
+            >
+              {linkOpening && <Loader2 size={10} className="animate-spin" />}
+              打开
             </button>
           </div>
         </div>

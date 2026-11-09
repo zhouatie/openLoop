@@ -16,8 +16,30 @@ function toAdbInputText(text: string): string {
   );
 }
 
+/**
+ * 把字符串包成设备端 shell 的单引号参数，内部的单引号按 '\'' 断开转义
+ */
+function quoteForDeviceShell(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * 把 am start / simctl 的多行报错压成一句可读提示
+ */
+function summarizeOpenUrlError(raw: string, platform: 'android' | 'ios'): string {
+  const text = String(raw || '');
+  if (/unable to resolve|No Activity found/i.test(text)) {
+    return '设备上没有能打开该链接的 App';
+  }
+  if (platform === 'ios' && /LSApplicationWorkspaceErrorDomain|failed to open/i.test(text)) {
+    return '模拟器上没有能打开该链接的 App';
+  }
+  const firstLine = text.split('\n').map((line) => line.trim()).find((line) => line && !line.startsWith('Command failed:'));
+  return firstLine || '打开链接失败';
+}
+
 export interface DeviceActionPayload {
-  type: 'tap' | 'swipe' | 'text' | 'key' | 'launch';
+  type: 'tap' | 'swipe' | 'text' | 'key' | 'launch' | 'openUrl';
   x?: number;
   y?: number;
   endX?: number;
@@ -30,6 +52,8 @@ export interface DeviceActionPayload {
   key?: 'back' | 'home' | 'power' | 'enter' | string;
   text?: string;
   appPackage?: string;
+  /** 目标链接：网页地址或应用深链（如 orpheus://…） */
+  url?: string;
 }
 
 export interface DeviceActionResult {
@@ -193,6 +217,22 @@ export class DeviceActionController {
           return { success: true };
         }
 
+        case 'openUrl': {
+          const url = (action.url || '').trim();
+          if (!url) throw new Error('未提供链接');
+          try {
+            // 整条命令作为单一参数下发，避免链接里的 & 被设备端 shell 截断
+            await execFileAsync(
+              'adb',
+              [...serialArgs, 'shell', `am start -a android.intent.action.VIEW -d ${quoteForDeviceShell(url)}`],
+              { timeout: 8000 }
+            );
+            return { success: true };
+          } catch (err: any) {
+            throw new Error(summarizeOpenUrlError(err?.stderr || err?.message, 'android'));
+          }
+        }
+
         default:
           return { success: false, message: `不支持的操作类型: ${(action as any).type}` };
       }
@@ -210,6 +250,21 @@ export class DeviceActionController {
     action: DeviceActionPayload,
     rawWdaEndpoint?: string
   ): Promise<DeviceActionResult> {
+    // 打开链接不依赖 WebDriverAgent：网页与深链直接交给模拟器转发
+    if (action.type === 'openUrl') {
+      const url = (action.url || '').trim();
+      if (!url) return { success: false, message: '未提供链接' };
+      if (!udid) return { success: false, message: '缺少模拟器 UDID，无法打开链接' };
+      try {
+        await execFileAsync('xcrun', ['simctl', 'openurl', udid, url], { timeout: 10000 });
+        return { success: true };
+      } catch (err: any) {
+        const message = summarizeOpenUrlError(err?.stderr || err?.message, 'ios');
+        logger.warn(`[IosAction] 打开链接失败 (${url}): ${message}`);
+        return { success: false, message };
+      }
+    }
+
     const endpoint = IosDeviceManager.resolveEndpoint(rawWdaEndpoint);
     try {
       // 1. 获取现有活跃 session
