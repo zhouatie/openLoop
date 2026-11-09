@@ -70,8 +70,8 @@ export function createDevServerRoutes(deps: DevServerRouteDeps): DevServerRouteH
         invalidCwd(res, meta);
         return true;
       }
-      const saved = saveConfig(cwd, { command: body?.command, port: body?.port, nodeBinPath: body?.nodeBinPath });
-      log?.(`[DevServer:Start] 拉起开发服务 (目录: ${cwd}, 端口: ${saved.port ?? '自动'})`);
+      const saved = saveConfig(cwd, { command: body?.command, nodeBinPath: body?.nodeBinPath });
+      log?.(`[DevServer:Start] 拉起开发服务 (目录: ${cwd}, 命令: ${saved.command || '自动'})`);
       sendJson(res, 200, await manager().start(cwd, saved), meta);
       return true;
     }
@@ -95,7 +95,7 @@ export function createDevServerRoutes(deps: DevServerRouteDeps): DevServerRouteH
         invalidCwd(res, meta);
         return true;
       }
-      saveConfig(cwd, { command: body?.command, port: body?.port, nodeBinPath: body?.nodeBinPath });
+      saveConfig(cwd, { command: body?.command, nodeBinPath: body?.nodeBinPath });
       sendJson(res, 200, await manager().status(cwd, readConfig(cwd)), meta);
       return true;
     }

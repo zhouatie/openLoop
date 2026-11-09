@@ -313,18 +313,17 @@ export class DevServerManager {
     return found;
   }
 
-  /** 合并用户配置：命令与端口以用户保存值为准 */
+  /** 合并用户配置：端口从命令里解析，命令按用户原样执行 */
   public resolve(cwd: string, saved?: DevServerConfig): ResolvedConfig {
     const info = this.detectProject(cwd);
     const root = info.root || path.resolve(cwd || process.cwd());
-    const port = Number(saved?.port) > 0 ? Number(saved?.port) : info.port;
-    const command = withPort(saved?.command?.trim() || info.command, port);
+    const command = saved?.command?.trim() || info.command;
     return {
       ...info,
       root,
       key: devServerProcessKey(root),
       command,
-      port,
+      port: parsePort(command) ?? info.port,
       nodeBinPath: saved?.nodeBinPath?.trim() ? expandHome(saved.nodeBinPath.trim()) : undefined,
     };
   }
@@ -526,11 +525,11 @@ export class DevServerManager {
   }
 }
 
-/** Chitu / RN 的标准启动器认 --port：端口以面板配置为准，旧命令里的端口一律覆盖 */
-function withPort(command: string, port: number): string {
-  if (!/\b(chitu\s+dev|react-native\s+start)\b/.test(command)) return command;
-  const stripped = command.replace(/\s--port(?:=|\s+)\d+/g, '').trim();
-  return `${stripped} --port=${port}`;
+/** 端口取自命令里的 --port：不向命令尾部追加参数，避免破坏 tee / 重定向等管道写法 */
+function parsePort(command: string): number | null {
+  const matched = command.match(/\s--port(?:=|\s+)(\d{2,5})(?!\d)/);
+  const port = matched ? Number(matched[1]) : 0;
+  return port > 0 && port < 65536 ? port : null;
 }
 
 /** 退出原因：优先挑出报错行，挑不到再退回末尾几行，避免只给模型看堆栈尾巴 */
