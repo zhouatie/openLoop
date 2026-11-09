@@ -1208,17 +1208,8 @@ export class WorktreeManager {
 
             // 6. 验证沙箱冲突是否彻底消除
             try {
-              const remainingOutput = execSync('git diff --name-only --diff-filter=U', { cwd: worktreeDir, encoding: 'utf-8' });
-              const remaining = remainingOutput.split('\n').map((s) => s.trim()).filter(Boolean);
-
-              if (remaining.length > 0) {
-                const errMsg = `仍有未消解的冲突文件: ${remaining.join(', ')}`;
-                onLog?.(`[代码冲突自愈 失败] ${errMsg}`);
-                finish({ resolved: false, conflictFiles: remaining, error: errMsg });
-                return;
-              }
-
-              // 检查文件中是否还残留冲突标记 <<<<<<<
+              // 先查标记：Agent 只改了工作区文件、没有 git add 时，索引里仍是未合并状态，
+              // 但内容正确。所以以文件内容为准，再由本节点统一暂存，避免把已消解的改动判成失败。
               let hasConflictMarkers = false;
               for (const f of conflictFiles) {
                 const fullPath = path.join(worktreeDir, f);
@@ -1235,6 +1226,17 @@ export class WorktreeManager {
                 const errMsg = `代码中仍残留 Git 冲突标记 (<<<<<<< 或 >>>>>>>)`;
                 onLog?.(`[代码冲突自愈 失败] ${errMsg}`);
                 finish({ resolved: false, conflictFiles, error: errMsg });
+                return;
+              }
+
+              execSync('git add -A', { cwd: worktreeDir, stdio: 'pipe' });
+              const remainingOutput = execSync('git diff --name-only --diff-filter=U', { cwd: worktreeDir, encoding: 'utf-8' });
+              const remaining = remainingOutput.split('\n').map((s) => s.trim()).filter(Boolean);
+
+              if (remaining.length > 0) {
+                const errMsg = `仍有未消解的冲突文件: ${remaining.join(', ')}`;
+                onLog?.(`[代码冲突自愈 失败] ${errMsg}`);
+                finish({ resolved: false, conflictFiles: remaining, error: errMsg });
                 return;
               }
 
