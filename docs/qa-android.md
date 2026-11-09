@@ -39,6 +39,20 @@ export MIDSCENE_MODEL_FAMILY="qwen3"
 DeepSeek 通过 Magpie 可正常识图，且 Midscene 内置 DeepSeek 专用的坐标解析器。
 已在 Pixel 6 模拟器（Android 16）上跑通「截图定位 → 点击 → 视觉断言」全链路。
 
+## 设备镜像截图
+
+设备镜像标题栏的相机按钮会截下当前画面，保存在数据目录的 `screenshots/` 下。
+截图可以连点多次，截图条会按时间倒序列出这台设备的截图：
+点某一张即「选定」它（高亮描边），刚截的图自动成为选定。
+截图条默认收起，不占画面：截图后自动展开 6 秒即收回，
+也可以点标题栏的历史图标手动展开或收起（悬停时不自动收回）。
+会话里 agent 调用 `qa_device_screenshot` 工具即可读回**选定的那张**
+（没有选定就取最新一张，`fresh: true` 时现场重抓），用于分析界面缺陷。
+
+也可以把截图直接塞进对话：输入框的 ➕ 面板 → 添加 → **设备截图**，
+在弹窗里勾选一张或多张（最多 6 张），确认后作为附件随消息发出；
+服务端会把图片路径拼进正文，agent 读图后直接分析。
+
 ## 使用流程
 
 1. 进入 QA 自动化 → 用例 Tab → 新建用例。
@@ -65,6 +79,9 @@ DeepSeek 通过 Magpie 可正常识图，且 Midscene 内置 DeepSeek 专用的�
 - `GET /api/qa/devices/android/current-app?serial=` — 前台应用包名
 - `POST /api/qa/devices/android/connect` — WiFi ADB 连接（`{ address }`）
 - `POST /api/qa/devices/android/disconnect` — 断开 WiFi ADB
+- `POST /api/qa/devices/screenshot` — 设备截图（`{ platform, serial }`），返回本地图片路径
+- `GET /api/qa/devices/screenshots?platform=&serial=` — 该设备保存过的截图列表（含 `selected` 标记）
+- `POST /api/qa/devices/screenshots/select` — 选定某张截图（`{ path }`），之后 agent 读这一张
 
 ## 产物位置与清理
 
@@ -73,6 +90,7 @@ DeepSeek 通过 Magpie 可正常识图，且 Midscene 内置 DeepSeek 专用的�
 | 步骤截图 | `~/.openloop/artifacts/<runId>/step_N.png` | 时间线回放用，随运行记录删除 |
 | Midscene 调试产物 | `~/.openloop/midscene/` | dump、规划日志、报告，纯诊断数据 |
 | 任务附件 | `~/.openloop/attachments/` | 任务上传的图片 |
+| 设备截图 | `~/.openloop/screenshots/device-<platform>-<串号>-<时间戳>.png` | 镜像面板点「截图」保存，只保留最近 30 张（选定的那张不删） |
 
 Midscene 默认把调试产物写进进程工作目录的 `midscene_run/`。Core 启动时会把
 `MIDSCENE_RUN_DIR` 重定向到数据目录，避免污染仓库，并纳入存储统计。

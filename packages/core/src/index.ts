@@ -33,6 +33,7 @@ export * from './qa/qa-driver-factory';
 export * from './qa/device-lease-pool';
 export * from './qa/android-device-manager';
 export * from './qa/ios-device-manager';
+export * from './qa/device-screenshot';
 export * from './qa/model-env';
 export * from './qa/runtime-paths';
 export * from './qa/artifact-paths';
