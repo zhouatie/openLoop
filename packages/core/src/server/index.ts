@@ -3563,6 +3563,16 @@ ${existingSubSummary}
         return this.sendJson(res, stopRes.success ? 200 : 400, stopRes, reqMeta);
       }
 
+      // 在原生窗口打开设备：iOS 走 Simulator.app，Android 真机走 scrcpy、模拟器带窗口重启
+      if (pathname === '/api/qa/devices/open-window' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        const winRes =
+          body.platform === 'ios'
+            ? await IosDeviceManager.openSimulatorWindow(body.udid || body.serial)
+            : await AndroidDeviceManager.openNativeWindow(body.serial);
+        return this.sendJson(res, winRes.success ? 200 : 400, winRes, reqMeta);
+      }
+
       // 构建并启动 WebDriverAgentRunner（iOS 流畅串流与反向控制的前提）
       if (pathname === '/api/qa/wda/launch' && method === 'POST') {
         const body = await this.parseJsonBody(req);

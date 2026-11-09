@@ -17,6 +17,7 @@ import {
   Play,
   Camera,
   Images,
+  AppWindow,
 } from 'lucide-react';
 import { api, type DeviceScreenshotResult } from '../../services/api';
 import { imageSrc } from '../../agent-ui/local-image';
@@ -115,6 +116,8 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   const [linkInput, setLinkInput] = useState('');
   const [linkOpening, setLinkOpening] = useState(false);
   const [reconnectNonce, setReconnectNonce] = useState(0);
+  /** 正在拉起外部模拟器窗口 */
+  const [nativeOpening, setNativeOpening] = useState(false);
   const autoRetryRef = useRef(0);
   /**
    * 单例视频渲染器：跨重连复用同一个 Canvas / WebGL 上下文。
@@ -291,6 +294,21 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   }, [platform, serial]);
 
   /** 立刻截下当前画面：图片落在本地，agent 可通过 qa_device_screenshot 读回 */
+  const handleOpenNativeWindow = useCallback(async () => {
+    if (nativeOpening) return;
+    setNativeOpening(true);
+    try {
+      const res = await api.openDeviceNativeWindow({ platform, serial });
+      if (import.meta.env?.DEV) console.log('[DeviceMirror] 打开原生设备窗口:', { platform, serial, res });
+      if (res.success) toast.success(res.message || '已在外部窗口打开');
+      else toast.error(res.message || '打开模拟器窗口失败');
+    } catch (err: any) {
+      toast.error(err?.message || '打开模拟器窗口失败');
+    } finally {
+      setNativeOpening(false);
+    }
+  }, [nativeOpening, platform, serial]);
+
   const handleCaptureShot = useCallback(async () => {
     if (shotState === 'capturing') return;
     setShotState('capturing');
@@ -1054,6 +1072,20 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
                 ) : (
                   <Camera size={11} />
                 )}
+              </button>
+
+              <button
+                type="button"
+                title={
+                  platform === 'ios'
+                    ? '在模拟器窗口中打开（Simulator 原生窗口）'
+                    : '在模拟器窗口打开（无窗口实例会带窗口重启）'
+                }
+                disabled={nativeOpening || isBusy}
+                onClick={() => void handleOpenNativeWindow()}
+                className="p-1 rounded text-[#a1a1aa] hover:text-white hover:bg-[#3f3f46] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {nativeOpening ? <Loader2 size={11} className="animate-spin" /> : <AppWindow size={11} />}
               </button>
 
               <button

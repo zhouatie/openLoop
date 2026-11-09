@@ -1629,6 +1629,20 @@ export class DesktopApiService {
     });
   }
 
+  async openDeviceNativeWindow(target: {
+    platform: 'android' | 'ios';
+    serial: string;
+  }): Promise<{ success: boolean; message: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 在原生窗口打开设备:', target);
+    }
+    return requestJson<{ success: boolean; message: string }>(`${BASE_URL}/api/qa/devices/open-window`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(target),
+    });
+  }
+
   async captureDeviceScreenshot(payload: {
     platform: 'android' | 'ios';
     serial?: string;

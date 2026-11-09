@@ -125,6 +125,58 @@ export class AndroidDeviceManager {
   }
 
   /**
+   * 在原生窗口打开设备：真机开 scrcpy 窗口；无窗口运行的模拟器带窗口重启该 AVD
+   * （模拟器的 Qt 窗口只能在启动时决定，跑起来后无法中途显示）
+   */
+  static async openNativeWindow(serial?: string): Promise<{ success: boolean; message: string }> {
+    const target = (serial || '').trim();
+    const running = await AndroidDeviceManager.getRunningEmulators();
+    const match = running.find((item) => target && item.serial === target);
+
+    if (!match) {
+      // 不是本机模拟器：真机开 scrcpy 原生窗口
+      return AndroidDeviceManager.openMirror(target || undefined);
+    }
+    if (await AndroidDeviceManager.isWindowedEmulator(match.pid)) {
+      return { success: true, message: `${match.name} 的模拟器窗口已在运行` };
+    }
+    const stopped = await AndroidDeviceManager.stopEmulator({ pid: match.pid, serial: match.serial });
+    if (!stopped.success) {
+      return { success: false, message: '停止无窗口模拟器失败，无法切换到窗口模式' };
+    }
+    await AndroidDeviceManager.waitForProcessExit(match.pid);
+    const relaunch = await AndroidDeviceManager.launchEmulator(match.name, { showWindow: true });
+    if (!relaunch.success) return relaunch;
+    logger.info(`[AndroidDeviceManager] 已带窗口重启模拟器: ${match.name}`);
+    return { success: true, message: `正在以窗口模式重启 ${match.name}，约需 10-30 秒` };
+  }
+
+  /** 该模拟器进程是否带窗口运行（启动参数不含 -no-window） */
+  private static async isWindowedEmulator(pid?: number): Promise<boolean> {
+    if (!pid) return false;
+    try {
+      const { stdout } = await execAsync(`ps -p ${pid} -o command=`, { timeout: 4000 });
+      return stdout.trim().length > 0 && !stdout.includes('-no-window');
+    } catch {
+      return false;
+    }
+  }
+
+  /** 等模拟器进程真正退出，避免重启时被「已有模拟器在线」拦下 */
+  private static async waitForProcessExit(pid?: number, timeoutMs = 8000): Promise<void> {
+    if (!pid) return;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+
+  /**
    * 获取指定设备当前处于前台焦点的应用包名与 Activity
    */
   static async getCurrentForegroundApp(serial?: string): Promise<{ packageName: string; activityName?: string } | null> {
