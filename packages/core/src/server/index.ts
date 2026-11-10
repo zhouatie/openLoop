@@ -59,6 +59,7 @@ import {
 import { AndroidStreamHub } from '../preview/android-stream-hub';
 import { proxyIosStream, closeAllIosStreams } from '../preview/ios-stream-proxy';
 import { DeviceActionController } from '../preview/device-action-controller';
+import { pushDeviceFile } from '../qa/device-file-transfer';
 import { isQaPlatform } from '../qa/qa-driver';
 import { applyQaModelEnv } from '../qa/model-env';
 import { configureQaRuntimePaths } from '../qa/runtime-paths';
@@ -3655,6 +3656,35 @@ ${existingSubSummary}
         });
         const statusCode = result.busy ? 409 : result.success ? 200 : 400;
         return this.sendJson(res, statusCode, result, reqMeta);
+      }
+
+      // 镜像期间临时熄灭设备物理屏：镜像照常推流，离开镜像时自动恢复
+      if (pathname === '/api/qa/devices/android/screen-power' && method === 'POST') {
+        const body = await this.parseJsonBody(req);
+        try {
+          const result = await AndroidStreamHub.setScreenOff((body.serial || '').toString(), body.off === true);
+          return this.sendJson(res, 200, { success: true, ...result }, reqMeta);
+        } catch (err: any) {
+          return this.sendJson(res, 400, { success: false, message: err?.message || '切换屏幕电源失败' }, reqMeta);
+        }
+      }
+
+      // 本地文件下发到当前设备：普通文件进 /sdcard/Download，安装包直接安装。
+      // 请求体是文件二进制流，不走 JSON 解析，避免把大文件读进内存。
+      if (pathname === '/api/qa/devices/file-push' && method === 'POST') {
+        try {
+          const pushed = await pushDeviceFile({
+            dataDir: this.store.getDataDir(),
+            serial: parsedUrl.searchParams.get('serial') || undefined,
+            name: parsedUrl.searchParams.get('name') || '',
+            stream: req,
+            contentLength: Number(req.headers['content-length'] || 0) || undefined,
+          });
+          return this.sendJson(res, 200, pushed, reqMeta);
+        } catch (err: any) {
+          serverLogger.warn(`[QA:DeviceFilePush] 文件下发失败: ${err?.message}`);
+          return this.sendJson(res, 400, { success: false, message: err?.message || '文件下发失败' }, reqMeta);
+        }
       }
 
       const deviceActionMatch = pathname.match(/^\/api\/qa\/devices\/(android|ios)\/([^/]+)\/action$/);

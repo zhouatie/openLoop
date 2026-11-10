@@ -40,6 +40,19 @@ export interface DeviceScreenshotResult {
   selected?: boolean;
 }
 
+/** 本地文件下发结果：普通文件返回设备路径，安装包返回 installed */
+export interface DeviceFilePushResult {
+  success: boolean;
+  serial: string;
+  name: string;
+  bytes: number;
+  /** 推送到设备后的路径；安装安装包时为空 */
+  path?: string;
+  /** 是否是安装包并已安装 */
+  installed?: boolean;
+  message: string;
+}
+
 function resolveBackendUrls(): { httpUrl: string; wsUrl: string } {
   if (typeof window !== 'undefined' && window.location) {
     const { protocol, hostname, port, search } = window.location;
@@ -1681,6 +1694,43 @@ export class DesktopApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path }),
     });
+  }
+
+  /** 镜像期间熄灭 / 点亮设备物理屏（Android scrcpy 控制通道，离开镜像自动恢复） */
+  async setAndroidScreenPower(payload: {
+    serial: string;
+    off: boolean;
+  }): Promise<{ success: boolean; off: boolean; effective: boolean | null; message?: string }> {
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 切换设备屏幕电源:', payload.serial, payload.off ? '关闭' : '点亮');
+    }
+    return requestJson<{ success: boolean; off: boolean; effective: boolean | null; message?: string }>(
+      `${BASE_URL}/api/qa/devices/android/screen-power`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  /** 把本地文件送到设备：普通文件进 /sdcard/Download，安装包直接安装 */
+  async pushDeviceFile(payload: { serial?: string; file: File }): Promise<DeviceFilePushResult> {
+    const query = new URLSearchParams({ name: payload.file.name });
+    if (payload.serial) query.set('serial', payload.serial);
+    if (import.meta.env?.DEV) {
+      console.log('[UI:QA] 下发本地文件到设备:', payload.serial || '默认设备', payload.file.name);
+    }
+    return requestJson<DeviceFilePushResult>(
+      `${BASE_URL}/api/qa/devices/file-push?${query.toString()}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: payload.file,
+      },
+      // 大文件走 adb push，别用默认 15s 截断
+      10 * 60 * 1000
+    );
   }
 
   async getAndroidCurrentApp(serial?: string): Promise<{ packageName: string; activityName?: string }> {

@@ -4,6 +4,7 @@ import type { WebSocket } from 'ws';
 import { Adb, AdbServerClient } from '@yume-chan/adb';
 import { AdbServerNodeTcpConnector } from '@yume-chan/adb-server-node-tcp';
 import { AdbScrcpyClient, AdbScrcpyOptions3_3_3 } from '@yume-chan/adb-scrcpy';
+import { AndroidScreenPowerMode } from '@yume-chan/scrcpy';
 // 独立服务端路径：与 Midscene 内置会话的 DefaultServerPath 隔离，避免互相覆盖推送
 const SERVER_PATH = '/data/local/tmp/openloop-scrcpy-server.jar';
 import { createLogger } from '../logger';
@@ -22,6 +23,15 @@ const IDLE_TEARDOWN_MS = 20000;
  */
 const MAX_SUBSCRIBER_BACKLOG_BYTES = 1024 * 1024;
 
+/**
+ * 缓存给新订阅者的 GOP 字节上限。
+ * 新订阅者只补关键帧、不补后续参考帧就会出现花屏，所以缓存从关键帧起的一整段；
+ * 超过上限说明这一段太长（迟迟没有新关键帧），宁可丢弃等下一个关键帧，也不无限吃内存。
+ */
+const MAX_GOP_BYTES = 8 * 1024 * 1024;
+/** 新订阅者补齐 GOP 的最长等待时间；超时就不阻塞，直接跟随实时帧 */
+const GOP_WAIT_TIMEOUT_MS = 5000;
+
 export interface StreamMetadata {
   codec: string;
   width: number;
@@ -32,12 +42,18 @@ export class AndroidStreamSession {
   readonly serial: string;
   private subscribers = new Set<WebSocket>();
   private scrcpyClient: any = null;
-  private isStarting = false;
+  private startingTask: Promise<void> | null = null;
   private isDestroyed = false;
   private idleTimer: NodeJS.Timeout | null = null;
   private metadata: StreamMetadata | null = null;
   private lastConfigPacket: Buffer | null = null;
-  private lastIFramePacket: Buffer | null = null;
+  /** 当前 GOP 的完整帧序列（从关键帧开始），供新订阅者补齐参考链 */
+  private gopPackets: Buffer[] = [];
+  private gopBytes = 0;
+  private gopComplete = false;
+  private gopWaiters = new Set<(ready: boolean) => void>();
+  /** 镜像期间是否已关闭设备物理屏幕，用于离开时恢复 */
+  private screenOff = false;
   private onDestroyCallback?: () => void;
 
   constructor(serial: string, onDestroy?: () => void) {
@@ -62,29 +78,31 @@ export class AndroidStreamSession {
       this.idleTimer = null;
     }
 
-    this.subscribers.add(ws);
-    logger.info(`[${this.serial}] 新客户端接入实时流，当前订阅数: ${this.subscribers.size}`);
+    // 监听断开（先挂监听，避免补齐 GOP 期间客户端离开漏掉清理）
+    ws.once('close', () => {
+      this.unsubscribe(ws);
+    });
 
-    // 如果流已经在跑，立刻向新客户端发送 metadata 与缓存的 configuration 帧与首个 I-Frame 关键帧
+    // 流已经在跑：先补 metadata 与 configuration，再等 GOP 补齐后整段回放。
+    // 只回放关键帧、不补后续参考帧会让浏览器解出花屏，所以这里回放从关键帧起的完整一段。
     if (this.metadata && ws.readyState === ws.OPEN) {
       ws.send(JSON.stringify({ type: 'metadata', ...this.metadata }));
       if (this.lastConfigPacket) {
         ws.send(this.lastConfigPacket);
       }
-      if (this.lastIFramePacket) {
-        ws.send(this.lastIFramePacket);
+      // 补齐期间不挂进订阅表：实时帧插进回放序列里会让解码器参考链错乱
+      await this.waitForGop();
+      if (this.isDestroyed || ws.readyState !== ws.OPEN) return;
+      for (const packet of this.gopPackets) {
+        ws.send(packet, { binary: true });
       }
     }
 
-    // 监听断开
-    ws.once('close', () => {
-      this.unsubscribe(ws);
-    });
+    this.subscribers.add(ws);
+    logger.info(`[${this.serial}] 新客户端接入实时流，当前订阅数: ${this.subscribers.size}`);
 
     // 确保 scrcpy 服务已拉起
-    if (!this.scrcpyClient && !this.isStarting) {
-      await this.startScrcpy();
-    }
+    await this.ensureStarted();
   }
 
   /**
@@ -95,6 +113,8 @@ export class AndroidStreamSession {
     logger.info(`[${this.serial}] 客户端断开实时流，剩余订阅数: ${this.subscribers.size}`);
 
     if (this.subscribers.size === 0 && !this.isDestroyed) {
+      // 最后一个观看者离开：立刻把物理屏点亮，不让用户拿到一块黑屏
+      void this.restoreScreen();
       // 启动空闲倒计时
       if (this.idleTimer) clearTimeout(this.idleTimer);
       this.idleTimer = setTimeout(() => {
@@ -107,10 +127,22 @@ export class AndroidStreamSession {
   }
 
   /**
+   * 共用一次启动：并发订阅或多个订阅者同时接入时只拉一次 scrcpy 服务
+   */
+  private async ensureStarted(): Promise<void> {
+    if (this.scrcpyClient) return;
+    if (!this.startingTask) {
+      this.startingTask = this.startScrcpy().finally(() => {
+        this.startingTask = null;
+      });
+    }
+    await this.startingTask;
+  }
+
+  /**
    * 启动 scrcpy 服务并建立推流循环
    */
   private async startScrcpy(): Promise<void> {
-    this.isStarting = true;
     try {
       const serverBin = resolveScrcpyServerBinaryPath();
       if (!serverBin) {
@@ -134,7 +166,8 @@ export class AndroidStreamSession {
 
       const scrcpyOptions = new AdbScrcpyOptions3_3_3({
         audio: false,
-        control: false,
+        // 需要控制通道才能下发屏幕电源（镜像时熄灭物理屏）
+        control: true,
         maxSize: 1080,
         sendFrameMeta: true,
         videoBitRate: 3000000,
@@ -143,7 +176,14 @@ export class AndroidStreamSession {
       });
 
       logger.info(`[${this.serial}] 正在启动设备端 scrcpy 服务...`);
-      this.scrcpyClient = await AdbScrcpyClient.start(adb, SERVER_PATH, scrcpyOptions);
+      const client = await AdbScrcpyClient.start(adb, SERVER_PATH, scrcpyOptions);
+
+      // 启动期间用户可能已切走设备：晚到的 client 必须自己关掉，否则设备端进程会残留并占住编码器
+      if (this.isDestroyed) {
+        await client.close().catch(() => {});
+        throw new Error('设备镜像会话已释放');
+      }
+      this.scrcpyClient = client;
 
       const videoStream = await this.scrcpyClient.videoStream;
       const meta = videoStream.metadata || {};
@@ -173,10 +213,8 @@ export class AndroidStreamSession {
     } catch (err: any) {
       logger.error(`[${this.serial}] 启动 scrcpy 流会话失败: ${err.message}`);
       this.broadcastError(err.message);
-      await this.destroy();
+      await this.releaseClient();
       throw err;
-    } finally {
-      this.isStarting = false;
     }
   }
 
@@ -212,9 +250,17 @@ export class AndroidStreamSession {
 
         if (isConfig) {
           this.lastConfigPacket = packetBuffer;
-        }
-        if (isKeyFrame) {
-          this.lastIFramePacket = packetBuffer;
+          // configuration 变化等同于新序列开始：旧 GOP 的参考链已失效
+          this.resetGop();
+        } else if (isKeyFrame) {
+          this.gopPackets = [packetBuffer];
+          this.gopBytes = packetBuffer.length;
+          this.gopComplete = true;
+          this.flushGopWaiters(true);
+        } else if (this.gopComplete) {
+          this.gopPackets.push(packetBuffer);
+          this.gopBytes += packetBuffer.length;
+          if (this.gopBytes > MAX_GOP_BYTES) this.resetGop();
         }
 
         // 推送给所有活跃订阅客户端
@@ -235,6 +281,106 @@ export class AndroidStreamSession {
         });
       }
     }
+  }
+
+  /**
+   * 切换设备物理屏电源（镜像继续跑）：护屏与省电，离开镜像时必须恢复。
+   * 下发后回读合成器电源状态：个别机型会忽略这条控制消息，界面需要知道真实结果。
+   */
+  async setScreenOff(off: boolean): Promise<{ off: boolean; effective: boolean | null }> {
+    const controller = this.scrcpyClient?.controller;
+    if (!controller) throw new Error('设备画面尚未建立，无法切换屏幕电源');
+    await controller.setScreenPowerMode(off ? AndroidScreenPowerMode.Off : AndroidScreenPowerMode.Normal);
+    const mode = await this.waitDisplayPowerMode(off);
+    const effective = mode === 'unknown' ? null : (mode === 'off') === off;
+    // 没真正熄屏就不记成已熄屏：否则离开镜像时无从恢复
+    this.screenOff = effective === false ? false : off;
+    logger.info(
+      `[${this.serial}] 设备物理屏${off ? '熄灭' : '点亮'}指令已下发（合成器电源=${mode}，生效=${effective}）`
+    );
+    return { off: this.screenOff, effective };
+  }
+
+  /**
+   * 短时轮询合成器电源状态，等到与期望一致再返回，避免把下发延迟误判成不支持
+   */
+  private async waitDisplayPowerMode(off: boolean): Promise<'on' | 'off' | 'unknown'> {
+    const expect = off ? 'off' : 'on';
+    let mode: 'on' | 'off' | 'unknown' = 'unknown';
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      mode = await this.readDisplayPowerMode();
+      if (mode === expect) return mode;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    return mode;
+  }
+
+  /**
+   * 读内置屏的合成器电源状态。
+   * scrcpy 的熄屏走 SurfaceControl，只改合成器这一层，
+   * DisplayManagerService 的 Display State 仍是 ON，所以不能拿 dumpsys display 判断。
+   */
+  private async readDisplayPowerMode(): Promise<'on' | 'off' | 'unknown'> {
+    try {
+      const { stdout } = await execFileAsync('adb', ['-s', this.serial, 'shell', 'dumpsys', 'SurfaceFlinger'], {
+        timeout: 8000,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      const matched = String(stdout).match(/connectionType=Internal[\s\S]{0,800}?powerMode=(\w+)/);
+      if (!matched) return 'unknown';
+      return matched[1].toLowerCase() === 'off' ? 'off' : 'on';
+    } catch (err: any) {
+      logger.warn(`[${this.serial}] 读取合成器电源状态失败: ${err.message}`);
+      return 'unknown';
+    }
+  }
+
+  private async restoreScreen(): Promise<void> {
+    if (!this.screenOff) return;
+    try {
+      await this.setScreenOff(false);
+    } catch (err: any) {
+      logger.warn(`[${this.serial}] 恢复设备物理屏失败（scrcpy 退出后设备会自行亮屏）: ${err.message}`);
+      this.screenOff = false;
+    }
+  }
+
+  private resetGop(): void {
+    this.gopPackets = [];
+    this.gopBytes = 0;
+    this.gopComplete = false;
+  }
+
+  private flushGopWaiters(ready: boolean): void {
+    for (const done of [...this.gopWaiters]) done(ready);
+    this.gopWaiters.clear();
+  }
+
+  /** 等一个完整 GOP 就绪；超时返回 false，避免新订阅者长时间黑屏等待 */
+  private waitForGop(timeoutMs = GOP_WAIT_TIMEOUT_MS): Promise<boolean> {
+    if (this.gopComplete) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let timer: NodeJS.Timeout;
+      const finish = (ready: boolean) => {
+        clearTimeout(timer);
+        this.gopWaiters.delete(finish);
+        resolve(ready);
+      };
+      timer = setTimeout(() => finish(false), timeoutMs);
+      this.gopWaiters.add(finish);
+    });
+  }
+
+  private async releaseClient(): Promise<void> {
+    if (!this.scrcpyClient) return;
+    try {
+      logger.info(`[${this.serial}] 正在关闭 scrcpy client...`);
+      await this.scrcpyClient.close();
+    } catch (err: any) {
+      logger.warn(`[${this.serial}] 关闭 scrcpy client 异常: ${err.message}`);
+    }
+    this.scrcpyClient = null;
+    this.screenOff = false;
   }
 
   private broadcastMessage(message: Record<string, unknown>): void {
@@ -266,15 +412,15 @@ export class AndroidStreamSession {
       this.idleTimer = null;
     }
 
-    if (this.scrcpyClient) {
-      try {
-        logger.info(`[${this.serial}] 正在关闭 scrcpy client...`);
-        await this.scrcpyClient.close();
-      } catch (err: any) {
-        logger.warn(`[${this.serial}] 关闭 scrcpy client 异常: ${err.message}`);
-      }
-      this.scrcpyClient = null;
+    // 启动中的会话要先落地，否则晚到的 scrcpy client 会绕过释放流程残留
+    if (this.startingTask) {
+      await this.startingTask.catch(() => {});
     }
+
+    this.flushGopWaiters(false);
+    this.resetGop();
+    await this.restoreScreen();
+    await this.releaseClient();
 
     for (const sub of this.subscribers) {
       try {

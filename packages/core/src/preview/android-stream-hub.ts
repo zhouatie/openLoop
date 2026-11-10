@@ -37,6 +37,18 @@ export class AndroidStreamHub {
   }
 
   /**
+   * 切换某台设备镜像的物理屏电源；无会话时直接报错，不隐式新建会话
+   */
+  static async setScreenOff(serial: string, off: boolean): Promise<{ off: boolean; effective: boolean | null }> {
+    const cleanSerial = serial.trim();
+    const session = this.sessions.get(cleanSerial);
+    if (!session || session.isDestroyedState()) {
+      throw new Error('设备画面尚未连接，无法切换屏幕电源');
+    }
+    return session.setScreenOff(off);
+  }
+
+  /**
    * 关闭并移除指定设备的会话（如设备断开时手动清理）
    */
   static async remove(serial: string): Promise<void> {
