@@ -17,6 +17,8 @@ import {
   Play,
   Camera,
   Images,
+  Paperclip,
+  MonitorOff,
   AppWindow,
   SquareStack,
 } from 'lucide-react';
@@ -143,6 +145,13 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   const [shotState, setShotState] = useState<'idle' | 'capturing' | 'done'>('idle');
   /** 这台设备保存过的截图：截图条可视化选给 agent 读哪一张 */
   const [shots, setShots] = useState<DeviceScreenshotResult[]>([]);
+  /** 这台设备当前是否已熄灭物理屏（镜像照常推流，离开镜像自动点亮） */
+  const [screenOff, setScreenOff] = useState(false);
+  const [screenBusy, setScreenBusy] = useState(false);
+  /** 是否正在把本地文件下发到设备 */
+  const [pushingFile, setPushingFile] = useState(false);
+  const screenOffRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   /** 截图条默认收起，只在截图后短暂展开或手动展开 */
   const [stripOpen, setStripOpen] = useState(false);
   /** 用户手动展开或正在操作时，截图条不再自动收起 */
@@ -188,6 +197,27 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
 
   const isBusy = Boolean(leaseHolder);
 
+  /**
+   * 点亮设备物理屏。
+   * 黑屏是「临时效果」：自动化一开始、切换设备或离开镜像都必须恢复，
+   * 否则用户直接拿设备时只看到一块黑屏。
+   */
+  const restoreScreen = useCallback(() => {
+    if (!screenOffRef.current) return;
+    screenOffRef.current = false;
+    setScreenOff(false);
+    void api.setAndroidScreenPower({ serial, off: false }).catch((err: any) => {
+      if (import.meta.env?.DEV) console.warn('[DeviceMirror] 恢复设备物理屏失败:', err);
+    });
+  }, [serial]);
+
+  // 自动化任务开始时必须亮屏：screencap 与视觉断言都依赖真实画面
+  useEffect(() => {
+    if (isBusy) restoreScreen();
+  }, [isBusy, restoreScreen]);
+
+  useEffect(() => restoreScreen, [restoreScreen]);
+
   // 截图条展开时底部多一条，等比换算时要扣掉这部分高度
   const shotStripHeight = stripOpen && shots.length > 0 ? SHOT_STRIP_HEIGHT : 0;
 
@@ -213,8 +243,14 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
     if (!stageBox || stageBox.width <= 0 || stageBox.height <= 0) return null;
     // 32px 为紧贴屏幕的按键列；36px 为卡片顶部标题栏
     const usableWidth = Math.max(80, stageBox.width - 32);
-    const usableHeight = Math.max(80, stageBox.height - 36 - shotStripHeight);
-    const scale = Math.min(usableWidth / deviceSize.width, usableHeight / deviceSize.height);
+    const budget = (strip: number) => Math.max(80, stageBox.height - 36 - strip);
+    const scaleOf = (strip: number) =>
+      Math.min(usableWidth / deviceSize.width, budget(strip) / deviceSize.height);
+    // 截图条展开时优先撑高外框，手机画面尺寸保持不变；舞台放不下时才退回等比缩小
+    let scale = scaleOf(0);
+    if (deviceSize.height * scale + 36 + shotStripHeight > stageBox.height) {
+      scale = scaleOf(shotStripHeight);
+    }
     return {
       width: Math.max(120, Math.round(deviceSize.width * scale)),
       height: Math.round(deviceSize.height * scale) + 36 + shotStripHeight,
@@ -346,6 +382,65 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
       toast.error('选定失败', { description: err?.message || '请重新截图后再选' });
     }
   }, []);
+
+  /** 切换设备物理屏：镜像流不受影响，只熄灭手机那头 */
+  const handleToggleScreen = useCallback(async () => {
+    if (screenBusy || isBusy) return;
+    const next = !screenOffRef.current;
+    setScreenBusy(true);
+    try {
+      const res = await api.setAndroidScreenPower({ serial, off: next });
+      const off = Boolean(res.off);
+      screenOffRef.current = off;
+      setScreenOff(off);
+      if (import.meta.env?.DEV) console.log('[DeviceMirror] 设备屏幕电源已切换:', off ? 'off' : 'normal');
+      // 厂商 ROM 会默默忽略熄屏指令：如实告知，不假装成功
+      if (next && res.effective === false) {
+        toast.error('当前设备不支持熄屏镜像', {
+          description: '系统忽略了熄屏指令；镜像与设备画面都不受影响',
+        });
+        return;
+      }
+      if (off) {
+        toast.success('设备屏幕已熄灭', {
+          description: '镜像照常可用；离开镜像或开始自动化会自动点亮',
+        });
+      } else {
+        toast.success('设备屏幕已点亮');
+      }
+    } catch (err: any) {
+      if (import.meta.env?.DEV) console.warn('[DeviceMirror] 切换屏幕电源失败:', err);
+      toast.error('切换屏幕电源失败', {
+        description: err?.message || '请确认设备画面正常后再试',
+      });
+    } finally {
+      setScreenBusy(false);
+    }
+  }, [isBusy, screenBusy, serial]);
+
+  /** 把本地文件下发到设备：安装包直接安装，其他文件进 /sdcard/Download */
+  const handlePushFile = useCallback(
+    async (file: File | undefined) => {
+      if (!file || pushingFile || isBusy) return;
+      setPushingFile(true);
+      const pending = toast.info(`正在发送 ${file.name}`, { description: '大文件会慢一些，请勿关闭镜像' });
+      try {
+        const res = await api.pushDeviceFile({ serial, file });
+        if (import.meta.env?.DEV) console.log('[DeviceMirror] 文件下发完成:', res);
+        toast.success(res.message || '已发送到设备', {
+          description: res.installed ? '安装包已安装到当前设备' : res.path,
+        });
+      } catch (err: any) {
+        if (import.meta.env?.DEV) console.warn('[DeviceMirror] 文件下发失败:', err);
+        toast.error('发送失败', { description: err?.message || '请确认设备在线后再试' });
+      } finally {
+        toast.dismiss(pending);
+        setPushingFile(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    },
+    [isBusy, pushingFile, serial]
+  );
 
   // 已保存状态短暂停留后回归常态，避免按钮长期停在完成态
   useEffect(() => {
@@ -839,6 +934,13 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
   return (
     // 空白区域不吃点击：浮层贴在顶部设备面板下方时，透明区域必须让事件穿透到下层界面
     <div className="relative flex w-full h-full min-h-0 items-stretch gap-3 pointer-events-none">
+      {/* 本地文件选择：选完立刻下发，不需要另开弹层 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => void handlePushFile(e.target.files?.[0])}
+      />
       {/* 画面舞台：手机外框 + 紧贴屏幕的操作按键列 */}
       <div ref={stageRef} className="flex-1 min-w-0 min-h-0 flex items-center justify-center">
         {/* 紧贴屏幕的操作按键列（位于画面左侧） */}
@@ -902,6 +1004,21 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
           >
             <Link2 size={13} strokeWidth={1.9} />
           </button>
+          {platform === 'android' && (
+            <button
+              type="button"
+              disabled={isBusy || pushingFile}
+              onClick={() => fileInputRef.current?.click()}
+              title="发送文件到设备（安装包直接安装，其他文件进 /sdcard/Download）"
+              className="w-8 h-9 flex items-center justify-center transition-colors cursor-pointer text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc] disabled:opacity-35 disabled:cursor-not-allowed"
+            >
+              {pushingFile ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Paperclip size={13} strokeWidth={1.9} />
+              )}
+            </button>
+          )}
           {shots.length > 0 && (
             <button
               type="button"
@@ -938,6 +1055,29 @@ export const DeviceMirror: React.FC<DeviceMirrorProps> = ({
               <Camera size={13} strokeWidth={1.9} />
             )}
           </button>
+          {platform === 'android' && (
+            <button
+              type="button"
+              disabled={isBusy || screenBusy}
+              onClick={() => void handleToggleScreen()}
+              title={
+                screenOff
+                  ? '点亮手机屏幕'
+                  : '关闭手机屏幕：镜像照常可用，护屏与省电（离开镜像自动点亮）'
+              }
+              className={`w-8 h-9 flex items-center justify-center transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${
+                screenOff
+                  ? 'bg-[#eeedfd] text-[#4f46e5]'
+                  : 'text-[#63636b] hover:text-[#1c1c21] hover:bg-[#fafafc]'
+              }`}
+            >
+              {screenBusy ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <MonitorOff size={13} strokeWidth={1.9} />
+              )}
+            </button>
+          )}
         </div>
 
         <div
