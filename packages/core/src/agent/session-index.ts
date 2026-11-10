@@ -722,7 +722,7 @@ function decodeEncodedPath(encoded: string, base: string): string {
 const folderCwdCache = new Map<string, string>();
 
 /**
- * 会话工作目录可能是软链（raven 归档目录就指向 active 目录），
+ * 会话工作目录可能是软链（归档目录指向 active 目录），
  * 不取真实路径会让同一目录在侧栏拆成两个工作区。
  */
 function canonicalCwd(cwd: string): string {

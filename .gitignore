@@ -21,6 +21,8 @@ build/icons/*.iconset/
 .playwright-cli/
 .DS_Store
 *.local
+.env
+.env.*
 
 # openLoop runtime data & sandboxes
 .openloop/

@@ -345,7 +345,7 @@ export function DevServerPanel({ rootDir, onClose, client, pickDirectory, notify
                           spellCheck={false}
                           onChange={(event) => setForm({ ...form, command: event.target.value })}
                           aria-label="启动命令"
-                          placeholder="如 npx chitu dev --port=8082 | tee .run.log"
+                          placeholder="如 npx react-native start --port=8082 | tee .run.log"
                           className="flex-1 h-[24px] px-2 bg-white border border-[#e3e3e8] focus:border-[#4f46e5] rounded-[5px] font-mono text-[11px] text-[#1c1c21] outline-none placeholder:text-[#b4b4bb]"
                         />
                       </label>

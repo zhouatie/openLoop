@@ -1,6 +1,6 @@
 # openLoop 插件开发实战指南 (Plugin Quickstart)
 
-本文档指导开发者如何以独立的 Git 仓库开发一个符合 openLoop 规范的插件，并以接入 `pi-desktop` Web 界面为例进行演示。
+本文档指导开发者如何以独立的 Git 仓库开发一个符合 openLoop 规范的插件，并以接入一个既有 Electron Web 界面为例进行演示。
 
 ---
 
@@ -127,9 +127,9 @@ export const bridge = new OpenLoopBridgeClient();
 
 ---
 
-## 3. 接入 PI-Desktop 界面方案
+## 3. 接入既有 Web 界面方案
 
-以从本地 `/Users/zhoushitie/Desktop/clone/PI-Desktop` 抽取独立插件为例：
+以一个已有的 Electron 前端工程 `pi-desktop` 抽取独立插件为例：
 
 1. **新建独立 Git 仓库**：
    ```bash
@@ -137,7 +137,7 @@ export const bridge = new OpenLoopBridgeClient();
    git init
    ```
 2. **迁移核心渲染组件**：
-   - 从 `PI-Desktop/apps/desktop/src` 提取：
+   - 从 `pi-desktop/apps/desktop/src` 提取：
      - `components/ChatSurface.tsx`（对话消息流）
      - `components/PromptComposer.tsx`（底部输入区）
      - `components/ui/`（按钮、卡片、气泡）

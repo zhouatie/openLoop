@@ -2,6 +2,12 @@
   "name": "@openloop/desktop",
   "version": "0.8.0",
   "description": "Desktop Application for openLoop Automation Platform",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhouatie/openLoop.git",
+    "directory": "packages/desktop"
+  },
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",

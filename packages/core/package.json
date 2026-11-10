@@ -2,6 +2,12 @@
   "name": "@openloop/core",
   "version": "0.8.0",
   "description": "Core orchestration and DAG execution engine for openLoop",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhouatie/openLoop.git",
+    "directory": "packages/core"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
