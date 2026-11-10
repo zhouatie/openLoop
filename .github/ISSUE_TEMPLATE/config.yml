@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用与部署问题
+    url: https://github.com/zhouatie/openLoop/blob/main/docs/README.md
+    about: 先查文档库，覆盖流水线、插件、QA 与设计系统
+  - name: 安全漏洞
+    url: https://github.com/zhouatie/openLoop/security/advisories/new
+    about: 请勿公开提交，走私密报告通道

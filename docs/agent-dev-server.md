@@ -35,7 +35,7 @@
 
 每行右侧齿轮可改命令、Node 运行时目录与端口：
 
-- **命令**：完整 shell 命令。Chitu 与 `react-native start` 的 `--port` 以端口字段为准，会被覆盖。
+- **命令**：完整 shell 命令。命令内已有的 `--port` 会被端口字段覆盖。
 - **Node**：形如 `~/.nvm/versions/node/v14/bin`，只注入 `PATH`，用于老项目必须跑 Node 14 的场景。
 - **端口**：默认 8081，改动在下一次启动生效。
 

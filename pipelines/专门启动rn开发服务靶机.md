@@ -1,12 +1,12 @@
 ---
 id: wf_mvqbtjst
 name: 专门启动rn开发服务靶机
-tags: RN,Chitu,工作
+tags: RN,工作
 ---
 
 # 目标
 
-独立拉起 React Native (Chitu dev) 开发环境靶机并探活，支持 Node 14 运行时与端口自动清理
+独立拉起 React Native 开发环境靶机并探活，支持 Node 14 运行时与端口自动清理
 
 # 流程
 
@@ -87,7 +87,7 @@ echo "[Dev Server] 当前 Node: $(command -v node) $(node -v 2>&1) / 架构: $(n
 # 6. 启动开发服务
 DEV_CMD='{{devCommand}}'
 if [ -z "$DEV_CMD" ] || [ "$DEV_CMD" = "{{devCommand}}" ]; then
-  DEV_CMD="npx chitu dev"
+  DEV_CMD="npx react-native start"
 fi
 
 case "$DEV_CMD" in

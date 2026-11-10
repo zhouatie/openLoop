@@ -22,7 +22,7 @@
 {
   "type": "env-prepare",
   "config": {
-    "command": "npx chitu dev --port={{webPort}}",
+    "command": "npx react-native start --port={{webPort}}",
     "healthUrl": "http://127.0.0.1:{{webPort}}/status",
     "scanUrl": "exp://{{lanIp}}:{{webPort}}"
   }

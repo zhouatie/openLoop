@@ -114,7 +114,7 @@ function readJson(file: string): any {
   }
 }
 
-/** RN 工程标记：Chitu 的 appJson.json、原生 RN 依赖或 Metro 配置 */
+/** RN 工程标记：appJson.json、原生 RN 依赖或 Metro 配置 */
 function isRnProject(dir: string): boolean {
   if (fs.existsSync(path.join(dir, 'appJson.json'))) return true;
   if (fs.existsSync(path.join(dir, 'metro.config.js'))) return true;
@@ -198,7 +198,7 @@ export class DevServerManager {
       break;
     }
 
-    // monorepo 里 RN 应用常在子目录（例如 febase/xxx）：向上找不到时向下浅扫两层
+    // monorepo 里 RN 应用常在子目录（例如 apps/mobile）：向上找不到时向下浅扫两层
     const base = nearestPkg || start;
     const sub = this.findRnSubproject(base);
     if (sub) return this.describe(sub);
@@ -506,7 +506,7 @@ export class DevServerManager {
     entry.child.stderr?.on('data', push);
   }
 
-  /** 工程根的启动默认值：优先沿用工程自己的脚本，缺省回落到 Chitu / RN 标准命令 */
+  /** 工程根的启动默认值：优先沿用工程自己的脚本，缺省回落到标准启动命令 */
   private describe(root: string): ProjectInfo {
     const pkg = readJson(path.join(root, 'package.json'));
     const scripts: Record<string, string> = pkg?.scripts || {};

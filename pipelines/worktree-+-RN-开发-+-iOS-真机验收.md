@@ -23,7 +23,7 @@ tags: 开发,QA,iOS
 ```bash
 echo "[Deps] 工作目录: $(pwd)"
 
-# 1. 注入指定的 Node 运行时环境 (旧版 RN/Chitu 必须依赖特定 Node 版本如 Node 14)
+# 1. 注入指定的 Node 运行时环境 (旧版 RN 工程必须依赖特定 Node 版本如 Node 14)
 NODE_BIN='{{nodeBinPath}}'
 case "$NODE_BIN" in
   "~"/*) NODE_BIN="$HOME/${NODE_BIN#\~/}" ;;
@@ -35,11 +35,11 @@ fi
 echo "[Deps] 当前 Node: $(node -v 2>&1 || echo '未找到') / npm: $(npm -v 2>&1 || echo '未找到')"
 
 # 2. 多策略智能定位宿主工作区根目录
-# 在 Raven monorepo / worktree 架构下，当前沙箱位于宿主项目的 .worktrees/task-* 目录下
+# 在宿主 monorepo / worktree 架构下，当前沙箱位于宿主项目的 .worktrees/task-* 目录下
 CUR_DIR="$(pwd)"
 CANDIDATE_HOSTS=()
 
-# 策略 A: 若当前在 .worktrees/* 隔离沙箱下，其父级目录即为直接创建沙箱的宿主工程 (兼容 Raven active 模式)
+# 策略 A: 若当前在 .worktrees/* 隔离沙箱下，其父级目录即为直接创建沙箱的宿主工程 (兼容宿主工程 active 模式)
 case "$CUR_DIR" in
   */.worktrees/*)
     PARENT_WT="${CUR_DIR%%/.worktrees/*}"
