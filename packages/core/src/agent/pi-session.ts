@@ -56,6 +56,15 @@ const PI_SNAPSHOT_INTERVAL_MS = 250;
  */
 const TERMINATE_GRACE_MS = 10_000;
 
+/**
+ * 中止不算报错：pi 在 abort 时给最后一条 assistant 消息同时写 stopReason='aborted' 与 errorMessage='Request aborted'，
+ * 这类消息只表示本轮被打断，不应在终端留下「[Agent 报错]」。
+ */
+function isAssistantFailure(msg: any): boolean {
+  if (!msg || msg.stopReason === 'aborted') return false;
+  return msg.stopReason === 'error' || Boolean(msg.errorMessage);
+}
+
 /** pi SDK 是纯 ESM 包，CJS 宿主通过这份 ESM 桥加载（见 assets/pi-sdk.mjs） */
 const PI_SDK_BRIDGE = path.join(__dirname, 'assets', 'pi-sdk.mjs');
 /** 随 openLoop 发布的技能目录：真机验证等内置技能从这里装载 */
@@ -936,7 +945,7 @@ export class PiSessionInstance extends EventEmitter {
               this.emitLog('stdout', `[Agent 输出] ${summaryText.slice(0, 300)}${summaryText.length > 300 ? '...' : ''}`);
             }
           }
-          if (msg?.errorMessage || msg?.stopReason === 'error') {
+          if (isAssistantFailure(msg)) {
             const errorText = msg?.errorMessage || '模型调用失败';
             this.lastError = errorText;
             this.currentAssistantMessage.errorMessage = errorText;
@@ -957,7 +966,7 @@ export class PiSessionInstance extends EventEmitter {
           this.emitMessage(this.currentAssistantMessage);
           this.notifyUpdate(true);
           this.currentAssistantMessage = null;
-        } else if (msg?.errorMessage || msg?.stopReason === 'error') {
+        } else if (isAssistantFailure(msg)) {
           const errorText = msg?.errorMessage || '模型调用失败';
           this.lastError = errorText;
           this.emitLog('stderr', `[Agent 报错] 模型接口异常: ${errorText}`);
@@ -970,7 +979,7 @@ export class PiSessionInstance extends EventEmitter {
         finishTurnChanges(this.sessionId, this.turnSeq);
         this.flushEntryIds();
         const msg = record.message;
-        if (msg?.errorMessage || msg?.stopReason === 'error') {
+        if (isAssistantFailure(msg)) {
           const errorText = msg.errorMessage || '模型调用失败';
           this.lastError = errorText;
           const targetMsg =
