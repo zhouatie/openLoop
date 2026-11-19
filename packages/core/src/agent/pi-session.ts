@@ -50,6 +50,12 @@ export const PIPELINE_DONE_MARKER = '[OPENLOOP_DONE]';
  */
 const PI_SNAPSHOT_INTERVAL_MS = 250;
 
+/**
+ * 终止会话时等待本轮收尾的上限
+ * 正常中止毫秒级收尾；工具体不响应取消时（如挂起的人工卡点），到点直接释放，不让会话拖着不放。
+ */
+const TERMINATE_GRACE_MS = 10_000;
+
 /** pi SDK 是纯 ESM 包，CJS 宿主通过这份 ESM 桥加载（见 assets/pi-sdk.mjs） */
 const PI_SDK_BRIDGE = path.join(__dirname, 'assets', 'pi-sdk.mjs');
 /** 随 openLoop 发布的技能目录：真机验证等内置技能从这里装载 */
@@ -1570,17 +1576,35 @@ export class PiSessionInstance extends EventEmitter {
 
   /**
    * 彻底停止并销毁会话
+   *
+   * 本轮还在跑时不能立刻 dispose：turn_end / agent_settled 要等本轮收尾才派发给扩展，
+   * 提前释放会让扩展拿到失效的 ctx（日志里表现为「[扩展错误]」）。
+   * abort() 内部等到本轮收尾后才返回，返回之后再释放。
    */
   public terminate() {
+    const session = this.session;
+    this.session = undefined;
     this.active = false;
     this.isBusy = false;
     this.extensionUi.cancelAll();
     // 会话销毁：连同本轮改动的捕获记录与内容副本一起清理
     forgetSessionChanges(this.sessionId);
-    this.session?.dispose();
-    this.session = undefined;
     this.emitStatus({ active: false, isBusy: false });
     this.notifyUpdate(true);
+    if (!session) return;
+    let disposed = false;
+    const release = () => {
+      if (disposed) return;
+      disposed = true;
+      clearTimeout(graceTimer);
+      session.dispose();
+    };
+    const graceTimer = setTimeout(release, TERMINATE_GRACE_MS);
+    graceTimer.unref?.();
+    void session.abort().then(release, (error: any) => {
+      logger.warn(`中止本轮失败，直接释放会话: ${error?.message || error}`, undefined, { taskId: this.taskId });
+      release();
+    });
   }
 }
 
