@@ -1,6 +1,6 @@
 {
   "name": "openloop-monorepo",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Desktop automation platform: Markdown pipelines, worktree sandboxes, agent workbench, plugin slots and QA automation",
   "author": "openLoop contributors",

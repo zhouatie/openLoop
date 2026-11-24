@@ -1,6 +1,6 @@
 {
   "name": "@openloop/core",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Core orchestration and DAG execution engine for openLoop",
   "license": "MIT",
   "repository": {

@@ -24,7 +24,7 @@ Three surfaces share one Core daemon:
 | Web UI | Browser against Core | Remote review, team walkthroughs |
 | CLI | `openloop` | CI, scripted triggers, single-machine runs |
 
-> Version `0.8.0`, early preview. APIs and data shapes may still change; breaking changes are recorded in the [changelog](CHANGELOG.md).
+> Version `0.9.0`, early preview. APIs and data shapes may still change; breaking changes are recorded in the [changelog](CHANGELOG.md).
 
 ---
 

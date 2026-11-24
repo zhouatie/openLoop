@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-24
+
+### 变更
+
+- 流水线脚本化：下线画布编排，流水线只保留 Markdown 与脚本节点。
+
+### 新增
+
+- 设备监视：Android / iOS 实时镜像与反向控制，右侧镜像浮层可用 `Super+M` 唤起。
+- 本机模拟器支持启动与关闭，iOS 镜像增加三级降级串流。
+- 设备镜像支持截图、切换设备、操作按键列移到画面左侧，并可在镜像内打开 App 后台与 URL。
+- 智能体内可直接启动与关闭本机 RN 服务，不依赖任务触发。
+
+### 修复
+
+- 修复设备镜像卡死、上传无限转圈、iOS 冻结与点按无响应。
+- 修复设备镜像断流黑屏：会话随流结束销毁，前端自动重连。
+- Worktree 冲突自愈改以文件内容判定，并由节点统一暂存。
+- 修复 Agent 中止被误报为错误，以及会话终止时扩展拿到失效 ctx。
+
+### 工程
+
+- Electron 版本统一由 `package.json` 决定，移除 electron-builder 固定版本。
+- 固定 Electron 二进制下载镜像，避免代理访问 GitHub 504。
+
 ## [0.8.0] - 2025-11-10
 
 首次对外开源。
@@ -25,5 +50,6 @@
 - 双环境隔离：开发沙箱 `:19889` / `~/.openloop-dev`，稳定版 `:19888` / `~/.openloop`。
 - 单端口生产部署、Docker 镜像与 macOS DMG 发布流水线。
 
-[Unreleased]: https://github.com/zhouatie/openLoop/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/zhouatie/openLoop/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/zhouatie/openLoop/releases/tag/v0.9.0
 [0.8.0]: https://github.com/zhouatie/openLoop/releases/tag/v0.8.0
